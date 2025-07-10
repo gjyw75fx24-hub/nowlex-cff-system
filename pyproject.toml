@@ -1,0 +1,18 @@
+[project]
+name = "nowlex-erp-mini-maicon"
+version = "0.1.0"
+description = "ERP Mini para estudos Django"
+authors = [
+    {name = "maicon"}
+]
+readme = "README.md"
+requires-python = "^3.11"
+dependencies = [
+    "django (>=5.2.4,<6.0.0)",
+    "nome-do-pacote (>=0.1.0,<0.2.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
