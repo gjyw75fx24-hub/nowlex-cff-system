@@ -1,71 +1,43 @@
-# contratos/admin.py
 from django.contrib import admin
 from django.utils.html import format_html
 from django import forms
+from django.db import models
 from .models import ProcessoJudicial, Parte, Contrato
-
-# Formulário para reduzir o campo Endereço e ajustar larguras
-class ParteInlineForm(forms.ModelForm):
-    class Meta:
-        model = Parte
-        fields = '__all__'
-        widgets = {
-            'endereco': forms.Textarea(attrs={'rows': 4, 'cols': 40}),
-            'nome': forms.TextInput(attrs={'size': '30'}),
-            'documento': forms.TextInput(attrs={'size': '20'}),
-        }
 
 class ParteInline(admin.StackedInline):
     model = Parte
-    extra = 2
+    extra = 1
     fk_name = 'processo'
-    # Organiza os campos para melhor alinhamento
-    fieldsets = (
-        (None, {
-            'fields': (('tipo_polo', 'nome'), ('tipo_pessoa', 'documento'), 'endereco')
-        }),
-    )
-    form = ParteInlineForm
+    fieldsets = ((None, {'fields': (('tipo_polo', 'nome'), ('tipo_pessoa', 'documento'), 'endereco')}),)
+    formfield_overrides = {
+        models.TextField: {'widget': forms.Textarea(attrs={'rows': 4, 'cols': 40})},
+    }
 
 class ContratoInline(admin.StackedInline):
     model = Contrato
     extra = 1
     fk_name = 'processo'
 
-# Formulário para ajustar a largura do campo UF
-class ProcessoJudicialForm(forms.ModelForm):
-    class Meta:
-        model = ProcessoJudicial
-        fields = '__all__'
-        widgets = {
-            'uf': forms.TextInput(attrs={'size': '5'}),
-        }
-
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    list_display = ('cnj', 'uf', 'vara', 'tribunal')
-    search_fields = ('cnj',)
+    list_display = ('cnj', 'uf', 'get_polo_ativo', 'get_polo_passivo')
+    search_fields = ('cnj', 'partes__nome')
     inlines = [ParteInline, ContratoInline]
-    form = ProcessoJudicialForm
-
-    # 👇 VOLTAMOS PARA A ABORDAGEM SEGURA E FUNCIONAL
-    fieldsets = (
-        (None, {
-            'fields': (
-                'cnj', 
-                ('uf', 'preencher_uf_button'), # Botão ao lado do campo UF
-                'vara', 
-                'tribunal', 
-                'valor_causa'
-            )
-        }),
-    )
-    
+    fieldsets = ((None, {'fields': ('cnj', ('uf', 'preencher_uf_button'), 'vara', 'tribunal', 'valor_causa')}),)
     readonly_fields = ('preencher_uf_button',)
 
-    # 👇 CARREGAMOS APENAS O SCRIPT ESSENCIAL
     class Media:
         js = ('admin/js/processo_judicial_enhancer.js',)
+
+    @admin.display(description="Polo Ativo")
+    def get_polo_ativo(self, obj):
+        ativo = obj.partes.filter(tipo_polo='ATIVO').first()
+        return ativo.nome if ativo else "---"
+
+    @admin.display(description="Polo Passivo")
+    def get_polo_passivo(self, obj):
+        passivo = obj.partes.filter(tipo_polo='PASSIVO').first()
+        return passivo.nome if passivo else "---"
 
     @admin.display(description="")
     def preencher_uf_button(self, obj):
