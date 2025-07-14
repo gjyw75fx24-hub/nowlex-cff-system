@@ -1,47 +1,72 @@
 # contratos/admin.py
 from django.contrib import admin
-from .models import Devedor, ProcessoJudicial, Contrato
+from django.utils.html import format_html
+from django import forms
+from .models import ProcessoJudicial, Parte, Contrato
 
-@admin.register(Devedor)
-class DevedorAdmin(admin.ModelAdmin):
-    list_display = ('nome_completo', 'cpf')
-    search_fields = ('nome_completo', 'cpf')
+# Formulário para reduzir o campo Endereço e ajustar larguras
+class ParteInlineForm(forms.ModelForm):
+    class Meta:
+        model = Parte
+        fields = '__all__'
+        widgets = {
+            'endereco': forms.Textarea(attrs={'rows': 4, 'cols': 40}),
+            'nome': forms.TextInput(attrs={'size': '30'}),
+            'documento': forms.TextInput(attrs={'size': '20'}),
+        }
+
+class ParteInline(admin.StackedInline):
+    model = Parte
+    extra = 2
+    fk_name = 'processo'
+    # Organiza os campos para melhor alinhamento
+    fieldsets = (
+        (None, {
+            'fields': (('tipo_polo', 'nome'), ('tipo_pessoa', 'documento'), 'endereco')
+        }),
+    )
+    form = ParteInlineForm
+
+class ContratoInline(admin.StackedInline):
+    model = Contrato
+    extra = 1
+    fk_name = 'processo'
+
+# Formulário para ajustar a largura do campo UF
+class ProcessoJudicialForm(forms.ModelForm):
+    class Meta:
+        model = ProcessoJudicial
+        fields = '__all__'
+        widgets = {
+            'uf': forms.TextInput(attrs={'size': '5'}),
+        }
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    # --- NOME AJUSTADO ---
-    list_display = ('cnj', 'tribunal', 'vara', 'valor_causa')
+    list_display = ('cnj', 'uf', 'vara', 'tribunal')
     search_fields = ('cnj',)
-    list_filter = ('tribunal',)
+    inlines = [ParteInline, ContratoInline]
+    form = ProcessoJudicialForm
 
-@admin.register(Contrato)
-class ContratoAdmin(admin.ModelAdmin):
-    list_display = (
-        'numero_contrato', 'devedor', 'get_tribunal', 'get_cnj',
-        'valor_total_devido', 'parcelas_em_aberto', 'data_contrato'
+    # 👇 VOLTAMOS PARA A ABORDAGEM SEGURA E FUNCIONAL
+    fieldsets = (
+        (None, {
+            'fields': (
+                'cnj', 
+                ('uf', 'preencher_uf_button'), # Botão ao lado do campo UF
+                'vara', 
+                'tribunal', 
+                'valor_causa'
+            )
+        }),
     )
-    search_fields = (
-        'numero_contrato',
-        'devedor__nome_completo',
-        'processo__cnj'  # --- CAMINHO AJUSTADO ---
-    )
-    list_filter = (
-        'processo__tribunal', # --- CAMINHO AJUSTADO ---
-        'devedor'
-    )
-    # --- NOME AJUSTADO ---
-    raw_id_fields = ('devedor', 'processo')
+    
+    readonly_fields = ('preencher_uf_button',)
 
-    @admin.display(description='Tribunal (UF)', ordering='processo__tribunal')
-    def get_tribunal(self, obj):
-        # --- NOME AJUSTADO ---
-        if obj.processo:
-            return obj.processo.tribunal
-        return "—"
+    # 👇 CARREGAMOS APENAS O SCRIPT ESSENCIAL
+    class Media:
+        js = ('admin/js/processo_judicial_enhancer.js',)
 
-    @admin.display(description='Nº Processo (CNJ)', ordering='processo__cnj')
-    def get_cnj(self, obj):
-        # --- NOME AJUSTADO ---
-        if obj.processo:
-            return obj.processo.cnj
-        return "—"
+    @admin.display(description="")
+    def preencher_uf_button(self, obj):
+        return format_html('<button type="button" id="btn_preencher_uf" class="button">Preencher UF</button>')

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Detalhes do Processo {{ processo.cnj }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: auto; background: #fff; padding: 2em; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.5em; margin-bottom: 1.5em; }
+        .card h3 { margin-top: 0; border-bottom: 2px solid #0056b3; padding-bottom: 0.5em; color: #0056b3; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{% url 'contratos:lista_processos' %}">&larr; Voltar para a lista</a>
+        <h1>Ficha do Processo</h1>
+
+        <div class="card">
+            <h3>{{ processo.cnj }}</h3>
+            <p><strong>Vara:</strong> {{ processo.vara }}</p>
+            <p><strong>Tribunal:</strong> {{ processo.tribunal }} (UF: {{ processo.uf_calculada }})</p>
+            <p><strong>Valor da Causa:</strong> R$ {{ processo.valor_causa|floatformat:2 }}</p>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Polo Ativo</h3>
+                <p><strong>Nome:</strong> {{ processo.polo_ativo_nome }}</p>
+                <p><strong>Documento:</strong> {{ processo.polo_ativo_documento }}</p>
+            </div>
+            <div class="card">
+                <h3>Polo Passivo</h3>
+                <p><strong>Nome:</strong> {{ processo.polo_passivo_nome }}</p>
+                <p><strong>Documento:</strong> {{ processo.polo_passivo_documento }}</p>
+                <p><strong>Endereço:</strong> {{ processo.polo_passivo_endereco|linebreaksbr }}</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Contratos Vinculados ({{ processo.contratos.count }})</h3>
+            {% if processo.contratos.all %}
+                <ul>
+                    {% for contrato in processo.contratos.all %}
+                        <li>
+                            <strong>Nº:</strong> {{ contrato.numero_contrato }} | 
+                            <strong>Valor:</strong> R$ {{ contrato.valor_total_devido|floatformat:2 }} |
+                            <strong>Parcelas em Aberto:</strong> {{ contrato.parcelas_em_aberto }}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>Nenhum contrato vinculado a este processo.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

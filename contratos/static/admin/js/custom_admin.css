@@ -1,0 +1,14 @@
+/* contratos/static/admin/css/custom_admin.css */
+
+/* Alinha os campos Nome e CPF/CNPJ nos inlines de Parte */
+.form-row.field-nome, .form-row.field-documento {
+    display: inline-block;
+    vertical-align: top;
+    width: 48%; /* Ajuste a largura conforme necessário */
+}
+
+/* Posiciona o botão de preenchimento da UF */
+#btn_preencher_uf {
+    margin-top: 5px;
+    margin-left: 105px; /* Ajuste para alinhar abaixo do título UF */
+}

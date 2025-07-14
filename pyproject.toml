@@ -10,6 +10,7 @@ package-mode = false
 python = "^3.11"
 django = "^5.2.4"
 psycopg2-binary = "^2.9.10"
+django-nested-admin = "^4.1.1"
 
 [build-system]
 requires = ["poetry-core"]
