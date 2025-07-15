@@ -1,11 +1,32 @@
 from django.db import models
 
+class StatusProcessual(models.Model):
+    nome = models.CharField(max_length=100, unique=True, verbose_name="Nome do Status")
+    ordem = models.PositiveIntegerField(default=1, verbose_name="Ordem")
+
+    class Meta:
+        verbose_name = "Status Processual"
+        verbose_name_plural = "Status Processuais"
+        ordering = ['ordem', 'nome']
+
+    def __str__(self):
+        return self.nome
+
 class ProcessoJudicial(models.Model):
     cnj = models.CharField(max_length=30, unique=True, verbose_name="Número CNJ")
     uf = models.CharField(max_length=2, blank=True, verbose_name="UF")
     vara = models.CharField(max_length=255, verbose_name="Vara")
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
     valor_causa = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Valor da Causa")
+    
+    # 🔽 CAMPO ADICIONADO AQUI
+    status = models.ForeignKey(
+        StatusProcessual,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Status Processual"
+    )
 
     def __str__(self):
         return self.cnj

@@ -1,0 +1,22 @@
+/* contratos/static/admin/css/custom_admin.css */
+
+/* Esconde a linha original do botão */
+.form-row.field-preencher_uf_button {
+    display: none;
+}
+
+/* Ajusta o campo UF para ter uma largura mínima e não quebrar */
+.form-row.field-uf .flex-container {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Espaço entre os elementos */
+}
+
+#id_uf {
+    max-width: 60px !important; /* Largura máxima para o campo UF */
+}
+
+/* Ajuste para alinhar o label do UF com o botão */
+.form-row.field-uf label {
+    margin-right: 5px; /* Pequeno espaço entre o label e o botão/campo */
+}
