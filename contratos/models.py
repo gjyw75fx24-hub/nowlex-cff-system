@@ -19,7 +19,6 @@ class ProcessoJudicial(models.Model):
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
     valor_causa = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Valor da Causa")
     
-    # 🔽 CAMPO ADICIONADO AQUI
     status = models.ForeignKey(
         StatusProcessual,
         on_delete=models.SET_NULL,
@@ -27,9 +26,32 @@ class ProcessoJudicial(models.Model):
         blank=True,
         verbose_name="Status Processual"
     )
+    
+    # 🔽 CAMPO ADICIONADO PARA CONTROLE DA BUSCA ATIVA
+    busca_ativa = models.BooleanField(
+        default=False,
+        verbose_name="Busca Ativa",
+        help_text="Se marcado, o sistema buscará andamentos para este processo automaticamente."
+    )
 
     def __str__(self):
         return self.cnj
+
+# 🔽 NOVO MODELO PARA ARMAZENAR ANDAMENTOS
+class Andamento(models.Model):
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='andamentos')
+    data = models.DateTimeField(verbose_name="Data do Andamento")
+    descricao = models.TextField(verbose_name="Descrição")
+
+    class Meta:
+        verbose_name = "Andamento"
+        verbose_name_plural = "Andamentos"
+        ordering = ['-data'] # Mostra os mais recentes primeiro
+        unique_together = ('processo', 'data', 'descricao') # Evita duplicatas
+
+    def __str__(self):
+        return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
+
 
 class Parte(models.Model):
     TIPO_POLO_CHOICES = [('ATIVO', 'Polo Ativo'), ('PASSIVO', 'Polo Passivo')]

@@ -6,15 +6,32 @@ admin.site.index_title = "Bem-vindo à Administração"
 from django.utils.safestring import mark_safe
 from django import forms
 from django.db import models
-from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual
+from django.urls import reverse
+from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, Andamento
 
 # ──────────────────────────────────────────
 # Inlines
 # ──────────────────────────────────────────
+class AndamentoInline(admin.TabularInline):
+    model = Andamento
+    extra = 0
+    readonly_fields = ('data', 'descricao')
+    can_delete = False
+    ordering = ('-data',)
+    classes = ('dynamic-andamento',) # Adicionado para JS
+    
+    formfield_overrides = {
+        models.TextField: {"widget": forms.Textarea(attrs={"rows": 2, "cols": 100})},
+    }
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
 class ParteInline(admin.StackedInline):
     model = Parte
     extra = 1
     fk_name = "processo"
+    classes = ('dynamic-partes',) # <-- Adiciona uma classe ao container do inline
     fieldsets = (
         (None, {
             "fields": (
@@ -38,17 +55,23 @@ class ContratoInline(admin.StackedInline):
 # ──────────────────────────────────────────
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    list_display = ("cnj", "uf", "get_polo_ativo", "get_polo_passivo", "status")
+    list_display = ("cnj", "uf", "get_polo_ativo", "get_polo_passivo", "status", "busca_ativa")
+    list_filter = ("busca_ativa", "status", "uf")
     search_fields = ("cnj", "partes__nome")
-    inlines = [ParteInline, ContratoInline]
-    readonly_fields = ("uf_com_botao",)
+    inlines = [ParteInline, ContratoInline, AndamentoInline]
+    readonly_fields = ("uf_com_botao", "cnj_com_botao")
 
     fieldsets = (
-        (None, {
+        ("Controle e Status", {
             "fields": (
                 "status",
-                "cnj",
-                "uf_com_botao",  # UF: [Botão] [Campo]
+                "busca_ativa",
+            )
+        }),
+        ("Dados do Processo", {
+            "fields": (
+                "cnj_com_botao",
+                "uf_com_botao",
                 "vara",
                 "tribunal",
                 "valor_causa",
@@ -56,7 +79,17 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         }),
     )
 
-    # ────────────── Colunas extras ──────────────
+    # ────────────── Carrega o JS e CSS customizado ──────────────
+    class Media:
+        css = {
+            'all': ('admin/css/admin_tabs.css',)
+        }
+        js = (
+            'admin/js/processo_judicial_enhancer.js', 
+            'admin/js/admin_tabs.js',
+            'admin/js/input_masks.js', # <-- Adicionado
+        )
+
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
         ativo = obj.partes.filter(tipo_polo="ATIVO").first()
@@ -67,14 +100,27 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         passivo = obj.partes.filter(tipo_polo="PASSIVO").first()
         return passivo.nome if passivo else "---"
 
-    # ────────────── Campo UF com botão funcional via JS ──────────────
+    @admin.display(description="CNJ")
+    def cnj_com_botao(self, obj=None):
+        valor_cnj = obj.cnj if obj else ""
+        # URL estática para garantir que o caminho correto seja sempre usado
+        url_busca = "/api/contratos/buscar-dados-escavador/"
+        
+        return mark_safe(f'''
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <input id="id_cnj" type="text" name="cnj" value="{valor_cnj}" class="vTextField" maxlength="30" required>
+                <button type="button" id="btn_buscar_cnj" class="button" data-url="{url_busca}" disabled>Dados Online</button>
+            </div>
+            <div id="cnj_feedback" style="margin-top: 5px; font-weight: bold;"></div>
+        ''')
+
     @admin.display(description="UF")
     def uf_com_botao(self, obj=None):
-        valor = obj.uf if obj else ""
+        valor_uf = obj.uf if obj else ""
         return mark_safe(f'''
             <div style="display: flex; align-items: center; gap: 8px;">
                 <button type="button" class="button" onclick="preencherUF()">Preencher UF</button>
-                <input id="id_uf" type="text" name="uf" maxlength="2" value="{valor}" class="vTextField" style="width: 60px;">
+                <input id="id_uf" type="text" name="uf" maxlength="2" value="{valor_uf}" class="vTextField" style="width: 60px;">
             </div>
             <script>
                 function preencherUF() {{
@@ -93,7 +139,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                         if (partes.length >= 4) {{
                             codUF = `${{partes[2]}}.${{partes[3]}}`;
                         }}
-                    }} else if (/^\\d{{20}}$/.test(cnj)) {{
+                    }} else if (/^\d{{20}}$/.test(cnj)) {{
                         const j = cnj.substr(13, 1);
                         const tr = cnj.substr(14, 2);
                         codUF = `${{j}}.${{tr}}`;
@@ -119,9 +165,6 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             </script>
         ''')
 
-# ──────────────────────────────────────────
-# Admin Status Processual
-# ──────────────────────────────────────────
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):
     list_display = ("nome", "ordem")
