@@ -8,6 +8,20 @@ from django import forms
 from django.db import models
 from django.urls import reverse
 from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, AndamentoProcessual
+from django import forms
+from .models import ProcessoJudicial
+
+class ProcessoJudicialForm(forms.ModelForm):
+    class Meta:
+        model = ProcessoJudicial
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["uf"].widget.attrs.update({
+            "id": "id_uf",
+            "style": "width: 60px;",
+        })
 
 
 # ──────────────────────────────────────────
@@ -57,11 +71,12 @@ class ContratoInline(admin.StackedInline):
 # ──────────────────────────────────────────
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
+    form = ProcessoJudicialForm  # ✅ vincula o form real
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "busca_ativa")
     list_filter = ("busca_ativa", "status", "uf")
     search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
-    readonly_fields = ("cnj_busca_online_display", "uf_com_input_e_botao")
+    readonly_fields = ("cnj_busca_online_display",)
 
     fieldsets = (
         ("Controle e Status", {
@@ -71,18 +86,17 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             )
         }),
         ("Dados do Processo", {
-    "fields": (
-        "cnj",
-        "cnj_busca_online_display",
-        "uf_com_input_e_botao",  # <-- Aqui entra o input real + botão juntos
-        "vara",
-        "tribunal",
-        "valor_causa",
+            "fields": (
+                "cnj",
+                "cnj_busca_online_display",
+                "uf",  # ✅ Agora é real e salvável
+                "vara",
+                "tribunal",
+                "valor_causa",
+            )
+        }),
     )
-}),
 
-
-    )
 
     class Media:
         css = {
@@ -118,59 +132,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             <div id="cnj_feedback" style="margin-top: 5px; font-weight: bold;"></div>
         ''')
 
-    @admin.display(description="UF")
-    def uf_com_input_e_botao(self, obj=None):
-        valor_uf = obj.uf if obj else ""
-        return mark_safe(f'''
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <input type="text" name="uf" id="id_uf" value="{valor_uf}" maxlength="2" class="vTextField" style="width: 60px;" />
-            <button type="button" class="button" onclick="preencherUF()">Preencher UF</button>
-        </div>
-        <script>
-            function preencherUF() {{
-                const cnjInput = document.getElementById('id_cnj');
-                const ufInput = document.getElementById('id_uf');
-                const tribunalInput = document.getElementById('id_tribunal');
-                if (!cnjInput || !ufInput) {{
-                    alert("Campos CNJ ou UF não encontrados.");
-                    return;
-                }}
-                const cnj = cnjInput.value.trim();
-                let codUF = null;
-
-                if (cnj.includes(".")) {{
-                    const partes = cnj.split(".");
-                    if (partes.length >= 4) {{
-                        codUF = `${{partes[2]}}.${{partes[3]}}`;
-                    }}
-                }} else if (/^\\d{{20}}$/.test(cnj)) {{
-                    const j = cnj.substr(13, 1);
-                    const tr = cnj.substr(14, 2);
-                    codUF = `${{j}}.${{tr}}`;
-                }}
-
-                const mapaUF = {{
-                    "8.01": "AC", "8.02": "AL", "8.03": "AP", "8.04": "AM", "8.05": "BA",
-                    "8.06": "CE", "8.07": "DF", "8.08": "ES", "8.09": "GO", "8.10": "MA",
-                    "8.11": "MT", "8.12": "MS", "8.13": "MG", "8.14": "PA", "8.15": "PB",
-                    "8.16": "PR", "8.17": "PE", "8.18": "PI", "8.19": "RJ", "8.20": "RN",
-                    "8.21": "RS", "8.22": "RO", "8.23": "RR", "8.24": "SC", "8.25": "SE",
-                    "8.26": "SP", "8.27": "TO"
-                }};
-
-                const uf = mapaUF[codUF];
-                if (uf) {{
-                    ufInput.value = uf;
-                    if (tribunalInput) tribunalInput.value = "TJ" + uf;
-                }} else {{
-                    alert("Não foi possível extrair a UF a partir do CNJ informado.");
-                }}
-            }}
-        </script>
-    ''')
-
-
-
+    
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):
     list_display = ("nome", "ordem")

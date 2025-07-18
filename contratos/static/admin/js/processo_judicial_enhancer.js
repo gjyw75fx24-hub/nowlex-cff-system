@@ -7,6 +7,57 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchButton = document.getElementById('btn_buscar_cnj');
     
     const ufInput = document.getElementById('id_uf'); // Adicionado
+// Botão "Preencher UF" ao lado do campo UF
+if (ufInput && !document.getElementById("btn_preencher_uf")) {
+    const botao = document.createElement("button");
+    botao.id = "btn_preencher_uf";
+    botao.type = "button";
+    botao.innerText = "Preencher UF";
+    botao.className = "button";
+    botao.style.marginLeft = "10px";
+
+    botao.onclick = function () {
+        const cnjInput = document.getElementById("id_cnj");
+        const tribunalInput = document.getElementById("id_tribunal");
+        if (!cnjInput || !ufInput) {
+            alert("Campos CNJ ou UF não encontrados.");
+            return;
+        }
+        const cnj = cnjInput.value.trim();
+        let codUF = null;
+
+        if (cnj.includes(".")) {
+            const partes = cnj.split(".");
+            if (partes.length >= 4) {
+                codUF = `${partes[2]}.${partes[3]}`;
+            }
+        } else if (/^\d{20}$/.test(cnj)) {
+            const j = cnj.substr(13, 1);
+            const tr = cnj.substr(14, 2);
+            codUF = `${j}.${tr}`;
+        }
+
+        const mapaUF = {
+            "8.01": "AC", "8.02": "AL", "8.03": "AP", "8.04": "AM", "8.05": "BA",
+            "8.06": "CE", "8.07": "DF", "8.08": "ES", "8.09": "GO", "8.10": "MA",
+            "8.11": "MT", "8.12": "MS", "8.13": "MG", "8.14": "PA", "8.15": "PB",
+            "8.16": "PR", "8.17": "PE", "8.18": "PI", "8.19": "RJ", "8.20": "RN",
+            "8.21": "RS", "8.22": "RO", "8.23": "RR", "8.24": "SC", "8.25": "SE",
+            "8.26": "SP", "8.27": "TO"
+        };
+
+        const uf = mapaUF[codUF];
+        if (uf) {
+            ufInput.value = uf;
+            if (tribunalInput) tribunalInput.value = "TJ" + uf;
+        } else {
+            alert("Não foi possível extrair a UF a partir do CNJ informado.");
+        }
+    };
+
+    ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
+}
+
     const varaInput = document.getElementById('id_vara');
     const tribunalInput = document.getElementById('id_tribunal');
     const valorCausaInput = document.getElementById('id_valor_causa');
