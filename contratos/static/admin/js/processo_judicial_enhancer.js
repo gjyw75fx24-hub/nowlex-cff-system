@@ -105,8 +105,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 2. Preenche os formulários de inline das partes
         if (partes && partes.length > 0) {
-            const addParteButton = document.querySelector('#partes-group .add-row a');
-            const totalPartesForms = document.querySelectorAll('.dynamic-partes').length;
+            const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
+            const totalPartesForms = document.querySelectorAll('.dynamic-partes_processuais').length;
 
             // Garante que há inlines suficientes
             for (let i = totalPartesForms; i < partes.length; i++) {
@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Remove inlines extras se houver mais formulários do que partes
             for (let i = partes.length; i < totalPartesForms; i++) {
-                const inline = document.querySelector(`#partes-group .dynamic-partes:nth-child(${i + 1})`);
+                const inline = document.querySelector(`#partes_processuais-group .dynamic-partes_processuais:nth-child(${i + 1})`);
                 if (inline) {
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = true;
@@ -123,10 +123,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Preenche os inlines
-            document.querySelectorAll('.dynamic-partes').forEach((inline, i) => {
+            document.querySelectorAll('.dynamic-partes_processuais').forEach((inline, i) => {
                 if (i < partes.length) {
                     const parte = partes[i];
-                    const prefix = `id_partes-${i}-`;
+                    const prefix = `id_partes_processuais-${i}-`;
                     const tipoPoloSelect = inline.querySelector(`#${prefix}tipo_polo`);
                     const nomeInput = inline.querySelector(`#${prefix}nome`);
                     const tipoPessoaSelect = inline.querySelector(`#${prefix}tipo_pessoa`);
@@ -151,8 +151,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 3. Preenche os formulários de inline dos andamentos
         if (andamentos && andamentos.length > 0) {
-            const addAndamentoButton = document.querySelector('#andamento-group .add-row a');
-            const totalAndamentosForms = document.querySelectorAll('.dynamic-andamento').length;
+            const addAndamentoButton = document.querySelector('#andamentos-group .add-row a');
+            const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
 
             // Garante que há inlines suficientes
             for (let i = totalAndamentosForms; i < andamentos.length; i++) {
@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Remove inlines extras se houver mais formulários do que andamentos
             for (let i = andamentos.length; i < totalAndamentosForms; i++) {
-                const inline = document.querySelector(`#andamento-group .dynamic-andamento:nth-child(${i + 1})`);
+                const inline = document.querySelector(`#andamentos-group .dynamic-andamentos:nth-child(${i + 1})`);
                 if (inline) {
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = true;
@@ -169,10 +169,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Preenche os inlines
-            document.querySelectorAll('.dynamic-andamento').forEach((inline, i) => {
+            document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
                 if (i < andamentos.length) {
                     const andamento = andamentos[i];
-                    const prefix = `id_andamento-${i}-`;
+                    const prefix = `id_andamentos-${i}-`;
                     const dataInput = inline.querySelector(`#${prefix}data_0`);
                     const horaInput = inline.querySelector(`#${prefix}data_1`);
                     const descricaoInput = inline.querySelector(`#${prefix}descricao`);

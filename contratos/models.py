@@ -38,14 +38,15 @@ class ProcessoJudicial(models.Model):
         return self.cnj
 
 # 🔽 NOVO MODELO PARA ARMAZENAR ANDAMENTOS
-class Andamento(models.Model):
+class AndamentoProcessual(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='andamentos')
     data = models.DateTimeField(verbose_name="Data do Andamento")
     descricao = models.TextField(verbose_name="Descrição")
+    detalhes = models.TextField(blank=True, null=True, verbose_name="Detalhes")
 
     class Meta:
-        verbose_name = "Andamento"
-        verbose_name_plural = "Andamentos"
+        verbose_name = "Andamento Processual"
+        verbose_name_plural = "Andamentos Processuais"
         ordering = ['-data'] # Mostra os mais recentes primeiro
         unique_together = ('processo', 'data', 'descricao') # Evita duplicatas
 
@@ -57,12 +58,22 @@ class Parte(models.Model):
     TIPO_POLO_CHOICES = [('ATIVO', 'Polo Ativo'), ('PASSIVO', 'Polo Passivo')]
     TIPO_PESSOA_CHOICES = [('PF', 'Pessoa Física'), ('PJ', 'Pessoa Jurídica')]
 
-    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='partes')
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='partes_processuais')
     tipo_polo = models.CharField(max_length=7, choices=TIPO_POLO_CHOICES, verbose_name="Tipo de Polo")
     nome = models.CharField(max_length=255, verbose_name="Nome / Razão Social")
     tipo_pessoa = models.CharField(max_length=2, choices=TIPO_PESSOA_CHOICES, verbose_name="Tipo de Pessoa")
     documento = models.CharField(max_length=20, verbose_name="CPF / CNPJ")
     endereco = models.TextField(blank=True, null=True, verbose_name="Endereço")
+
+    def __str__(self):
+        return self.nome
+
+class Advogado(models.Model):
+    parte = models.ForeignKey(Parte, on_delete=models.CASCADE, related_name='advogados')
+    nome = models.CharField(max_length=255, verbose_name="Nome")
+    cpf = models.CharField(max_length=14, blank=True, null=True, verbose_name="CPF")
+    numero_oab = models.CharField(max_length=20, verbose_name="Número OAB")
+    uf_oab = models.CharField(max_length=2, verbose_name="UF OAB")
 
     def __str__(self):
         return self.nome

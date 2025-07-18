@@ -7,15 +7,15 @@ from django.utils.safestring import mark_safe
 from django import forms
 from django.db import models
 from django.urls import reverse
-from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, Andamento
+from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, AndamentoProcessual
 
 # ──────────────────────────────────────────
 # Inlines
 # ──────────────────────────────────────────
 class AndamentoInline(admin.TabularInline):
-    model = Andamento
+    model = AndamentoProcessual
     extra = 0
-    readonly_fields = ('data', 'descricao')
+    readonly_fields = ('data',)
     can_delete = False
     ordering = ('-data',)
     classes = ('dynamic-andamento',) # Adicionado para JS
@@ -57,7 +57,7 @@ class ContratoInline(admin.StackedInline):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "uf", "get_polo_ativo", "get_polo_passivo", "status", "busca_ativa")
     list_filter = ("busca_ativa", "status", "uf")
-    search_fields = ("cnj", "partes__nome")
+    search_fields = ("cnj", "partes_processuais__nome")
     inlines = [ParteInline, ContratoInline, AndamentoInline]
     readonly_fields = ("uf_com_botao", "cnj_com_botao")
 
@@ -82,22 +82,25 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     # ────────────── Carrega o JS e CSS customizado ──────────────
     class Media:
         css = {
-            'all': ('admin/css/admin_tabs.css',)
+            'all': (
+                'admin/css/admin_tabs.css',
+                'admin/css/custom_admin_styles.css', # <-- Adicionado
+            )
         }
         js = (
             'admin/js/processo_judicial_enhancer.js', 
             'admin/js/admin_tabs.js',
-            'admin/js/input_masks.js', # <-- Adicionado
+            'admin/js/input_masks.js',
         )
 
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
-        ativo = obj.partes.filter(tipo_polo="ATIVO").first()
+        ativo = obj.partes_processuais.filter(tipo_polo="ATIVO").first()
         return ativo.nome if ativo else "---"
 
     @admin.display(description="Polo Passivo")
     def get_polo_passivo(self, obj):
-        passivo = obj.partes.filter(tipo_polo="PASSIVO").first()
+        passivo = obj.partes_processuais.filter(tipo_polo="PASSIVO").first()
         return passivo.nome if passivo else "---"
 
     @admin.display(description="CNJ")
