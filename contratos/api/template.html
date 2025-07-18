@@ -1,0 +1,363 @@
+<!-- =============================================================================
+STEP 7: Django Template for Process Detail with Escavador Integration
+============================================================================= -->
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processo {{ processo.numero_cnj }} - NowLex ERP</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        .enrichment-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .api-status {
+            font-size: 0.9rem;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        
+        .api-status.success { background-color: #d4edda; color: #155724; }
+        .api-status.warning { background-color: #fff3cd; color: #856404; }
+        .api-status.danger { background-color: #f8d7da; color: #721c24; }
+        
+        .change-details {
+            background-color: white;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        
+        .change-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .change-item:last-child {
+            border-bottom: none;
+        }
+        
+        .change-item.updated {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .change-item.confirmed {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .loading {
+            display: none;
+        }
+        
+        .loading.show {
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="mb-4">
+                    <i class="fas fa-gavel"></i>
+                    Processo {{ processo.numero_cnj }}
+                </h1>
+                
+                <!-- Process Basic Information -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-info-circle"></i> Informações Básicas</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Tribunal:</strong> {{ processo.tribunal|default:"Não informado" }}</p>
+                                <p><strong>Vara:</strong> {{ processo.vara|default:"Não informado" }}</p>
+                                <p><strong>Valor da Causa:</strong> R$ {{ processo.valor_causa|floatformat:2 }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Polo Ativo:</strong> {{ processo.polo_ativo|default:"Não informado" }}</p>
+                                <p><strong>Polo Passivo:</strong> {{ processo.polo_passivo|default:"Não informado" }}</p>
+                                <p><strong>Data de Criação:</strong> {{ processo.created_at|date:"d/m/Y H:i" }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Enriched Information -->
+                {% if processo.enriquecido %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-database"></i> Dados Enriquecidos</h5>
+                        <small class="text-muted">
+                            Última atualização: {{ processo.data_enriquecimento|date:"d/m/Y H:i"|default:"Não disponível" }}
+                        </small>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Data de Distribuição:</strong> {{ processo.data_distribuicao|date:"d/m/Y"|default:"Não informado" }}</p>
+                                <p><strong>Classe Processual:</strong> {{ processo.classe_processual|default:"Não informado" }}</p>
+                                <p><strong>Assunto Principal:</strong> {{ processo.assunto_principal|default:"Não informado" }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Situação:</strong> {{ processo.situacao|default:"Não informado" }}</p>
+                                <p><strong>Juiz Responsável:</strong> {{ processo.juiz_responsavel|default:"Não informado" }}</p>
+                                <p><strong>Última Movimentação:</strong> {{ processo.ultima_movimentacao|date:"d/m/Y"|default:"Não informado" }}</p>
+                            </div>
+                        </div>
+                        {% if processo.descricao_ultima_movimentacao %}
+                        <div class="mt-3">
+                            <p><strong>Descrição da Última Movimentação:</strong></p>
+                            <p class="text-muted">{{ processo.descricao_ultima_movimentacao }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Escavador API Integration Section -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-cloud-download-alt"></i> Enriquecimento de Dados</h5>
+                        
+                        <!-- API Status Indicator -->
+                        {% if escavador_status.conectividade == 'sucesso' %}
+                            <span class="api-status success">
+                                <i class="fas fa-check-circle"></i> API Conectada
+                            </span>
+                        {% elif escavador_status.conectividade == 'parcial' %}
+                            <span class="api-status warning">
+                                <i class="fas fa-exclamation-triangle"></i> API Parcial
+                            </span>
+                        {% else %}
+                            <span class="api-status danger">
+                                <i class="fas fa-times-circle"></i> API Indisponível
+                            </span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="card-body">
+                        {% if not escavador_status.configurado %}
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>API não configurada:</strong> Configure a chave de API do Escavador para usar esta funcionalidade.
+                            </div>
+                        {% else %}
+                            <!-- Enrichment Form -->
+                            <form id="enrichmentForm" method="post" action="{% url 'enriquecer_processo' processo.pk %}">
+                                {% csrf_token %}
+                                
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label for="modo" class="form-label">Modo de Enriquecimento:</label>
+                                        <select class="form-select" id="modo" name="modo">
+                                            <option value="preservar">Preservar dados existentes</option>
+                                            <option value="atualizar">Atualizar todos os dados</option>
+                                            <option value="adicionar">Adicionar apenas novos dados</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="form-check mt-4">
+                                            <input class="form-check-input" type="checkbox" id="forcar_atualizacao" name="forcar_atualizacao">
+                                            <label class="form-check-label" for="forcar_atualizacao">
+                                                Forçar atualização
+                                            </label>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="form-check mt-4">
+                                            <input class="form-check-input" type="checkbox" id="atualizar_tribunal" name="atualizar_tribunal">
+                                            <label class="form-check-label" for="atualizar_tribunal">
+                                                Atualizar no tribunal
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary" id="enrichBtn">
+                                        <i class="fas fa-sync-alt"></i>
+                                        <span class="btn-text">Enriquecer Processo</span>
+                                        <span class="loading">
+                                            <i class="fas fa-spinner fa-spin"></i> Processando...
+                                        </span>
+                                    </button>
+                                    
+                                    <button type="button" class="btn btn-info" id="statusBtn">
+                                        <i class="fas fa-info-circle"></i> Verificar Status
+                                    </button>
+                                </div>
+                            </form>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Enrichment Results Display -->
+                {% if enrichment_result %}
+                <div class="card mb-4" id="enrichmentResults">
+                    <div class="card-header">
+                        <h5>
+                            {% if enrichment_result.success %}
+                                <i class="fas fa-check-circle text-success"></i> Resultado do Enriquecimento
+                            {% else %}
+                                <i class="fas fa-times-circle text-danger"></i> Erro no Enriquecimento
+                            {% endif %}
+                        </h5>
+                    </div>
+                    
+                    <div class="card-body">
+                        {% if enrichment_result.success %}
+                            <div class="alert alert-success">
+                                <i class="fas fa-check-circle"></i>
+                                {{ enrichment_result.message }}
+                            </div>
+                            
+                            {% if enrichment_result.detalhes %}
+                                <div class="mt-3">
+                                    <h6>Resumo das Alterações:</h6>
+                                    <ul class="list-unstyled">
+                                        <li><strong>Campos processados:</strong> {{ enrichment_result.detalhes.campos_processados|default:0 }}</li>
+                                        <li><strong>Campos atualizados:</strong> {{ enrichment_result.detalhes.campos_atualizados|default:0 }}</li>
+                                        <li><strong>Campos preservados:</strong> {{ enrichment_result.detalhes.campos_preservados|default:0 }}</li>
+                                    </ul>
+                                    
+                                    {% if enrichment_result.detalhes.mudancas %}
+                                        <div class="mt-3">
+                                            <h6>Detalhes das Mudanças:</h6>
+                                            <div class="change-details">
+                                                {% for mudanca in enrichment_result.detalhes.mudancas %}
+                                                    <div class="change-item {% if mudanca.acao == 'atualizado' %}updated{% else %}confirmed{% endif %}">
+                                                        <strong>{{ mudanca.campo }}:</strong>
+                                                        {% if mudanca.acao == 'atualizado' %}
+                                                            <br><small class="text-muted">De:</small> {{ mudanca.valor_anterior|default:"(vazio)" }}
+                                                            <br><small class="text-muted">Para:</small> {{ mudanca.valor_novo }}
+                                                        {% else %}
+                                                            {{ mudanca.valor_novo }} <small class="text-muted">({{ mudanca.acao }})</small>
+                                                        {% endif %}
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="alert alert-danger">
+                                <i class="fas fa-times-circle"></i>
+                                {{ enrichment_result.message }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JavaScript for AJAX handling -->
+    <script>
+        // Handle enrichment form submission with AJAX
+        document.getElementById('enrichmentForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const btn = document.getElementById('enrichBtn');
+            const btnText = btn.querySelector('.btn-text');
+            const loading = btn.querySelector('.loading');
+            
+            // Show loading state
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            loading.classList.add('show');
+            
+            // Prepare form data
+            const formData = new FormData(this);
+            
+            // Submit via AJAX
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': formData.get('csrfmiddlewaretoken')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Redirect to show results
+                    window.location.href = data.redirect_url || window.location.href;
+                } else {
+                    alert('Erro: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Erro inesperado ao processar a solicitação.');
+            })
+            .finally(() => {
+                // Reset button state
+                btn.disabled = false;
+                btnText.style.display = 'inline';
+                loading.classList.remove('show');
+            });
+        });
+        
+        // Handle status check
+        document.getElementById('statusBtn').addEventListener('click', function() {
+            const btn = this;
+            btn.disabled = true;
+            
+            fetch(`/processos/{{ processo.pk }}/status-escavador/`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const status = data.status;
+                    let message = 'Status do processo:\n';
+                    message += `Pode atualizar: ${status.pode_atualizar || 'Não informado'}\n`;
+                    message += `Em atualização: ${status.em_atualizacao || 'Não informado'}`;
+                    alert(message);
+                } else {
+                    alert('Erro ao verificar status: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Erro inesperado ao verificar status.');
+            })
+            .finally(() => {
+                btn.disabled = false;
+            });
+        });
+        
+        // Auto-scroll to results if present
+        {% if enrichment_result %}
+        document.addEventListener('DOMContentLoaded', function() {
+            const resultsElement = document.getElementById('enrichmentResults');
+            if (resultsElement) {
+                resultsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+        {% endif %}
+    </script>
+</body>
+</html>

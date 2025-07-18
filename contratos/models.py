@@ -64,6 +64,11 @@ class Parte(models.Model):
     tipo_pessoa = models.CharField(max_length=2, choices=TIPO_PESSOA_CHOICES, verbose_name="Tipo de Pessoa")
     documento = models.CharField(max_length=20, verbose_name="CPF / CNPJ")
     endereco = models.TextField(blank=True, null=True, verbose_name="Endereço")
+    advogados_info = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Informações dos Advogados"
+    )
 
     def __str__(self):
         return self.nome

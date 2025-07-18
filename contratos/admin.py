@@ -9,6 +9,7 @@ from django.db import models
 from django.urls import reverse
 from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, AndamentoProcessual
 
+
 # ──────────────────────────────────────────
 # Inlines
 # ──────────────────────────────────────────
@@ -16,22 +17,21 @@ class AndamentoInline(admin.TabularInline):
     model = AndamentoProcessual
     extra = 0
     readonly_fields = ('data',)
-    can_delete = False
+    can_delete = True
     ordering = ('-data',)
-    classes = ('dynamic-andamento',) # Adicionado para JS
-    
+    classes = ('dynamic-andamento',)
+
     formfield_overrides = {
         models.TextField: {"widget": forms.Textarea(attrs={"rows": 2, "cols": 100})},
     }
 
-    def has_add_permission(self, request, obj=None):
-        return False
 
 class ParteInline(admin.StackedInline):
     model = Parte
     extra = 1
     fk_name = "processo"
-    classes = ('dynamic-partes',) # <-- Adiciona uma classe ao container do inline
+    classes = ('dynamic-partes',)
+    can_delete = True
     fieldsets = (
         (None, {
             "fields": (
@@ -42,24 +42,26 @@ class ParteInline(admin.StackedInline):
         }),
     )
     formfield_overrides = {
-        models.TextField: {"widget": forms.Textarea(attrs={"rows": 4, "cols": 40})},
+        models.TextField: {"widget": forms.Textarea(attrs={"rows": 4, "cols": 80})},
     }
+
 
 class ContratoInline(admin.StackedInline):
     model = Contrato
     extra = 1
     fk_name = "processo"
 
+
 # ──────────────────────────────────────────
 # Admin principal
 # ──────────────────────────────────────────
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    list_display = ("cnj", "uf", "get_polo_ativo", "get_polo_passivo", "status", "busca_ativa")
+    list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "busca_ativa")
     list_filter = ("busca_ativa", "status", "uf")
-    search_fields = ("cnj", "partes_processuais__nome")
+    search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
-    readonly_fields = ("uf_com_botao", "cnj_com_botao")
+    readonly_fields = ("cnj_busca_online_display", "uf_com_botao")
 
     fieldsets = (
         ("Controle e Status", {
@@ -70,7 +72,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         }),
         ("Dados do Processo", {
             "fields": (
-                "cnj_com_botao",
+                "cnj",
+                "cnj_busca_online_display",
                 "uf_com_botao",
                 "vara",
                 "tribunal",
@@ -79,19 +82,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         }),
     )
 
-    # ────────────── Carrega o JS e CSS customizado ──────────────
     class Media:
         css = {
-            'all': (
-                'admin/css/admin_tabs.css',
-                'admin/css/custom_admin_styles.css', # <-- Adicionado
-            )
+            'all': ('admin/css/admin_tabs.css', 'admin/css/custom_admin.css')
         }
         js = (
-            'admin/js/processo_judicial_enhancer.js', 
+            'admin/js/processo_judicial_enhancer.js',
             'admin/js/admin_tabs.js',
             'admin/js/input_masks.js',
         )
+
+    @admin.display(description="")
+    def get_x_separator(self, obj):
+        return "x"
 
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
@@ -103,15 +106,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         passivo = obj.partes_processuais.filter(tipo_polo="PASSIVO").first()
         return passivo.nome if passivo else "---"
 
-    @admin.display(description="CNJ")
-    def cnj_com_botao(self, obj=None):
-        valor_cnj = obj.cnj if obj else ""
-        # URL estática para garantir que o caminho correto seja sempre usado
+    @admin.display(description="Buscar Dados Online")
+    def cnj_busca_online_display(self, obj=None):
         url_busca = "/api/contratos/buscar-dados-escavador/"
-        
         return mark_safe(f'''
             <div style="display: flex; align-items: center; gap: 8px;">
-                <input id="id_cnj" type="text" name="cnj" value="{valor_cnj}" class="vTextField" maxlength="30" required>
                 <button type="button" id="btn_buscar_cnj" class="button" data-url="{url_busca}" disabled>Dados Online</button>
             </div>
             <div id="cnj_feedback" style="margin-top: 5px; font-weight: bold;"></div>
@@ -167,6 +166,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 }}
             </script>
         ''')
+
 
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):

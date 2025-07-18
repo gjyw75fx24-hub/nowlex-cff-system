@@ -4,7 +4,7 @@
 */
 
 /* Estiliza cada bloco de andamento (inline) para parecer um "card" ou "entrada de diário" */
-.dynamic-andamentos {
+.dynamic-andamento {
     border: 1px solid #e0e0e0;
     padding: 15px;
     margin-bottom: 15px;
@@ -14,13 +14,13 @@
 }
 
 /* Remove a borda da tabela interna que o Django admin usa para inlines tabulares */
-.dynamic-andamentos table {
+.dynamic-andamento table {
     border-collapse: collapse;
     width: 100%;
 }
 
 /* Garante que as linhas do formulário dentro do card não tenham bordas extras */
-.dynamic-andamentos .form-row {
+.dynamic-andamento .form-row {
     border-bottom: none;
     padding: 5px 0;
 }
@@ -29,7 +29,7 @@
   Aumenta a altura do campo de descrição e permite que o usuário o redimensione.
   Este é o ponto principal para criar a sensação de uma área de texto grande para cada andamento.
 */
-.dynamic-andamentos textarea[id$='-descricao'] {
+.dynamic-andamento textarea[id$='-descricao'] {
     height: 120px; /* Altura inicial generosa */
     resize: vertical; /* Permite que o usuário redimensione verticalmente */
     width: 100% !important; /* Força a largura total para uma melhor aparência */
@@ -37,14 +37,14 @@
 }
 
 /* Ajusta o alinhamento dos campos de data e hora para ficarem bem ao lado da descrição */
-.dynamic-andamentos .related-widget-wrapper,
-.dynamic-andamentos .form-row .flex-container {
+.dynamic-andamento .related-widget-wrapper,
+.dynamic-andamento .form-row .flex-container {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
 }
 
-.dynamic-andamentos .form-row .vDateField,
-.dynamic-andamentos .form-row .vTimeField {
+.dynamic-andamento .form-row .vDateField,
+.dynamic-andamento .form-row .vTimeField {
     margin-right: 10px;
 }
