@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.contrib.admin import SimpleListFilter
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
@@ -6,6 +7,25 @@ admin.site.index_title = "Bem-vindo à Administração"
 from django.utils.safestring import mark_safe
 from django import forms
 from django.db import models
+from django.db import models  # Certifique-se que esse import esteja presente
+
+class TerceiroInteressadoFilter(SimpleListFilter):
+    title = "⚠️ Terceiro Interessado"
+    parameter_name = "terceiro_interessado"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("sim", "Com terceiro interessado"),
+            ("nao", "Apenas dois polos"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "sim":
+            return queryset.annotate(num_partes=models.Count("partes_processuais")).filter(num_partes__gt=2)
+        if self.value() == "nao":
+            return queryset.annotate(num_partes=models.Count("partes_processuais")).filter(num_partes__lte=2)
+        return queryset
+
 from django.urls import reverse
 from .models import ProcessoJudicial, Parte, Contrato, StatusProcessual, AndamentoProcessual
 from django import forms
@@ -73,7 +93,7 @@ class ContratoInline(admin.StackedInline):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     form = ProcessoJudicialForm  # ✅ vincula o form real
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "busca_ativa")
-    list_filter = ("busca_ativa", "status", "uf")
+    list_filter = ["busca_ativa", "status", "uf", TerceiroInteressadoFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
     readonly_fields = ("cnj_busca_online_display",)
@@ -110,7 +130,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     @admin.display(description="")
     def get_x_separator(self, obj):
+        if obj.partes_processuais.count() > 2:
+            return mark_safe('<span title="Mais de dois polos">⚠️</span>')
         return "x"
+
 
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
