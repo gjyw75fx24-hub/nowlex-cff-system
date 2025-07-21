@@ -91,7 +91,7 @@ class ContratoInline(admin.StackedInline):
 # ──────────────────────────────────────────
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    form = ProcessoJudicialForm  # ✅ vincula o form real
+    form = ProcessoJudicialForm
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "busca_ativa")
     list_filter = ["busca_ativa", "status", "uf", TerceiroInteressadoFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
@@ -109,7 +109,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             "fields": (
                 "cnj",
                 "cnj_busca_online_display",
-                "uf",  # ✅ Agora é real e salvável
+                "uf",
                 "vara",
                 "tribunal",
                 "valor_causa",
@@ -117,6 +117,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         }),
     )
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "status":
+            # Filtra o dropdown para mostrar apenas status ativos e com ordem > 0
+            kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gt=0)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     class Media:
         css = {
@@ -156,7 +161,29 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         ''')
 
     
+from django.db.models import Max
+
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):
-    list_display = ("nome", "ordem")
+    list_display = ("nome", "ordem", "ativo")
+    list_editable = ("ordem", "ativo")
+    list_filter = ("ativo",)
     ordering = ("ordem", "nome")
+    
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        if 'ativo__exact' not in request.GET:
+             return queryset.filter(ativo=True)
+        return queryset
+
+    def get_changeform_initial_data(self, request):
+        """
+        Preenche o campo 'ordem' com o próximo valor disponível ao adicionar um novo status.
+        """
+        initial = super().get_changeform_initial_data(request)
+        max_order = StatusProcessual.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
+        initial['ordem'] = max_order + 1
+        return initial
+
+    class Media:
+        js = ('admin/js/status_normalizer.js',)

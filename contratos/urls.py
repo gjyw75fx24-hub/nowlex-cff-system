@@ -9,4 +9,5 @@ app_name = 'contratos'
 urlpatterns = [
     path('processos/', views.lista_processos, name='lista_processos'),
     path('processos/<int:pk>/', views.detalhe_processo, name='detalhe_processo'),
+    path('api/contratos/status/merge/', views.merge_status_view, name='merge_status'),
 ]

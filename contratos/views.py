@@ -119,6 +119,48 @@ def buscar_dados_escavador_view(request ):
     return JsonResponse(dados_completos)
 
 
+from django.contrib.admin.views.decorators import staff_member_required
+from django.db import transaction
+
+@staff_member_required
+@require_POST
+@transaction.atomic
+def merge_status_view(request):
+    """
+    View para mesclar dois Status Processuais.
+    Atualiza todos os Processos Judiciais do status de origem para o de destino.
+    """
+    try:
+        source_id = int(request.POST.get('source_id'))
+        target_id = int(request.POST.get('target_id'))
+
+        if source_id == target_id:
+            return JsonResponse({'status': 'error', 'message': 'Os status de origem e destino não podem ser os mesmos.'}, status=400)
+
+        source_status = get_object_or_404(StatusProcessual, pk=source_id)
+        target_status = get_object_or_404(StatusProcessual, pk=target_id)
+
+        # Conta quantos processos serão afetados
+        affected_processes_count = ProcessoJudicial.objects.filter(status=source_status).count()
+
+        # Atualiza os processos
+        ProcessoJudicial.objects.filter(status=source_status).update(status=target_status)
+        
+        # Inativa o status de origem
+        source_status.ativo = False
+        source_status.save()
+        
+        # Mensagem de sucesso
+        message = f'{affected_processes_count} processo(s) foram atualizados. O status "{source_status.nome}" foi mesclado e inativado.'
+        
+        return JsonResponse({'status': 'success', 'message': message})
+
+    except (KeyError, ValueError, TypeError):
+        return JsonResponse({'status': 'error', 'message': 'Dados inválidos fornecidos.'}, status=400)
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': f'Ocorreu um erro inesperado: {e}'}, status=500)
+
+
 def lista_processos(request):
     """
     Busca todos os processos no banco e os envia para o template de lista.

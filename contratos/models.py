@@ -3,6 +3,7 @@ from django.db import models
 class StatusProcessual(models.Model):
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome do Status")
     ordem = models.PositiveIntegerField(default=1, verbose_name="Ordem")
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
 
     class Meta:
         verbose_name = "Status Processual"
