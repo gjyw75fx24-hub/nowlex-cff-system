@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.db import models
 from django.db.models import Count, Sum, Max
@@ -53,25 +53,27 @@ class ProcessoJudicialForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["uf"].widget.attrs.update({"id": "id_uf", "style": "width: 60px;"})
-        # Adiciona uma classe para o JavaScript encontrar o campo facilmente
         self.fields["valor_causa"] = forms.CharField(
-    widget=forms.TextInput(attrs={"class": "money-mask"})
-)
-
+            widget=forms.TextInput(attrs={"class": "money-mask"}),
+            required=False
+        )
 
     def clean_valor_causa(self):
-        """Limpa e converte o valor da causa (ex: 'R$ 1.234,56') para Decimal."""
+        """
+        Limpa e converte o valor da causa de forma robusta.
+        Aceita formatos como 'R$ 1.234,56'.
+        """
         valor = self.cleaned_data.get('valor_causa')
-
-        if isinstance(valor, Decimal):
-            return valor
-
         if not valor:
             return Decimal('0.00')
 
+        # Remove o prefixo 'R$' e espaços em branco
+        valor_str = str(valor).replace("R$", "").strip()
+        
+        # Remove pontos de milhar e substitui a vírgula decimal por ponto
+        valor_str = valor_str.replace(".", "").replace(",", ".")
+        
         try:
-            # Remove "R$", espaços, pontos de milhar e troca a vírgula por ponto
-            valor_str = str(valor).replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
             return Decimal(valor_str)
         except (InvalidOperation, ValueError, TypeError):
             raise forms.ValidationError("Por favor, insira um valor monetário válido.", code='invalid')
@@ -125,9 +127,7 @@ class CarteiraAdmin(admin.ModelAdmin):
     def get_valor_medio_processo(self, obj):
         if obj.total_processos > 0 and obj.valor_total is not None:
             valor_medio = obj.valor_total / obj.total_processos
-            # Arredonda o valor para 2 casas decimais
             valor_arredondado = round(valor_medio, 2)
-            # Formata para o padrão monetário brasileiro
             return f"R$ {intcomma(valor_arredondado, use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
         return "R$ 0,00"
 
@@ -151,10 +151,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
-    readonly_fields = ("cnj_busca_online_display",)
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
-        ("Dados do Processo", {"fields": ("cnj", "cnj_busca_online_display", "uf", "vara", "tribunal", "valor_causa")}),
+        ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
     )
 
     class Media:
@@ -174,13 +173,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return super().history_view(request, object_id, extra_context=extra_context)
 
     def response_change(self, request, obj):
+        # Adiciona a mensagem de sucesso
+        messages.success(request, "Processo Salvo!")
+        # Verifica se o botão "Salvar" (e não "Salvar e adicionar outro") foi pressionado
         if "_save" in request.POST:
+            # Redireciona para a mesma página de edição
             return HttpResponseRedirect(request.path)
+        # Comportamento padrão para os outros botões
         return super().response_change(request, obj)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":
-            kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gt=0)
+            # Permite que status com ordem >= 0 sejam selecionáveis e válidos no formulário
+            kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gte=0)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description="")
@@ -194,16 +199,6 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     @admin.display(description="Polo Passivo")
     def get_polo_passivo(self, obj):
         return getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '---')
-
-    @admin.display(description="Buscar Dados Online")
-    def cnj_busca_online_display(self, obj=None):
-        url_busca = "/api/contratos/buscar-dados-escavador/"
-        return mark_safe(f'''
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <button type="button" id="btn_buscar_cnj" class="button" data-url="{url_busca}" disabled>Dados Online</button>
-            </div>
-            <div id="cnj_feedback" style="margin-top: 5px; font-weight: bold;"></div>
-        ''')
 
 
 class StatusProcessualAdmin(admin.ModelAdmin):

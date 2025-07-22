@@ -6,6 +6,8 @@ from django.views.decorators.http import require_POST
 from .models import ProcessoJudicial, StatusProcessual
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from decimal import Decimal, InvalidOperation
+from django.db.models import Max
+import re
 
 @require_POST
 def buscar_dados_escavador_view(request ):
@@ -51,17 +53,28 @@ def buscar_dados_escavador_view(request ):
         # Se houver qualquer erro na conversão ou se a lista de fontes for vazia, mantém o valor padrão de 0.00
         valor_causa = Decimal('0.00')
 
-    # Trata o status (classe processual)
+    # Trata o status (classe processual) com lógica de normalização
     status_id = None
-    # A classe está dentro da capa da fonte principal
+    status_nome = None
     if 'fonte_principal' in locals() and fonte_principal:
         nome_classe_processual = fonte_principal.get('capa', {}).get('classe')
         if nome_classe_processual:
-            status, _ = StatusProcessual.objects.get_or_create(
-                nome=nome_classe_processual,
-                defaults={'ordem': 0} # Define uma ordem padrão se o status for novo
-            )
+            # 1. Normaliza o nome: remove números entre parênteses e espaços extras.
+            normalized_name = re.sub(r'\s*\(\d+\)$', '', nome_classe_processual).strip()
+
+            # 2. Busca pela versão canônica (case-insensitive)
+            try:
+                status = StatusProcessual.objects.get(nome__iexact=normalized_name)
+            except StatusProcessual.DoesNotExist:
+                # 3. Se não encontra, cria um novo com ordem 0 para revisão.
+                # Usa .title() para uma capitalização mais limpa (ex: "procedimento comum" -> "Procedimento Comum")
+                status = StatusProcessual.objects.create(
+                    nome=normalized_name.title(),
+                    ordem=0 
+                )
+            
             status_id = status.id
+            status_nome = status.nome
 
     # 3. Preparar a lista de partes para o formulário
     partes_para_formulario = []
@@ -111,6 +124,7 @@ def buscar_dados_escavador_view(request ):
             'tribunal': fonte_principal.get('tribunal', {}).get('nome', '') if 'fonte_principal' in locals() else '',
             'valor_causa': f'{valor_causa:.2f}',
             'status_id': status_id,
+            'status_nome': status_nome,  # Adiciona o nome do status na resposta
         },
         'partes': partes_para_formulario,
         'andamentos': andamentos_para_formulario,

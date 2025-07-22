@@ -5,29 +5,47 @@ document.addEventListener('DOMContentLoaded', function() {
     const cnjInput = document.getElementById('id_cnj');
     const ufInput = document.getElementById('id_uf');
     const tribunalInput = document.getElementById('id_tribunal');
-    const cnjFeedback = document.getElementById('cnj_feedback');
-    const searchButton = document.getElementById('btn_buscar_cnj');
     const varaInput = document.getElementById('id_vara');
     const valorCausaInput = document.getElementById('id_valor_causa');
     const statusSelect = document.getElementById('id_status');
 
-    // --- 1. Prevenção de Envio com Enter ---
+    // --- 1. Criação do Botão "Dados Online" ---
+    // O botão é criado aqui para garantir a posição desejada, ao lado do campo CNJ.
+    if (cnjInput && !document.getElementById('btn_buscar_cnj')) {
+        const searchButton = document.createElement('button');
+        searchButton.id = 'btn_buscar_cnj';
+        searchButton.type = 'button';
+        searchButton.className = 'button';
+        searchButton.innerText = '📄 Dados Online';
+        searchButton.style.marginLeft = '10px';
+        cnjInput.parentNode.appendChild(searchButton);
+
+        const feedbackDiv = document.createElement('div');
+        feedbackDiv.id = 'cnj_feedback';
+        feedbackDiv.style.marginTop = '5px';
+        feedbackDiv.style.fontWeight = 'bold';
+        cnjInput.parentNode.parentNode.appendChild(feedbackDiv);
+    }
+    
+    // Agora que o botão foi criado, podemos selecioná-lo
+    const searchButton = document.getElementById('btn_buscar_cnj');
+    const cnjFeedback = document.getElementById('cnj_feedback');
+
+
+    // --- 2. Prevenção de Envio com Enter ---
     if (form) {
         form.addEventListener('keydown', function(event) {
-            // Impede o envio do formulário se a tecla Enter for pressionada em qualquer
-            // campo que não seja uma área de texto (onde o Enter é para nova linha).
             if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
                 event.preventDefault();
             }
         });
     }
 
-    // --- 2. Lógica do Botão "Preencher UF" ---
-    // Verifica se o campo UF existe e se o botão ainda não foi criado
+    // --- 3. Lógica do Botão "Preencher UF" ---
     if (ufInput && !document.getElementById("btn_preencher_uf")) {
         const botao = document.createElement("button");
         botao.id = "btn_preencher_uf";
-        botao.type = "button"; // Garante que não submete o formulário
+        botao.type = "button";
         botao.innerText = "Preencher UF";
         botao.className = "button";
         botao.style.marginLeft = "10px";
@@ -38,12 +56,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Lógica de extração baseada no script funcional fornecido
-            const valorLimpo = cnjInput.value.replace(/[^\d]/g, ""); // Remove todos os não-dígitos
+            const valorLimpo = cnjInput.value.replace(/[^\d]/g, "");
             let codUF = null;
 
             if (valorLimpo.length >= 20) {
-                // Extrai J.TR dos dígitos 14, 15 e 16 (índices 13, 14, 15)
                 const j = valorLimpo.substring(13, 14);
                 const tr = valorLimpo.substring(14, 16);
                 codUF = `${j}.${tr}`;
@@ -66,12 +82,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert("Não foi possível extrair a UF a partir do CNJ informado. Verifique se o número possui 20 dígitos.");
             }
         };
-
-        // Adiciona o botão ao lado do campo UF
         ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
     }
 
-    // --- 3. Lógica do Botão de Busca Online ---
+    // --- 4. Lógica do Botão de Busca Online ---
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -89,7 +103,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const csrftoken = getCookie('csrftoken');
 
     if (cnjInput && searchButton) {
-        // Habilita/desabilita o botão de busca
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
             searchButton.disabled = cnjLimpo.length < 10;
@@ -97,7 +110,6 @@ document.addEventListener('DOMContentLoaded', function() {
         toggleButtonState(); 
         cnjInput.addEventListener('input', toggleButtonState);
 
-        // Ação de clique do botão de busca
         searchButton.addEventListener('click', function() {
             const cnj = cnjInput.value.trim();
             if (!cnj) {
@@ -105,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const url = searchButton.getAttribute('data-url');
+            const url = '/api/contratos/buscar-dados-escavador/'; // URL está fixa aqui
             setFeedback('Buscando dados online...', 'loading');
 
             fetch(url, {
@@ -147,18 +159,32 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function fillFormFields(processo, partes, andamentos) {
-        // Preenche os campos do formulário principal
         if (varaInput) varaInput.value = processo.vara || '';
         if (tribunalInput) tribunalInput.value = processo.tribunal || '';
-        if (valorCausaInput) valorCausaInput.value = processo.valor_causa || '0.00';
-        if (statusSelect && processo.status_id) {
-            statusSelect.value = processo.status_id;
-        }
-        if (ufInput && !ufInput.value) {
-            ufInput.value = processo.uf || '';
+        
+        // Formata o valor da causa para o padrão brasileiro (vírgula como decimal)
+        if (valorCausaInput && processo.valor_causa) {
+            valorCausaInput.value = processo.valor_causa.replace('.', ',');
+        } else if (valorCausaInput) {
+            valorCausaInput.value = '0,00';
         }
 
-        // Preenche os formulários de inline das partes
+        if (ufInput && !ufInput.value) ufInput.value = processo.uf || '';
+
+        // --- Lógica Aprimorada para o Status Processual ---
+        const statusId = processo.status_id;
+        const statusNome = processo.status_nome;
+
+        if (statusSelect && statusId && statusNome) {
+            let optionExists = Array.from(statusSelect.options).some(opt => opt.value == statusId);
+            if (!optionExists) {
+                const newOption = new Option(statusNome, statusId, true, true);
+                statusSelect.appendChild(newOption);
+            }
+            statusSelect.value = statusId;
+        }
+        // --- Fim da Lógica do Status ---
+
         if (partes && partes.length > 0) {
             const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
             const totalPartesForms = document.querySelectorAll('.dynamic-partes_processuais').length;
@@ -192,7 +218,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Preenche os formulários de inline dos andamentos
         if (andamentos && andamentos.length > 0) {
             const addAndamentoButton = document.querySelector('#andamentos-group .add-row a');
             const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
