@@ -2,9 +2,9 @@ from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.db import models
 from django.db.models import Count, Sum, Max
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, JsonResponse
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
 from django.contrib.humanize.templatetags.humanize import intcomma
 import json
 from django import forms
@@ -206,11 +206,12 @@ class StatusProcessualAdmin(admin.ModelAdmin):
     list_editable = ("ordem", "ativo")
     list_filter = ("ativo",)
     ordering = ("ordem", "nome")
-    
+    change_list_template = 'admin/contratos/statusprocessual/change_list.html'
+
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
         if 'ativo__exact' not in request.GET:
-             return queryset.filter(ativo=True)
+            return queryset.filter(ativo=True)
         return queryset
 
     def get_changeform_initial_data(self, request):
@@ -219,5 +220,46 @@ class StatusProcessualAdmin(admin.ModelAdmin):
         initial['ordem'] = max_order + 1
         return initial
 
-    class Media:
-        js = ('admin/js/status_normalizer.js',)
+    def changelist_view(self, request, extra_context=None):
+        # Prepara os dados para o JavaScript de confirmação
+        statuses_for_data = list(self.get_queryset(request))
+        status_data = {
+            s.id: {'initial_ordem': s.ordem, 'nome': s.nome} for s in statuses_for_data
+        }
+        ordem_map = {
+            s.ordem: {'id': s.id, 'name': s.nome} 
+            for s in StatusProcessual.objects.filter(ativo=True, ordem__gt=0)
+        }
+
+        extra_context = extra_context or {}
+        extra_context['status_data_json'] = json.dumps(status_data)
+        extra_context['ordem_map_json'] = json.dumps(ordem_map)
+        
+        return super().changelist_view(request, extra_context)
+
+    def save_model(self, request, obj, form, change):
+        if change and 'ordem' in form.changed_data:
+            try:
+                original_obj = StatusProcessual.objects.get(pk=obj.pk)
+                
+                if obj.ordem > 0:
+                    canonical_status = StatusProcessual.objects.filter(ordem=obj.ordem).exclude(pk=obj.pk).first()
+                    
+                    if canonical_status:
+                        origin_status_name = original_obj.nome
+                        canonical_status_name = canonical_status.nome
+                        
+                        updated_count = ProcessoJudicial.objects.filter(status=original_obj).update(status=canonical_status)
+                        
+                        obj.nome = f"{origin_status_name} (MESCLADO EM {canonical_status_name})"
+                        obj.ativo = False
+                        obj.ordem = 0
+                        
+                        messages.success(request, 
+                            f"O status '{origin_status_name}' foi mesclado com '{canonical_status_name}'. "
+                            f"{updated_count} processo(s) foram atualizados."
+                        )
+            except StatusProcessual.DoesNotExist:
+                pass
+        
+        super().save_model(request, obj, form, change)
