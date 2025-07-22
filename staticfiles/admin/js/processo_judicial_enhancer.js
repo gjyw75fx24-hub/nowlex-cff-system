@@ -1,106 +1,276 @@
-// contratos/static/admin/js/processo_judicial_enhancer.js
+// Garante que o script só rode após o carregamento completo da página
+document.addEventListener('DOMContentLoaded', function() {
 
-document.addEventListener("DOMContentLoaded", () => {
-    // ====================================================================
-    // 1. LÓGICA DO BOTÃO E POSICIONAMENTO
-    // ====================================================================
-    const ufFieldBox = document.querySelector(".form-row.field-uf .flex-container");
-    const buttonRow = document.querySelector(".form-row.field-preencher_uf_button");
-
-    if (ufFieldBox && buttonRow) {
-        const button = buttonRow.querySelector("#btn_preencher_uf");
-        if (button) {
-            // Insere o botão como o primeiro elemento dentro do container do campo UF
-            ufFieldBox.prepend(button);
-            button.style.marginRight = "10px"; // Adiciona um espaço à direita do botão
-            buttonRow.style.display = "none"; // Esconde a linha original do botão
-        }
+    // --- Prevenção de Envio com Enter ---
+    // Impede que o formulário seja enviado ao pressionar Enter em qualquer campo
+    // que não seja uma área de texto (textarea).
+    const form = document.getElementById('processojudicial_form');
+    if (form) {
+        form.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
+                event.preventDefault();
+            }
+        });
     }
 
-    const btn = document.getElementById("btn_preencher_uf");
-    if (btn) {
-        btn.addEventListener("click", () => {
-            const cnjInput = document.getElementById("id_cnj");
-            const ufInput = document.getElementById("id_uf");
-            const tribunalInput = document.getElementById("id_tribunal");
-            const mapaUF = {"8.01":"AC","8.02":"AL","8.03":"AP","8.04":"AM","8.05":"BA","8.06":"CE","8.07":"DF","8.08":"ES","8.09":"GO","8.10":"MA","8.11":"MT","8.12":"MS","8.13":"MG","8.14":"PA","8.15":"PB","8.16":"PR","8.17":"PE","8.18":"PI","8.19":"RJ","8.20":"RN","8.21":"RS","8.22":"RO","8.23":"RR","8.24":"SC","8.25":"SE","8.26":"SP","8.27":"TO"};
-            const mapaTribunal = {"8.01":"TJAC","8.02":"TJAL","8.03":"TJAP","8.04":"TJAM","8.05":"TJBA","8.06":"TJCE","8.07":"TJDFT","8.08":"TJES","8.09":"TJGO","8.10":"TJMA","8.11":"TJMT","8.12":"TJMS","8.13":"TJMG","8.14":"TJPA","8.15":"TJPB","8.16":"TJPR","8.17":"TJPE","8.18":"TJPI","8.19":"TJRJ","8.20":"TJRN","8.21":"TJRS","8.22":"TJRO","8.23":"TJRR","8.24":"TJSC","8.25":"TJSE","8.26":"TJSP","8.27":"TJTO"};
-            let valor = cnjInput.value || "";
-            let codUF = null;
-            if (valor.includes(".")) {
-                const partes = valor.split(".");
-                if (partes.length >= 4) codUF = `${partes[2]}.${partes[3]}`;
-            } else {
-                const cnjLimpo = valor.replace(/\D/g, "");
-                if (/^\d{20}$/.test(cnjLimpo)) {
-                    const J = cnjLimpo.substr(13, 1);
-                    const TR = cnjLimpo.substr(14, 2);
-                    codUF = `${J}.${TR}`;
+    // --- Seletores dos elementos do formulário ---
+    const cnjInput = document.getElementById('id_cnj');
+    const cnjFeedback = document.getElementById('cnj_feedback');
+    const searchButton = document.getElementById('btn_buscar_cnj');
+
+    // Impede o envio do formulário ao pressionar Enter no campo CNJ
+    if (cnjInput) {
+        cnjInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+            }
+        });
+    }
+    
+    const ufInput = document.getElementById('id_uf'); // Adicionado
+// Botão "Preencher UF" ao lado do campo UF
+if (ufInput && !document.getElementById("btn_preencher_uf")) {
+    const botao = document.createElement("button");
+    botao.id = "btn_preencher_uf";
+    botao.type = "button";
+    botao.innerText = "Preencher UF";
+    botao.className = "button";
+    botao.style.marginLeft = "10px";
+
+    botao.onclick = function () {
+        const cnjInput = document.getElementById("id_cnj");
+        const tribunalInput = document.getElementById("id_tribunal");
+        if (!cnjInput || !ufInput) {
+            alert("Campos CNJ ou UF não encontrados.");
+            return;
+        }
+        const cnj = cnjInput.value.trim();
+        let codUF = null;
+
+        if (cnj.includes(".")) {
+            const partes = cnj.split(".");
+            if (partes.length >= 4) {
+                codUF = `${partes[2]}.${partes[3]}`;
+            }
+        } else if (/^\d{20}$/.test(cnj)) {
+            const j = cnj.substr(13, 1);
+            const tr = cnj.substr(14, 2);
+            codUF = `${j}.${tr}`;
+        }
+
+        const mapaUF = {
+            "8.01": "AC", "8.02": "AL", "8.03": "AP", "8.04": "AM", "8.05": "BA",
+            "8.06": "CE", "8.07": "DF", "8.08": "ES", "8.09": "GO", "8.10": "MA",
+            "8.11": "MT", "8.12": "MS", "8.13": "MG", "8.14": "PA", "8.15": "PB",
+            "8.16": "PR", "8.17": "PE", "8.18": "PI", "8.19": "RJ", "8.20": "RN",
+            "8.21": "RS", "8.22": "RO", "8.23": "RR", "8.24": "SC", "8.25": "SE",
+            "8.26": "SP", "8.27": "TO"
+        };
+
+        const uf = mapaUF[codUF];
+        if (uf) {
+            ufInput.value = uf;
+            if (tribunalInput) tribunalInput.value = "TJ" + uf;
+        } else {
+            alert("Não foi possível extrair a UF a partir do CNJ informado.");
+        }
+    };
+
+    ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
+}
+
+    const varaInput = document.getElementById('id_vara');
+    const tribunalInput = document.getElementById('id_tribunal');
+    const valorCausaInput = document.getElementById('id_valor_causa');
+    const statusSelect = document.getElementById('id_status');
+
+    // --- Funções auxiliares ---
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
                 }
             }
-            if (codUF && mapaUF[codUF]) {
-                ufInput.value = mapaUF[codUF];
-                tribunalInput.value = mapaTribunal[codUF];
-            } else {
-                alert("Não foi possível extrair a UF a partir do CNJ informado. Verifique o número.");
-            }
-        });
-    }
-
-    // ====================================================================
-    // 2. LÓGICA DAS MÁSCARAS (CNJ Principal e Partes)
-    // ====================================================================
-    const cnjPrincipalInput = document.getElementById("id_cnj");
-    if (cnjPrincipalInput) {
-        cnjPrincipalInput.addEventListener("input", (e) => {
-            let v = e.target.value.replace(/\D/g, "").substring(0, 20);
-            if (v.length >= 17) v = v.replace(/(\d{7})(\d{2})(\d{4})(\d{1})(\d{2})(\d{4})/, "$1-$2.$3.$4.$5.$6");
-            else if (v.length >= 15) v = v.replace(/(\d{7})(\d{2})(\d{4})(\d{1})(\d{2})/, "$1-$2.$3.$4.$5");
-            else if (v.length >= 14) v = v.replace(/(\d{7})(\d{2})(\d{4})(\d{1})/, "$1-$2.$3.$4");
-            else if (v.length >= 10) v = v.replace(/(\d{7})(\d{2})(\d{4})/, "$1-$2.$3");
-            else if (v.length >= 8) v = v.replace(/(\d{7})(\d{2})/, "$1-$2");
-            e.target.value = v;
-        });
-    }
-
-    function aplicarMascaraParte(docInput, tipoSelect) {
-        const mascaraHandler = () => {
-            const isPJ = tipoSelect.value === "PJ";
-            let v = docInput.value.replace(/\D/g, "");
-            if (isPJ) {
-                v = v.substring(0, 14);
-                if (v.length >= 13) v = v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
-                else if (v.length >= 9) v = v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})/, "$1.$2.$3/$4");
-                else if (v.length >= 6) v = v.replace(/(\d{2})(\d{3})(\d{3})/, "$1.$2.$3");
-                else if (v.length >= 3) v = v.replace(/(\d{2})(\d{3})/, "$1.$2");
-            } else { // PF
-                v = v.substring(0, 11);
-                if (v.length >= 10) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-                else if (v.length >= 7) v = v.replace(/(\d{3})(\d{3})(\d{3})/, "$1.$2.$3");
-                else if (v.length >= 4) v = v.replace(/(\d{3})(\d{3})/, "$1.$2");
-            }
-            docInput.value = v;
-        };
-        docInput.addEventListener("input", mascaraHandler);
-        tipoSelect.addEventListener("change", mascaraHandler);
-        mascaraHandler();
-    }
-
-    function configurarInlines() {
-        document.querySelectorAll(".dynamic-contratos-parte:not([data-mascara-configurada])").forEach(inline => {
-            const tipoSelect = inline.querySelector("select[name$='-tipo_pessoa']");
-            const docInput = inline.querySelector("input[name$='-documento']");
-            if (tipoSelect && docInput) {
-                aplicarMascaraParte(docInput, tipoSelect);
-                inline.setAttribute("data-mascara-configurada", "true");
-            }
-        });
-    }
-
-    configurarInlines();
-    document.body.addEventListener("formset:added", (event) => {
-        if (event.target.classList.contains("dynamic-contratos-parte")) {
-            configurarInlines();
         }
-    });
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    // --- Lógica de habilitação do botão ---
+    if (cnjInput && searchButton) {
+        const toggleButtonState = () => {
+            // Habilita o botão se o campo tiver um número razoável de caracteres
+            const cnjLimpo = cnjInput.value.replace(/\D/g, '');
+            searchButton.disabled = cnjLimpo.length < 10;
+        };
+        toggleButtonState(); 
+        cnjInput.addEventListener('input', toggleButtonState);
+    }
+
+    // --- Lógica do clique no botão de busca ---
+    if (searchButton) {
+        searchButton.addEventListener('click', function() {
+            const cnj = cnjInput.value.trim();
+            if (!cnj) {
+                setFeedback('Por favor, insira um número de CNJ.', 'error');
+                return;
+            }
+
+            const url = searchButton.getAttribute('data-url');
+            setFeedback('Buscando dados online...', 'loading');
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': csrftoken,
+                },
+                // Envia o CNJ como o usuário digitou. O backend vai limpar.
+                body: `cnj=${encodeURIComponent(cnj)}`
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.message || `Erro ${response.status}: ${response.statusText}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    setFeedback(data.message, 'success');
+                    // Passa os dados do processo, partes e andamentos
+                    fillFormFields(data.processo, data.partes, data.andamentos); 
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Erro na requisição:', error);
+                setFeedback(error.message || 'Ocorreu um erro inesperado.', 'error');
+            });
+        });
+    }
+
+    /**
+     * Preenche os campos do formulário principal e os inlines das partes.
+     * @param {object} processo - O objeto com os dados do processo principal.
+     * @param {Array} partes - A lista de objetos das partes.
+     */
+    function fillFormFields(processo, partes, andamentos) {
+        // 1. Preenche os campos do formulário principal
+        if (varaInput) varaInput.value = processo.vara || '';
+        if (tribunalInput) tribunalInput.value = processo.tribunal || '';
+        if (valorCausaInput) valorCausaInput.value = processo.valor_causa || '0.00';
+        if (statusSelect && processo.status_id) {
+            statusSelect.value = processo.status_id;
+        }
+        // Preenche UF apenas se estiver vazio
+        if (ufInput && !ufInput.value) {
+            ufInput.value = processo.uf || '';
+        }
+
+        // 2. Preenche os formulários de inline das partes
+        if (partes && partes.length > 0) {
+            const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
+            const totalPartesForms = document.querySelectorAll('.dynamic-partes_processuais').length;
+
+            // Garante que há inlines suficientes
+            for (let i = totalPartesForms; i < partes.length; i++) {
+                if (addParteButton) addParteButton.click();
+            }
+
+            // Remove inlines extras se houver mais formulários do que partes
+            for (let i = partes.length; i < totalPartesForms; i++) {
+                const inline = document.querySelector(`#partes_processuais-group .dynamic-partes_processuais:nth-child(${i + 1})`);
+                if (inline) {
+                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
+                    if (deleteCheckbox) deleteCheckbox.checked = true;
+                }
+            }
+
+            // Preenche os inlines
+            document.querySelectorAll('.dynamic-partes_processuais').forEach((inline, i) => {
+                if (i < partes.length) {
+                    const parte = partes[i];
+                    const prefix = `id_partes_processuais-${i}-`;
+                    const tipoPoloSelect = inline.querySelector(`#${prefix}tipo_polo`);
+                    const nomeInput = inline.querySelector(`#${prefix}nome`);
+                    const tipoPessoaSelect = inline.querySelector(`#${prefix}tipo_pessoa`);
+                    const documentoInput = inline.querySelector(`#${prefix}documento`);
+                    const enderecoInput = inline.querySelector(`#${prefix}endereco`);
+
+                    if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo;
+                    if (nomeInput) nomeInput.value = parte.nome;
+                    if (tipoPessoaSelect) tipoPessoaSelect.value = parte.tipo_pessoa;
+                    if (documentoInput) {
+                        documentoInput.value = parte.documento;
+                        documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                    if (enderecoInput) enderecoInput.value = parte.endereco || '';
+
+                    // Garante que o inline não está marcado para exclusão se estiver sendo preenchido
+                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
+                    if (deleteCheckbox) deleteCheckbox.checked = false;
+                }
+            });
+        }
+
+        // 3. Preenche os formulários de inline dos andamentos
+        if (andamentos && andamentos.length > 0) {
+            const addAndamentoButton = document.querySelector('#andamentos-group .add-row a');
+            const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
+
+            // Garante que há inlines suficientes
+            for (let i = totalAndamentosForms; i < andamentos.length; i++) {
+                if (addAndamentoButton) addAndamentoButton.click();
+            }
+
+            // Remove inlines extras se houver mais formulários do que andamentos
+            for (let i = andamentos.length; i < totalAndamentosForms; i++) {
+                const inline = document.querySelector(`#andamentos-group .dynamic-andamentos:nth-child(${i + 1})`);
+                if (inline) {
+                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
+                    if (deleteCheckbox) deleteCheckbox.checked = true;
+                }
+            }
+
+            // Preenche os inlines
+            document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
+                if (i < andamentos.length) {
+                    const andamento = andamentos[i];
+                    const prefix = `id_andamentos-${i}-`;
+                    const dataInput = inline.querySelector(`#${prefix}data_0`);
+                    const horaInput = inline.querySelector(`#${prefix}data_1`);
+                    const descricaoInput = inline.querySelector(`#${prefix}descricao`);
+
+                    if (dataInput && horaInput && andamento.data) {
+                        const dateTime = new Date(andamento.data);
+                        dataInput.value = dateTime.toLocaleDateString('pt-BR');
+                        horaInput.value = dateTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    }
+                    if (descricaoInput) descricaoInput.value = andamento.descricao || '';
+
+                    // Garante que o inline não está marcado para exclusão se estiver sendo preenchido
+                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
+                    if (deleteCheckbox) deleteCheckbox.checked = false;
+                }
+            });
+        }
+
+        // 4. Informa o usuário
+        setFeedback('Dados preenchidos. Revise as informações e salve o formulário.', 'success');
+    }
+
+    function setFeedback(message, type) {
+        if (cnjFeedback) {
+            cnjFeedback.textContent = message;
+            cnjFeedback.style.color = type === 'success' ? 'green' : (type === 'error' ? 'red' : 'orange');
+        }
+    }
 });

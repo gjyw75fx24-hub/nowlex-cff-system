@@ -1,10 +1,31 @@
 // Garante que o script só rode após o carregamento completo da página
 document.addEventListener('DOMContentLoaded', function() {
 
+    // --- Prevenção de Envio com Enter ---
+    // Impede que o formulário seja enviado ao pressionar Enter em qualquer campo
+    // que não seja uma área de texto (textarea).
+    const form = document.getElementById('processojudicial_form');
+    if (form) {
+        form.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
+                event.preventDefault();
+            }
+        });
+    }
+
     // --- Seletores dos elementos do formulário ---
     const cnjInput = document.getElementById('id_cnj');
     const cnjFeedback = document.getElementById('cnj_feedback');
     const searchButton = document.getElementById('btn_buscar_cnj');
+
+    // Impede o envio do formulário ao pressionar Enter no campo CNJ
+    if (cnjInput) {
+        cnjInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+            }
+        });
+    }
     
     const ufInput = document.getElementById('id_uf'); // Adicionado
 // Botão "Preencher UF" ao lado do campo UF

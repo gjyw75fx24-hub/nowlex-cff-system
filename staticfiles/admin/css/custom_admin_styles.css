@@ -1,0 +1,50 @@
+/* 
+  Estilos para a página de admin de Processo Judicial,
+  focados em melhorar a visualização dos andamentos.
+*/
+
+/* Estiliza cada bloco de andamento (inline) para parecer um "card" ou "entrada de diário" */
+.dynamic-andamento {
+    border: 1px solid #e0e0e0;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* Remove a borda da tabela interna que o Django admin usa para inlines tabulares */
+.dynamic-andamento table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+/* Garante que as linhas do formulário dentro do card não tenham bordas extras */
+.dynamic-andamento .form-row {
+    border-bottom: none;
+    padding: 5px 0;
+}
+
+/* 
+  Aumenta a altura do campo de descrição e permite que o usuário o redimensione.
+  Este é o ponto principal para criar a sensação de uma área de texto grande para cada andamento.
+*/
+.dynamic-andamento textarea[id$='-descricao'] {
+    height: 120px; /* Altura inicial generosa */
+    resize: vertical; /* Permite que o usuário redimensione verticalmente */
+    width: 100% !important; /* Força a largura total para uma melhor aparência */
+    box-sizing: border-box; /* Garante que padding e borda não afetem a largura final */
+}
+
+/* Ajusta o alinhamento dos campos de data e hora para ficarem bem ao lado da descrição */
+.dynamic-andamento .related-widget-wrapper,
+.dynamic-andamento .form-row .flex-container {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+
+.dynamic-andamento .form-row .vDateField,
+.dynamic-andamento .form-row .vTimeField {
+    margin-right: 10px;
+}

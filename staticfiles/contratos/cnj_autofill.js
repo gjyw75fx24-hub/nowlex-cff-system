@@ -47,6 +47,14 @@ window.addEventListener("load", function() {
         // A função preencherCampos será chamada toda vez que você digitar algo.
         $("#id_cnj").on("input", preencherCampos);
 
+        // Adiciona um "ouvinte" para a tecla Enter no campo CNJ
+        $("#id_cnj").on("keydown", function(event) {
+            if (event.key === "Enter") {
+                // Impede a submissão do formulário
+                event.preventDefault();
+            }
+        });
+
         // Roda a função uma vez no carregamento da página, caso o campo já esteja preenchido
         preencherCampos();
 

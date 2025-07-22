@@ -1,0 +1,4 @@
+# Ignorar arquivos e pastas de cache do Python
+__pycache__/
+*.py[cod]
+

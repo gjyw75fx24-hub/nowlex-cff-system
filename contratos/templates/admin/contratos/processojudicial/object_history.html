@@ -1,0 +1,10 @@
+{% extends "admin/object_history.html" %}
+{% load i18n %}
+
+{# Adiciona o botão "Voltar" acima da tabela de histórico #}
+{% block content %}
+<div style="margin-bottom: 1rem;">
+    <a href="{% url 'admin:contratos_processojudicial_change' object_id %}" class="button">{% trans "Voltar para o Processo" %}</a>
+</div>
+{{ block.super }}
+{% endblock %}

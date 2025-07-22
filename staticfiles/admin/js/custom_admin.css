@@ -1,22 +1,23 @@
-/* contratos/static/admin/css/custom_admin.css */
-
-/* Esconde a linha original do botão */
-.form-row.field-preencher_uf_button {
-    display: none;
+/* Alinha os campos Nome e CPF/CNPJ nos inlines de Parte */
+.form-row.field-nome, .form-row.field-documento {
+    display: inline-block;
+    vertical-align: top;
+    width: 48%;
 }
 
-/* Ajusta o campo UF para ter uma largura mínima e não quebrar */
-.form-row.field-uf .flex-container {
+/* Corrige layout da linha do campo UF */
+.form-row.field-uf {
     display: flex;
-    align-items: center;
-    gap: 10px; /* Espaço entre os elementos */
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px; /* Espaço entre o input e o botão */
 }
 
-#id_uf {
-    max-width: 60px !important; /* Largura máxima para o campo UF */
+/* Estiliza o botão com espaçamento suave */
+#btn_preencher_uf {
+    padding: 4px 10px;
+    font-size: 12px;
+    margin: 0;
 }
 
-/* Ajuste para alinhar o label do UF com o botão */
-.form-row.field-uf label {
-    margin-right: 5px; /* Pequeno espaço entre o label e o botão/campo */
-}
+/* Remove a classe custom-uf-btn — está duplicada e confusa */

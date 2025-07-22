@@ -1,5 +1,16 @@
 from django.db import models
 
+class Carteira(models.Model):
+    nome = models.CharField(max_length=100, unique=True, verbose_name="Nome da Carteira")
+
+    class Meta:
+        verbose_name = "Carteira"
+        verbose_name_plural = "Carteiras"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
 class StatusProcessual(models.Model):
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome do Status")
     ordem = models.PositiveIntegerField(default=1, verbose_name="Ordem")
@@ -28,6 +39,15 @@ class ProcessoJudicial(models.Model):
         verbose_name="Status Processual"
     )
     
+    carteira = models.ForeignKey(
+        Carteira,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Carteira",
+        related_name='processos'
+    )
+
     # 🔽 CAMPO ADICIONADO PARA CONTROLE DA BUSCA ATIVA
     busca_ativa = models.BooleanField(
         default=False,
@@ -93,3 +113,16 @@ class Contrato(models.Model):
 
     def __str__(self):
         return self.numero_contrato
+
+
+class ParteProcessoAdvogado(models.Model):
+    parte = models.ForeignKey(Parte, on_delete=models.CASCADE)
+    advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('parte', 'advogado')
+        verbose_name = "Relação Parte-Advogado"
+        verbose_name_plural = "Relações Parte-Advogado"
+
+    def __str__(self):
+        return f"{self.parte.nome} - {self.advogado.nome}"
