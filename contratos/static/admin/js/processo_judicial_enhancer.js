@@ -1,90 +1,77 @@
-// Garante que o script só rode após o carregamento completo da página
 document.addEventListener('DOMContentLoaded', function() {
 
-    // --- Prevenção de Envio com Enter ---
-    // Impede que o formulário seja enviado ao pressionar Enter em qualquer campo
-    // que não seja uma área de texto (textarea).
+    // --- Seletores Globais ---
     const form = document.getElementById('processojudicial_form');
+    const cnjInput = document.getElementById('id_cnj');
+    const ufInput = document.getElementById('id_uf');
+    const tribunalInput = document.getElementById('id_tribunal');
+    const cnjFeedback = document.getElementById('cnj_feedback');
+    const searchButton = document.getElementById('btn_buscar_cnj');
+    const varaInput = document.getElementById('id_vara');
+    const valorCausaInput = document.getElementById('id_valor_causa');
+    const statusSelect = document.getElementById('id_status');
+
+    // --- 1. Prevenção de Envio com Enter ---
     if (form) {
         form.addEventListener('keydown', function(event) {
+            // Impede o envio do formulário se a tecla Enter for pressionada em qualquer
+            // campo que não seja uma área de texto (onde o Enter é para nova linha).
             if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
                 event.preventDefault();
             }
         });
     }
 
-    // --- Seletores dos elementos do formulário ---
-    const cnjInput = document.getElementById('id_cnj');
-    const cnjFeedback = document.getElementById('cnj_feedback');
-    const searchButton = document.getElementById('btn_buscar_cnj');
+    // --- 2. Lógica do Botão "Preencher UF" ---
+    // Verifica se o campo UF existe e se o botão ainda não foi criado
+    if (ufInput && !document.getElementById("btn_preencher_uf")) {
+        const botao = document.createElement("button");
+        botao.id = "btn_preencher_uf";
+        botao.type = "button"; // Garante que não submete o formulário
+        botao.innerText = "Preencher UF";
+        botao.className = "button";
+        botao.style.marginLeft = "10px";
 
-    // Impede o envio do formulário ao pressionar Enter no campo CNJ
-    if (cnjInput) {
-        cnjInput.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
+        botao.onclick = function () {
+            if (!cnjInput.value) {
+                alert("Por favor, insira um número de CNJ.");
+                return;
             }
-        });
-    }
-    
-    const ufInput = document.getElementById('id_uf'); // Adicionado
-// Botão "Preencher UF" ao lado do campo UF
-if (ufInput && !document.getElementById("btn_preencher_uf")) {
-    const botao = document.createElement("button");
-    botao.id = "btn_preencher_uf";
-    botao.type = "button";
-    botao.innerText = "Preencher UF";
-    botao.className = "button";
-    botao.style.marginLeft = "10px";
+            
+            // Lógica de extração baseada no script funcional fornecido
+            const valorLimpo = cnjInput.value.replace(/[^\d]/g, ""); // Remove todos os não-dígitos
+            let codUF = null;
 
-    botao.onclick = function () {
-        const cnjInput = document.getElementById("id_cnj");
-        const tribunalInput = document.getElementById("id_tribunal");
-        if (!cnjInput || !ufInput) {
-            alert("Campos CNJ ou UF não encontrados.");
-            return;
-        }
-        const cnj = cnjInput.value.trim();
-        let codUF = null;
-
-        if (cnj.includes(".")) {
-            const partes = cnj.split(".");
-            if (partes.length >= 4) {
-                codUF = `${partes[2]}.${partes[3]}`;
+            if (valorLimpo.length >= 20) {
+                // Extrai J.TR dos dígitos 14, 15 e 16 (índices 13, 14, 15)
+                const j = valorLimpo.substring(13, 14);
+                const tr = valorLimpo.substring(14, 16);
+                codUF = `${j}.${tr}`;
             }
-        } else if (/^\d{20}$/.test(cnj)) {
-            const j = cnj.substr(13, 1);
-            const tr = cnj.substr(14, 2);
-            codUF = `${j}.${tr}`;
-        }
 
-        const mapaUF = {
-            "8.01": "AC", "8.02": "AL", "8.03": "AP", "8.04": "AM", "8.05": "BA",
-            "8.06": "CE", "8.07": "DF", "8.08": "ES", "8.09": "GO", "8.10": "MA",
-            "8.11": "MT", "8.12": "MS", "8.13": "MG", "8.14": "PA", "8.15": "PB",
-            "8.16": "PR", "8.17": "PE", "8.18": "PI", "8.19": "RJ", "8.20": "RN",
-            "8.21": "RS", "8.22": "RO", "8.23": "RR", "8.24": "SC", "8.25": "SE",
-            "8.26": "SP", "8.27": "TO"
+            const mapaUF = {
+                "8.01": "AC", "8.02": "AL", "8.03": "AP", "8.04": "AM", "8.05": "BA",
+                "8.06": "CE", "8.07": "DF", "8.08": "ES", "8.09": "GO", "8.10": "MA",
+                "8.11": "MT", "8.12": "MS", "8.13": "MG", "8.14": "PA", "8.15": "PB",
+                "8.16": "PR", "8.17": "PE", "8.18": "PI", "8.19": "RJ", "8.20": "RN",
+                "8.21": "RS", "8.22": "RO", "8.23": "RR", "8.24": "SC", "8.25": "SE",
+                "8.26": "SP", "8.27": "TO"
+            };
+
+            const uf = mapaUF[codUF];
+            if (uf) {
+                ufInput.value = uf;
+                if (tribunalInput) tribunalInput.value = "TJ" + uf;
+            } else {
+                alert("Não foi possível extrair a UF a partir do CNJ informado. Verifique se o número possui 20 dígitos.");
+            }
         };
 
-        const uf = mapaUF[codUF];
-        if (uf) {
-            ufInput.value = uf;
-            if (tribunalInput) tribunalInput.value = "TJ" + uf;
-        } else {
-            alert("Não foi possível extrair a UF a partir do CNJ informado.");
-        }
-    };
+        // Adiciona o botão ao lado do campo UF
+        ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
+    }
 
-    ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
-}
-
-    const varaInput = document.getElementById('id_vara');
-    const tribunalInput = document.getElementById('id_tribunal');
-    const valorCausaInput = document.getElementById('id_valor_causa');
-    const statusSelect = document.getElementById('id_status');
-
-    // --- Funções auxiliares ---
+    // --- 3. Lógica do Botão de Busca Online ---
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -101,19 +88,16 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
     }
     const csrftoken = getCookie('csrftoken');
 
-    // --- Lógica de habilitação do botão ---
     if (cnjInput && searchButton) {
+        // Habilita/desabilita o botão de busca
         const toggleButtonState = () => {
-            // Habilita o botão se o campo tiver um número razoável de caracteres
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
             searchButton.disabled = cnjLimpo.length < 10;
         };
         toggleButtonState(); 
         cnjInput.addEventListener('input', toggleButtonState);
-    }
 
-    // --- Lógica do clique no botão de busca ---
-    if (searchButton) {
+        // Ação de clique do botão de busca
         searchButton.addEventListener('click', function() {
             const cnj = cnjInput.value.trim();
             if (!cnj) {
@@ -130,7 +114,6 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-CSRFToken': csrftoken,
                 },
-                // Envia o CNJ como o usuário digitou. O backend vai limpar.
                 body: `cnj=${encodeURIComponent(cnj)}`
             })
             .then(response => {
@@ -144,7 +127,6 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
             .then(data => {
                 if (data.status === 'success') {
                     setFeedback(data.message, 'success');
-                    // Passa os dados do processo, partes e andamentos
                     fillFormFields(data.processo, data.partes, data.andamentos); 
                 } else {
                     throw new Error(data.message);
@@ -157,44 +139,34 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
         });
     }
 
-    /**
-     * Preenche os campos do formulário principal e os inlines das partes.
-     * @param {object} processo - O objeto com os dados do processo principal.
-     * @param {Array} partes - A lista de objetos das partes.
-     */
+    function setFeedback(message, type) {
+        if (cnjFeedback) {
+            cnjFeedback.textContent = message;
+            cnjFeedback.style.color = type === 'success' ? 'green' : (type === 'error' ? 'red' : 'orange');
+        }
+    }
+
     function fillFormFields(processo, partes, andamentos) {
-        // 1. Preenche os campos do formulário principal
+        // Preenche os campos do formulário principal
         if (varaInput) varaInput.value = processo.vara || '';
         if (tribunalInput) tribunalInput.value = processo.tribunal || '';
         if (valorCausaInput) valorCausaInput.value = processo.valor_causa || '0.00';
         if (statusSelect && processo.status_id) {
             statusSelect.value = processo.status_id;
         }
-        // Preenche UF apenas se estiver vazio
         if (ufInput && !ufInput.value) {
             ufInput.value = processo.uf || '';
         }
 
-        // 2. Preenche os formulários de inline das partes
+        // Preenche os formulários de inline das partes
         if (partes && partes.length > 0) {
             const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
             const totalPartesForms = document.querySelectorAll('.dynamic-partes_processuais').length;
 
-            // Garante que há inlines suficientes
             for (let i = totalPartesForms; i < partes.length; i++) {
                 if (addParteButton) addParteButton.click();
             }
 
-            // Remove inlines extras se houver mais formulários do que partes
-            for (let i = partes.length; i < totalPartesForms; i++) {
-                const inline = document.querySelector(`#partes_processuais-group .dynamic-partes_processuais:nth-child(${i + 1})`);
-                if (inline) {
-                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
-                    if (deleteCheckbox) deleteCheckbox.checked = true;
-                }
-            }
-
-            // Preenche os inlines
             document.querySelectorAll('.dynamic-partes_processuais').forEach((inline, i) => {
                 if (i < partes.length) {
                     const parte = partes[i];
@@ -214,33 +186,21 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
                     }
                     if (enderecoInput) enderecoInput.value = parte.endereco || '';
 
-                    // Garante que o inline não está marcado para exclusão se estiver sendo preenchido
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = false;
                 }
             });
         }
 
-        // 3. Preenche os formulários de inline dos andamentos
+        // Preenche os formulários de inline dos andamentos
         if (andamentos && andamentos.length > 0) {
             const addAndamentoButton = document.querySelector('#andamentos-group .add-row a');
             const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
 
-            // Garante que há inlines suficientes
             for (let i = totalAndamentosForms; i < andamentos.length; i++) {
                 if (addAndamentoButton) addAndamentoButton.click();
             }
 
-            // Remove inlines extras se houver mais formulários do que andamentos
-            for (let i = andamentos.length; i < totalAndamentosForms; i++) {
-                const inline = document.querySelector(`#andamentos-group .dynamic-andamentos:nth-child(${i + 1})`);
-                if (inline) {
-                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
-                    if (deleteCheckbox) deleteCheckbox.checked = true;
-                }
-            }
-
-            // Preenche os inlines
             document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
                 if (i < andamentos.length) {
                     const andamento = andamentos[i];
@@ -256,21 +216,10 @@ if (ufInput && !document.getElementById("btn_preencher_uf")) {
                     }
                     if (descricaoInput) descricaoInput.value = andamento.descricao || '';
 
-                    // Garante que o inline não está marcado para exclusão se estiver sendo preenchido
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = false;
                 }
             });
-        }
-
-        // 4. Informa o usuário
-        setFeedback('Dados preenchidos. Revise as informações e salve o formulário.', 'success');
-    }
-
-    function setFeedback(message, type) {
-        if (cnjFeedback) {
-            cnjFeedback.textContent = message;
-            cnjFeedback.style.color = type === 'success' ? 'green' : (type === 'error' ? 'red' : 'orange');
         }
     }
 });
