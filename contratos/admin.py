@@ -125,7 +125,10 @@ class CarteiraAdmin(admin.ModelAdmin):
     def get_valor_medio_processo(self, obj):
         if obj.total_processos > 0 and obj.valor_total is not None:
             valor_medio = obj.valor_total / obj.total_processos
-            return f"R$ {intcomma(valor_medio, use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
+            # Arredonda o valor para 2 casas decimais
+            valor_arredondado = round(valor_medio, 2)
+            # Formata para o padrão monetário brasileiro
+            return f"R$ {intcomma(valor_arredondado, use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
         return "R$ 0,00"
 
     @admin.display(description='Ações')
