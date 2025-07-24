@@ -259,8 +259,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/processo_judicial_enhancer.js', 
             'admin/js/admin_tabs.js', 
             'admin/js/input_masks.js', 
-            'admin/js/etiqueta_interface.js'
-        )
+            'admin/js/etiqueta_interface.js',
+            'admin/js/filter_search.js' # <-- ADICIONE ESTA LINHA
+         )
 
     def get_urls(self):
         urls = super().get_urls()

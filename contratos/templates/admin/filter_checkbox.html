@@ -1,16 +1,21 @@
 {% load i18n custom_filters %}
 
-{# 1. Lógica para determinar se o filtro está ativo #}
 {% with is_active=choices|slice:"1:"|some:"selected" %}
-
 <div class="filter-container">
-    {# 2. Usamos a variável 'is_active' para adicionar a classe 'active' #}
     <details class="filter-collapsible {% if is_active %}active{% endif %}" open>
         <summary>
             <span>{% blocktrans with filter_title=title %}Por {{ filter_title }}{% endblocktrans %}</span>
         </summary>
         <div class="filter-choices">
-            <ul>
+            
+            <!-- NOVO: Campo de Busca -->
+            <div class="filter-search-wrapper">
+                <input type="text" id="etiqueta-filter-search" placeholder="Buscar etiqueta...">
+                <span class="search-icon"></span>
+            </div>
+            <!-- FIM: Campo de Busca -->
+
+            <ul id="etiqueta-filter-list">
                 {% for choice in choices %}
                     <li class="{% if choice.selected %}selected{% endif %}">
                         <a href="{{ choice.query_string|iriencode }}">{{ choice.display }}</a>
@@ -20,5 +25,4 @@
         </div>
     </details>
 </div>
-
 {% endwith %}
