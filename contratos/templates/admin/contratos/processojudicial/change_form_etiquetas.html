@@ -1,12 +1,9 @@
 {% extends "admin/change_form.html" %}
 {% load i18n admin_urls %}
 
-{# O conteúdo principal do formulário do admin será renderizado aqui #}
-{% block content %}
+{# Adiciona os modais e elementos invisíveis no cabeçalho, fora do bloco de conteúdo principal #}
+{% block extrahead %}
 {{ block.super }}
-
-{# O HTML do modal e os contêineres ficam aqui no final, invisíveis.
-   O JavaScript irá movê-los para o lugar certo. #}
 <div id="etiqueta-elements-source" style="display: none;">
     <button type="button" id="open-etiqueta-modal" class="button">Inserir Etiquetas</button>
     <div id="etiquetas-aplicadas-container">
