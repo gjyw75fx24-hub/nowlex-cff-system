@@ -48,3 +48,46 @@
 .dynamic-andamento .form-row .vTimeField {
     margin-right: 10px;
 }
+
+/* --- Estilos para Etiquetas --- */
+.etiqueta-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    margin: 2px;
+    cursor: default;
+    position: relative;
+    padding-right: 25px; /* Espaço para o botão de remover */
+}
+
+.remove-etiqueta-btn {
+    position: absolute;
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: inherit; /* Herda a cor da fonte da etiqueta */
+    opacity: 0.7;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+
+.remove-etiqueta-btn:hover {
+    opacity: 1;
+}
+
+/* Reduz o tamanho das etiquetas aplicadas */
+#etiquetas-aplicadas-container .etiqueta-badge {
+    transform: scale(0.75);
+    transform-origin: left;
+}

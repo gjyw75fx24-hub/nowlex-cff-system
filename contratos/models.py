@@ -1,5 +1,18 @@
 from django.db import models
 
+class Etiqueta(models.Model):
+    nome = models.CharField(max_length=50, unique=True, verbose_name="Nome")
+    cor_fundo = models.CharField(max_length=7, default="#417690", verbose_name="Cor de Fundo")
+    cor_fonte = models.CharField(max_length=7, default="#FFFFFF", verbose_name="Cor da Fonte")
+
+    class Meta:
+        verbose_name = "Etiqueta"
+        verbose_name_plural = "Etiquetas"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
 class Carteira(models.Model):
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome da Carteira")
 
@@ -46,6 +59,12 @@ class ProcessoJudicial(models.Model):
         blank=True,
         verbose_name="Carteira",
         related_name='processos'
+    )
+
+    etiquetas = models.ManyToManyField(
+        'Etiqueta',
+        blank=True,
+        verbose_name="Etiquetas"
     )
 
     # 🔽 CAMPO ADICIONADO PARA CONTROLE DA BUSCA ATIVA
@@ -126,3 +145,15 @@ class ParteProcessoAdvogado(models.Model):
 
     def __str__(self):
         return f"{self.parte.nome} - {self.advogado.nome}"
+
+class AndamentoProcessualAdvogado(models.Model):
+    andamento = models.ForeignKey(AndamentoProcessual, on_delete=models.CASCADE)
+    advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('andamento', 'advogado')
+        verbose_name = "Relação Andamento-Advogado"
+        verbose_name_plural = "Relações Andamento-Advogado"
+
+    def __str__(self):
+        return f"Andamento de {self.andamento.id} - Advogado {self.advogado.nome}"

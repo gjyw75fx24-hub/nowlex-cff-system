@@ -1,26 +1,30 @@
 from django.contrib import admin, messages
-from django.contrib.admin import SimpleListFilter
 from django.db import models
-from django.db.models import Count, Sum, Max
+from django.db.models import Count, Max
 from django.http import HttpResponseRedirect, JsonResponse
+from django.shortcuts import get_object_or_404
 from django.utils.html import format_html
 from django.urls import reverse, path
 from django.contrib.humanize.templatetags.humanize import intcomma
 import json
 from django import forms
 from django.utils.safestring import mark_safe
+from decimal import Decimal, InvalidOperation
 
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual, 
-    AndamentoProcessual, Carteira
+    AndamentoProcessual, Carteira, Etiqueta
 )
+
+# --- Registro de Modelos Simples ---
+admin.site.register(Etiqueta)
 
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
 
 # --- Filtros ---
-class TerceiroInteressadoFilter(SimpleListFilter):
+class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
     parameter_name = "terceiro_interessado"
     def lookups(self, request, model_admin):
@@ -32,7 +36,7 @@ class TerceiroInteressadoFilter(SimpleListFilter):
             return queryset.annotate(num_partes=models.Count("partes_processuais")).filter(num_partes__lte=2)
         return queryset
 
-class AtivoStatusProcessualFilter(SimpleListFilter):
+class AtivoStatusProcessualFilter(admin.SimpleListFilter):
     title = 'Status Processual'
     parameter_name = 'status'
     def lookups(self, request, model_admin):
@@ -43,8 +47,6 @@ class AtivoStatusProcessualFilter(SimpleListFilter):
         return queryset
 
 # --- Forms ---
-from decimal import Decimal, InvalidOperation
-
 class ProcessoJudicialForm(forms.ModelForm):
     class Meta:
         model = ProcessoJudicial
@@ -59,25 +61,14 @@ class ProcessoJudicialForm(forms.ModelForm):
         )
 
     def clean_valor_causa(self):
-        """
-        Limpa e converte o valor da causa de forma robusta.
-        Aceita formatos como 'R$ 1.234,56'.
-        """
         valor = self.cleaned_data.get('valor_causa')
         if not valor:
             return Decimal('0.00')
-
-        # Remove o prefixo 'R$' e espaços em branco
-        valor_str = str(valor).replace("R$", "").strip()
-        
-        # Remove pontos de milhar e substitui a vírgula decimal por ponto
-        valor_str = valor_str.replace(".", "").replace(",", ".")
-        
+        valor_str = str(valor).replace("R$", "").strip().replace(".", "").replace(",", ".")
         try:
             return Decimal(valor_str)
         except (InvalidOperation, ValueError, TypeError):
             raise forms.ValidationError("Por favor, insira um valor monetário válido.", code='invalid')
-
 
 # --- Inlines ---
 class AndamentoInline(admin.TabularInline):
@@ -104,12 +95,13 @@ class ContratoInline(admin.StackedInline):
     fk_name = "processo"
 
 # --- ModelAdmins ---
+@admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
+    change_list_template = "admin/contratos/carteira/change_list.html"
     
     def get_queryset(self, request):
-        queryset = super().get_queryset(request)
-        return queryset.annotate(
+        return super().get_queryset(request).annotate(
             total_processos=models.Count('processos', distinct=True),
             valor_total=models.Sum('processos__valor_causa')
         )
@@ -127,8 +119,7 @@ class CarteiraAdmin(admin.ModelAdmin):
     def get_valor_medio_processo(self, obj):
         if obj.total_processos > 0 and obj.valor_total is not None:
             valor_medio = obj.valor_total / obj.total_processos
-            valor_arredondado = round(valor_medio, 2)
-            return f"R$ {intcomma(valor_arredondado, use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
+            return f"R$ {intcomma(round(valor_medio, 2), use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
         return "R$ 0,00"
 
     @admin.display(description='Ações')
@@ -145,6 +136,7 @@ class CarteiraAdmin(admin.ModelAdmin):
     class Media:
         js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js')
 
+@admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     form = ProcessoJudicialForm
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
@@ -155,17 +147,55 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
     )
+    change_form_template = "admin/contratos/processojudicial/change_form_etiquetas.html"
+    history_template = "admin/contratos/processojudicial/object_history.html"
 
     class Media:
-        css = {'all': (
-            'admin/css/admin_tabs.css',
-            'admin/css/custom_admin_styles.css',
-        )}
-        js = (
-            'admin/js/processo_judicial_enhancer.js',
-            'admin/js/admin_tabs.js',
-            'admin/js/input_masks.js',
-        )
+        css = {'all': ('admin/css/admin_tabs.css', 'admin/css/custom_admin_styles.css')}
+        js = ('admin/js/processo_judicial_enhancer.js', 'admin/js/admin_tabs.js', 'admin/js/input_masks.js', 'admin/js/etiqueta_interface.js')
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
+            path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
+        ]
+        return custom_urls + urls
+
+    def etiquetas_view(self, request, object_id):
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        if request.method == 'POST':
+            try:
+                data = json.loads(request.body)
+                etiqueta_id = data.get('etiqueta_id')
+                action = data.get('action')
+                etiqueta = get_object_or_404(Etiqueta, pk=etiqueta_id)
+                if action == 'add':
+                    processo.etiquetas.add(etiqueta)
+                    return JsonResponse({'status': 'added', 'etiqueta': {'id': etiqueta.id, 'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}})
+                elif action == 'remove':
+                    processo.etiquetas.remove(etiqueta)
+                    return JsonResponse({'status': 'removed'})
+                return JsonResponse({'status': 'error', 'message': 'Ação inválida.'}, status=400)
+            except (json.JSONDecodeError, Etiqueta.DoesNotExist):
+                return JsonResponse({'status': 'error', 'message': 'Dados inválidos.'}, status=400)
+        
+        todas_etiquetas = list(Etiqueta.objects.values('id', 'nome', 'cor_fundo', 'cor_fonte'))
+        etiquetas_processo = list(processo.etiquetas.values('id', 'nome', 'cor_fundo', 'cor_fonte'))
+        return JsonResponse({'todas_etiquetas': todas_etiquetas, 'etiquetas_processo': etiquetas_processo})
+
+    def criar_etiqueta_view(self, request):
+        if request.method == 'POST':
+            try:
+                data = json.loads(request.body)
+                nome = data.get('nome', '').strip()
+                if nome and not Etiqueta.objects.filter(nome__iexact=nome).exists():
+                    etiqueta = Etiqueta.objects.create(nome=nome)
+                    return JsonResponse({'status': 'created', 'etiqueta': {'id': etiqueta.id, 'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}}, status=201)
+                return JsonResponse({'status': 'error', 'message': 'Nome inválido ou já existe.'}, status=400)
+            except json.JSONDecodeError:
+                return JsonResponse({'status': 'error', 'message': 'Dados inválidos.'}, status=400)
+        return JsonResponse({'status': 'error', 'message': 'Método não permitido.'}, status=405)
 
     def history_view(self, request, object_id, extra_context=None):
         extra_context = extra_context or {}
@@ -173,18 +203,13 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return super().history_view(request, object_id, extra_context=extra_context)
 
     def response_change(self, request, obj):
-        # Adiciona a mensagem de sucesso
         messages.success(request, "Processo Salvo!")
-        # Verifica se o botão "Salvar" (e não "Salvar e adicionar outro") foi pressionado
         if "_save" in request.POST:
-            # Redireciona para a mesma página de edição
             return HttpResponseRedirect(request.path)
-        # Comportamento padrão para os outros botões
         return super().response_change(request, obj)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":
-            # Permite que status com ordem >= 0 sejam selecionáveis e válidos no formulário
             kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gte=0)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
@@ -200,7 +225,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     def get_polo_passivo(self, obj):
         return getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '---')
 
-
+@admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):
     list_display = ("nome", "ordem", "ativo")
     list_editable = ("ordem", "ativo")
@@ -220,46 +245,20 @@ class StatusProcessualAdmin(admin.ModelAdmin):
         initial['ordem'] = max_order + 1
         return initial
 
-    def changelist_view(self, request, extra_context=None):
-        # Prepara os dados para o JavaScript de confirmação
-        statuses_for_data = list(self.get_queryset(request))
-        status_data = {
-            s.id: {'initial_ordem': s.ordem, 'nome': s.nome} for s in statuses_for_data
-        }
-        ordem_map = {
-            s.ordem: {'id': s.id, 'name': s.nome} 
-            for s in StatusProcessual.objects.filter(ativo=True, ordem__gt=0)
-        }
-
-        extra_context = extra_context or {}
-        extra_context['status_data_json'] = json.dumps(status_data)
-        extra_context['ordem_map_json'] = json.dumps(ordem_map)
-        
-        return super().changelist_view(request, extra_context)
-
     def save_model(self, request, obj, form, change):
         if change and 'ordem' in form.changed_data:
             try:
                 original_obj = StatusProcessual.objects.get(pk=obj.pk)
-                
                 if obj.ordem > 0:
                     canonical_status = StatusProcessual.objects.filter(ordem=obj.ordem).exclude(pk=obj.pk).first()
-                    
                     if canonical_status:
                         origin_status_name = original_obj.nome
                         canonical_status_name = canonical_status.nome
-                        
                         updated_count = ProcessoJudicial.objects.filter(status=original_obj).update(status=canonical_status)
-                        
                         obj.nome = f"{origin_status_name} (MESCLADO EM {canonical_status_name})"
                         obj.ativo = False
                         obj.ordem = 0
-                        
-                        messages.success(request, 
-                            f"O status '{origin_status_name}' foi mesclado com '{canonical_status_name}'. "
-                            f"{updated_count} processo(s) foram atualizados."
-                        )
+                        messages.success(request, f"O status '{origin_status_name}' foi mesclado com '{canonical_status_name}'. {updated_count} processo(s) foram atualizados.")
             except StatusProcessual.DoesNotExist:
                 pass
-        
         super().save_model(request, obj, form, change)

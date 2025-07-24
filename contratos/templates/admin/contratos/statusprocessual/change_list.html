@@ -1,0 +1,12 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="{% static 'admin/js/status_normalizer.js' %}" defer></script>
+    <script>
+        // Passa os dados do Django para o JavaScript
+        window.statusData = JSON.parse('{{ status_data_json|escapejs }}');
+        window.ordemMap = JSON.parse('{{ ordem_map_json|escapejs }}');
+    </script>
+{% endblock %}
