@@ -16,6 +16,19 @@ from .models import (
     AndamentoProcessual, Carteira, Etiqueta
 )
 
+# --- Filtros ---
+class EtiquetaFilter(admin.SimpleListFilter):
+    title = 'Etiquetas'
+    parameter_name = 'etiqueta'
+
+    def lookups(self, request, model_admin):
+        return list(Etiqueta.objects.order_by('ordem', 'nome').values_list('id', 'nome'))
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(etiquetas__id=self.value())
+        return queryset
+
 # --- Registro de Modelos Simples ---
 @admin.register(Etiqueta)
 class EtiquetaAdmin(admin.ModelAdmin):
@@ -150,7 +163,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     form = ProcessoJudicialForm
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
-    list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter]
+    list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", EtiquetaFilter, "uf", TerceiroInteressadoFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
     fieldsets = (
@@ -159,22 +172,27 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     )
     change_form_template = "admin/contratos/processojudicial/change_form_etiquetas.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
+    change_list_template = "admin/contratos/processojudicial/change_list.html"
+
+    def changelist_view(self, request, extra_context=None):
+        response = super().changelist_view(request, extra_context)
+        try:
+            qs = response.context_data['cl'].queryset
+            etiquetas_data = {}
+            for processo in qs:
+                etiquetas = processo.etiquetas.order_by('ordem', 'nome').values('nome', 'cor_fundo', 'cor_fonte')
+                etiquetas_data[processo.pk] = list(etiquetas)
+            
+            extra_context = extra_context or {}
+            extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
+        except (AttributeError, KeyError):
+            pass # Lida com casos onde o queryset não está disponível
+        
+        return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
-        css = {
-            'all': (
-                'admin/css/admin_tabs.css', 
-                'admin/css/custom_admin_styles.css',
-                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css'  # CSS do Pickr
-            )
-        }
-        js = (
-            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',  # JS do Pickr
-            'admin/js/processo_judicial_enhancer.js', 
-            'admin/js/admin_tabs.js', 
-            'admin/js/input_masks.js', 
-            'admin/js/etiqueta_interface.js'
-        )
+        css = {'all': ('admin/css/admin_tabs.css', 'admin/css/custom_admin_styles.css')}
+        js = ('admin/js/processo_judicial_enhancer.js', 'admin/js/admin_tabs.js', 'admin/js/input_masks.js', 'admin/js/etiqueta_interface.js')
 
     def get_urls(self):
         urls = super().get_urls()

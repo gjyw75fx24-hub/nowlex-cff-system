@@ -1,0 +1,68 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const etiquetasData = JSON.parse('{{ etiquetas_data_json|escapejs }}' || '{}');
+        
+        setTimeout(function() {
+            const table = document.getElementById('result_list');
+            if (!table) return;
+
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            rows.forEach(row => {
+                const input = row.querySelector('input.action-select');
+                if (!input) return;
+
+                const processoId = input.value;
+                const etiquetas = etiquetasData[processoId];
+
+                if (etiquetas && etiquetas.length > 0) {
+                    // 1. Garante que a linha seja um container de posicionamento
+                    row.style.position = 'relative';
+                    
+                    // 2. Aumenta o padding inferior de TODAS as células na linha para criar espaço
+                    const cells = row.getElementsByTagName('td');
+                    for (let cell of cells) {
+                        cell.style.paddingBottom = '35px';
+                    }
+                    const thCell = row.getElementsByTagName('th')[0];
+                    if (thCell) {
+                        thCell.style.paddingBottom = '35px';
+                    }
+
+                    // 3. Cria o container para as etiquetas
+                    const container = document.createElement('div');
+                    container.style.position = 'absolute';
+                    container.style.bottom = '5px';
+                    container.style.left = '10px';
+                    container.style.right = '10px';
+                    container.style.whiteSpace = 'nowrap';
+                    container.style.overflow = 'hidden';
+                    // container.style.borderTop = '1px solid rgba(0, 0, 0, 0.1)'; // Linha removida
+                    container.style.paddingTop = '5px';
+                    container.style.textAlign = 'left'; // Garante o alinhamento à esquerda
+
+
+                    etiquetas.forEach(e => {
+                        const badge = document.createElement('span');
+                        badge.className = 'etiqueta-badge';
+                        badge.textContent = e.nome;
+                        badge.style.backgroundColor = e.cor_fundo;
+                        badge.style.color = e.cor_fonte;
+                        badge.style.paddingRight = '10px';
+                        badge.style.transform = 'scale(0.75)';
+                        badge.style.transformOrigin = 'left';
+                        badge.style.marginRight = '-2px';
+                        container.appendChild(badge);
+                    });
+                    
+                    // 4. Anexa o container à primeira célula (ele se posicionará em relação à linha inteira)
+                    row.cells[0].appendChild(container);
+                }
+            });
+        }, 250);
+    });
+    </script>
+{% endblock %}
