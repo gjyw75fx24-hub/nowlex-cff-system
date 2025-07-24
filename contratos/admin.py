@@ -17,17 +17,73 @@ from .models import (
 )
 
 # --- Filtros ---
+# --- Filtros ---
+# Em contratos/admin.py
+
+# Em contratos/admin.py
+
 class EtiquetaFilter(admin.SimpleListFilter):
     title = 'Etiquetas'
-    parameter_name = 'etiqueta'
+    parameter_name = 'etiquetas'
+    template = "admin/filter_checkbox.html" # Essencial para usar nosso template
 
     def lookups(self, request, model_admin):
+        """
+        Este método é obrigatório pelo Django. Retorna as opções de filtro.
+        """
         return list(Etiqueta.objects.order_by('ordem', 'nome').values_list('id', 'nome'))
 
     def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(etiquetas__id=self.value())
+        """
+        Filtra os processos para que contenham TODAS as etiquetas selecionadas.
+        """
+        valor = self.value()
+        if valor:
+            etiqueta_ids = valor.split(',')
+            # Adiciona um .distinct() para evitar resultados duplicados na lista de processos
+            queryset = queryset.distinct()
+            for etiqueta_id in etiqueta_ids:
+                if etiqueta_id:
+                    queryset = queryset.filter(etiquetas__id=etiqueta_id)
         return queryset
+
+    def choices(self, changelist):
+        """
+        Gera os links de filtro para o template, gerenciando a seleção múltipla.
+        Este método é o que realmente será usado pelo nosso template.
+        """
+        selected_ids = self.value().split(',') if self.value() else []
+        
+        # Opção "Todos"
+        yield {
+            'selected': not self.value(),
+            'query_string': changelist.get_query_string(remove=[self.parameter_name]),
+            'display': 'Todos',
+        }
+
+        # Gera as opções para cada etiqueta
+        for lookup, title in self.lookup_choices:
+            lookup_str = str(lookup)
+            selected = lookup_str in selected_ids
+            
+            new_selected_ids = list(selected_ids)
+            if selected:
+                new_selected_ids.remove(lookup_str)
+            else:
+                new_selected_ids.append(lookup_str)
+            
+            new_selected_ids = [sid for sid in new_selected_ids if sid]
+            
+            query_string = changelist.get_query_string({
+                self.parameter_name: ','.join(new_selected_ids)
+            })
+
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': title,
+            }
+
 
 # --- Registro de Modelos Simples ---
 @admin.register(Etiqueta)
