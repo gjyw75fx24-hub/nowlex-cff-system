@@ -21,6 +21,7 @@
         const cancelCreateEtiquetaBtn = $('#cancel-create-etiqueta-btn');
         const newEtiquetaNameInput = $('#new-etiqueta-name-input');
         const createEtiquetaError = $('#create-etiqueta-error');
+        const previewContainer = $('#etiqueta-preview-container');
 
         // --- Instâncias do Pickr ---
         let pickrFundo = null;
@@ -147,7 +148,7 @@
             handleEtiquetaChange($(this).data('id'), 'remove');
         });
 
-        // --- Lógica do Modal de Criação com Preview no Input ---
+        // --- Lógica do Modal de Criação com Pickr e Preview ---
         const swatches = [
             '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
             '#009688', '#4CAF50', '#8BC34A', '#CDDC39', '#FFEB3B', '#FFC107', '#FF9800', '#FF5722',
@@ -158,6 +159,7 @@
             const cor_fundo = pickrFundo.getColor().toHEXA().toString();
             const cor_fonte = pickrFonte.getColor().toHEXA().toString();
             
+            // O CSS agora cuida do placeholder, então só precisamos definir a cor do texto digitado
             newEtiquetaNameInput.css({
                 'background-color': cor_fundo,
                 'color': cor_fonte,
@@ -166,7 +168,7 @@
             });
         }
 
-        function initializePickers() {
+        function initializePickers(callback) {
             if (window.Pickr) {
                 const pickerOptions = {
                     theme: 'classic',
@@ -193,22 +195,40 @@
 
                 pickrFundo.on('change', updatePreview).on('save', updatePreview);
                 pickrFonte.on('change', updatePreview).on('save', updatePreview);
+
+                if (callback) callback();
             } else {
-                setTimeout(initializePickers, 100);
+                setTimeout(() => initializePickers(callback), 100);
             }
         }
 
         addNewEtiquetaBtn.on('click', function() {
-            if (!pickrFundo) {
-                initializePickers();
-            }
             createEtiquetaError.hide();
-            newEtiquetaNameInput.val('').css({ // Reseta o estilo ao abrir
+            newEtiquetaNameInput.val('');
+            newEtiquetaNameInput.css({ // Reseta o estilo para o padrão do navegador
                 'background-color': '', 'color': '', 'text-align': '', 'font-weight': ''
             });
-            createModal.show();
-            setTimeout(updatePreview, 0);
+
+            const setupAndShow = () => {
+                // Garante que as cores padrão estão definidas nos seletores
+                pickrFundo.setColor('#417690', true);
+                pickrFonte.setColor('#FFFFFF', true);
+                
+                // Pinta o preview com as cores padrão
+                updatePreview();
+                
+                // Só então, mostra o modal
+                createModal.show();
+            };
+
+            if (!pickrFundo) {
+                initializePickers(setupAndShow);
+            } else {
+                setupAndShow();
+            }
         });
+
+        newEtiquetaNameInput.on('keyup', updatePreview);
 
         cancelCreateEtiquetaBtn.on('click', function() {
             createModal.hide();

@@ -96,3 +96,9 @@
 .pcr-button {
     border: 1px solid #000 !important;
 }
+
+/* CORREÇÃO: Estiliza o placeholder do preview */
+#new-etiqueta-name-input::placeholder {
+  color: white !important;
+  opacity: 0.8 !important; /* Opacidade para diferenciar do texto digitado */
+}

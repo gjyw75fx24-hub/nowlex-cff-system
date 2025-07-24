@@ -191,8 +191,20 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
-        css = {'all': ('admin/css/admin_tabs.css', 'admin/css/custom_admin_styles.css')}
-        js = ('admin/js/processo_judicial_enhancer.js', 'admin/js/admin_tabs.js', 'admin/js/input_masks.js', 'admin/js/etiqueta_interface.js')
+        css = {
+            'all': (
+                'admin/css/admin_tabs.css', 
+                'admin/css/custom_admin_styles.css',
+                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css'
+            )
+        }
+        js = (
+            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
+            'admin/js/processo_judicial_enhancer.js', 
+            'admin/js/admin_tabs.js', 
+            'admin/js/input_masks.js', 
+            'admin/js/etiqueta_interface.js'
+        )
 
     def get_urls(self):
         urls = super().get_urls()
