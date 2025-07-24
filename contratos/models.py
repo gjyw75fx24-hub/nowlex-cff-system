@@ -4,11 +4,12 @@ class Etiqueta(models.Model):
     nome = models.CharField(max_length=50, unique=True, verbose_name="Nome")
     cor_fundo = models.CharField(max_length=7, default="#417690", verbose_name="Cor de Fundo")
     cor_fonte = models.CharField(max_length=7, default="#FFFFFF", verbose_name="Cor da Fonte")
+    ordem = models.PositiveIntegerField(default=1, verbose_name="Ordem")
 
     class Meta:
         verbose_name = "Etiqueta"
         verbose_name_plural = "Etiquetas"
-        ordering = ['nome']
+        ordering = ['ordem', 'nome']
 
     def __str__(self):
         return self.nome

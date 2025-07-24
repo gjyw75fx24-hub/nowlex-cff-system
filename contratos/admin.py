@@ -17,7 +17,17 @@ from .models import (
 )
 
 # --- Registro de Modelos Simples ---
-admin.site.register(Etiqueta)
+@admin.register(Etiqueta)
+class EtiquetaAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'ordem')
+    list_editable = ('ordem',)
+    ordering = ('ordem', 'nome')
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        max_order = Etiqueta.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
+        initial['ordem'] = max_order + 1
+        return initial
 
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
@@ -205,7 +215,16 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 cor_fonte = data.get('cor_fonte', '#FFFFFF')
 
                 if nome and not Etiqueta.objects.filter(nome__iexact=nome).exists():
-                    etiqueta = Etiqueta.objects.create(nome=nome, cor_fundo=cor_fundo, cor_fonte=cor_fonte)
+                    # Calcula a próxima ordem disponível
+                    max_order = Etiqueta.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
+                    nova_ordem = max_order + 1
+                    
+                    etiqueta = Etiqueta.objects.create(
+                        nome=nome, 
+                        cor_fundo=cor_fundo, 
+                        cor_fonte=cor_fonte,
+                        ordem=nova_ordem
+                    )
                     return JsonResponse({'status': 'created', 'etiqueta': {'id': etiqueta.id, 'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}}, status=201)
                 return JsonResponse({'status': 'error', 'message': 'Nome inválido ou já existe.'}, status=400)
             except json.JSONDecodeError:
