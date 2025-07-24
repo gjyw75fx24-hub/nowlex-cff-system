@@ -91,3 +91,8 @@
     transform: scale(0.75);
     transform-origin: left;
 }
+
+/* Adiciona contorno aos seletores de cor */
+.pcr-button {
+    border: 1px solid #000 !important;
+}

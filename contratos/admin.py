@@ -151,8 +151,20 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     history_template = "admin/contratos/processojudicial/object_history.html"
 
     class Media:
-        css = {'all': ('admin/css/admin_tabs.css', 'admin/css/custom_admin_styles.css')}
-        js = ('admin/js/processo_judicial_enhancer.js', 'admin/js/admin_tabs.js', 'admin/js/input_masks.js', 'admin/js/etiqueta_interface.js')
+        css = {
+            'all': (
+                'admin/css/admin_tabs.css', 
+                'admin/css/custom_admin_styles.css',
+                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css'  # CSS do Pickr
+            )
+        }
+        js = (
+            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',  # JS do Pickr
+            'admin/js/processo_judicial_enhancer.js', 
+            'admin/js/admin_tabs.js', 
+            'admin/js/input_masks.js', 
+            'admin/js/etiqueta_interface.js'
+        )
 
     def get_urls(self):
         urls = super().get_urls()
@@ -189,8 +201,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             try:
                 data = json.loads(request.body)
                 nome = data.get('nome', '').strip()
+                cor_fundo = data.get('cor_fundo', '#417690')
+                cor_fonte = data.get('cor_fonte', '#FFFFFF')
+
                 if nome and not Etiqueta.objects.filter(nome__iexact=nome).exists():
-                    etiqueta = Etiqueta.objects.create(nome=nome)
+                    etiqueta = Etiqueta.objects.create(nome=nome, cor_fundo=cor_fundo, cor_fonte=cor_fonte)
                     return JsonResponse({'status': 'created', 'etiqueta': {'id': etiqueta.id, 'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}}, status=201)
                 return JsonResponse({'status': 'error', 'message': 'Nome inválido ou já existe.'}, status=400)
             except json.JSONDecodeError:

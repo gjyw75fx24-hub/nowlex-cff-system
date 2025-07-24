@@ -22,6 +22,10 @@
         const newEtiquetaNameInput = $('#new-etiqueta-name-input');
         const createEtiquetaError = $('#create-etiqueta-error');
 
+        // --- Instâncias do Pickr ---
+        let pickrFundo = null;
+        let pickrFonte = null;
+
         // --- Posicionamento ---
         function positionElements() {
             const mainHeader = $('#content h1').first();
@@ -29,7 +33,6 @@
             const openModalBtn = $('#open-etiqueta-modal');
 
             if (mainHeader.length && contentDiv.length) {
-                // 1. Posicionar o botão com 'position: absolute' e scale(0.7)
                 const topPosition = mainHeader.position().top + parseFloat(mainHeader.css('margin-top'));
                 openModalBtn.detach().appendTo(contentDiv).css({
                     'position': 'absolute',
@@ -38,12 +41,9 @@
                     'transform': 'scale(0.7)',
                     'transform-origin': 'top right'
                 });
-
-                // 2. Posicionar as etiquetas abaixo do H1
                 mainHeader.after(aplicadasContainer.detach());
                 aplicadasContainer.css({ 'padding': '10px 0', 'display': 'block' }).show();
                 
-                // 3. Diminuir o botão Histórico
                 const historyButton = $('a.historylink');
                 if (historyButton.length) {
                     historyButton.css({
@@ -147,11 +147,67 @@
             handleEtiquetaChange($(this).data('id'), 'remove');
         });
 
-        // --- Lógica do Modal de Criação (sem seletor de cor) ---
+        // --- Lógica do Modal de Criação com Preview no Input ---
+        const swatches = [
+            '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
+            '#009688', '#4CAF50', '#8BC34A', '#CDDC39', '#FFEB3B', '#FFC107', '#FF9800', '#FF5722',
+            '#795548', '#9E9E9E', '#607D8B', '#000000', '#FFFFFF'
+        ];
+
+        function updatePreview() {
+            const cor_fundo = pickrFundo.getColor().toHEXA().toString();
+            const cor_fonte = pickrFonte.getColor().toHEXA().toString();
+            
+            newEtiquetaNameInput.css({
+                'background-color': cor_fundo,
+                'color': cor_fonte,
+                'text-align': 'center',
+                'font-weight': 'bold'
+            });
+        }
+
+        function initializePickers() {
+            if (window.Pickr) {
+                const pickerOptions = {
+                    theme: 'classic',
+                    swatches: swatches,
+                    components: {
+                        preview: true, opacity: false, hue: true,
+                        interaction: {
+                            hex: false, rgba: false, hsla: false, hsva: false, cmyk: false,
+                            input: true, clear: false, save: true
+                        }
+                    }
+                };
+                pickrFundo = Pickr.create({ el: '#color-picker-fundo', default: '#417690', ...pickerOptions });
+                pickrFonte = Pickr.create({ el: '#color-picker-fonte', default: '#FFFFFF', ...pickerOptions });
+
+                const repositionPicker = (pickerInstance) => {
+                    const pickerApp = pickerInstance.getRoot().app;
+                    const createModalBox = createModal.find('> div')[0].getBoundingClientRect();
+                    pickerApp.style.top = `${createModalBox.bottom + 10}px`;
+                };
+
+                pickrFundo.on('show', instance => repositionPicker(instance));
+                pickrFonte.on('show', instance => repositionPicker(instance));
+
+                pickrFundo.on('change', updatePreview).on('save', updatePreview);
+                pickrFonte.on('change', updatePreview).on('save', updatePreview);
+            } else {
+                setTimeout(initializePickers, 100);
+            }
+        }
+
         addNewEtiquetaBtn.on('click', function() {
+            if (!pickrFundo) {
+                initializePickers();
+            }
             createEtiquetaError.hide();
-            newEtiquetaNameInput.val('');
+            newEtiquetaNameInput.val('').css({ // Reseta o estilo ao abrir
+                'background-color': '', 'color': '', 'text-align': '', 'font-weight': ''
+            });
             createModal.show();
+            setTimeout(updatePreview, 0);
         });
 
         cancelCreateEtiquetaBtn.on('click', function() {
@@ -161,10 +217,12 @@
         saveNewEtiquetaBtn.on('click', function() {
             const nome = newEtiquetaNameInput.val().trim();
             if (nome) {
+                const cor_fundo = pickrFundo.getColor().toHEXA().toString();
+                const cor_fonte = pickrFonte.getColor().toHEXA().toString();
                 $.ajax({
                     url: criarEtiquetaUrl,
                     type: 'POST',
-                    data: JSON.stringify({ 'nome': nome }),
+                    data: JSON.stringify({ 'nome': nome, 'cor_fundo': cor_fundo, 'cor_fonte': cor_fonte }),
                     contentType: 'application/json',
                     beforeSend: xhr => xhr.setRequestHeader("X-CSRFToken", csrftoken),
                     success: response => {
