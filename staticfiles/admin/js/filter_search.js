@@ -1,18 +1,31 @@
 // contratos/static/admin/js/filter_search.js
 
 window.addEventListener('load', function() {
-    // --- Lógica para o botão de colapsar filtro ---
+    // --- Lógica para o botão de colapsar filtro (com memória) ---
     const filterDiv = document.getElementById('changelist-filter');
     const toggleButton = document.getElementById('filter-toggle');
 
     if (filterDiv && toggleButton) {
+        // 1. Ao carregar, verifica o estado salvo no localStorage
+        const isCollapsedSaved = localStorage.getItem('filterCollapsed') === 'true';
+        if (isCollapsedSaved) {
+            filterDiv.classList.add('collapsed');
+            toggleButton.textContent = ' [+]';
+        }
+
+        // 2. Adiciona o evento de clique para alterar e salvar o estado
         toggleButton.addEventListener('click', function() {
             filterDiv.classList.toggle('collapsed');
-            if (filterDiv.classList.contains('collapsed')) {
+            const isCurrentlyCollapsed = filterDiv.classList.contains('collapsed');
+            
+            if (isCurrentlyCollapsed) {
                 toggleButton.textContent = ' [+]';
             } else {
                 toggleButton.textContent = ' [–]';
             }
+            
+            // Salva o estado atual no localStorage para lembrar na próxima visita
+            localStorage.setItem('filterCollapsed', isCurrentlyCollapsed);
         });
     }
 
