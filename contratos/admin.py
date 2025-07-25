@@ -227,7 +227,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     form = ProcessoJudicialForm
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
-    list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", EtiquetaFilter, "uf", TerceiroInteressadoFilter]
+    list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
     inlines = [ParteInline, ContratoInline, AndamentoInline]
     fieldsets = (
