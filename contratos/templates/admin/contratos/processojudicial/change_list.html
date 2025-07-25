@@ -7,7 +7,38 @@
             font-weight: bold;
             text-decoration: underline;
         }
+        /* Estilos para o botão de colapsar filtro */
+        #filter-toggle {
+            cursor: pointer;
+            font-weight: bold;
+            margin-left: 10px;
+            font-size: 1.2em;
+            color: #5b80b2;
+        }
+        #changelist-filter.collapsed {
+            height: 40px;
+            overflow: hidden;
+        }
     </style>
+{% endblock %}
+
+{% block content %}
+    <script>
+        // Move o script para o final do bloco de conteúdo para garantir que os elementos existam
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterDiv = document.getElementById('changelist-filter');
+            if (filterDiv) {
+                const filterTitle = filterDiv.querySelector('h2');
+                if (filterTitle) {
+                    const toggleButton = document.createElement('span');
+                    toggleButton.id = 'filter-toggle';
+                    toggleButton.textContent = ' [–]';
+                    filterTitle.appendChild(toggleButton);
+                }
+            }
+        });
+    </script>
+    {{ block.super }}
 {% endblock %}
 
 {% block extrahead %}

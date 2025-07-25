@@ -1,7 +1,22 @@
 // contratos/static/admin/js/filter_search.js
 
 window.addEventListener('load', function() {
-    // Garante que o código só rode se os elementos existirem na página
+    // --- Lógica para o botão de colapsar filtro ---
+    const filterDiv = document.getElementById('changelist-filter');
+    const toggleButton = document.getElementById('filter-toggle');
+
+    if (filterDiv && toggleButton) {
+        toggleButton.addEventListener('click', function() {
+            filterDiv.classList.toggle('collapsed');
+            if (filterDiv.classList.contains('collapsed')) {
+                toggleButton.textContent = ' [+]';
+            } else {
+                toggleButton.textContent = ' [–]';
+            }
+        });
+    }
+
+    // --- Lógica para a busca no filtro de etiquetas ---
     const searchInput = document.getElementById('etiqueta-filter-search');
     const etiquetaList = document.getElementById('etiqueta-filter-list');
 

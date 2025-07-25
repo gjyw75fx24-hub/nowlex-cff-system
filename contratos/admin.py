@@ -29,9 +29,17 @@ class EtiquetaFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         """
-        Este método é obrigatório pelo Django. Retorna as opções de filtro.
+        Este método é obrigatório pelo Django. Retorna as opções de filtro,
+        agora com a contagem de processos.
         """
-        return list(Etiqueta.objects.order_by('ordem', 'nome').values_list('id', 'nome'))
+        queryset = Etiqueta.objects.annotate(
+            processo_count=Count('processojudicial')
+        ).order_by('ordem', 'nome')
+        
+        return [
+            (etiqueta.id, f"{etiqueta.nome} ({etiqueta.processo_count})")
+            for etiqueta in queryset
+        ]
 
     def queryset(self, request, queryset):
         """
