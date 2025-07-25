@@ -27,12 +27,17 @@
         let pickrFundo = null;
         let pickrFonte = null;
 
-        // --- Posicionamento ---
+                // --- Posicionamento ---
         function positionElements() {
+            // ================== INÍCIO DA SOLUÇÃO FINAL ==================
+
+            // 1. Seleciona os elementos principais
             const mainHeader = $('#content h1').first();
             const contentDiv = $('#content');
             const openModalBtn = $('#open-etiqueta-modal');
+            const aplicadasContainer = $('#etiquetas-aplicadas-container');
 
+            // 2. Lógica original para posicionar o botão "Inserir Etiquetas"
             if (mainHeader.length && contentDiv.length) {
                 const topPosition = mainHeader.position().top + parseFloat(mainHeader.css('margin-top'));
                 openModalBtn.detach().appendTo(contentDiv).css({
@@ -42,19 +47,39 @@
                     'transform': 'scale(0.7)',
                     'transform-origin': 'top right'
                 });
-                mainHeader.after(aplicadasContainer.detach());
-                aplicadasContainer.css({ 'padding': '10px 0', 'display': 'block' }).show();
-                
-                const historyButton = $('a.historylink');
-                if (historyButton.length) {
-                    historyButton.css({
-                        'transform': 'scale(0.8)',
-                        'transform-origin': 'top right',
-                        'display': 'inline-block'
-                    });
-                }
             }
+
+            // 3. AQUI ESTÁ A MÁGICA:
+            // O subtítulo (CNJ) é adicionado um pouco depois.
+            // Esta função espera até que o subtítulo exista para então mover as etiquetas.
+            const waitForSubTitle = setInterval(function() {
+                // O seletor '.object-tools' é o container do subtítulo CNJ.
+                const subTitleContainer = $('.object-tools');
+
+                if (subTitleContainer.length > 0) {
+                    // O subtítulo foi encontrado!
+                    clearInterval(waitForSubTitle); // Para de verificar
+
+                    // Move o container de etiquetas para DEPOIS do container do subtítulo
+                    subTitleContainer.after(aplicadasContainer.detach());
+                    
+                    // Mostra o container de etiquetas com o espaçamento correto
+                    aplicadasContainer.css({ 'padding': '10px 0', 'display': 'block' }).show();
+                }
+            }, 50); // Verifica a cada 50 milissegundos
+
+            // 4. Lógica original para ajustar o botão de histórico
+            const historyButton = $('a.historylink');
+            if (historyButton.length) {
+                historyButton.css({
+                    'transform': 'scale(0.8)',
+                    'transform-origin': 'top right',
+                    'display': 'inline-block'
+                });
+            }
+            // =================== FIM DA SOLUÇÃO FINAL ====================
         }
+
         
         positionElements();
 
@@ -159,7 +184,6 @@
             const cor_fundo = pickrFundo.getColor().toHEXA().toString();
             const cor_fonte = pickrFonte.getColor().toHEXA().toString();
             
-            // O CSS agora cuida do placeholder, então só precisamos definir a cor do texto digitado
             newEtiquetaNameInput.css({
                 'background-color': cor_fundo,
                 'color': cor_fonte,
@@ -205,19 +229,14 @@
         addNewEtiquetaBtn.on('click', function() {
             createEtiquetaError.hide();
             newEtiquetaNameInput.val('');
-            newEtiquetaNameInput.css({ // Reseta o estilo para o padrão do navegador
+            newEtiquetaNameInput.css({
                 'background-color': '', 'color': '', 'text-align': '', 'font-weight': ''
             });
 
             const setupAndShow = () => {
-                // Garante que as cores padrão estão definidas nos seletores
                 pickrFundo.setColor('#417690', true);
                 pickrFonte.setColor('#FFFFFF', true);
-                
-                // Pinta o preview com as cores padrão
                 updatePreview();
-                
-                // Só então, mostra o modal
                 createModal.show();
             };
 

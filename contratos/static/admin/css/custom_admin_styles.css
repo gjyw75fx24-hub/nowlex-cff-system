@@ -132,3 +132,18 @@
     background-position: center;
     opacity: 0.6;
 }
+/*
+ * Ajustes finos nos botões do cabeçalho do formulário de processo.
+ */
+
+/* 1. Seleciona o botão de Histórico (que é um link com a classe 'historylink') */
+a.historylink {
+    /* Adiciona uma margem no topo para descolar do botão de Etiquetas */
+    margin-top: 5px !important; 
+
+    /* Reduz o tamanho geral do botão para aproximadamente 90% */
+    transform: scale(0.9) !important;
+
+    /* Ajusta a origem da transformação para o canto superior direito */
+    transform-origin: top right !important;
+}
