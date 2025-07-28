@@ -1,40 +1,41 @@
 document.addEventListener('DOMContentLoaded', function () {
-    console.log("Mapa Interativo Script Carregado (v2).");
-
     const mapaWrapper = document.getElementById('mapa-brasil-wrapper');
-    if (!mapaWrapper) {
-        console.error("Erro: Div 'mapa-brasil-wrapper' não encontrada.");
-        return;
-    }
+    if (!mapaWrapper) return;
 
     const filtroUFLink = document.querySelector('#changelist-filter a[href*="?uf="]');
-    if (!filtroUFLink) {
-        console.error("Erro: Nenhum link de filtro de UF (ex: ?uf=SP) foi encontrado. Verifique se o filtro 'uf' está ativo no admin.py e se há processos com UFs cadastradas.");
-        return;
-    }
+    if (!filtroUFLink) return;
 
     const ufList = filtroUFLink.closest('ul');
-    if (!ufList) {
-        console.error("Erro: Lista <ul> para o filtro UF não foi encontrada.");
-        return;
-    }
+    if (!ufList) return;
     
-    const filtroContainer = ufList.parentElement;
-    console.log("Elementos do filtro encontrados. Montando o mapa...");
+    // O contêiner original que envolve a lista de UFs
+    const originalContainer = ufList.parentElement;
 
-    filtroContainer.style.display = 'flex';
-    filtroContainer.style.gap = '15px';
-    filtroContainer.style.alignItems = 'flex-start';
+    // --- CORREÇÃO: Criar um novo wrapper flexível ---
+    const flexWrapper = document.createElement('div');
+    flexWrapper.style.display = 'flex';
+    flexWrapper.style.gap = '0px';
+    flexWrapper.style.alignItems = 'flex-start';
+    mapaWrapper.style.marginLeft = '-55px'; // Puxa o mapa para a esquerda
+    mapaWrapper.style.marginTop = '25px'; // Empurra o mapa para baixo
 
+    // Move a lista de UFs original para dentro do novo wrapper
+    flexWrapper.appendChild(ufList);
+    
+    // Define os tamanhos
     ufList.style.flex = '0 0 80px';
     ufList.style.marginTop = '0';
     mapaWrapper.style.flex = '1';
     mapaWrapper.style.minWidth = '150px';
 
-    filtroContainer.appendChild(mapaWrapper);
+    // Adiciona o mapa ao novo wrapper
+    flexWrapper.appendChild(mapaWrapper);
+    
+    // Substitui o contêiner original pelo nosso novo wrapper flexível
+    originalContainer.appendChild(flexWrapper);
     mapaWrapper.style.display = 'block';
-    console.log("Mapa inserido no DOM.");
 
+    // --- Lógica de interatividade (sem alterações) ---
     const mapa = document.getElementById("mapa-brasil");
     if (!mapa) return;
 
