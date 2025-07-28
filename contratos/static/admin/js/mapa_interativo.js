@@ -40,7 +40,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const urlParams = new URLSearchParams(window.location.search);
     const ufAtiva = urlParams.get("uf"); 
 
-    // --- NOVA LÓGICA: Identificar UFs com processos ---
     const ufsComProcessos = new Set();
     ufList.querySelectorAll('a').forEach(link => {
         const match = link.href.match(/[\?&]uf=([A-Z]{2})/);
@@ -56,26 +55,52 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    const linkTodos = Array.from(ufList.querySelectorAll('a')).find(a => a.textContent.trim().toLowerCase() === 'todos');
+
     mapa.querySelectorAll("path[id^='UF-']").forEach(path => {
         const uf = path.id.replace("UF-", "");
         
-        // Verifica se o estado está na lista de UFs com processos
         if (ufsComProcessos.has(uf)) {
-            // Comportamento para estados COM processos
-            const linkUF = Array.from(ufList.querySelectorAll('a')).find(a => a.href.includes(`?uf=${uf}`));
+            // Usa o href para encontrar o link, o que ignora a contagem no texto
+            const linkUF = Array.from(ufList.querySelectorAll('a')).find(a => a.href.includes(`uf=${uf}`));
 
+            // Hover no MAPA -> Destaque na LISTA
             path.addEventListener("mouseenter", () => {
-                if (uf.toUpperCase() !== ufAtiva) path.classList.add("highlighted");
+                if (uf.toUpperCase() !== ufAtiva) {
+                    path.classList.add("highlighted");
+                    if (linkUF) linkUF.style.fontWeight = 'bold';
+                }
             });
             path.addEventListener("mouseleave", () => {
-                if (uf.toUpperCase() !== ufAtiva) path.classList.remove("highlighted");
+                if (uf.toUpperCase() !== ufAtiva) {
+                    path.classList.remove("highlighted");
+                    if (linkUF) linkUF.style.fontWeight = 'normal';
+                }
             });
 
             if (linkUF) {
-                path.addEventListener("click", () => { window.location.href = linkUF.href; });
+                // Hover na LISTA -> Destaque no MAPA (Restaurado)
+                linkUF.addEventListener('mouseenter', () => {
+                    if (uf.toUpperCase() !== ufAtiva) path.classList.add('highlighted');
+                });
+                linkUF.addEventListener('mouseleave', () => {
+                    if (uf.toUpperCase() !== ufAtiva) path.classList.remove('highlighted');
+                });
+
+                // Lógica de clique unificada
+                const clickHandler = (event) => {
+                    event.preventDefault();
+                    if (uf.toUpperCase() === ufAtiva) {
+                        if (linkTodos) window.location.href = linkTodos.href;
+                    } else {
+                        window.location.href = linkUF.href;
+                    }
+                };
+                
+                path.addEventListener("click", clickHandler);
+                linkUF.addEventListener("click", clickHandler);
             }
         } else {
-            // Comportamento para estados VAZIOS
             path.classList.add('estado-vazio');
             path.addEventListener("mouseenter", () => { path.classList.add("highlighted-vazio"); });
             path.addEventListener("mouseleave", () => { path.classList.remove("highlighted-vazio"); });
