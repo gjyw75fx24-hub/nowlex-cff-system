@@ -236,7 +236,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     )
     change_form_template = "admin/contratos/processojudicial/change_form_etiquetas.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
-    change_list_template = "admin/contratos/processojudicial/change_list.html"
+    change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
 
     def changelist_view(self, request, extra_context=None):
         response = super().changelist_view(request, extra_context)
@@ -268,7 +268,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/admin_tabs.js', 
             'admin/js/input_masks.js', 
             'admin/js/etiqueta_interface.js',
-            'admin/js/filter_search.js' # <-- ADICIONE ESTA LINHA
+            'admin/js/filter_search.js',
+            'admin/js/mapa_interativo.js'
          )
 
     def get_urls(self):

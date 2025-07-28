@@ -1,0 +1,36 @@
+{% extends "admin/contratos/processojudicial/change_list.html" %}
+{% load static %}
+
+{# Adiciona os estilos do mapa sem sobrescrever os originais #}
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        #mapa-brasil svg {
+            width: 100%;
+            height: auto;
+            stroke: #fff;
+            stroke-width: 1;
+        }
+        #mapa-brasil svg path {
+            fill: #ccc;
+            cursor: pointer;
+            transition: fill 0.2s ease-in-out, transform 0.2s ease-in-out;
+        }
+        #mapa-brasil svg path:hover {
+            fill: #999;
+            transform: none !important;
+        }
+        #mapa-brasil svg path.highlighted {
+            fill: #417690;
+            transform: none !important;
+        }
+    </style>
+{% endblock %}
+
+{# Adiciona o contêiner do mapa sem sobrescrever o conteúdo original #}
+{% block content %}
+    {{ block.super }}
+    <div id="mapa-brasil-wrapper" style="display: none;">
+        {% include "admin/contratos/processojudicial/mapa_uf_interativo.html" %}
+    </div>
+{% endblock %}
