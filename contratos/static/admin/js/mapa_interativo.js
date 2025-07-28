@@ -2,45 +2,52 @@ document.addEventListener('DOMContentLoaded', function () {
     const mapaWrapper = document.getElementById('mapa-brasil-wrapper');
     if (!mapaWrapper) return;
 
-    const filtroUFLink = document.querySelector('#changelist-filter a[href*="?uf="]');
-    if (!filtroUFLink) return;
+    const allSummaries = document.querySelectorAll('#changelist-filter summary');
+    let filtroUFSummary = null;
+    for (const summary of allSummaries) {
+        if (summary.textContent.trim().toLowerCase() === 'por uf') {
+            filtroUFSummary = summary;
+            break;
+        }
+    }
 
-    const ufList = filtroUFLink.closest('ul');
-    if (!ufList) return;
+    if (!filtroUFSummary) return;
+
+    const ufList = filtroUFSummary.nextElementSibling;
+    if (!ufList || ufList.tagName !== 'UL') return;
     
-    // O contêiner original que envolve a lista de UFs
-    const originalContainer = ufList.parentElement;
-
-    // --- CORREÇÃO: Criar um novo wrapper flexível ---
     const flexWrapper = document.createElement('div');
     flexWrapper.style.display = 'flex';
     flexWrapper.style.gap = '0px';
     flexWrapper.style.alignItems = 'flex-start';
-    mapaWrapper.style.marginLeft = '-55px'; // Puxa o mapa para a esquerda
-    mapaWrapper.style.marginTop = '25px'; // Empurra o mapa para baixo
+    flexWrapper.style.padding = '5px 0';
 
-    // Move a lista de UFs original para dentro do novo wrapper
     flexWrapper.appendChild(ufList);
+    flexWrapper.appendChild(mapaWrapper);
+    filtroUFSummary.insertAdjacentElement('afterend', flexWrapper);
     
-    // Define os tamanhos
     ufList.style.flex = '0 0 80px';
     ufList.style.marginTop = '0';
     mapaWrapper.style.flex = '1';
     mapaWrapper.style.minWidth = '150px';
-
-    // Adiciona o mapa ao novo wrapper
-    flexWrapper.appendChild(mapaWrapper);
-    
-    // Substitui o contêiner original pelo nosso novo wrapper flexível
-    originalContainer.appendChild(flexWrapper);
+    mapaWrapper.style.marginLeft = '-55px';
+    mapaWrapper.style.marginTop = '25px';
     mapaWrapper.style.display = 'block';
 
-    // --- Lógica de interatividade (sem alterações) ---
     const mapa = document.getElementById("mapa-brasil");
     if (!mapa) return;
 
     const urlParams = new URLSearchParams(window.location.search);
     const ufAtiva = urlParams.get("uf"); 
+
+    // --- NOVA LÓGICA: Identificar UFs com processos ---
+    const ufsComProcessos = new Set();
+    ufList.querySelectorAll('a').forEach(link => {
+        const match = link.href.match(/[\?&]uf=([A-Z]{2})/);
+        if (match) {
+            ufsComProcessos.add(match[1]);
+        }
+    });
 
     if (ufAtiva) {
         const estadoSelecionado = mapa.querySelector(`#UF-${ufAtiva.toUpperCase()}`);
@@ -51,32 +58,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
     mapa.querySelectorAll("path[id^='UF-']").forEach(path => {
         const uf = path.id.replace("UF-", "");
-        const linkUF = Array.from(ufList.querySelectorAll('a')).find(a => a.textContent.trim() === uf);
+        
+        // Verifica se o estado está na lista de UFs com processos
+        if (ufsComProcessos.has(uf)) {
+            // Comportamento para estados COM processos
+            const linkUF = Array.from(ufList.querySelectorAll('a')).find(a => a.href.includes(`?uf=${uf}`));
 
-        path.addEventListener("mouseenter", () => {
-            path.classList.add("highlighted");
-            if (linkUF) linkUF.style.fontWeight = 'bold';
-        });
-        path.addEventListener("mouseleave", () => {
-            if (!ufAtiva || ufAtiva.toUpperCase() !== uf) {
-                path.classList.remove("highlighted");
-                if (linkUF) linkUF.style.fontWeight = 'normal';
-            }
-        });
-
-        if (linkUF) {
-            linkUF.addEventListener('mouseenter', () => path.classList.add('highlighted'));
-            linkUF.addEventListener('mouseleave', () => {
-                if (!ufAtiva || ufAtiva.toUpperCase() !== uf) {
-                    path.classList.remove('highlighted');
-                }
+            path.addEventListener("mouseenter", () => {
+                if (uf.toUpperCase() !== ufAtiva) path.classList.add("highlighted");
             });
-        }
+            path.addEventListener("mouseleave", () => {
+                if (uf.toUpperCase() !== ufAtiva) path.classList.remove("highlighted");
+            });
 
-        path.addEventListener("click", () => {
             if (linkUF) {
-                window.location.href = linkUF.href;
+                path.addEventListener("click", () => { window.location.href = linkUF.href; });
             }
-        });
+        } else {
+            // Comportamento para estados VAZIOS
+            path.classList.add('estado-vazio');
+            path.addEventListener("mouseenter", () => { path.classList.add("highlighted-vazio"); });
+            path.addEventListener("mouseleave", () => { path.classList.remove("highlighted-vazio"); });
+        }
     });
 });

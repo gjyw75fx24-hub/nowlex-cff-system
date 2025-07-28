@@ -24,6 +24,15 @@
             fill: #417690;
             transform: none !important;
         }
+
+        /* Estilos para estados sem processos */
+        #mapa-brasil svg path.estado-vazio {
+            cursor: not-allowed;
+        }
+        #mapa-brasil svg path.highlighted-vazio {
+            fill: #ffcccc; /* Vermelho suave */
+            transform: none !important;
+        }
     </style>
 {% endblock %}
 
