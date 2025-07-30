@@ -8,3 +8,5 @@ dist/
 build/
 *.pyo
 
+# macOS
+.DS_Store

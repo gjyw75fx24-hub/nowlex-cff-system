@@ -13,6 +13,7 @@ psycopg2-binary = "^2.9.10"
 django-nested-admin = "^4.1.1"
 python-dotenv = "^1.1.1"
 requests = "^2.32.4"
+djangorestframework = "^3.16.0"
 
 [build-system]
 requires = ["poetry-core"]

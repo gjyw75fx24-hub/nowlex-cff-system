@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual, 
-    AndamentoProcessual, Carteira, Etiqueta
+    AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo
 )
 
 # --- Filtros ---
@@ -106,6 +106,12 @@ class EtiquetaAdmin(admin.ModelAdmin):
         initial['ordem'] = max_order + 1
         return initial
 
+@admin.register(ListaDeTarefas)
+class ListaDeTarefasAdmin(admin.ModelAdmin):
+    list_display = ('nome',)
+    search_fields = ('nome',)
+
+
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
@@ -181,6 +187,17 @@ class ContratoInline(admin.StackedInline):
     extra = 1
     fk_name = "processo"
 
+class TarefaInline(admin.TabularInline):
+    model = Tarefa
+    extra = 0
+    autocomplete_fields = ['responsavel']
+
+class PrazoInline(admin.TabularInline):
+    model = Prazo
+    extra = 0
+    autocomplete_fields = ['responsavel']
+
+
 # --- ModelAdmins ---
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
@@ -205,7 +222,7 @@ class CarteiraAdmin(admin.ModelAdmin):
     @admin.display(description='📈 Valor Médio por Processo')
     def get_valor_medio_processo(self, obj):
         if obj.total_processos > 0 and obj.valor_total is not None:
-            valor_medio = obj.valor_total / obj.total_processos
+            valor_medio = obj.total_processos / obj.valor_total
             return f"R$ {intcomma(round(valor_medio, 2), use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
         return "R$ 0,00"
 
@@ -229,7 +246,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
     list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
-    inlines = [ParteInline, ContratoInline, AndamentoInline]
+    inlines = [ParteInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
@@ -239,18 +256,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
 
     def changelist_view(self, request, extra_context=None):
-        response = super().changelist_view(request, extra_context)
-        try:
-            qs = response.context_data['cl'].queryset
-            etiquetas_data = {}
-            for processo in qs:
-                etiquetas = processo.etiquetas.order_by('ordem', 'nome').values('nome', 'cor_fundo', 'cor_fonte')
-                etiquetas_data[processo.pk] = list(etiquetas)
-            
-            extra_context = extra_context or {}
-            extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
-        except (AttributeError, KeyError):
-            pass # Lida com casos onde o queryset não está disponível
+        # Prepara o contexto extra ANTES de chamar o método pai.
+        extra_context = extra_context or {}
+        
+        # Usa o changelist para obter o queryset filtrado.
+        changelist = self.get_changelist_instance(request)
+        queryset = changelist.get_queryset(request)
+        
+        etiquetas_data = {}
+        for processo in queryset:
+            etiquetas = processo.etiquetas.order_by('ordem', 'nome').values('nome', 'cor_fundo', 'cor_fonte')
+            etiquetas_data[processo.pk] = list(etiquetas)
+        
+        extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
         
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -269,7 +287,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/input_masks.js', 
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
-            'admin/js/mapa_interativo.js'
+            'admin/js/mapa_interativo.js',
+            'admin/js/tarefas_prazos_interface.js' # <-- Adicionado
          )
 
     def get_urls(self):

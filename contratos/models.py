@@ -1,4 +1,6 @@
 from django.db import models
+from django.contrib.auth.models import User
+
 
 class Etiqueta(models.Model):
     nome = models.CharField(max_length=50, unique=True, verbose_name="Nome")
@@ -158,3 +160,62 @@ class AndamentoProcessualAdvogado(models.Model):
 
     def __str__(self):
         return f"Andamento de {self.andamento.id} - Advogado {self.advogado.nome}"
+
+# --- Modelos de Tarefas e Prazos ---
+
+class ListaDeTarefas(models.Model):
+    nome = models.CharField(max_length=100, unique=True)
+
+    def __str__(self):
+        return self.nome
+
+    class Meta:
+        verbose_name = "Lista de Tarefas"
+        verbose_name_plural = "Listas de Tarefas"
+        ordering = ['nome']
+
+class Tarefa(models.Model):
+    PRIORIDADE_CHOICES = [
+        ('B', 'Baixa'),
+        ('M', 'Média'),
+        ('A', 'Alta'),
+    ]
+
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='tarefas')
+    descricao = models.CharField(max_length=255, verbose_name="Descrição")
+    lista = models.ForeignKey(ListaDeTarefas, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Lista")
+    data = models.DateField(verbose_name="Data")
+    responsavel = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tarefas_responsaveis')
+    prioridade = models.CharField(max_length=1, choices=PRIORIDADE_CHOICES, default='M')
+    concluida = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.descricao
+
+    class Meta:
+        verbose_name = "Tarefa"
+        verbose_name_plural = "Tarefas"
+        ordering = ['-data']
+
+class Prazo(models.Model):
+    ALERTA_UNIDADE_CHOICES = [
+        ('D', 'Dias antes'),
+        ('H', 'Horas antes'),
+    ]
+
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='prazos')
+    titulo = models.CharField(max_length=255, verbose_name="Título")
+    data_limite = models.DateTimeField(verbose_name="Data Limite")
+    alerta_valor = models.PositiveIntegerField(default=1, verbose_name="Alerta")
+    alerta_unidade = models.CharField(max_length=1, choices=ALERTA_UNIDADE_CHOICES, default='D')
+    responsavel = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='prazos_responsaveis')
+    observacoes = models.TextField(blank=True, null=True)
+    concluido = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.titulo
+
+    class Meta:
+        verbose_name = "Prazo"
+        verbose_name_plural = "Prazos"
+        ordering = ['data_limite']

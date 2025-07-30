@@ -1,0 +1,30 @@
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from ..models import Tarefa, Prazo, ListaDeTarefas
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name']
+
+class ListaDeTarefasSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListaDeTarefas
+        fields = ['id', 'nome']
+
+class TarefaSerializer(serializers.ModelSerializer):
+    responsavel = UserSerializer(read_only=True)
+    lista = ListaDeTarefasSerializer(read_only=True)
+    prioridade_display = serializers.CharField(source='get_prioridade_display', read_only=True)
+
+    class Meta:
+        model = Tarefa
+        fields = ['id', 'descricao', 'lista', 'data', 'responsavel', 'prioridade', 'prioridade_display', 'concluida']
+
+class PrazoSerializer(serializers.ModelSerializer):
+    responsavel = UserSerializer(read_only=True)
+    alerta_unidade_display = serializers.CharField(source='get_alerta_unidade_display', read_only=True)
+
+    class Meta:
+        model = Prazo
+        fields = ['id', 'titulo', 'data_limite', 'alerta_valor', 'alerta_unidade', 'alerta_unidade_display', 'responsavel', 'observacoes', 'concluido']
