@@ -222,7 +222,7 @@ class CarteiraAdmin(admin.ModelAdmin):
     @admin.display(description='📈 Valor Médio por Processo')
     def get_valor_medio_processo(self, obj):
         if obj.total_processos > 0 and obj.valor_total is not None:
-            valor_medio = obj.total_processos / obj.valor_total
+            valor_medio = obj.valor_total / obj.total_processos
             return f"R$ {intcomma(round(valor_medio, 2), use_l10n=False).replace(',', 'X').replace('.', ',').replace('X', '.')}"
         return "R$ 0,00"
 
