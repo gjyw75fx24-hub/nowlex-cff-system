@@ -167,7 +167,7 @@ class ProcessoJudicialForm(forms.ModelForm):
 class AndamentoInline(admin.TabularInline):
     model = AndamentoProcessual
     extra = 0
-    readonly_fields = ('data',)
+    readonly_fields = ()
     can_delete = True
     ordering = ('-data',)
     classes = ('dynamic-andamento',)

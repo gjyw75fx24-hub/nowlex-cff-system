@@ -81,7 +81,7 @@ def buscar_dados_escavador_view(request):
         # Prepara a lista de andamentos
         andamentos_para_formulario = []
         if fonte_principal:
-            for andamento_api in fonte_principal.get('movimentacoes', []):
+            for andamento_api in dados_api.get('movimentacoes', []):
                 andamentos_para_formulario.append({
                     'data': andamento_api.get('data'),
                     'descricao': andamento_api.get('conteudo'),

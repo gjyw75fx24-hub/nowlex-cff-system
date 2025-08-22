@@ -91,7 +91,7 @@ class AndamentoProcessual(models.Model):
         verbose_name = "Andamento Processual"
         verbose_name_plural = "Andamentos Processuais"
         ordering = ['-data'] # Mostra os mais recentes primeiro
-        unique_together = ('processo', 'data', 'descricao') # Evita duplicatas
+        unique_together = ('processo', 'data') # Removido 'descricao' temporariamente para depuração
 
     def __str__(self):
         return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
