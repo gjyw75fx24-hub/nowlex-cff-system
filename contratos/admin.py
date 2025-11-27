@@ -118,29 +118,6 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
             return queryset.filter(status__id=self.value())
         return queryset
 
-class ProcessoJudicialForm(forms.ModelForm):
-    class Meta:
-        model = ProcessoJudicial
-        fields = "__all__"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["uf"].widget.attrs.update({"id": "id_uf", "style": "width: 60px;"})
-        self.fields["valor_causa"] = forms.CharField(
-            widget=forms.TextInput(attrs={"class": "money-mask"}),
-            required=False
-        )
-
-    def clean_valor_causa(self):
-        valor = self.cleaned_data.get('valor_causa')
-        if not valor:
-            return Decimal('0.00')
-        valor_str = str(valor).replace("R$", "").strip().replace(".", "").replace(",", ".")
-        try:
-            return Decimal(valor_str)
-        except (InvalidOperation, ValueError, TypeError):
-            raise forms.ValidationError("Por favor, insira um valor monetário válido.", code='invalid')
-
 class AndamentoProcessualForm(forms.ModelForm):
     class Meta:
         model = AndamentoProcessual
@@ -164,10 +141,28 @@ class ParteInline(admin.StackedInline):
     fk_name = "processo"
     classes = ('dynamic-partes',)
     can_delete = True
-    fieldsets = ((None, {"fields": (("tipo_polo", "nome"), ("tipo_pessoa", "documento"), "endereco")}),)
+    fieldsets = ((None, {"fields": (("tipo_polo", "tipo_pessoa"), ("nome", "documento"), "endereco")}),)
     formfield_overrides = {models.TextField: {"widget": forms.Textarea(attrs={"rows": 4, "cols": 80})}}
 
+class ContratoForm(forms.ModelForm):
+    class Meta:
+        model = Contrato
+        fields = "__all__"
+
+    valor_total_devido = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=14
+    )
+    valor_causa = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=14
+    )
+
+
 class ContratoInline(admin.StackedInline):
+    form = ContratoForm
     model = Contrato
     extra = 1
     fk_name = "processo"
@@ -226,7 +221,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    form = ProcessoJudicialForm
+    readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
     list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome",)
@@ -266,11 +261,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/processo_judicial_enhancer.js', 
             'admin/js/admin_tabs.js', 
-            'admin/js/input_masks.js', 
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/mapa_interativo.js',
-            'admin/js/tarefas_prazos_interface.js'
+            'admin/js/tarefas_prazos_interface.js',
+            'admin/js/soma_contratos.js'
          )
 
     def get_urls(self):
