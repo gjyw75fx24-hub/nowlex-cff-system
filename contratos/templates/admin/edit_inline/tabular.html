@@ -1,4 +1,5 @@
-{% load i18n admin_urls %}{% load static %}
+{% load i18n admin_urls %}
+{% load static %}
 <div class="js-inline-admin-formset inline-group" id="{{ inline_admin_formset.formset.prefix }}-group"
      data-inline-type="tabular"
      data-inline-formset="{{ inline_admin_formset.formset.opts.inline_formset_data }}">
@@ -27,7 +28,6 @@
             <tr class="form-row {% if inline_admin_form.form.non_field_errors %}errors{% endif %}{% if inline_admin_form.form.errors %} errors{% endif %}{% if inline_admin_form.deleted %} deleted{% endif %}" id="{{ inline_admin_form.form.prefix }}">
            {% endif %}
             <td class="original">
-              {% if inline_admin_form.original or inline_admin_form.show_url %}<p>
               {% if inline_admin_form.original %}{{ inline_admin_form.original }}{% endif %}
               {% if inline_admin_form.show_url %}<a href="{{ inline_admin_form.absolute_url }}">{% trans "View on site" %}</a>{% endif %}
               </p>{% endif %}
@@ -50,7 +50,13 @@
               {% endfor %}
             {% endfor %}
             {% if inline_admin_formset.formset.can_delete %}
-              <td class="delete">{% if inline_admin_form.original_content_type_id %}{{ inline_admin_form.deletion_field.field }}{% endif %}</td>
+              <td class="delete">
+                {% if inline_admin_form.original_content_type_id %}
+                  {# Render the hidden checkbox and a visual "x" #}
+                  <label for="{{ inline_admin_form.deletion_field.field.id }}" class="inline-deletelink">X</label>
+                  {{ inline_admin_form.deletion_field.field }}
+                {% endif %}
+              </td>
             {% endif %}
             </tr>
         {% endfor %}

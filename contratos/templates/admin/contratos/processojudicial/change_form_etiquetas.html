@@ -1,9 +1,92 @@
 {% extends "admin/change_form.html" %}
-{% load i18n admin_urls %}
+{% load i18n admin_urls static %}
+
+{% block content %}
+<style>
+    .info-card {
+        background: #f8f8f8;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+        font-size: 14px;
+        color: #333;
+    }
+    .info-card-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: bold;
+        border-bottom: 1px solid #e0e0e0;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }
+    .info-card-body .contrato-item {
+        display: inline-block;
+        margin-right: 15px;
+    }
+    .prescrito-p {
+        background-color: #dc3545; /* Vermelho */
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+    .prescrito-np {
+        background-color: #007bff; /* Azul */
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+</style>
+
+{% if original %}
+    {% with polo_passivo=original.partes_processuais.all|slice:":0"|first %}
+        {% for parte in original.partes_processuais.all %}
+            {% if parte.tipo_polo == 'PASSIVO' %}
+                <div class="info-card">
+                    <div class="info-card-header">
+                        <span>{{ parte.nome }}</span>
+                        <span>{{ parte.documento }}</span>
+                    </div>
+                    <div class="info-card-body">
+                        {% for contrato in original.contratos.all %}
+                            <span class="contrato-item">
+                                {{ contrato.numero_contrato }}
+                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
+                                {% if contrato.data_prescricao %}
+                                    {% if contrato.is_prescrito %}
+                                        <span class="prescrito-p">P</span>
+                                    {% else %}
+                                        <span class="prescrito-np">NP</span>
+                                    {% endif %}
+                                {% endif %}
+                            </span>
+                            {% if not forloop.last %}-&nbsp;{% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    {% endwith %}
+{% endif %}
+
+
+{{ block.super }}
+{% endblock %}
+
+{% block submit_buttons_bottom %}
+    {{ block.super }}
+    <div class="submit-row">
+        <input type="submit" value="Excluir Andamentos Selecionados" name="_action" class="button" style="background-color: #ba2121; color: white;" onclick="return confirm('Tem certeza que deseja excluir os andamentos selecionados?');">
+        <input type="hidden" name="action" value="excluir_andamentos_selecionados">
+    </div>
+{% endblock %}
 
 {# Adiciona os modais e elementos invisíveis no cabeçalho, fora do bloco de conteúdo principal #}
 {% block extrahead %}
 {{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static 'admin/css/custom_admin_styles.css' %}">
 <div id="etiqueta-elements-source" style="display: none;">
     <button type="button" id="open-etiqueta-modal" class="button">Inserir Etiquetas</button>
     <div id="etiquetas-aplicadas-container">
@@ -55,4 +138,5 @@
         </div>
     </div>
 </div>
+
 {% endblock %}

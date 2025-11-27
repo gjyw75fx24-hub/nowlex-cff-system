@@ -104,6 +104,12 @@ function setupCompletarDados() {
                 }
 
                 alert(data.message || "Dados preenchidos com sucesso!");
+
+                // Chamar a função para preencher os andamentos
+                if (data.andamentos && data.andamentos.length > 0) {
+                    populateAndamentos(data.andamentos);
+                }
+
             } else {
                 alert("Erro: " + (data.message || "Não foi possível completar os dados."));
             }
@@ -114,5 +120,47 @@ function setupCompletarDados() {
             botao.disabled = false;
             botao.textContent = originalText;
         }
+    });
+}
+
+function populateAndamentos(andamentos) {
+    const totalFormsInput = document.getElementById('id_andamentoprocessual_set-TOTAL_FORMS');
+    const addRowButton = document.querySelector('.andamentoprocessual_set .add-row a'); 
+
+    if (!totalFormsInput || !addRowButton) {
+        console.warn("Elementos do formset de andamentos não encontrados. Não foi possível preencher os andamentos.");
+        return;
+    }
+
+    let currentTotalForms = parseInt(totalFormsInput.value);
+
+    andamentos.forEach(andamento => {
+        // Simular clique no botão "Adicionar outro Andamento Processual"
+        addRowButton.click();
+
+        // The new form will have the index currentTotalForms (before it was incremented by the click)
+        const newFormIndex = currentTotalForms;
+
+        // Preencher os campos do novo formulário
+        const dataInput = document.getElementById(`id_andamentoprocessual_set-${newFormIndex}-data_0`);
+        const dataTimeInput = document.getElementById(`id_andamentoprocessual_set-${newFormIndex}-data_1`);
+        const descricaoInput = document.getElementById(`id_andamentoprocessual_set-${newFormIndex}-descricao`);
+        const detalhesInput = document.getElementById(`id_andamentoprocessual_set-${newFormIndex}-detalhes`);
+
+        if (dataInput) {
+            dataInput.value = andamento.data;
+        }
+        if (dataTimeInput) {
+            dataTimeInput.value = '21:00:00';
+        }
+        if (descricaoInput) {
+            descricaoInput.value = andamento.descricao;
+        }
+        if (detalhesInput && andamento.detalhes) {
+            detalhesInput.value = andamento.detalhes;
+        }
+
+        // Update currentTotalForms for the next loop
+        currentTotalForms++;
     });
 }

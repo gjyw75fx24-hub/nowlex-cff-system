@@ -130,8 +130,16 @@ class Contrato(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='contratos')
     numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato", blank=True, null=True)
     valor_total_devido = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Valor Total Devido", blank=True, null=True)
+    valor_causa = models.DecimalField("Valor da Causa", max_digits=10, decimal_places=2, null=True, blank=True)
     parcelas_em_aberto = models.IntegerField(verbose_name="Parcelas em Aberto", blank=True, null=True)
-    data_contrato = models.DateField(verbose_name="Data do Contrato", blank=True, null=True)
+    data_prescricao = models.DateField(verbose_name="Data de Prescrição", blank=True, null=True)
+
+    @property
+    def is_prescrito(self):
+        from django.utils import timezone
+        if not self.data_prescricao:
+            return False
+        return self.data_prescricao < timezone.now().date()
 
     def __str__(self):
         return self.numero_contrato if self.numero_contrato else f"Contrato do processo {self.processo.cnj}"
