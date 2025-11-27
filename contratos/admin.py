@@ -17,21 +17,12 @@ from .models import (
 )
 
 # --- Filtros ---
-# --- Filtros ---
-# Em contratos/admin.py
-
-# Em contratos/admin.py
-
 class EtiquetaFilter(admin.SimpleListFilter):
     title = 'Etiquetas'
     parameter_name = 'etiquetas'
-    template = "admin/filter_checkbox.html" # Essencial para usar nosso template
+    template = "admin/filter_checkbox.html"
 
     def lookups(self, request, model_admin):
-        """
-        Este método é obrigatório pelo Django. Retorna as opções de filtro,
-        agora com a contagem de processos.
-        """
         queryset = Etiqueta.objects.annotate(
             processo_count=Count('processojudicial')
         ).order_by('ordem', 'nome')
@@ -42,13 +33,9 @@ class EtiquetaFilter(admin.SimpleListFilter):
         ]
 
     def queryset(self, request, queryset):
-        """
-        Filtra os processos para que contenham TODAS as etiquetas selecionadas.
-        """
         valor = self.value()
         if valor:
             etiqueta_ids = valor.split(',')
-            # Adiciona um .distinct() para evitar resultados duplicados na lista de processos
             queryset = queryset.distinct()
             for etiqueta_id in etiqueta_ids:
                 if etiqueta_id:
@@ -56,20 +43,14 @@ class EtiquetaFilter(admin.SimpleListFilter):
         return queryset
 
     def choices(self, changelist):
-        """
-        Gera os links de filtro para o template, gerenciando a seleção múltipla.
-        Este método é o que realmente será usado pelo nosso template.
-        """
         selected_ids = self.value().split(',') if self.value() else []
         
-        # Opção "Todos"
         yield {
             'selected': not self.value(),
             'query_string': changelist.get_query_string(remove=[self.parameter_name]),
             'display': 'Todos',
         }
 
-        # Gera as opções para cada etiqueta
         for lookup, title in self.lookup_choices:
             lookup_str = str(lookup)
             selected = lookup_str in selected_ids
@@ -93,7 +74,6 @@ class EtiquetaFilter(admin.SimpleListFilter):
             }
 
 
-# --- Registro de Modelos Simples ---
 @admin.register(Etiqueta)
 class EtiquetaAdmin(admin.ModelAdmin):
     list_display = ('nome', 'ordem')
@@ -116,7 +96,6 @@ admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
 
-# --- Filtros ---
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
     parameter_name = "terceiro_interessado"
@@ -139,7 +118,6 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
             return queryset.filter(status__id=self.value())
         return queryset
 
-# --- Forms ---
 class ProcessoJudicialForm(forms.ModelForm):
     class Meta:
         model = ProcessoJudicial
@@ -163,15 +141,22 @@ class ProcessoJudicialForm(forms.ModelForm):
         except (InvalidOperation, ValueError, TypeError):
             raise forms.ValidationError("Por favor, insira um valor monetário válido.", code='invalid')
 
-# --- Inlines ---
+class AndamentoProcessualForm(forms.ModelForm):
+    class Meta:
+        model = AndamentoProcessual
+        fields = '__all__'
+        widgets = {
+            'descricao': forms.Textarea(attrs={'rows': 2, 'cols': 600}), # 6x a largura original
+            'detalhes': forms.Textarea(attrs={'rows': 2, 'cols': 50}), # Proporcionalmente menor
+        }
+
 class AndamentoInline(admin.TabularInline):
+    form = AndamentoProcessualForm
     model = AndamentoProcessual
     extra = 0
-    readonly_fields = ()
     can_delete = True
     ordering = ('-data',)
     classes = ('dynamic-andamento',)
-    formfield_overrides = {models.TextField: {"widget": forms.Textarea(attrs={"rows": 2, "cols": 100})}}
 
 class ParteInline(admin.StackedInline):
     model = Parte
@@ -198,7 +183,6 @@ class PrazoInline(admin.TabularInline):
     autocomplete_fields = ['responsavel']
 
 
-# --- ModelAdmins ---
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
@@ -254,12 +238,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_etiquetas.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
+    actions = ['excluir_andamentos_selecionados']
 
     def changelist_view(self, request, extra_context=None):
-        # Prepara o contexto extra ANTES de chamar o método pai.
         extra_context = extra_context or {}
-        
-        # Usa o changelist para obter o queryset filtrado.
         changelist = self.get_changelist_instance(request)
         queryset = changelist.get_queryset(request)
         
@@ -288,7 +270,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/mapa_interativo.js',
-            'admin/js/tarefas_prazos_interface.js' # <-- Adicionado
+            'admin/js/tarefas_prazos_interface.js'
          )
 
     def get_urls(self):
@@ -352,10 +334,38 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return super().history_view(request, object_id, extra_context=extra_context)
 
     def response_change(self, request, obj):
+        if '_action' in request.POST and request.POST['_action'] == 'excluir_andamentos_selecionados':
+            selected_andamento_ids = []
+            # Iterate through the POST data to find selected inline items
+            for key, value in request.POST.items():
+                if key.startswith('andamentos-') and key.endswith('-id') and value:
+                    # Check if the corresponding DELETE checkbox is marked
+                    form_idx = key.split('-')[1]
+                    delete_key = f'andamentos-{form_idx}-DELETE'
+                    if delete_key in request.POST:
+                        selected_andamento_ids.append(value)
+            
+            if selected_andamento_ids:
+                count, _ = AndamentoProcessual.objects.filter(pk__in=selected_andamento_ids).delete()
+                self.message_user(request, f"{count} andamento(s) foram excluídos com sucesso.", messages.SUCCESS)
+            else:
+                self.message_user(request, "Nenhum andamento foi selecionado para exclusão.", messages.WARNING)
+            
+            return HttpResponseRedirect(request.path)
+
         messages.success(request, "Processo Salvo!")
         if "_save" in request.POST:
             return HttpResponseRedirect(request.path)
         return super().response_change(request, obj)
+
+    def excluir_andamentos_selecionados(self, request, queryset):
+        # Esta função será chamada quando a ação for executada
+        # O queryset aqui será dos ProcessoJudicial, mas precisamos dos AndamentoProcessual
+        # Esta action será acionada via um botão customizado no change_form
+        
+        # A lógica de exclusão será tratada no response_change
+        pass
+    excluir_andamentos_selecionados.short_description = "Excluir Andamentos Selecionados"
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":

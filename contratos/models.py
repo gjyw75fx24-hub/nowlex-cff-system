@@ -85,13 +85,13 @@ class AndamentoProcessual(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='andamentos')
     data = models.DateTimeField(verbose_name="Data do Andamento")
     descricao = models.TextField(verbose_name="Descrição")
-    detalhes = models.TextField(blank=True, null=True, verbose_name="Detalhes")
+    detalhes = models.TextField(blank=True, null=True, verbose_name="Observações")
 
     class Meta:
         verbose_name = "Andamento Processual"
         verbose_name_plural = "Andamentos Processuais"
         ordering = ['-data'] # Mostra os mais recentes primeiro
-        unique_together = ('processo', 'data') # Removido 'descricao' temporariamente para depuração
+        unique_together = ('processo', 'data', 'descricao')
 
     def __str__(self):
         return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
@@ -128,13 +128,13 @@ class Advogado(models.Model):
 
 class Contrato(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='contratos')
-    numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato")
-    valor_total_devido = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Valor Total Devido")
-    parcelas_em_aberto = models.IntegerField(verbose_name="Parcelas em Aberto")
-    data_contrato = models.DateField(verbose_name="Data do Contrato")
+    numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato", blank=True, null=True)
+    valor_total_devido = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Valor Total Devido", blank=True, null=True)
+    parcelas_em_aberto = models.IntegerField(verbose_name="Parcelas em Aberto", blank=True, null=True)
+    data_contrato = models.DateField(verbose_name="Data do Contrato", blank=True, null=True)
 
     def __str__(self):
-        return self.numero_contrato
+        return self.numero_contrato if self.numero_contrato else f"Contrato do processo {self.processo.cnj}"
 
 
 class ParteProcessoAdvogado(models.Model):
