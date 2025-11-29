@@ -224,7 +224,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
     list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
-    search_fields = ("cnj", "partes_processuais__nome",)
+    search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
@@ -254,10 +254,13 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'all': (
                 'admin/css/admin_tabs.css', 
                 'admin/css/custom_admin_styles.css',
-                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css'
+                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
+                'admin/css/cia_button.css', # <--- Adicionado
             )
         }
         js = (
+            'admin/js/vendor/jquery/jquery.min.js', # <--- Garantir que o jQuery carregue primeiro
+            'admin/js/jquery.init.js',
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/processo_judicial_enhancer.js', 
             'admin/js/admin_tabs.js', 
@@ -265,7 +268,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/filter_search.js',
             'admin/js/mapa_interativo.js',
             'admin/js/tarefas_prazos_interface.js',
-            'admin/js/soma_contratos.js'
+            'admin/js/soma_contratos.js',
+            'admin/js/cia_button.js', # <--- Adicionado
          )
 
     def get_urls(self):
