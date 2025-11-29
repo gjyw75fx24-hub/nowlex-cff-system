@@ -1,0 +1,40 @@
+<div id="{{ widget.attrs.id }}_wrapper" class="endereco-widget-wrapper">
+    <!-- Textarea original (escondido), é ele que será salvo pelo Django -->
+    <textarea name="{{ widget.name }}" id="{{ widget.attrs.id }}" style="display: none;">{{ widget.value_as_string }}</textarea>
+
+    <!-- Campos de Input Visíveis -->
+    <div class="endereco-fields-grid">
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_A">A (Rua ou Av):</label>
+            <input type="text" id="{{ widget.attrs.id }}_A" data-part="A">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_B">B (Número):</label>
+            <input type="text" id="{{ widget.attrs.id }}_B" data-part="B">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_C">C (Complemento):</label>
+            <input type="text" id="{{ widget.attrs.id }}_C" data-part="C">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_D">D (Bairro):</label>
+            <input type="text" id="{{ widget.attrs.id }}_D" data-part="D">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_E">E (Cidade):</label>
+            <input type="text" id="{{ widget.attrs.id }}_E" data-part="E">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_F">F (Estado):</label>
+            <input type="text" id="{{ widget.attrs.id }}_F" data-part="F">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_G">G (CEP):</label>
+            <input type="text" id="{{ widget.attrs.id }}_G" data-part="G" maxlength="9">
+        </div>
+        <div class="form-group">
+            <label for="{{ widget.attrs.id }}_H">H (UF):</label>
+            <input type="text" id="{{ widget.attrs.id }}_H" data-part="H" maxlength="2">
+        </div>
+    </div>
+</div>

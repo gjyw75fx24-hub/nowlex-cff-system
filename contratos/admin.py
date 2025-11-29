@@ -15,6 +15,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual, 
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo
 )
+from .widgets import EnderecoWidget
 
 # --- Filtros ---
 class EtiquetaFilter(admin.SimpleListFilter):
@@ -135,14 +136,22 @@ class AndamentoInline(admin.TabularInline):
     ordering = ('-data',)
     classes = ('dynamic-andamento',)
 
+class ParteForm(forms.ModelForm):
+    class Meta:
+        model = Parte
+        fields = '__all__'
+        widgets = {
+            'endereco': EnderecoWidget(),
+        }
+
 class ParteInline(admin.StackedInline):
     model = Parte
+    form = ParteForm
     extra = 1
     fk_name = "processo"
     classes = ('dynamic-partes',)
     can_delete = True
     fieldsets = ((None, {"fields": (("tipo_polo", "tipo_pessoa"), ("nome", "documento"), "endereco")}),)
-    formfield_overrides = {models.TextField: {"widget": forms.Textarea(attrs={"rows": 4, "cols": 80})}}
 
 class ContratoForm(forms.ModelForm):
     class Meta:
@@ -255,11 +264,12 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 'admin/css/admin_tabs.css', 
                 'admin/css/custom_admin_styles.css',
                 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
-                'admin/css/cia_button.css', # <--- Adicionado
+                'admin/css/cia_button.css',
+                'admin/css/endereco_widget.css', # <--- Adicionado
             )
         }
         js = (
-            'admin/js/vendor/jquery/jquery.min.js', # <--- Garantir que o jQuery carregue primeiro
+            'admin/js/vendor/jquery/jquery.min.js', 
             'admin/js/jquery.init.js',
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/processo_judicial_enhancer.js', 
@@ -269,7 +279,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/mapa_interativo.js',
             'admin/js/tarefas_prazos_interface.js',
             'admin/js/soma_contratos.js',
-            'admin/js/cia_button.js', # <--- Adicionado
+            'admin/js/cia_button.js',
          )
 
     def get_urls(self):
