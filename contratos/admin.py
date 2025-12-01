@@ -12,10 +12,12 @@ from django.utils.safestring import mark_safe
 from decimal import Decimal, InvalidOperation
 
 from .models import (
-    ProcessoJudicial, Parte, Contrato, StatusProcessual, 
-    AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo
+    ProcessoJudicial, Parte, Contrato, StatusProcessual,
+    AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
+    OpcaoResposta, QuestaoAnalise,  # <-- se esse model existir no models.py
 )
 from .widgets import EnderecoWidget
+
 
 # --- Filtros ---
 class EtiquetaFilter(admin.SimpleListFilter):
@@ -430,3 +432,36 @@ class StatusProcessualAdmin(admin.ModelAdmin):
             except StatusProcessual.DoesNotExist:
                 pass
         super().save_model(request, obj, form, change)
+
+# --- Admin para o Motor da Árvore de Decisão ---
+
+class OpcaoRespostaInline(admin.TabularInline):
+    model = OpcaoResposta
+    extra = 1
+    fk_name = 'questao_origem'
+    # Autocomplete para facilitar a seleção da próxima questão
+    # autocomplete_fields = ['proxima_questao'] # Desabilitado temporariamente
+
+@admin.register(QuestaoAnalise) # Referência por string
+class QuestaoAnaliseAdmin(admin.ModelAdmin):
+    list_display = ('texto_pergunta', 'tipo_campo', 'is_primeira_questao', 'ordem')
+    list_filter = ('tipo_campo', 'is_primeira_questao')
+    search_fields = ('texto_pergunta',)
+    list_editable = ('is_primeira_questao', 'ordem')
+    inlines = [OpcaoRespostaInline]
+    
+    fieldsets = (
+        (None, {
+            "fields": ('texto_pergunta', 'tipo_campo', 'ordem')
+        }),
+        ("Ponto de Partida", {
+            "classes": ('collapse',),
+            "fields": ('is_primeira_questao',),
+            "description": "Marque esta opção para definir esta questão como o início da análise. Só deve haver uma."
+        }),
+    )
+
+@admin.register(OpcaoResposta) # Referência por string
+class OpcaoRespostaAdmin(admin.ModelAdmin):
+    list_display = ('questao_origem', 'texto_resposta', 'proxima_questao')
+        

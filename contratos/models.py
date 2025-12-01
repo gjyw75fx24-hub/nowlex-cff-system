@@ -227,3 +227,57 @@ class Prazo(models.Model):
         verbose_name = "Prazo"
         verbose_name_plural = "Prazos"
         ordering = ['data_limite']
+
+
+# --- Modelos para o Motor da Árvore de Decisão de Análise ---
+
+class QuestaoAnalise(models.Model):
+    TIPO_CAMPO_CHOICES = [
+        ('OPCOES', 'Opções (dropdown)'),
+        ('TEXTO', 'Texto Curto'),
+        ('TEXTO_LONGO', 'Texto Longo (observações)'),
+        ('DATA', 'Data'),
+        ('PROCESSO_VINCULADO', 'Interface de Processos Vinculados'),
+    ]
+    
+    texto_pergunta = models.CharField(max_length=255, verbose_name="Texto da Pergunta/Critério")
+    tipo_campo = models.CharField(max_length=20, choices=TIPO_CAMPO_CHOICES, default='OPCOES', verbose_name="Tipo de Campo de Resposta")
+    is_primeira_questao = models.BooleanField(
+        default=False, 
+        verbose_name="É a primeira questão da análise?",
+        help_text="Marque apenas uma questão como a primeira. Será o ponto de partida da árvore."
+    )
+    ordem = models.PositiveIntegerField(default=10, verbose_name="Ordem de Exibição")
+
+    class Meta:
+        verbose_name = "Questão da Análise"
+        verbose_name_plural = "1. Questões da Análise"
+        ordering = ['ordem', 'texto_pergunta']
+
+    def __str__(self):
+        return self.texto_pergunta
+
+class OpcaoResposta(models.Model):
+    questao_origem = models.ForeignKey(
+        'QuestaoAnalise', 
+        on_delete=models.CASCADE, 
+        related_name='opcoes',
+        verbose_name="Questão de Origem"
+    )
+    texto_resposta = models.CharField(max_length=255, verbose_name="Texto da Opção de Resposta")
+    proxima_questao = models.ForeignKey(
+        'QuestaoAnalise',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='veio_de_opcao',
+        verbose_name="Próxima Questão (se esta opção for escolhida)"
+    )
+    
+    class Meta:
+        verbose_name = "Opção de Resposta"
+        verbose_name_plural = "2. Opções de Respostas"
+        ordering = ['questao_origem', 'texto_resposta']
+
+    def __str__(self):
+        return f"{self.questao_origem.texto_pergunta[:30]}... -> {self.questao_origem}" # Corrigido para mostrar a origem
