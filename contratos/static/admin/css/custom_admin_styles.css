@@ -167,3 +167,29 @@ a.historylink {
     border-bottom: none;
 }
 
+/* --- Estilos para a seleção de contratos no card --- */
+.contrato-item-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.contrato-quitado-toggle {
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    color: #555;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.contrato-quitado-toggle.active {
+    background-color: #ffc107; /* Amarelo */
+    color: white;
+    border-color: #f5b300;
+}
+

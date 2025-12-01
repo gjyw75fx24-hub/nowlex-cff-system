@@ -50,9 +50,13 @@
                 </div>
                 <div class="info-card-body">
                     {% for contrato in original.contratos.all %}
-                        <span class="contrato-item">
-                            {{ contrato.numero_contrato }}
-                            {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
+                        <div class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}">
+                            <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
+                            <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
+                            <span class="contrato-numero">
+                                {{ contrato.numero_contrato }}
+                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
+                            </span>
                             {% if contrato.data_prescricao %}
                                 {% if contrato.is_prescrito %}
                                     <span class="prescrito-p">P</span>
@@ -60,8 +64,7 @@
                                     <span class="prescrito-np">NP</span>
                                 {% endif %}
                             {% endif %}
-                        </span>
-                        {% if not forloop.last %}-&nbsp;{% endif %}
+                        </div>
                     {% endfor %}
                 </div>
             </div>
