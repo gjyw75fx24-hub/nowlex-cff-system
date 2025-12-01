@@ -1,0 +1,35 @@
+/* contratos/static/admin/css/analise_processo.css */
+
+.decision-tree-container {
+    padding: 10px;
+    border: 1px solid #ccc;
+    background-color: #f9f9f9;
+    margin-top: 20px;
+    border-radius: 5px;
+}
+
+.decision-tree-container .form-row {
+    margin-bottom: 15px;
+    padding: 5px 0;
+}
+
+.decision-tree-container .form-row label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 5px;
+}
+
+/* Estilo para o BLOCO REPROPOSIÇÃO (exemplo) */
+.decision-tree-container .bloco-reproposicao {
+    background-color: #fffacd; /* Amarelo claro */
+    border: 1px solid #ffebcd;
+    padding: 15px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+.decision-tree-container .errorlist {
+    color: #ba2121;
+    margin: 0;
+    padding: 0;
+}

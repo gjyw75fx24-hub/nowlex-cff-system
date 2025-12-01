@@ -241,6 +241,7 @@ class QuestaoAnalise(models.Model):
     ]
     
     texto_pergunta = models.CharField(max_length=255, verbose_name="Texto da Pergunta/Critério")
+    chave = models.CharField(max_length=50, unique=True, blank=True, null=True, verbose_name="Chave de Referência (Slug)")
     tipo_campo = models.CharField(max_length=20, choices=TIPO_CAMPO_CHOICES, default='OPCOES', verbose_name="Tipo de Campo de Resposta")
     is_primeira_questao = models.BooleanField(
         default=False, 
@@ -281,3 +282,26 @@ class OpcaoResposta(models.Model):
 
     def __str__(self):
         return f"{self.questao_origem.texto_pergunta[:30]}... -> {self.questao_origem}" # Corrigido para mostrar a origem
+
+# --- Modelo para armazenar as respostas da Análise de Processo ---
+
+class AnaliseProcesso(models.Model):
+    processo_judicial = models.OneToOneField(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='analise_processo',
+        verbose_name="Processo Judicial"
+    )
+    respostas = models.JSONField(
+        default=dict,
+        verbose_name="Respostas da Análise"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Análise de Processo"
+        verbose_name_plural = "Análises de Processos"
+
+    def __str__(self):
+        return f"Análise para {self.processo_judicial.cnj}"

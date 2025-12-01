@@ -41,36 +41,33 @@
 </style>
 
 {% if original %}
-    {% with polo_passivo=original.partes_processuais.all|slice:":0"|first %}
-        {% for parte in original.partes_processuais.all %}
-            {% if parte.tipo_polo == 'PASSIVO' %}
-                <div class="info-card">
-                    <div class="info-card-header">
-                        <span>{{ parte.nome }}</span>
-                        <span>{{ parte.documento }}</span>
-                    </div>
-                    <div class="info-card-body">
-                        {% for contrato in original.contratos.all %}
-                            <span class="contrato-item">
-                                {{ contrato.numero_contrato }}
-                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
-                                {% if contrato.data_prescricao %}
-                                    {% if contrato.is_prescrito %}
-                                        <span class="prescrito-p">P</span>
-                                    {% else %}
-                                        <span class="prescrito-np">NP</span>
-                                    {% endif %}
-                                {% endif %}
-                            </span>
-                            {% if not forloop.last %}-&nbsp;{% endif %}
-                        {% endfor %}
-                    </div>
+    {% for parte in original.partes_processuais.all %}
+        {% if parte.tipo_polo == 'PASSIVO' %}
+            <div class="info-card">
+                <div class="info-card-header">
+                    <span>{{ parte.nome }}</span>
+                    <span>{{ parte.documento }}</span>
                 </div>
-            {% endif %}
-        {% endfor %}
-    {% endwith %}
+                <div class="info-card-body">
+                    {% for contrato in original.contratos.all %}
+                        <span class="contrato-item">
+                            {{ contrato.numero_contrato }}
+                            {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
+                            {% if contrato.data_prescricao %}
+                                {% if contrato.is_prescrito %}
+                                    <span class="prescrito-p">P</span>
+                                {% else %}
+                                    <span class="prescrito-np">NP</span>
+                                {% endif %}
+                            {% endif %}
+                        </span>
+                        {% if not forloop.last %}-&nbsp;{% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    {% endfor %}
 {% endif %}
-
 
 {{ block.super }}
 {% endblock %}
@@ -83,7 +80,6 @@
     </div>
 {% endblock %}
 
-{# Adiciona os modais e elementos invisíveis no cabeçalho, fora do bloco de conteúdo principal #}
 {% block extrahead %}
 {{ block.super }}
 <link rel="stylesheet" type="text/css" href="{% static 'admin/css/custom_admin_styles.css' %}">
@@ -138,5 +134,4 @@
         </div>
     </div>
 </div>
-
 {% endblock %}

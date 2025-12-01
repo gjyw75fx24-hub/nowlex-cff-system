@@ -2,8 +2,8 @@
 
 from django.http import JsonResponse
 from django.shortcuts import render, get_object_or_404
-from django.views.decorators.http import require_POST
-from .models import ProcessoJudicial, StatusProcessual
+from django.views.decorators.http import require_POST, require_GET
+from .models import ProcessoJudicial, StatusProcessual, QuestaoAnalise, OpcaoResposta, Contrato
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from decimal import Decimal, InvalidOperation
 from django.db.models import Max
@@ -11,6 +11,8 @@ from django.db import transaction
 from django.contrib.admin.views.decorators import staff_member_required
 import re
 import logging
+from contratos.data.decision_tree_config import DECISION_TREE_CONFIG # <--- Nova importação
+import copy # Para cópia profunda do dicionário
 
 logger = logging.getLogger(__name__)
 
@@ -169,3 +171,104 @@ def detalhe_processo(request, pk):
         'contratos': contratos_do_processo,
     }
     return render(request, 'contratos/detalhe_processo.html', contexto)
+
+@require_GET
+def get_decision_tree_data(request):
+    """
+    Retorna a estrutura da árvore de decisão (questões e opções) como JSON,
+    mesclando a configuração nativa com as do banco de dados.
+    """
+    # 1. Inicia com a configuração nativa
+    # Cria uma cópia profunda para evitar modificar o dicionário original
+    current_tree_config = copy.deepcopy(DECISION_TREE_CONFIG)
+    
+    primeira_questao_chave_db = None
+
+    # 2. Mescla/Sobrescreve com as questões configuradas no banco de dados
+    db_questoes = QuestaoAnalise.objects.all().prefetch_related('opcoes')
+    for questao_db in db_questoes:
+        if not questao_db.chave: # Chave é essencial para mesclar
+            continue
+
+        q_data = {
+            'id': questao_db.id,
+            'texto_pergunta': questao_db.texto_pergunta,
+            'chave': questao_db.chave,
+            'tipo_campo': questao_db.tipo_campo,
+            'is_primeira_questao': questao_db.is_primeira_questao,
+            'ordem': questao_db.ordem,
+            'opcoes': []
+        }
+
+        for opcao_db in questao_db.opcoes.all().order_by('texto_resposta'):
+            o_data = {
+                'id': opcao_db.id,
+                'texto_resposta': opcao_db.texto_resposta,
+                'proxima_questao_id': opcao_db.proxima_questao.id if opcao_db.proxima_questao else None,
+                'proxima_questao_chave': opcao_db.proxima_questao.chave if opcao_db.proxima_questao and opcao_db.proxima_questao.chave else None,
+            }
+            q_data['opcoes'].append(o_data)
+        
+        # Se a questão já existe na config nativa, sobrescreve seus campos
+        # e mescla as opções. Caso contrário, adiciona a questão.
+        if questao_db.chave in current_tree_config:
+            # Sobrescreve atributos da questão
+            current_tree_config[questao_db.chave].update({
+                'id': q_data['id'],
+                'texto_pergunta': q_data['texto_pergunta'],
+                'tipo_campo': q_data['tipo_campo'],
+                'is_primeira_questao': q_data['is_primeira_questao'],
+                'ordem': q_data['ordem'],
+            })
+            # Substitui as opções pelas do banco de dados
+            current_tree_config[questao_db.chave]['opcoes'] = q_data['opcoes']
+        else:
+            current_tree_config[questao_db.chave] = q_data
+        
+        if questao_db.is_primeira_questao:
+            primeira_questao_chave_db = questao_db.chave
+    
+    # 3. Determina a chave da primeira questão
+    # Prioriza a primeira questão definida no banco de dados
+    if primeira_questao_chave_db:
+        final_primeira_questao_chave = primeira_questao_chave_db
+    else:
+        # Se não houver no banco, usa a da configuração nativa
+        # Assume que há apenas uma 'is_primeira_questao = True' na config nativa
+        for chave, questao_data in current_tree_config.items():
+            if questao_data.get("is_primeira_questao"):
+                final_primeira_questao_chave = chave
+                break
+        else: # Se não encontrar nem na nativa
+            return JsonResponse({'status': 'error', 'message': 'Nenhuma questão inicial configurada no banco de dados ou na configuração nativa.'}, status=404)
+
+    return JsonResponse({
+        'status': 'success',
+        'primeira_questao_chave': final_primeira_questao_chave,
+        'tree_data': current_tree_config
+    })
+
+@require_GET
+def get_processo_contratos_api(request, processo_id):
+    """
+    Retorna uma lista de contratos associados a um Processo Judicial específico como JSON.
+    """
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id)
+        contratos = processo.contratos.all().order_by('numero_contrato')
+        
+        contratos_data = [
+            {
+                'id': contrato.id,
+                'numero_contrato': contrato.numero_contrato or f'Contrato sem número ({contrato.id})',
+                'valor_total_devido': str(contrato.valor_total_devido) if contrato.valor_total_devido else None,
+            }
+            for contrato in contratos
+        ]
+        
+        return JsonResponse({'status': 'success', 'contratos': contratos_data})
+    except ProcessoJudicial.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': 'Processo Judicial não encontrado.'}, status=404)
+    except Exception as e:
+        logger.error(f"Erro ao buscar contratos para processo_id {processo_id}: {e}", exc_info=True)
+        return JsonResponse({'status': 'error', 'message': f'Ocorreu um erro interno: {e}'}, status=500)

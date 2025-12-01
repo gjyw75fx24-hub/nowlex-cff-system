@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
-    OpcaoResposta, QuestaoAnalise,  # <-- se esse model existir no models.py
+    OpcaoResposta, QuestaoAnalise, AnaliseProcesso,
 )
 from .widgets import EnderecoWidget
 
@@ -189,6 +189,17 @@ class PrazoInline(admin.TabularInline):
     autocomplete_fields = ['responsavel']
 
 
+class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
+    model = AnaliseProcesso
+    classes = ('analise-procedural-group',)
+    can_delete = False # Geralmente, só queremos uma análise por processo, não deletável diretamente aqui.
+    verbose_name_plural = "Análise Procedural"
+    fk_name = 'processo_judicial' # Garantir que o fk_name esteja correto, pois é um OneToOneField
+    fields = ('respostas',) # Apenas o campo JSONField será editável
+    extra = 0
+    max_num = 1 # Apenas uma instância de AnaliseProcesso por ProcessoJudicial
+
+
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
@@ -236,7 +247,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa")
     list_filter = ["busca_ativa", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
-    inlines = [ParteInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline]
+    inlines = [ParteInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
@@ -268,6 +279,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css', # <--- Adicionado
+                'admin/css/analise_processo.css', # <--- Adicionado
             )
         }
         js = (
@@ -282,6 +294,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/tarefas_prazos_interface.js',
             'admin/js/soma_contratos.js',
             'admin/js/cia_button.js',
+            'admin/js/analise_processo_arvore.js', # <--- Adicionado
          )
 
     def get_urls(self):
@@ -440,13 +453,13 @@ class OpcaoRespostaInline(admin.TabularInline):
     extra = 1
     fk_name = 'questao_origem'
     # Autocomplete para facilitar a seleção da próxima questão
-    # autocomplete_fields = ['proxima_questao'] # Desabilitado temporariamente
+    autocomplete_fields = ['proxima_questao']
 
 @admin.register(QuestaoAnalise) # Referência por string
 class QuestaoAnaliseAdmin(admin.ModelAdmin):
-    list_display = ('texto_pergunta', 'tipo_campo', 'is_primeira_questao', 'ordem')
+    list_display = ('texto_pergunta', 'chave', 'tipo_campo', 'is_primeira_questao', 'ordem')
     list_filter = ('tipo_campo', 'is_primeira_questao')
-    search_fields = ('texto_pergunta',)
+    search_fields = ('texto_pergunta', 'chave',)
     list_editable = ('is_primeira_questao', 'ordem')
     inlines = [OpcaoRespostaInline]
     
