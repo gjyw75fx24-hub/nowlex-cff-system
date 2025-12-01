@@ -295,6 +295,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/soma_contratos.js',
             'admin/js/cia_button.js',
             'admin/js/analise_processo_arvore.js', # <--- Adicionado
+            'admin/js/cpf_formatter.js',
          )
 
     def get_urls(self):
