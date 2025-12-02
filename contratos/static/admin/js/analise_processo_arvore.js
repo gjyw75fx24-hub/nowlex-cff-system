@@ -31,14 +31,17 @@
                 if (!userResponses.contratos_status) {
                     userResponses.contratos_status = {};
                 }
+                console.log("DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregar:", JSON.stringify(userResponses));
             } catch (e) {
-                console.error("Erro ao parsear respostas existentes:", e);
+                console.error("DEBUG A_P_A: Erro ao parsear respostas existentes:", e);
                 userResponses = { contratos_status: {} };
             }
         }
 
         function saveResponses() {
+            console.log("DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:", JSON.stringify(userResponses));
             $responseField.val(JSON.stringify(userResponses, null, 2));
+            console.log("DEBUG A_P_A: saveResponses - TextArea contém:", $responseField.val());
         }
 
         function areAnySelectedContractsQuitado() {
@@ -48,58 +51,65 @@
                     return true;
                 }
             }
-            return false;
-        }
-
-        function fetchContratosForProcesso(processoId) {
-            if (!processoId) {
-                return $.Deferred().resolve({ contratos: [] }).promise();
-            }
-            const contratosApiUrl = `/api/processo/${processoId}/contratos/`;
-            return $.ajax({
-                url: contratosApiUrl,
-                method: 'GET',
-                dataType: 'json',
-                success: function(data) {
-                    if (data.status === 'success') allAvailableContratos = data.contratos;
-                }
-            });
-        }
-
-        function fetchDecisionTreeConfig() {
-            $.ajax({
-                url: decisionTreeApiUrl,
-                method: 'GET',
-                dataType: 'json',
-                success: function(data) {
-                    if (data.status === 'success') {
-                        treeConfig = data.tree_data;
-                        firstQuestionKey = data.primeira_questao_chave;
-                        if (currentProcessoId) {
-                            fetchContratosForProcesso(currentProcessoId).done(renderDecisionTree);
-                        } else {
-                            renderDecisionTree();
-                        }
-                    } else {
-                        console.error("Erro ao carregar configuração da árvore:", data.message);
-                        $dynamicQuestionsContainer.html('<p class="errornote">' + data.message + '</p>');
+                        return false;
                     }
-                },
-                error: function(xhr, status, error) {
-                    console.error("Erro AJAX ao carregar configuração da árvore:", status, error);
-                    $dynamicQuestionsContainer.html('<p class="errornote">Erro ao carregar a árvore de decisão.</p>');
-                }
-            });
-        }
-
-        function renderDecisionTree() {
-            $dynamicQuestionsContainer.empty();
-            if (!firstQuestionKey || !treeConfig[firstQuestionKey]) {
-                $dynamicQuestionsContainer.html('<p>Configuração da árvore incompleta.</p>');
-                return;
-            }
-            renderQuestion(firstQuestionKey, $dynamicQuestionsContainer, userResponses);
-        }
+            
+                    // NOVA FUNÇÃO: Carrega contratos do DOM
+                    function loadContratosFromDOM() {
+                        allAvailableContratos = [];
+                        $('.contrato-item-wrapper').each(function() {
+                            const $wrapper = $(this);
+                            const contratoId = $wrapper.data('contrato-id');
+                            // Pega o texto do span.contrato-numero e remove espaços em branco extras
+                            const numeroContrato = $wrapper.find('.contrato-numero').text().trim().split('\n')[0].trim();
+                            
+                            if (contratoId && numeroContrato) {
+                                allAvailableContratos.push({ id: contratoId, numero_contrato: numeroContrato });
+                            }
+                        });
+                        console.log("DEBUG A_P_A: Contratos carregados do DOM:", JSON.stringify(allAvailableContratos));
+                    }
+            
+                    function fetchDecisionTreeConfig() {
+                        const deferredConfig = $.Deferred();
+            
+                        $.ajax({
+                            url: decisionTreeApiUrl,
+                            method: 'GET',
+                            dataType: 'json',
+                            success: function(data) {
+                                if (data.status === 'success') {
+                                    treeConfig = data.tree_data;
+                                    firstQuestionKey = data.primeira_questao_chave;
+                                    deferredConfig.resolve();
+                                } else {
+                                    console.error("Erro ao carregar configuração da árvore:", data.message);
+                                    $dynamicQuestionsContainer.html('<p class="errornote">' + data.message + '</p>');
+                                    deferredConfig.reject();
+                                }
+                            },
+                            error: function(xhr, status, error) {
+                                console.error("Erro AJAX ao carregar configuração da árvore:", status, error);
+                                $dynamicQuestionsContainer.html('<p class="errornote">Erro ao carregar a árvore de decisão.</p>');
+                                deferredConfig.reject();
+                            }
+                        });
+                        
+                        deferredConfig.promise().done(function() {
+                            renderDecisionTree();
+                        }).fail(function() {
+                            console.error("Erro ao carregar configuração da árvore. Não foi possível renderizar a árvore de decisão.");
+                        });
+                    }
+            
+                    function renderDecisionTree() {
+                        $dynamicQuestionsContainer.empty();
+                        if (!firstQuestionKey || !treeConfig[firstQuestionKey]) {
+                            $dynamicQuestionsContainer.html('<p>Configuração da árvore incompleta.</p>');
+                            return;
+                        }
+                        renderQuestion(firstQuestionKey, $dynamicQuestionsContainer, userResponses);
+                    }
 
         function renderQuestion(questionKey, $container, currentResponses, cardIndex = null) {
             const question = treeConfig[questionKey];
@@ -274,10 +284,14 @@
             const $contratosCheckboxesContainer = $('<div class="contratos-checkboxes"></div>');
             
             const contratosStatus = userResponses.contratos_status || {};
+            console.log("DEBUG RENDER CARD: userResponses.contratos_status:", JSON.stringify(contratosStatus));
+            console.log("DEBUG RENDER CARD: allAvailableContratos:", JSON.stringify(allAvailableContratos));
+
             const selectedContratos = allAvailableContratos.filter(contrato => {
-                const a = contratosStatus[contrato.id] && contratosStatus[contrato.id].selecionado;
-                return a
+                // Garante que a chave seja string, assim como é salva pelo info_card_manager
+                return contratosStatus[String(contrato.id)] && contratosStatus[String(contrato.id)].selecionado;
             });
+            console.log("DEBUG RENDER CARD: selectedContratos (após filtro):", JSON.stringify(selectedContratos), "Count:", selectedContratos.length);
 
             if (selectedContratos.length > 0) {
                 selectedContratos.forEach(function(contrato) {
@@ -324,11 +338,13 @@
 
         $(document).on('contratoStatusChange', function() {
             loadExistingResponses();
+            loadContratosFromDOM(); // RECARREGAR contratos do DOM quando o status mudar
             renderDecisionTree();
         });
 
         if ($inlineGroup.length) {
             loadExistingResponses();
+            loadContratosFromDOM(); // Chamar aqui para popular allAvailableContratos do DOM
             fetchDecisionTreeConfig();
         }
     });
