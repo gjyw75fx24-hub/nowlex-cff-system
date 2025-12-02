@@ -188,17 +188,40 @@ class PrazoInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ['responsavel']
 
+# Definir um formulário para AnaliseProcesso para garantir o widget correto
+class AnaliseProcessoAdminForm(forms.ModelForm):
+    class Meta:
+        model = AnaliseProcesso
+        fields = '__all__'
+        widgets = {
+            'respostas': forms.Textarea(attrs={'class': 'vLargeTextField analise-respostas-json', 'style': 'display: none;'})
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Verifica se a instância existe e tem uma primary key (ou seja, já foi salva)
+        # e tenta acessar processo_judicial de forma segura.
+        if self.instance and self.instance.pk:
+            try:
+                cnj_analise = self.instance.processo_judicial.cnj
+                self.fields['respostas'].widget.attrs['data-analise-cnj'] = cnj_analise
+            except AnaliseProcesso.processo_judicial.RelatedObjectDoesNotExist:
+                # Se o AnaliseProcesso existir mas não tiver um processo_judicial
+                # associado (o que não deveria acontecer para um OneToOneField salvo),
+                # ou se for uma instância nova ainda não associada.
+                pass
 
 class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
+    form = AnaliseProcessoAdminForm # Usar o formulário customizado
     model = AnaliseProcesso
     classes = ('analise-procedural-group',)
     can_delete = False # Geralmente, só queremos uma análise por processo, não deletável diretamente aqui.
-    verbose_name_plural = "Análise Procedural"
+    verbose_name_plural = "" # Remover o título do inline
     fk_name = 'processo_judicial' # Garantir que o fk_name esteja correto, pois é um OneToOneField
     fields = ('respostas',) # Apenas o campo JSONField será editável
-    extra = 0
-    max_num = 1 # Apenas uma instância de AnaliseProcesso por ProcessoJudicial
-
+    extra = 1 # Alterado para 1, para permitir a criação de uma nova instância se não houver
+    max_num = 1 # Mantido em 1 por enquanto para a questão da visualização
+    # template = 'admin/contratos/analiseprocesso/stacked.html' # Removida a linha do template customizado
 
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):

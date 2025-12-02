@@ -18,9 +18,12 @@
 
         const $responseField = $inlineGroup.find('textarea[name$="-respostas"]');
         
-        $responseField.closest('.form-row').hide();
+        $responseField.closest('.form-row').hide(); // Manter o textarea original escondido
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
         $inlineGroup.append($dynamicQuestionsContainer);
+
+        const $formattedResponsesContainer = $('<div class="formatted-responses-container"><h3>Respostas da Análise</h3></div>');
+        $inlineGroup.append($formattedResponsesContainer); // Novo container para exibir as respostas formatadas
 
         let allAvailableContratos = [];
 
@@ -32,9 +35,11 @@
                     userResponses.contratos_status = {};
                 }
                 console.log("DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregar:", JSON.stringify(userResponses));
+                displayFormattedResponses(); // Atualiza a exibição formatada após carregar
             } catch (e) {
                 console.error("DEBUG A_P_A: Erro ao parsear respostas existentes:", e);
                 userResponses = { contratos_status: {} };
+                displayFormattedResponses(); // Garante que a exibição seja atualizada mesmo em caso de erro
             }
         }
 
@@ -42,6 +47,125 @@
             console.log("DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:", JSON.stringify(userResponses));
             $responseField.val(JSON.stringify(userResponses, null, 2));
             console.log("DEBUG A_P_A: saveResponses - TextArea contém:", $responseField.val());
+            displayFormattedResponses(); // Atualiza a exibição formatada após salvar
+        }
+
+        function displayFormattedResponses() {
+            $formattedResponsesContainer.empty(); // Limpa o container antes de preencher
+
+            if (Object.keys(userResponses).length === 0 || (!userResponses.contratos_status && !userResponses.judicializado_pela_massa && !userResponses.processos_vinculados && Object.keys(userResponses).length <= 0)) {
+                $formattedResponsesContainer.append('<p>Nenhuma análise registrada ainda. Preencha a árvore acima para iniciar.</p>');
+                return;
+            }
+
+            const $analiseCard = $('<div class="analise-summary-card"></div>');
+            const $cardHeader = $('<div class="analise-summary-card-header"></div>');
+            const $cardBody = $('<div class="analise-summary-card-body" style="display: none;"></div>'); // Inicia minimizado
+
+            // --- Construção da Capa do Card ---
+            let resumoContratos = [];
+            const contratosStatus = userResponses.contratos_status || {};
+            for (const contratoId in contratosStatus) {
+                if (contratosStatus[contratoId].selecionado) {
+                    const contratoInfo = allAvailableContratos.find(c => String(c.id) === String(contratoId));
+                    if (contratoInfo) resumoContratos.push(contratoInfo.numero_contrato);
+                }
+            }
+            const contratosDisplay = resumoContratos.length > 0 ? resumoContratos.join(', ') : 'Nenhum';
+            const judicializadoDisplay = userResponses.judicializado_pela_massa || 'Não informado';
+
+            // Obter o CNJ da análise a partir do atributo data-analise-cnj do textarea
+            const analiseCnj = $responseField.data('analise-cnj') || 'Não Atribuído';
+            $cardHeader.append(`<span>Processo: <strong>${analiseCnj}</strong></span>`); // Usando o CNJ da análise
+            $cardHeader.append(`<span>Contratos: <strong>${contratosDisplay}</strong></span>`);
+            $cardHeader.append(`<span>Judicializado: <strong>${judicializadoDisplay}</strong></span>`);
+
+            const $toggleBtn = $('<button type="button" class="analise-toggle-btn"> + </button>');
+            $cardHeader.append($toggleBtn);
+
+            const $editBtn = $('<button type="button" class="analise-edit-btn">Editar</button>');
+            $cardHeader.append($editBtn);
+
+            $analiseCard.append($cardHeader);
+
+            // --- Construção do Corpo Detalhado (Conteúdo existente de displayFormattedResponses) ---
+            const $ulDetalhes = $('<ul></ul>');
+
+            for (const key in userResponses) {
+                if (userResponses.hasOwnProperty(key)) {
+                    if (key === 'contratos_status') {
+                        const $liContratos = $('<li><strong>Contratos Selecionados:</strong><ul></ul></li>');
+                        const $ulContratos = $liContratos.find('ul');
+                        let hasSelectedContract = false;
+                        for (const contratoId in contratosStatus) {
+                            if (contratosStatus[contratoId].selecionado) {
+                                hasSelectedContract = true;
+                                const contratoInfo = allAvailableContratos.find(c => String(c.id) === String(contratoId));
+                                const nomeContrato = contratoInfo ? contratoInfo.numero_contrato : `ID ${contratoId}`;
+                                $ulContratos.append(`<li>${nomeContrato} (Quitado: ${contratosStatus[contratoId].quitado ? 'Sim' : 'Não'})</li>`);
+                            }
+                        }
+                        if (!hasSelectedContract) {
+                            $ulContratos.append('<li>Nenhum contrato selecionado.</li>');
+                        }
+                        $ulDetalhes.append($liContratos);
+                    } else if (key === 'processos_vinculados') {
+                        const processosVinculados = userResponses[key];
+                        if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
+                            const $liProcessos = $('<li><strong>Processos Vinculados:</strong><ol></ol></li>');
+                            const $olProcessos = $liProcessos.find('ol');
+                            processosVinculados.forEach((processo, index) => {
+                                const cnj = processo.cnj || 'Não informado';
+                                const $liProcesso = $(`<li>CNJ: ${cnj}</li>`);
+                                const $ulDetalhesProcesso = $('<ul></ul>');
+
+                                if (processo.contratos && processo.contratos.length > 0) {
+                                    const contratosVinculadosNomes = processo.contratos.map(cId => {
+                                        const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
+                                        return cInfo ? cInfo.numero_contrato : `ID ${cId}`;
+                                    }).join(', ');
+                                    $ulDetalhesProcesso.append(`<li>Contratos Vinculados: ${contratosVinculadosNomes}</li>`);
+                                }
+                                if (processo.tipo_de_acao_respostas && Object.keys(processo.tipo_de_acao_respostas).length > 0) {
+                                    const $liSubRespostas = $('<li>Respostas da Ação:<ul></ul></li>');
+                                    const $ulSubRespostas = $liSubRespostas.find('ul');
+                                    for (const subKey in processo.tipo_de_acao_respostas) {
+                                        if (processo.tipo_de_acao_respostas.hasOwnProperty(subKey)) {
+                                            $ulSubRespostas.append(`<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`);
+                                        }
+                                    }
+                                    $ulDetalhesProcesso.append($liSubRespostas);
+                                }
+                                $liProcesso.append($ulDetalhesProcesso);
+                                $olProcessos.append($liProcesso);
+                            });
+                            $ulDetalhes.append($liProcessos);
+                        }
+                    } else {
+                        // Para outras respostas simples
+                        $ulDetalhes.append(`<li><strong>${key}:</strong> ${userResponses[key]}</li>`);
+                    }
+                }
+            }
+            $cardBody.append($ulDetalhes);
+            $analiseCard.append($cardBody);
+            $formattedResponsesContainer.append($analiseCard);
+
+            // --- Event Listeners ---
+            $toggleBtn.on('click', function() {
+                $cardBody.slideToggle(200, function() {
+                    $toggleBtn.text($cardBody.is(':visible') ? ' - ' : ' + ');
+                });
+            });
+
+            $editBtn.on('click', function() {
+                // Implementar lógica de reabrir a árvore aqui
+                // Por agora, vamos mostrar a árvore e rolar para ela
+                $dynamicQuestionsContainer.show(); // ou desliza para cima se estiver escondida
+                $('html, body').animate({
+                    scrollTop: $dynamicQuestionsContainer.offset().top - 50 // -50 para um pequeno offset
+                }, 500);
+            });
         }
 
         function areAnySelectedContractsQuitado() {
@@ -340,12 +464,18 @@
             loadExistingResponses();
             loadContratosFromDOM(); // RECARREGAR contratos do DOM quando o status mudar
             renderDecisionTree();
+            displayFormattedResponses(); // Atualiza a exibição formatada após mudanças nos contratos
         });
 
         if ($inlineGroup.length) {
             loadExistingResponses();
             loadContratosFromDOM(); // Chamar aqui para popular allAvailableContratos do DOM
             fetchDecisionTreeConfig();
+
+            // Esconder o título do fieldset do inline, que é o __str__ do AnaliseProcesso
+            // O Django Admin renderiza um h3 para cada item inline com o __str__ do objeto
+            // Ocultar o h3 que está diretamente dentro de um div com a classe 'inline-related'.
+            $inlineGroup.find('.inline-related h3').hide();
         }
     });
 })(django.jQuery);

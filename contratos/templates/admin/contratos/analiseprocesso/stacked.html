@@ -1,0 +1,15 @@
+{% extends "admin/edit_inline/stacked.html" %}
+{% load i18n %}
+
+{# Este bloco é o que renderiza o título "Análise de Processo: Análise para CNJ..." #}
+{# Vamos sobrescrevê-lo para não renderizar nada, removendo o título completamente. #}
+{% block inline_field_labels %}
+{# Conteúdo vazio para suprimir o título #}
+{% endblock %}
+
+{# O bloco fieldset_title também pode renderizar o titulo #}
+{% block fieldset_title %}
+{# Conteúdo vazio para suprimir o título #}
+{% endblock %}
+
+{# O restante do conteúdo do inline deve ser renderizado pelo template pai #}
