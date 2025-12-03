@@ -10,8 +10,27 @@ DECISION_TREE_CONFIG = {
         "opcoes": [
             {"texto_resposta": "SIM - EM ANDAMENTO", "proxima_questao_chave": "processos_vinculados"},
             {"texto_resposta": "SIM - EXTINTO", "proxima_questao_chave": "processos_vinculados"},
+            {"texto_resposta": "NÃO", "proxima_questao_chave": "propor_monitoria"},
+        ]
+    },
+    "propor_monitoria": {
+        "texto_pergunta": "PROPOR MONITÓRIA?",
+        "chave": "propor_monitoria",
+        "tipo_campo": "OPCOES",
+        "is_primeira_questao": False,
+        "ordem": 15,
+        "opcoes": [
+            {"texto_resposta": "SIM", "proxima_questao_chave": "selecionar_contratos_monitoria"},
             {"texto_resposta": "NÃO", "proxima_questao_chave": None},
         ]
+    },
+    "selecionar_contratos_monitoria": {
+        "texto_pergunta": "Selecione os contratos para a monitória:",
+        "chave": "selecionar_contratos_monitoria",
+        "tipo_campo": "CONTRATOS_MONITORIA",
+        "is_primeira_questao": False,
+        "ordem": 18,
+        "opcoes": []
     },
     "processos_vinculados": {
         "texto_pergunta": "PROCESSOS VINCULADOS",

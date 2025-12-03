@@ -54,7 +54,7 @@
                 </div>
                 <div class="info-card-body">
                     {% for contrato in original.contratos.all %}
-                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}">
+                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}">
                             <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
                             <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
                             <span class="contrato-numero">

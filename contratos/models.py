@@ -238,6 +238,7 @@ class QuestaoAnalise(models.Model):
         ('TEXTO_LONGO', 'Texto Longo (observações)'),
         ('DATA', 'Data'),
         ('PROCESSO_VINCULADO', 'Interface de Processos Vinculados'),
+        ('CONTRATOS_MONITORIA', 'Seleção de Contratos para Monitória'),
     ]
     
     texto_pergunta = models.CharField(max_length=255, verbose_name="Texto da Pergunta/Critério")
