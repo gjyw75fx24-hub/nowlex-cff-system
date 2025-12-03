@@ -54,8 +54,10 @@
                     const $toggle = $wrapper.find('.contrato-quitado-toggle');
                     if (status.quitado) {
                         $toggle.addClass('active');
+                        $wrapper.attr('data-is-quitado', true);
                     } else {
                         $toggle.removeClass('active');
+                        $wrapper.attr('data-is-quitado', false);
                     }
                 }
             });
@@ -73,12 +75,14 @@
 
         $('.contrato-quitado-toggle').on('click', function() {
             const $toggle = $(this);
-            const contratoId = $toggle.closest('.contrato-item-wrapper').data('contrato-id');
+            const $wrapper = $toggle.closest('.contrato-item-wrapper');
+            const contratoId = $wrapper.data('contrato-id');
             const isActive = $toggle.hasClass('active');
             
             // Inverte o estado
             const newState = !isActive;
             $toggle.toggleClass('active', newState);
+            $wrapper.attr('data-is-quitado', newState); // Atualiza o atributo data-is-quitado
             updateContratoStatus(contratoId, 'quitado', newState);
             $(document).trigger('contratoStatusChange'); // Notifica outros scripts
         });

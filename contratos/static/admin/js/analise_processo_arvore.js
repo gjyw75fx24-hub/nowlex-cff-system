@@ -29,7 +29,15 @@
 
         function updateContractStars() {
             $('.monitoria-star').remove(); // Limpa estrelas existentes
-            const contratosParaMonitoria = userResponses.contratos_para_monitoria || [];
+            let contratosParaMonitoria = userResponses.contratos_para_monitoria || [];
+
+            // Filtrar contratosParaMonitoria para remover aqueles que estão prescritos ou quitados
+            contratosParaMonitoria = contratosParaMonitoria.filter(function(contratoId) {
+                const contratoInfo = allAvailableContratos.find(c => String(c.id) === String(contratoId));
+                return contratoInfo && !contratoInfo.is_prescrito && !contratoInfo.is_quitado;
+            });
+            userResponses.contratos_para_monitoria = contratosParaMonitoria; // Atualiza o estado
+
             contratosParaMonitoria.forEach(function(contratoId) {
                 const $wrapper = $(`.contrato-item-wrapper[data-contrato-id="${contratoId}"]`);
                 if ($wrapper.length) {
@@ -202,21 +210,21 @@
                     }
             
                     // NOVA FUNÇÃO: Carrega contratos do DOM
-                            function loadContratosFromDOM() {
-                                allAvailableContratos = [];
-                                $('.contrato-item-wrapper').each(function() {
-                                    const $wrapper = $(this);
-                                    const contratoId = $wrapper.data('contrato-id');
-                                    const numeroContrato = $wrapper.find('.contrato-numero').text().trim().split('\n')[0].trim();
-                                    const isPrescrito = $wrapper.data('is-prescrito') === true; // Convertendo para booleano
-                                    
-                                    if (contratoId && numeroContrato) {
-                                        allAvailableContratos.push({ id: contratoId, numero_contrato: numeroContrato, is_prescrito: isPrescrito });
-                                    }
-                                });
-                                console.log("DEBUG A_P_A: Contratos carregados do DOM:", JSON.stringify(allAvailableContratos));
-                            }            
-                    function fetchDecisionTreeConfig() {
+                                    function loadContratosFromDOM() {
+                                        allAvailableContratos = [];
+                                        $('.contrato-item-wrapper').each(function() {
+                                            const $wrapper = $(this);
+                                            const contratoId = $wrapper.data('contrato-id');
+                                            const numeroContrato = $wrapper.find('.contrato-numero').text().trim().split('\n')[0].trim();
+                                            const isPrescrito = $wrapper.data('is-prescrito') === true;
+                                            const isQuitado = $wrapper.data('is-quitado') === true; // Novo: Lendo o status de quitado
+                                            
+                                            if (contratoId && numeroContrato) {
+                                                allAvailableContratos.push({ id: contratoId, numero_contrato: numeroContrato, is_prescrito: isPrescrito, is_quitado: isQuitado });
+                                            }
+                                        });
+                                        console.log("DEBUG A_P_A: Contratos carregados do DOM:", JSON.stringify(allAvailableContratos));
+                                    }                    function fetchDecisionTreeConfig() {
                         const deferredConfig = $.Deferred();
             
                         $.ajax({
@@ -425,11 +433,13 @@
 
             selectedInInfoCard.forEach(function(contrato) {
                 const isChecked = selectedForMonitoria.includes(contrato.id);
-                const isDisabled = contrato.is_prescrito;
+                const isDisabled = contrato.is_prescrito || contrato.is_quitado; // Desabilita se prescrito OU quitado
                 
                 let label = `${contrato.numero_contrato}`;
-                if (isDisabled) {
+                if (contrato.is_prescrito) {
                     label += ' <span style="color: #c62828; font-style: italic;">(Prescrito)</span>';
+                } else if (contrato.is_quitado) { // Adiciona notificação para quitado
+                    label += ' <span style="color: #007bff; font-style: italic;">(Quitado)</span>';
                 }
 
                 const $checkboxWrapper = $(`<div><input type="checkbox" id="monitoria_contrato_${contrato.id}" value="${contrato.id}" ${isChecked ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}> <label for="monitoria_contrato_${contrato.id}">${label}</label></div>`);
