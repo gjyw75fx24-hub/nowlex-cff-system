@@ -27,6 +27,18 @@
 
         let allAvailableContratos = [];
 
+        const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn');
+
+        function updateGenerateButtonState() {
+            if ($gerarMonitoriaBtn.length) {
+                if (userResponses.contratos_para_monitoria && userResponses.contratos_para_monitoria.length > 0) {
+                    $gerarMonitoriaBtn.prop('disabled', false);
+                } else {
+                    $gerarMonitoriaBtn.prop('disabled', true);
+                }
+            }
+        }
+
         function updateContractStars() {
             $('.monitoria-star').remove(); // Limpa estrelas existentes
             let contratosParaMonitoria = userResponses.contratos_para_monitoria || [];
@@ -56,6 +68,7 @@
                 console.log("DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregar:", JSON.stringify(userResponses));
                 displayFormattedResponses();
                 updateContractStars(); 
+                updateGenerateButtonState(); // Atualiza o estado do botão
             } catch (e) {
                 console.error("DEBUG A_P_A: Erro ao parsear respostas existentes:", e);
                 userResponses = { contratos_status: {}, contratos_para_monitoria: [] };
@@ -69,6 +82,7 @@
             console.log("DEBUG A_P_A: saveResponses - TextArea contém:", $responseField.val());
             displayFormattedResponses();
             updateContractStars();
+            updateGenerateButtonState(); // Atualiza o estado do botão
         }
 
         function displayFormattedResponses() {
@@ -478,6 +492,62 @@
             // O Django Admin renderiza um h3 para cada item inline com o __str__ do objeto
             // Ocultar o h3 que está diretamente dentro de um div com a classe 'inline-related'.
             $inlineGroup.find('.inline-related h3').hide();
+
+            // Lógica para o botão "Gerar Petição Monitória"
+            $('#id_gerar_monitoria_btn').on('click', function(e) {
+                e.preventDefault();
+                
+                if (!currentProcessoId) {
+                    alert('Erro: ID do processo não encontrado para gerar a petição.');
+                    return;
+                }
+                if (!userResponses.contratos_para_monitoria || userResponses.contratos_para_monitoria.length === 0) {
+                    alert('Selecione pelo menos um contrato para a monitória antes de gerar a petição.');
+                    return;
+                }
+
+                const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+                const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria/`;
+
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken },
+                    data: { processo_id: currentProcessoId }, // Pode ser necessário enviar outros dados, como os IDs dos contratos
+                    xhrFields: { responseType: 'blob' }, // Para download de arquivos
+                    beforeSend: function() {
+                        // Opcional: mostrar um spinner de carregamento ou desabilitar o botão
+                        $('#id_gerar_monitoria_btn').prop('disabled', true).text('Gerando...');
+                    },
+                    success: function(blob, status, xhr) {
+                        const filename = xhr.getResponseHeader('Content-Disposition').split('filename=')[1].replace(/"/g, '');
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        alert('Petição gerada com sucesso e download iniciado!');
+                    },
+                    error: function(xhr, status, error) {
+                        let errorMessage = 'Erro ao gerar petição. Tente novamente.';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMessage = xhr.responseJSON.message;
+                        } else if (xhr.responseText) {
+                            // Tenta ler o erro como texto (pode ser o caso para HttpResponse)
+                            errorMessage = xhr.responseText;
+                        }
+                        alert(errorMessage);
+                        console.error('Erro na geração da petição:', status, error, xhr);
+                    },
+                    complete: function() {
+                        // Opcional: esconder spinner e reabilitar botão
+                        $('#id_gerar_monitoria_btn').prop('disabled', false).text('Gerar Petição Monitória');
+                    }
+                });
+            });
         }
     });
 })(django.jQuery);

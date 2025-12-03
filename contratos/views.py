@@ -1,6 +1,6 @@
 # contratos/views.py
 
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
 from .models import ProcessoJudicial, StatusProcessual, QuestaoAnalise, OpcaoResposta, Contrato
@@ -13,6 +13,14 @@ import re
 import logging
 from contratos.data.decision_tree_config import DECISION_TREE_CONFIG # <--- Nova importação
 import copy # Para cópia profunda do dicionário
+
+# Imports para geração de DOCX
+from docx import Document
+from io import BytesIO
+from datetime import datetime
+import os
+from django.conf import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -272,3 +280,224 @@ def get_processo_contratos_api(request, processo_id):
     except Exception as e:
         logger.error(f"Erro ao buscar contratos para processo_id {processo_id}: {e}", exc_info=True)
         return JsonResponse({'status': 'error', 'message': f'Ocorreu um erro interno: {e}'}, status=500)
+# ==============================================================================
+# FUNÇÕES E VIEWS PARA GERAÇÃO DA PEÇA MONITÓRIA
+# ==============================================================================
+from docx import Document
+from io import BytesIO
+from datetime import datetime
+import os
+from django.conf import settings
+
+# Helper para parsear o endereço
+def parse_endereco(endereco_str):
+    parts = {
+        'A': '', 'B': '', 'C': '', 'D': '', 'E': '',
+        'F': '', 'G': '', 'H': ''
+    }
+    if not endereco_str:
+        return parts
+
+    # Expressão regular para capturar CHAVE: VALOR
+    # Garante que o valor pode conter hífens e espaços
+    matches = re.findall(r'([A-H]):\s*([^:]+?)(?=\s*-\s*[A-H]:|\s*$)', endereco_str)
+    
+    for key, value in matches:
+        value = value.strip()
+        # Limpa 'None' e 'null' da string, que podem vir de campos vazios
+        if value.lower() == 'none' or value.lower() == 'null':
+            value = ''
+        parts[key.strip()] = value
+    return parts
+
+# Helper para converter número para extenso (simplificado)
+# Para uma solução robusta, usar uma biblioteca ou implementar mais completo.
+def number_to_words_pt_br(num):
+    if not isinstance(num, (int, float, Decimal)):
+        return str(num) # Retorna como string se não for número
+
+    num_str = str(int(num)) # Lida apenas com a parte inteira para simplificar
+
+    unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
+    dezena = ['', 'dez', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
+    dez_a_dezenove = ['dez', 'onze', 'doze', 'treze', 'catorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove']
+    centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos']
+
+    if num == 0: return 'zero'
+
+    def _num_to_words_chunk(n):
+        s = ''
+        n = int(n)
+        
+        if n >= 100:
+            if n == 100:
+                s += 'cem'
+            else:
+                s += centenas[n // 100]
+            n %= 100
+            if n > 0: s += ' e '
+        
+        if n >= 20 or n < 10:
+            s += dezena[n // 10]
+            n %= 10
+            if n > 0 and (s != '' or (n // 10) > 0): s += ' e '
+        
+        if n > 0:
+            s += unidades[n]
+        
+        return s
+
+    def _process_triplet(triplet, scale):
+        triplet = int(triplet)
+        if triplet == 0: return ''
+        words = _num_to_words_chunk(triplet)
+        
+        if scale == 1: # Mil
+            if words == 'um': return 'mil'
+            return words + ' mil'
+        elif scale == 2: # Milhão
+            if words == 'um': return 'um milhão'
+            return words + ' milhões'
+        # Adicione mais escalas conforme necessário (bilhões, trilhões)
+        return words
+
+    words_list = []
+    
+    # Processar parte inteira
+    inteiro = int(num)
+    if inteiro == 0:
+        words_list.append('zero')
+    else:
+        chunks = []
+        temp_int = inteiro
+        while temp_int > 0:
+            chunks.append(temp_int % 1000)
+            temp_int //= 1000
+        
+        for i, chunk in enumerate(chunks):
+            if chunk > 0:
+                words_list.insert(0, _process_triplet(chunk, i))
+    
+    result = ' '.join(filter(None, words_list)) # Remove strings vazias e junta
+    
+    # Processar parte decimal (centavos)
+    decimal_part = round((num - inteiro) * 100)
+    if decimal_part > 0:
+        if inteiro == 0:
+            result = _num_to_words_chunk(decimal_part) + ' centavos'
+        else:
+            result += ' e ' + _num_to_words_chunk(decimal_part) + ' centavos'
+    
+    return result.capitalize()
+
+@require_POST
+def generate_monitoria_petition(request):
+    processo_id = request.POST.get('processo_id')
+    
+    if not processo_id:
+        return HttpResponse("ID do processo não fornecido.", status=400)
+
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id)
+        analise = processo.analise_processo # OneToOneField
+    except ProcessoJudicial.DoesNotExist:
+        return HttpResponse("Processo Judicial não encontrado.", status=404)
+    except Exception as e:
+        logger.error(f"Erro ao buscar análise do processo {processo_id}: {e}", exc_info=True)
+        return HttpResponse(f"Erro ao buscar dados do processo: {e}", status=500)
+
+    # Buscar a parte passiva
+    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+    if not polo_passivo:
+        return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
+    
+    # Buscar contratos selecionados para monitória
+    contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
+    contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
+
+    if not contratos_monitoria.exists():
+        return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
+
+    # Mapeamento de dados
+    dados = {}
+    dados['PARTE CONTRÁRIA'] = polo_passivo.nome
+    dados['CPF'] = polo_passivo.documento # Pode ser CPF ou CNPJ
+
+    # Parsear endereço
+    endereco_parts = parse_endereco(polo_passivo.endereco)
+    dados['A'] = endereco_parts.get('A', '') # Logradouro
+    dados['B'] = endereco_parts.get('B', '') # Número
+    dados['C'] = endereco_parts.get('C', '') # Complemento
+    dados['D'] = endereco_parts.get('D', '') # Bairro
+    dados['E'] = endereco_parts.get('E', '') # Cidade
+    dados['F'] = endereco_parts.get('F', '') # Estado por extenso (ex: Rondônia)
+    dados['G'] = endereco_parts.get('G', '') # CEP
+    dados['H'] = endereco_parts.get('H', '') # UF (ex: RO)
+
+    # Outros dados do processo
+    dados['E_FORO'] = processo.vara # Ex: COMARCA DE PORTO VELHO
+    dados['H_FORO'] = processo.uf # Ex: RO
+
+    # Contratos
+    # Assume que [CONTRATO] espera uma lista de números de contrato separados por vírgula
+    dados['CONTRATO'] = ", ".join([c.numero_contrato for c in contratos_monitoria if c.numero_contrato])
+    
+    # Calcular Valor da Causa
+    total_valor_causa = sum(contrato.valor_causa for contrato in contratos_monitoria if contrato.valor_causa is not None)
+    dados['VALOR DA CAUSA'] = f'{total_valor_causa:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.') # Formato BR
+    dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
+
+    # Data de Hoje
+    dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
+        'January', 'janeiro').replace('February', 'fevereiro').replace('March', 'março').replace(
+        'April', 'abril').replace('May', 'maio').replace('June', 'junho').replace(
+        'July', 'julho').replace('August', 'agosto').replace('September', 'setembro').replace(
+        'October', 'outubro').replace('November', 'novembro').replace('December', 'dezembro')
+
+
+    # Caminho para o template DOCX
+    template_path = os.path.join(
+        settings.BASE_DIR, 
+        'contratos', 'documents', 'Base de Minutas Oficiais Modelo', 
+        '1 - Base - Inicial Monitoria - B6.docx'
+    )
+
+    if not os.path.exists(template_path):
+        return HttpResponse(f"Arquivo de template não encontrado em: {template_path}", status=500)
+
+    try:
+        document = Document(template_path)
+
+        for p in document.paragraphs:
+            for key, value in dados.items():
+                # Substituir [E]/[H] que está no mesmo parágrafo
+                if key == 'E_FORO' and '[E]/[H]' in p.text:
+                    p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+                # Substituir outros placeholders
+                p.text = p.text.replace(f'[{key}]', str(value))
+        
+        # Iterar sobre tabelas, se houver
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        for key, value in dados.items():
+                            if key == 'E_FORO' and '[E]/[H]' in p.text:
+                                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+                            p.text = p.text.replace(f'[{key}]', str(value))
+
+
+        # Salvar o documento em um buffer de memória
+        file_stream = BytesIO()
+        document.save(file_stream)
+        file_stream.seek(0)
+
+        # Retornar o documento como uma resposta de download
+        filename = f"Petição_Monitoria_{polo_passivo.nome}_{datetime.now().strftime('%Y%m%d')}.docx"
+        response = FileResponse(file_stream, content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        logger.error(f"Erro ao gerar a petição para o processo {processo_id}: {e}", exc_info=True)
+        return HttpResponse(f"Erro ao gerar a petição: {e}", status=500)
