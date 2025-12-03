@@ -76,6 +76,25 @@
 
             // Obter o CNJ da análise a partir do atributo data-analise-cnj do textarea
             const analiseCnj = $responseField.data('analise-cnj') || 'Não Atribuído';
+            const updatedAtRaw = $responseField.data('analise-updated-at');
+            const updatedBy = $responseField.data('analise-updated-by');
+
+            if (updatedAtRaw) {
+                const updatedAt = new Date(updatedAtRaw);
+                const formattedDate = ('0' + updatedAt.getDate()).slice(-2) + '/' +
+                                    ('0' + (updatedAt.getMonth() + 1)).slice(-2) + '/' +
+                                    updatedAt.getFullYear() + ' ' +
+                                    ('0' + updatedAt.getHours()).slice(-2) + ':' +
+                                    ('0' + updatedAt.getMinutes()).slice(-2);
+                const $dateSpan = $(`<span class="analise-save-date">Última atualização: ${formattedDate}</span>`);
+                
+                if (updatedBy) {
+                    $dateSpan.attr('title', `Atualizado por: ${updatedBy}`);
+                }
+
+                $cardHeader.append($dateSpan);
+            }
+
             $cardHeader.append(`<span>Processo: <strong>${analiseCnj}</strong></span>`); // Usando o CNJ da análise
             $cardHeader.append(`<span>Contratos: <strong>${contratosDisplay}</strong></span>`);
             $cardHeader.append(`<span>Judicializado: <strong>${judicializadoDisplay}</strong></span>`);

@@ -205,6 +205,12 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
             try:
                 cnj_analise = self.instance.processo_judicial.cnj
                 self.fields['respostas'].widget.attrs['data-analise-cnj'] = cnj_analise
+                # Adiciona a data de atualização ao widget
+                if self.instance.updated_at:
+                    self.fields['respostas'].widget.attrs['data-analise-updated-at'] = self.instance.updated_at.isoformat()
+                # Adiciona o nome do usuário que atualizou
+                if self.instance.updated_by:
+                    self.fields['respostas'].widget.attrs['data-analise-updated-by'] = self.instance.updated_by.get_full_name() or self.instance.updated_by.username
             except AnaliseProcesso.processo_judicial.RelatedObjectDoesNotExist:
                 # Se o AnaliseProcesso existir mas não tiver um processo_judicial
                 # associado (o que não deveria acontecer para um OneToOneField salvo),
@@ -279,6 +285,17 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados']
+
+    def save_formset(self, request, form, formset, change):
+        if formset.model == AnaliseProcesso:
+            instances = formset.save(commit=False)
+            for instance in instances:
+                if isinstance(instance, AnaliseProcesso):
+                    instance.updated_by = request.user
+                    instance.save()
+            formset.save_m2m()
+        else:
+            super().save_formset(request, form, formset, change)
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
