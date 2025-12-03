@@ -24,6 +24,10 @@
         display: inline-block;
         margin-right: 15px;
     }
+    .info-card-body .contrato-item-wrapper {
+        display: inline-block;
+        vertical-align: middle;
+    }
     .prescrito-p {
         background-color: #dc3545; /* Vermelho */
         color: white;
@@ -50,7 +54,7 @@
                 </div>
                 <div class="info-card-body">
                     {% for contrato in original.contratos.all %}
-                        <div class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}">
+                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}">
                             <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
                             <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
                             <span class="contrato-numero">
@@ -64,7 +68,7 @@
                                     <span class="prescrito-np">NP</span>
                                 {% endif %}
                             {% endif %}
-                        </div>
+                        </span>{% if not forloop.last %} - {% endif %}
                     {% endfor %}
                 </div>
             </div>

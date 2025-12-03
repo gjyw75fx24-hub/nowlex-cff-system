@@ -52,17 +52,19 @@
 
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty(); // Limpa o container antes de preencher
+            $formattedResponsesContainer.append('<h3>Respostas da Análise</h3>'); // Adiciona o título de volta
 
             if (Object.keys(userResponses).length === 0 || (!userResponses.contratos_status && !userResponses.judicializado_pela_massa && !userResponses.processos_vinculados && Object.keys(userResponses).length <= 0)) {
                 $formattedResponsesContainer.append('<p>Nenhuma análise registrada ainda. Preencha a árvore acima para iniciar.</p>');
                 return;
             }
 
+            // --- 1. Renderizar o Card Principal ---
             const $analiseCard = $('<div class="analise-summary-card"></div>');
             const $cardHeader = $('<div class="analise-summary-card-header"></div>');
-            const $cardBody = $('<div class="analise-summary-card-body" style="display: none;"></div>'); // Inicia minimizado
+            const $cardBody = $('<div class="analise-summary-card-body" style="display: none;"></div>');
 
-            // --- Construção da Capa do Card ---
+            // Header do card principal
             let resumoContratos = [];
             const contratosStatus = userResponses.contratos_status || {};
             for (const contratoId in contratosStatus) {
@@ -73,45 +75,33 @@
             }
             const contratosDisplay = resumoContratos.length > 0 ? resumoContratos.join(', ') : 'Nenhum';
             const judicializadoDisplay = userResponses.judicializado_pela_massa || 'Não informado';
-
-            // Obter o CNJ da análise a partir do atributo data-analise-cnj do textarea
             const analiseCnj = $responseField.data('analise-cnj') || 'Não Atribuído';
             const updatedAtRaw = $responseField.data('analise-updated-at');
             const updatedBy = $responseField.data('analise-updated-by');
 
             if (updatedAtRaw) {
                 const updatedAt = new Date(updatedAtRaw);
-                const formattedDate = ('0' + updatedAt.getDate()).slice(-2) + '/' +
-                                    ('0' + (updatedAt.getMonth() + 1)).slice(-2) + '/' +
-                                    updatedAt.getFullYear() + ' ' +
-                                    ('0' + updatedAt.getHours()).slice(-2) + ':' +
-                                    ('0' + updatedAt.getMinutes()).slice(-2);
+                const formattedDate = ('0' + updatedAt.getDate()).slice(-2) + '/' + ('0' + (updatedAt.getMonth() + 1)).slice(-2) + '/' + updatedAt.getFullYear() + ' ' + ('0' + updatedAt.getHours()).slice(-2) + ':' + ('0' + updatedAt.getMinutes()).slice(-2);
                 const $dateSpan = $(`<span class="analise-save-date">Última atualização: ${formattedDate}</span>`);
-                
                 if (updatedBy) {
                     $dateSpan.attr('title', `Atualizado por: ${updatedBy}`);
                 }
-
                 $cardHeader.append($dateSpan);
             }
-
-            $cardHeader.append(`<span>Processo: <strong>${analiseCnj}</strong></span>`); // Usando o CNJ da análise
+            $cardHeader.append(`<span>Processo Principal: <strong>${analiseCnj}</strong></span>`);
             $cardHeader.append(`<span>Contratos: <strong>${contratosDisplay}</strong></span>`);
             $cardHeader.append(`<span>Judicializado: <strong>${judicializadoDisplay}</strong></span>`);
-
+            
             const $toggleBtn = $('<button type="button" class="analise-toggle-btn"> + </button>');
             $cardHeader.append($toggleBtn);
-
             const $editBtn = $('<button type="button" class="analise-edit-btn">Editar</button>');
             $cardHeader.append($editBtn);
-
             $analiseCard.append($cardHeader);
 
-            // --- Construção do Corpo Detalhado (Conteúdo existente de displayFormattedResponses) ---
+            // Corpo do card principal (excluindo processos vinculados)
             const $ulDetalhes = $('<ul></ul>');
-
             for (const key in userResponses) {
-                if (userResponses.hasOwnProperty(key)) {
+                if (userResponses.hasOwnProperty(key) && key !== 'processos_vinculados') { // <-- Exclui os vinculados
                     if (key === 'contratos_status') {
                         const $liContratos = $('<li><strong>Contratos Selecionados:</strong><ul></ul></li>');
                         const $ulContratos = $liContratos.find('ul');
@@ -128,40 +118,7 @@
                             $ulContratos.append('<li>Nenhum contrato selecionado.</li>');
                         }
                         $ulDetalhes.append($liContratos);
-                    } else if (key === 'processos_vinculados') {
-                        const processosVinculados = userResponses[key];
-                        if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
-                            const $liProcessos = $('<li><strong>Processos Vinculados:</strong><ol></ol></li>');
-                            const $olProcessos = $liProcessos.find('ol');
-                            processosVinculados.forEach((processo, index) => {
-                                const cnj = processo.cnj || 'Não informado';
-                                const $liProcesso = $(`<li>CNJ: ${cnj}</li>`);
-                                const $ulDetalhesProcesso = $('<ul></ul>');
-
-                                if (processo.contratos && processo.contratos.length > 0) {
-                                    const contratosVinculadosNomes = processo.contratos.map(cId => {
-                                        const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
-                                        return cInfo ? cInfo.numero_contrato : `ID ${cId}`;
-                                    }).join(', ');
-                                    $ulDetalhesProcesso.append(`<li>Contratos Vinculados: ${contratosVinculadosNomes}</li>`);
-                                }
-                                if (processo.tipo_de_acao_respostas && Object.keys(processo.tipo_de_acao_respostas).length > 0) {
-                                    const $liSubRespostas = $('<li>Respostas da Ação:<ul></ul></li>');
-                                    const $ulSubRespostas = $liSubRespostas.find('ul');
-                                    for (const subKey in processo.tipo_de_acao_respostas) {
-                                        if (processo.tipo_de_acao_respostas.hasOwnProperty(subKey)) {
-                                            $ulSubRespostas.append(`<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`);
-                                        }
-                                    }
-                                    $ulDetalhesProcesso.append($liSubRespostas);
-                                }
-                                $liProcesso.append($ulDetalhesProcesso);
-                                $olProcessos.append($liProcesso);
-                            });
-                            $ulDetalhes.append($liProcessos);
-                        }
                     } else {
-                        // Para outras respostas simples
                         $ulDetalhes.append(`<li><strong>${key}:</strong> ${userResponses[key]}</li>`);
                     }
                 }
@@ -170,21 +127,56 @@
             $analiseCard.append($cardBody);
             $formattedResponsesContainer.append($analiseCard);
 
-            // --- Event Listeners ---
-            $toggleBtn.on('click', function() {
-                $cardBody.slideToggle(200, function() {
-                    $toggleBtn.text($cardBody.is(':visible') ? ' - ' : ' + ');
-                });
-            });
+            // Event Listeners para o card principal
+            $toggleBtn.on('click', function() { $cardBody.slideToggle(200, function() { $toggleBtn.text($cardBody.is(':visible') ? ' - ' : ' + '); }); });
+            $editBtn.on('click', function() { /* Lógica para reabrir árvore */ });
 
-            $editBtn.on('click', function() {
-                // Implementar lógica de reabrir a árvore aqui
-                // Por agora, vamos mostrar a árvore e rolar para ela
-                $dynamicQuestionsContainer.show(); // ou desliza para cima se estiver escondida
-                $('html, body').animate({
-                    scrollTop: $dynamicQuestionsContainer.offset().top - 50 // -50 para um pequeno offset
-                }, 500);
-            });
+            // --- 2. Renderizar Cards para Processos Vinculados ---
+            const processosVinculados = userResponses.processos_vinculados;
+            if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
+                
+                processosVinculados.forEach((processo, index) => {
+                    const $cardVinculado = $('<div class="analise-summary-card"></div>');
+                    const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
+                    const $bodyVinculado = $('<div class="analise-summary-card-body" style="display: none;"></div>');
+                    const cnjVinculado = processo.cnj || 'Não informado';
+
+                    // Header do card vinculado
+                    $headerVinculado.append(`<span>Processo Vinculado: <strong>${cnjVinculado}</strong></span>`);
+                    const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
+                    $headerVinculado.append($toggleBtnVinculado);
+                    $cardVinculado.append($headerVinculado);
+
+                    // Corpo do card vinculado
+                    const $ulDetalhesVinculado = $('<ul></ul>');
+                    if (processo.contratos && processo.contratos.length > 0) {
+                        const nomesContratos = processo.contratos.map(cId => {
+                            const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
+                            return cInfo ? cInfo.numero_contrato : `ID ${cId}`;
+                        }).join(', ');
+                        $ulDetalhesVinculado.append(`<li><strong>Contratos Vinculados:</strong> ${nomesContratos}</li>`);
+                    }
+                    if (processo.tipo_de_acao_respostas && Object.keys(processo.tipo_de_acao_respostas).length > 0) {
+                        const $liAcao = $('<li><strong>Respostas da Ação:</strong><ul></ul></li>');
+                        const $ulAcao = $liAcao.find('ul');
+                        for (const subKey in processo.tipo_de_acao_respostas) {
+                            $ulAcao.append(`<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`);
+                        }
+                        $ulDetalhesVinculado.append($liAcao);
+                    }
+                    $bodyVinculado.append($ulDetalhesVinculado);
+                    $cardVinculado.append($bodyVinculado);
+                    
+                    $formattedResponsesContainer.append($cardVinculado);
+
+                    // Event listener para o card vinculado
+                    $toggleBtnVinculado.on('click', function() {
+                        $bodyVinculado.slideToggle(200, function() {
+                            $toggleBtnVinculado.text($bodyVinculado.is(':visible') ? ' - ' : ' + ');
+                        });
+                    });
+                });
+            }
         }
 
         function areAnySelectedContractsQuitado() {
