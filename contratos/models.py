@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 
 
 class Etiqueta(models.Model):
@@ -41,11 +42,12 @@ class StatusProcessual(models.Model):
         return self.nome
 
 class ProcessoJudicial(models.Model):
-    cnj = models.CharField(max_length=30, unique=True, verbose_name="Número CNJ")
+    cnj = models.CharField(max_length=30, null=True, blank=True, verbose_name="Número CNJ", db_index=True)
+    nao_judicializado = models.BooleanField(default=True, editable=False, verbose_name="Não Judicializado")
     uf = models.CharField(max_length=2, blank=True, verbose_name="UF")
-    vara = models.CharField(max_length=255, verbose_name="Vara")
+    vara = models.CharField(max_length=255, verbose_name="Vara", blank=True, null=True)
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
-    valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa")
+    valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa", blank=True, null=True)
     
     status = models.ForeignKey(
         StatusProcessual,
@@ -77,8 +79,33 @@ class ProcessoJudicial(models.Model):
         help_text="Se marcado, o sistema buscará andamentos para este processo automaticamente."
     )
 
+    def save(self, *args, **kwargs):
+        if self.cnj and self.cnj.strip():
+            self.nao_judicializado = False
+        else:
+            self.nao_judicializado = True
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        if self.cnj:
+            qs = ProcessoJudicial.objects.filter(cnj=self.cnj)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError({'cnj': 'Já existe um processo com este número CNJ.'})
+
     def __str__(self):
-        return self.cnj
+        if self.cnj:
+            return self.cnj
+        
+        if self.pk:
+            parte_principal = self.partes_processuais.first()
+            if parte_principal:
+                return f"Cadastro de {parte_principal.nome} (ID: {self.pk})"
+            return f"Cadastro Simplificado #{self.pk}"
+            
+        return "Novo Cadastro"
 
 # 🔽 NOVO MODELO PARA ARMAZENAR ANDAMENTOS
 class AndamentoProcessual(models.Model):
