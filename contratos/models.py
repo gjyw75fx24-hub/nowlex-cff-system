@@ -34,8 +34,8 @@ class StatusProcessual(models.Model):
     ativo = models.BooleanField(default=True, verbose_name="Ativo")
 
     class Meta:
-        verbose_name = "Status Processual"
-        verbose_name_plural = "Status Processuais"
+        verbose_name = "Classe Processual"
+        verbose_name_plural = "Classes Processuais"
         ordering = ['ordem', 'nome']
 
     def __str__(self):
@@ -54,7 +54,7 @@ class ProcessoJudicial(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        verbose_name="Status Processual"
+        verbose_name="Classe Processual"
     )
     
     carteira = models.ForeignKey(

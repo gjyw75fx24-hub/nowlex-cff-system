@@ -214,3 +214,89 @@ class SaveManualAddressAPIView(View):
             return JsonResponse({'error': 'Dados inválidos.'}, status=400)
         except Exception as e:
             return JsonResponse({'error': f'Ocorreu um erro interno: {e}'}, status=500)
+
+
+class BuscarDadosEscavadorView(View):
+    """
+    Busca os dados de um processo na API do Escavador usando o número CNJ.
+    """
+    def get(self, request, numero_cnj):
+        api_key = os.getenv('ESCAVADOR_API_TOKEN')
+        if not api_key:
+            return JsonResponse({'status': 'error', 'message': 'A chave da API do Escavador não está configurada no servidor.'}, status=500)
+
+        url = f'https://api.escavador.com/api/v2/processos/numero_cnj/{numero_cnj}'
+        headers = {'Authorization': f'Bearer {api_key}'}
+        
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            res.raise_for_status()
+            
+            escavador_data = res.json()
+
+            processo_data = {}
+            partes_data = []
+            andamentos_data = []
+
+            if escavador_data:
+                primeira_fonte = escavador_data.get('fontes', [{}])[0]
+                capa_fonte = primeira_fonte.get('capa', {})
+                tribunal_fonte = primeira_fonte.get('tribunal', {})
+
+                processo_data = {
+                    'numero_cnj': escavador_data.get('numero_cnj'),
+                    'uf': escavador_data.get('estado_origem', {}).get('sigla'),
+                    'vara': capa_fonte.get('orgao_julgador'),
+                    'tribunal': tribunal_fonte.get('sigla'),
+                    'valor_causa': capa_fonte.get('valor_causa', {}).get('valor'),
+                    'status_id': capa_fonte.get('classe') or 'DESCONHECIDO',
+                    'status_nome': capa_fonte.get('classe') or 'DESCONHECIDO',
+                }
+
+                # Utiliza um dicionário para desduplicar as partes pelo nome
+                partes_encontradas = {}
+
+                for fonte in escavador_data.get('fontes', []):
+                    for envolvido in fonte.get('envolvidos', []):
+                        polo_escavador = envolvido.get('polo', '').upper()
+                        nome_envolvido = envolvido.get('nome')
+
+                        # Se o envolvido não tem nome, ou já foi adicionado, pula
+                        if not nome_envolvido or nome_envolvido in partes_encontradas:
+                            continue
+
+                        # Mapeia polo ATIVO ou PASSIVO. Ignora outros por enquanto para evitar ruído.
+                        tipo_polo_django = None
+                        if polo_escavador == 'ATIVO':
+                            tipo_polo_django = 'ATIVO'
+                        elif polo_escavador == 'PASSIVO':
+                            tipo_polo_django = 'PASSIVO'
+
+                        if tipo_polo_django:
+                            documento = envolvido.get('cpf') or envolvido.get('cnpj')
+                            
+                            partes_encontradas[nome_envolvido] = {
+                                'nome': nome_envolvido,
+                                'tipo_polo': tipo_polo_django,
+                                'tipo_pessoa': envolvido.get('tipo_pessoa'),
+                                'documento': documento,
+                                'endereco': ''
+                            }
+                
+                partes_data = list(partes_encontradas.values())
+
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Dados obtidos com sucesso!',
+                'processo': processo_data,
+                'partes': partes_data,
+                'andamentos': andamentos_data
+            })
+
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                return JsonResponse({'status': 'error', 'message': 'Processo não encontrado no Escavador.'}, status=404)
+            return JsonResponse({'status': 'error', 'message': f'Erro na API do Escavador: {e.response.status_code}'}, status=500)
+        except requests.exceptions.RequestException as e:
+            return JsonResponse({'status': 'error', 'message': f'Erro de conexão com a API do Escavador: {e}'}, status=500)
+
