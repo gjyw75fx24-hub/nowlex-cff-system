@@ -1,0 +1,19 @@
+{% extends "admin/contratos/processojudicial/change_form_etiquetas.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="navigation-buttons" style="text-align: right; margin-bottom: 10px;">
+  {% if prev_obj_url %}
+    <a href="{{ prev_obj_url }}" class="button" style="font-size: 1.2em; padding: 5px 10px; margin-right: 5px; background: none; border: none; box-shadow: none; color: #417690;"><</a>
+  {% else %}
+    <span class="button disabled" style="font-size: 1.2em; padding: 5px 10px; margin-right: 5px; background: none; border: none; box-shadow: none; color: #ccc; cursor: default;"> < </span>
+  {% endif %}
+  
+  {% if next_obj_url %}
+    <a href="{{ next_obj_url }}" class="button" style="font-size: 1.2em; padding: 5px 10px; background: none; border: none; box-shadow: none; color: #417690;"> > </a>
+  {% else %}
+    <span class="button disabled" style="font-size: 1.2em; padding: 5px 10px; background: none; border: none; box-shadow: none; color: #ccc; cursor: default;"> > </span>
+  {% endif %}
+</div>
+{{ block.super }} {# Render the content from the parent template #}
+{% endblock %}

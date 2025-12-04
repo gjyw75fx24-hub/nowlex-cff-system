@@ -281,10 +281,42 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
     )
-    change_form_template = "admin/contratos/processojudicial/change_form_etiquetas.html"
+    change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados']
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        
+        # Preserva os filtros da changelist para a navegação
+        changelist_filters = request.GET.get('_changelist_filters')
+        
+        # Usa o mesmo queryset da changelist para consistência
+        changelist = self.get_changelist_instance(request)
+        queryset = changelist.get_queryset(request)
+        
+        # Garante uma ordenação consistente
+        ordering = self.get_ordering(request) or ('-pk',)
+        object_list = list(queryset.order_by(*ordering).values_list('pk', flat=True))
+        
+        try:
+            current_index = object_list.index(int(object_id))
+        except ValueError:
+            current_index = -1
+
+        prev_obj_id = object_list[current_index - 1] if current_index > 0 else None
+        next_obj_id = object_list[current_index + 1] if current_index != -1 and current_index < len(object_list) - 1 else None
+
+        # Monta as URLs preservando os filtros
+        base_url = reverse('admin:contratos_processojudicial_changelist') + "{}"
+        filter_params = f'?{changelist_filters}' if changelist_filters else ''
+
+        extra_context['prev_obj_url'] = base_url.format(f'{prev_obj_id}/change/{filter_params}') if prev_obj_id else None
+        extra_context['next_obj_url'] = base_url.format(f'{next_obj_id}/change/{filter_params}') if next_obj_id else None
+        
+        return super().change_view(request, object_id, form_url, extra_context=extra_context)
+
 
     def save_formset(self, request, form, formset, change):
         if formset.model == AnaliseProcesso:
