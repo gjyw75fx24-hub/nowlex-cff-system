@@ -2,7 +2,7 @@ from django.contrib import admin, messages
 from django.db import models
 from django.db.models import Count, Max
 from django.http import HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.utils.html import format_html
 from django.urls import reverse, path
 from django.contrib.humanize.templatetags.humanize import intcomma
@@ -10,6 +10,7 @@ import json
 from django import forms
 from django.utils.safestring import mark_safe
 from decimal import Decimal, InvalidOperation
+from django.contrib.auth.models import User # Importar o modelo User
 
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
@@ -17,6 +18,15 @@ from .models import (
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso,
 )
 from .widgets import EnderecoWidget
+
+
+# Form para seleção de usuário na ação de delegar
+class UserForm(forms.Form):
+    user = forms.ModelChoiceField(
+        queryset=User.objects.all().order_by('username'),
+        label="Selecionar Usuário",
+        empty_label="Nenhum (Remover Delegação)"
+    )
 
 
 # --- Filtros ---
@@ -284,7 +294,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
-    actions = ['excluir_andamentos_selecionados']
+    actions = ['excluir_andamentos_selecionados', 'delegate_processes']
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
@@ -376,6 +386,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         custom_urls = [
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
+            path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
         ]
         return custom_urls + urls
 
@@ -465,6 +476,12 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         pass
     excluir_andamentos_selecionados.short_description = "Excluir Andamentos Selecionados"
 
+    def delegate_processes(self, request, queryset):
+        # Redireciona para uma view intermediária para selecionar o usuário
+        selected_ids = ','.join(str(pk) for pk in queryset.values_list('pk', flat=True))
+        return HttpResponseRedirect(f'delegate-select-user/?ids={selected_ids}')
+    delegate_processes.short_description = "Delegar processos selecionados"
+
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":
             kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gte=0)
@@ -481,6 +498,45 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     @admin.display(description="Polo Passivo")
     def get_polo_passivo(self, obj):
         return getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '---')
+
+    def delegate_select_user_view(self, request):
+        opts = self.model._meta
+        app_label = opts.app_label
+        
+        # Recupera os IDs dos processos selecionados da URL
+        selected_ids = request.GET.get('ids', '')
+        if not selected_ids:
+            self.message_user(request, "Nenhum processo selecionado para delegar.", messages.WARNING)
+            return HttpResponseRedirect("../")
+        
+        process_pks = [int(pk) for pk in selected_ids.split(',')]
+        
+        if request.method == 'POST':
+            form = UserForm(request.POST)
+            if form.is_valid():
+                selected_user = form.cleaned_data['user']
+                
+                # Atualiza os processos
+                self.model.objects.filter(pk__in=process_pks).update(delegado_para=selected_user)
+                
+                user_name = selected_user.username if selected_user else "Ninguém"
+                self.message_user(request, f"{len(process_pks)} processo(s) delegados para {user_name} com sucesso.", messages.SUCCESS)
+                return HttpResponseRedirect("../") # Volta para a changelist
+            else:
+                self.message_user(request, "Por favor, selecione um usuário válido.", messages.ERROR)
+        else:
+            form = UserForm()
+        
+        context = {
+            'form': form,
+            'process_pks': process_pks,
+            'opts': opts,
+            'app_label': app_label,
+            'title': "Delegar Processos Selecionados",
+            'is_popup': False,
+            'media': self.media, # Inclui os assets do admin para o formulário
+        }
+        return render(request, 'admin/contratos/processojudicial/delegate_select_user.html', context)
 
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):

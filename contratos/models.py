@@ -79,6 +79,15 @@ class ProcessoJudicial(models.Model):
         help_text="Se marcado, o sistema buscará andamentos para este processo automaticamente."
     )
 
+    delegado_para = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processos_delegados',
+        verbose_name="Delegado Para"
+    )
+
     def save(self, *args, **kwargs):
         if self.cnj and self.cnj.strip():
             self.nao_judicializado = False
