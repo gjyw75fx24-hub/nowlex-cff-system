@@ -10,7 +10,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusSelect = document.getElementById('id_status');
 
     // --- 1. Criação do Botão "Dados Online" ---
-    // O botão é criado aqui para garantir a posição desejada, ao lado do campo CNJ.
     if (cnjInput && !document.getElementById('btn_buscar_cnj')) {
         const searchButton = document.createElement('button');
         searchButton.id = 'btn_buscar_cnj';
@@ -26,8 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
         feedbackDiv.style.fontWeight = 'bold';
         cnjInput.parentNode.parentNode.appendChild(feedbackDiv);
     }
-    
-    // Agora que o botão foi criado, podemos selecioná-lo
+
     const searchButton = document.getElementById('btn_buscar_cnj');
     const cnjFeedback = document.getElementById('cnj_feedback');
 
@@ -55,7 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert("Por favor, insira um número de CNJ.");
                 return;
             }
-            
+
             const valorLimpo = cnjInput.value.replace(/[^\d]/g, "");
             let codUF = null;
 
@@ -107,26 +105,24 @@ document.addEventListener('DOMContentLoaded', function() {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
             searchButton.disabled = cnjLimpo.length < 10;
         };
-        toggleButtonState(); 
+        toggleButtonState();
         cnjInput.addEventListener('input', toggleButtonState);
 
         searchButton.addEventListener('click', function() {
-            const cnj = cnjInput.value.trim();
+            const cnj = cnjInput.value.trim().replace(/\D/g, ''); // Limpa o CNJ para garantir que só números sejam enviados
             if (!cnj) {
                 setFeedback('Por favor, insira um número de CNJ.', 'error');
                 return;
             }
 
-            const url = '/api/contratos/buscar-dados-escavador/'; // URL está fixa aqui
+            const url = `/api/buscar-dados-escavador/${cnj}/`;
             setFeedback('Buscando dados online...', 'loading');
 
             fetch(url, {
-                method: 'POST',
+                method: 'GET',
                 headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
                     'X-CSRFToken': csrftoken,
-                },
-                body: `cnj=${encodeURIComponent(cnj)}`
+                }
             })
             .then(response => {
                 if (!response.ok) {
@@ -139,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 if (data.status === 'success') {
                     setFeedback(data.message, 'success');
-                    fillFormFields(data.processo, data.partes, data.andamentos); 
+                    fillFormFields(data.processo, data.partes, data.andamentos);
                 } else {
                     throw new Error(data.message);
                 }
@@ -158,44 +154,214 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function fillFormFields(processo, partes, andamentos) {
-        if (varaInput) varaInput.value = processo.vara || '';
-        if (tribunalInput) tribunalInput.value = processo.tribunal || '';
-        
-        // Formata o valor da causa para o padrão brasileiro (vírgula como decimal)
-        if (valorCausaInput && processo.valor_causa) {
-            valorCausaInput.value = processo.valor_causa.replace('.', ',');
-        } else if (valorCausaInput) {
-            valorCausaInput.value = '0,00';
+    // --- Funções Auxiliares para Inlines de Parte ---
+
+    // Função para aplicar máscara de CPF/CNPJ
+    function maskCpfCnpj(value) {
+        let cleaned = value.replace(/\D/g, '');
+        if (cleaned.length <= 11) { // CPF
+            cleaned = cleaned.replace(/(\d{3})(\d)/, '$1.$2');
+            cleaned = cleaned.replace(/(\d{3})(\d)/, '$1.$2');
+            cleaned = cleaned.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+        } else { // CNPJ
+            cleaned = cleaned.replace(/^(\d{2})(\d)/, '$1.$2');
+            cleaned = cleaned.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
+            cleaned = cleaned.replace(/\.(\d{3})(\d)/, '.$1/$2');
+            cleaned = cleaned.replace(/(\d{4})(\d)/, '$1-$2');
         }
+        return cleaned;
+    }
 
-        if (ufInput && !ufInput.value) ufInput.value = processo.uf || '';
+    // Atualiza o estado visual da inline de parte (ex: cor de fundo, visibilidade do botão CIA)
+    function updateParteDisplay(parteInline) {
+        const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
+        if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
+            parteInline.style.backgroundColor = 'rgba(220, 230, 255, 0.5)'; // Azul claro sutil
+        } else {
+            parteInline.style.backgroundColor = ''; // Remove cor se não for passivo
+        }
+        setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
+    }
 
-        // --- Lógica Aprimorada para o Status Processual ---
-        const statusId = processo.status_id;
-        const statusNome = processo.status_nome;
+    // Configura o botão CIA (Completar Informações de Endereço) para uma inline de parte
+    function setupCiaButton(parteInline) {
+        const enderecoInput = parteInline.querySelector('[id$="-endereco"]');
+        const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
+        const documentoInput = parteInline.querySelector('[id$="-documento"]'); // Necessário para a API do CIA
+        let ciaButton = parteInline.querySelector('.cia-button');
 
-        if (statusSelect && statusId && statusNome) {
-            let optionExists = Array.from(statusSelect.options).some(opt => opt.value == statusId);
-            if (!optionExists) {
-                const newOption = new Option(statusNome, statusId, true, true);
-                statusSelect.appendChild(newOption);
+        const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
+
+        if (enderecoInput) {
+            if (isPassive && !ciaButton) {
+                // Cria o botão se for polo passivo e ainda não existir
+                ciaButton = document.createElement('button');
+                ciaButton.type = 'button';
+                ciaButton.className = 'button cia-button';
+                ciaButton.innerText = 'CEP';
+                ciaButton.style.marginLeft = '5px';
+                enderecoInput.parentNode.appendChild(ciaButton);
+            } else if (!isPassive && ciaButton) {
+                // Remove o botão se não for polo passivo e ele existir
+                ciaButton.remove();
+                ciaButton = null;
             }
-            statusSelect.value = statusId;
+
+            if (ciaButton) {
+                // Configura o handler do botão (se ele existir)
+                ciaButton.onclick = function() {
+                    const cpfCnpj = documentoInput ? documentoInput.value.replace(/\D/g, '') : '';
+                    if (!cpfCnpj) {
+                        alert('Por favor, informe o CPF/CNPJ da parte para buscar o endereço.');
+                        return;
+                    }
+                    const url = `/contratos/api/fetch-address/${cpfCnpj}/`;
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.endereco_formatado) {
+                                enderecoInput.value = data.endereco_formatado;
+                                enderecoInput.dispatchEvent(new Event('change', { bubbles: true })); // Dispara evento de mudança para o widget EnderecoWidget
+                            } else if (data.error) {
+                                alert('Erro ao buscar endereço: ' + data.error);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Erro na requisição da API de endereço:', error);
+                            alert('Erro de conexão ao buscar endereço.');
+                        });
+                };
+            }
         }
-        // --- Fim da Lógica do Status ---
+    }
+
+
+    // Configura campo de documento (máscara e tipo de pessoa) para uma inline de parte
+    function setupDocumentoField(parteInline) {
+        const documentoInput = parteInline.querySelector('[id$="-documento"]');
+        const tipoPessoaSelect = parteInline.querySelector('[id$="-tipo_pessoa"]');
+
+        if (documentoInput) {
+            // Aplica máscara inicial e atualiza no input
+            documentoInput.value = maskCpfCnpj(documentoInput.value);
+
+            documentoInput.addEventListener('input', function() {
+                const cleanedValue = this.value.replace(/\D/g, '');
+                this.value = maskCpfCnpj(cleanedValue);
+
+                // Auto-set tipo_pessoa
+                if (tipoPessoaSelect) {
+                    if (cleanedValue.length > 0 && cleanedValue.length <= 11) {
+                        tipoPessoaSelect.value = 'PF'; // Pessoa Física
+                    } else if (cleanedValue.length > 11) {
+                        tipoPessoaSelect.value = 'PJ'; // Pessoa Jurídica
+                    } else {
+                        tipoPessoaSelect.value = ''; // Limpa se vazio
+                    }
+                }
+            });
+        }
+    }
+
+    // Função principal para configurar uma inline de parte
+    function setupParteInline(parteInline) {
+        setupDocumentoField(parteInline);
+
+        const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
+        if (tipoPoloSelect) {
+            tipoPoloSelect.addEventListener('change', () => updateParteDisplay(parteInline));
+        }
+        updateParteDisplay(parteInline); // Atualiza no carregamento inicial
+    }
+
+
+    // --- 5. Preenchimento de Campos do Formulário ---
+    function fillFormFields(processo, partes, andamentos) {
+        console.log("--- Iniciando fillFormFields ---");
+        console.log("Dados do processo recebidos:", processo);
+        console.log("Dados das partes recebidos:", partes);
+
+        // Mapeamento dos valores de tipo_pessoa da API para os valores do campo no Django
+        const tipoPessoaMap = {
+            'JURIDICA': 'PJ',
+            'FISICA': 'PF'
+        };
+
+
+        if (processo) { // Adiciona uma verificação de segurança
+            console.log("Preenchendo campos do processo principal...");
+            if (varaInput) varaInput.value = processo.vara || '';
+            if (tribunalInput) tribunalInput.value = processo.tribunal || '';
+            
+            // CORRIGIDO: Agora espera o valor numérico do backend.
+            if (valorCausaInput && processo.valor_causa) {
+                // O Django DecimalField espera um ponto como separador decimal, não vírgula.
+                valorCausaInput.value = processo.valor_causa;
+            } else if (valorCausaInput) {
+                valorCausaInput.value = '0.00';
+            }
+
+            if (ufInput && !ufInput.value) ufInput.value = processo.uf || '';
+
+            const statusId = processo.status_id;
+            const statusNome = processo.status_nome;
+
+            if (statusSelect && statusId && statusNome) {
+                console.log(`Tentando definir Classe para: ID=${statusId}, Nome=${statusNome}`);
+                let optionExists = Array.from(statusSelect.options).some(opt => opt.value == statusId);
+                if (!optionExists) {
+                    console.log("Opção de Classe não existe, criando uma nova.");
+                    const newOption = new Option(statusNome, statusId, true, true);
+                    statusSelect.appendChild(newOption);
+                }
+                statusSelect.value = statusId;
+            }
+        } else {
+            console.warn("Objeto 'processo' é nulo ou indefinido. Pulando preenchimento dos campos principais.");
+        }
 
         if (partes && partes.length > 0) {
             const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
-            const totalPartesForms = document.querySelectorAll('.dynamic-partes_processuais').length;
+            let totalFormsInput = document.querySelector('#id_partes_processuais-TOTAL_FORMS');
+            let totalForms = parseInt(totalFormsInput.value);
+            
+            console.log(`Encontradas ${totalForms} inlines de partes. Recebidas ${partes.length} partes.`);
 
-            for (let i = totalPartesForms; i < partes.length; i++) {
-                if (addParteButton) addParteButton.click();
+            // Adiciona novas inlines se necessário
+            for (let i = totalForms; i < partes.length; i++) {
+                if (addParteButton) {
+                    console.log("Adicionando nova inline de parte...");
+                    addParteButton.click();
+                }
+            }
+            
+            // Lógica para esconder inlines extras
+            totalForms = parseInt(totalFormsInput.value); // Re-ler o total
+            for (let i = partes.length; i < totalForms; i++) {
+                 const inlineToDelete = document.getElementById(`partes_processuais-${i}`);
+                 if (inlineToDelete) {
+                    const deleteCheckbox = inlineToDelete.querySelector('input[id$="-DELETE"]');
+                    if(deleteCheckbox) deleteCheckbox.checked = true;
+                    inlineToDelete.style.display = 'none';
+                 }
             }
 
-            document.querySelectorAll('.dynamic-partes_processuais').forEach((inline, i) => {
-                if (i < partes.length) {
+
+            // Aumentado o timeout para garantir a renderização de novas inlines
+            setTimeout(() => {
+                console.log("Iniciando preenchimento das inlines de partes após timeout.");
+                
+                // Itera sobre os dados das partes recebidas para preencher as inlines correspondentes
+                for (let i = 0; i < partes.length; i++) {
+                    const inline = document.getElementById(`partes_processuais-${i}`);
+                    if (!inline) {
+                        console.error(`Não foi possível encontrar a inline de parte #${i} para preencher. O formulário pode não ter sido adicionado a tempo.`);
+                        continue;
+                    }
+                    
                     const parte = partes[i];
+                    console.log(`Processando inline #${i} com dados:`, parte);
+
                     const prefix = `id_partes_processuais-${i}-`;
                     const tipoPoloSelect = inline.querySelector(`#${prefix}tipo_polo`);
                     const nomeInput = inline.querySelector(`#${prefix}nome`);
@@ -203,19 +369,23 @@ document.addEventListener('DOMContentLoaded', function() {
                     const documentoInput = inline.querySelector(`#${prefix}documento`);
                     const enderecoInput = inline.querySelector(`#${prefix}endereco`);
 
-                    if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo;
-                    if (nomeInput) nomeInput.value = parte.nome;
-                    if (tipoPessoaSelect) tipoPessoaSelect.value = parte.tipo_pessoa;
-                    if (documentoInput) {
-                        documentoInput.value = parte.documento;
-                        documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (nomeInput) nomeInput.value = parte.nome || '';
+                                            if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo || '';
+                                            if (tipoPessoaSelect) {
+                                                const apiTipoPessoa = parte.tipo_pessoa ? parte.tipo_pessoa.toUpperCase() : '';
+                                                tipoPessoaSelect.value = tipoPessoaMap[apiTipoPessoa] || '';
+                                            }
+                                            if (documentoInput) {                        documentoInput.value = parte.documento || '';
+                        documentoInput.dispatchEvent(new Event('input', { bubbles: true })); 
                     }
                     if (enderecoInput) enderecoInput.value = parte.endereco || '';
 
+                    // Garante que o checkbox de deleção esteja desmarcado para as partes que estamos preenchendo
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = false;
+                    inline.style.display = 'block'; // Garante que a inline esteja visível
                 }
-            });
+            }, 500); 
         }
 
         if (andamentos && andamentos.length > 0) {
@@ -223,28 +393,49 @@ document.addEventListener('DOMContentLoaded', function() {
             const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
 
             for (let i = totalAndamentosForms; i < andamentos.length; i++) {
-                if (addAndamentoButton) addAndamentoButton.click();
+                if (addAndamentoButton) {
+                    addAndamentoButton.click();
+                }
             }
 
-            document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
-                if (i < andamentos.length) {
-                    const andamento = andamentos[i];
-                    const prefix = `id_andamentos-${i}-`;
-                    const dataInput = inline.querySelector(`#${prefix}data_0`);
-                    const horaInput = inline.querySelector(`#${prefix}data_1`);
-                    const descricaoInput = inline.querySelector(`#${prefix}descricao`);
+            setTimeout(() => {
+                document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
+                    if (i < andamentos.length) {
+                        const andamento = andamentos[i];
+                        const prefix = `id_andamentos-${i}-`;
+                        const dataInput = inline.querySelector(`#${prefix}data_0`);
+                        const horaInput = inline.querySelector(`#${prefix}data_1`);
+                        const descricaoInput = inline.querySelector(`#${prefix}descricao`);
 
-                    if (dataInput && horaInput && andamento.data) {
-                        const dateTime = new Date(andamento.data);
-                        dataInput.value = dateTime.toLocaleDateString('pt-BR');
-                        horaInput.value = dateTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        if (dataInput && horaInput && andamento.data) {
+                            const dateTime = new Date(andamento.data);
+                            dataInput.value = dateTime.toLocaleDateString('pt-BR');
+                            horaInput.value = dateTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        }
+                        if (descricaoInput) descricaoInput.value = andamento.descricao || '';
+
+                        const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
+                        if (deleteCheckbox) deleteCheckbox.checked = false;
                     }
-                    if (descricaoInput) descricaoInput.value = andamento.descricao || '';
-
-                    const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
-                    if (deleteCheckbox) deleteCheckbox.checked = false;
-                }
-            });
+                });
+            }, 500);
         }
     }
+
+    // --- Inicialização de Inlines existentes ---
+    document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
+
+    // --- Configuração para novas inlines adicionadas dinamicamente ---
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).on('formset:added', function(event, $row, formsetName) {
+            // Verifica se a nova linha pertence ao formset 'partes_processuais'
+            if (formsetName === 'partes_processuais') {
+                // $row é um objeto jQuery, pegamos o elemento DOM com [0]
+                if ($row && $row.length) {
+                    setupParteInline($row[0]);
+                }
+            }
+        });
+    }
+
 });
