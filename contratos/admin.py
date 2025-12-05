@@ -301,10 +301,22 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         
         # Preserva os filtros da changelist para a navegação
         changelist_filters = request.GET.get('_changelist_filters')
+
+        # Clona os filtros para o queryset da changelist, evitando que o Django
+        # tente filtrar pelo parâmetro especial "_changelist_filters"
+        from django.http import QueryDict
+        original_get = request.GET
+        if changelist_filters:
+            request.GET = QueryDict(changelist_filters, mutable=False)
+        else:
+            request.GET = QueryDict('', mutable=False)
         
         # Usa o mesmo queryset da changelist para consistência
         changelist = self.get_changelist_instance(request)
         queryset = changelist.get_queryset(request)
+
+        # Restaura o GET original para não afetar o restante do fluxo
+        request.GET = original_get
         
         # Garante uma ordenação consistente
         ordering = self.get_ordering(request) or ('-pk',)
