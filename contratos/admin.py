@@ -15,7 +15,7 @@ from django.contrib.auth.models import User # Importar o modelo User
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
-    OpcaoResposta, QuestaoAnalise, AnaliseProcesso,
+    OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
 )
 from .widgets import EnderecoWidget
 
@@ -350,6 +350,16 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             formset.save_m2m()
         else:
             super().save_formset(request, form, formset, change)
+
+
+@admin.register(BuscaAtivaConfig)
+class BuscaAtivaConfigAdmin(admin.ModelAdmin):
+    list_display = ("horario", "habilitado", "ultima_execucao")
+    readonly_fields = ("ultima_execucao",)
+
+    def has_add_permission(self, request):
+        # Impede múltiplos registros; apenas edição do único registro
+        return not BuscaAtivaConfig.objects.exists()
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}

@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
-from contratos.models import ProcessoJudicial
+from django.utils import timezone
+from contratos.models import ProcessoJudicial, BuscaAtivaConfig
 from contratos.integracoes_escavador.atualizador import atualizar_processo_do_escavador
 import time
 
@@ -10,6 +11,23 @@ class Command(BaseCommand):
         """
         O ponto de entrada principal para o comando.
         """
+        config = BuscaAtivaConfig.get_solo()
+        now = timezone.localtime()
+
+        if not config.habilitado:
+            self.stdout.write(self.style.WARNING('Busca ativa desabilitada. Nada a fazer.'))
+            return
+
+        # Impede reexecução no mesmo dia
+        if config.ultima_execucao and config.ultima_execucao.date() == now.date():
+            self.stdout.write(self.style.WARNING('Busca ativa já executada hoje.'))
+            return
+
+        # Se horário configurado ainda não chegou, encerra
+        if now.time() < config.horario:
+            self.stdout.write(self.style.WARNING(f"Aguardando horário configurado ({config.horario}) para executar."))
+            return
+
         self.stdout.write(self.style.SUCCESS('Iniciando a atualização de processos com busca ativa...'))
 
         # Filtra apenas os processos que devem ser atualizados
@@ -36,3 +54,5 @@ class Command(BaseCommand):
             time.sleep(1) 
 
         self.stdout.write(self.style.SUCCESS('Atualização de processos concluída.'))
+        config.ultima_execucao = now
+        config.save(update_fields=['ultima_execucao'])

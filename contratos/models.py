@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+import datetime
 
 
 class Etiqueta(models.Model):
@@ -258,6 +259,29 @@ class Prazo(models.Model):
 
     def __str__(self):
         return self.titulo
+
+
+class BuscaAtivaConfig(models.Model):
+    horario = models.TimeField(default=datetime.time(3, 0), verbose_name="Horário diário")
+    habilitado = models.BooleanField(default=True, verbose_name="Busca ativa habilitada")
+    ultima_execucao = models.DateTimeField(null=True, blank=True, verbose_name="Última execução")
+
+    class Meta:
+        verbose_name = "Configuração de Busca Ativa"
+        verbose_name_plural = "Configuração de Busca Ativa"
+
+    def save(self, *args, **kwargs):
+        # Garante apenas um registro (singleton simples)
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Configuração de Busca Ativa"
 
     class Meta:
         verbose_name = "Prazo"
