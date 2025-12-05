@@ -387,6 +387,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
+            path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
         ]
         return custom_urls + urls
 
@@ -436,6 +437,30 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             except json.JSONDecodeError:
                 return JsonResponse({'status': 'error', 'message': 'Dados inválidos.'}, status=400)
         return JsonResponse({'status': 'error', 'message': 'Método não permitido.'}, status=405)
+
+    def atualizar_andamentos_view(self, request, object_id):
+        """
+        Endpoint acionado pelo botão 'Atualizar andamentos agora'.
+        Busca andamentos na API do Escavador para o processo com CNJ informado
+        e salva no banco.
+        """
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+
+        if not processo.cnj:
+            self.message_user(request, "Processo sem CNJ. Preencha o CNJ para buscar andamentos.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
+
+        try:
+            from contratos.integracoes_escavador.atualizador import atualizar_processo_do_escavador
+            resultado = atualizar_processo_do_escavador(processo.cnj)
+            if resultado:
+                self.message_user(request, f"Andamentos atualizados para o processo {processo.cnj}.", level=messages.SUCCESS)
+            else:
+                self.message_user(request, f"Não foi possível atualizar andamentos para o processo {processo.cnj}. Verifique o token da API.", level=messages.ERROR)
+        except Exception as exc:
+            self.message_user(request, f"Erro ao atualizar andamentos: {exc}", level=messages.ERROR)
+
+        return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
     def history_view(self, request, object_id, extra_context=None):
         extra_context = extra_context or {}

@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from django.utils.timezone import make_aware
-from contratos.models import ProcessoJudicial, StatusProcessual, Parte, Andamento
+from contratos.models import ProcessoJudicial, StatusProcessual, Parte, AndamentoProcessual
 
 def parse_dados_processo(processo: ProcessoJudicial, dados_api: dict):
     """
@@ -35,7 +35,7 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
     Cria ou atualiza as partes do processo a partir dos dados da API.
     Limpa as partes antigas antes de adicionar as novas para evitar duplicatas.
     """
-    processo.partes.all().delete() # Remove as partes existentes para sincronizar com a API
+    processo.partes_processuais.all().delete()  # Usa o related_name correto
 
     partes_envolvidas = dados_api.get('partes_envolvidas', [])
     for parte_api in partes_envolvidas:
@@ -78,7 +78,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict):
             data_andamento = make_aware(datetime.fromisoformat(data_str))
             
             # Cria o andamento apenas se ele não existir
-            Andamento.objects.get_or_create(
+            AndamentoProcessual.objects.get_or_create(
                 processo=processo,
                 data=data_andamento,
                 descricao=descricao

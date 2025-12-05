@@ -13,6 +13,7 @@ import re
 from django.http import JsonResponse
 from django.views import View
 import json
+from datetime import datetime
 
 class AgendaAPIView(APIView):
     """
@@ -285,6 +286,26 @@ class BuscarDadosEscavadorView(View):
                 
                 partes_data = list(partes_encontradas.values())
 
+                # Andamentos processuais
+                andamentos_data = []
+                for fonte in escavador_data.get('fontes', []):
+                    fonte_nome = fonte.get('fonte', {}).get('nome')
+                    for mov in fonte.get('movimentacoes', []):
+                        data_raw = mov.get('data')
+                        data_iso = None
+                        if data_raw:
+                            try:
+                                data_iso = datetime.fromisoformat(data_raw).isoformat()
+                            except ValueError:
+                                # Mantém o valor bruto caso o formato seja diferente
+                                data_iso = data_raw
+
+                        andamentos_data.append({
+                            'data': data_iso,
+                            'descricao': mov.get('conteudo') or mov.get('titulo'),
+                            'detalhes': fonte_nome,
+                        })
+
             return JsonResponse({
                 'status': 'success',
                 'message': 'Dados obtidos com sucesso!',
@@ -299,4 +320,3 @@ class BuscarDadosEscavadorView(View):
             return JsonResponse({'status': 'error', 'message': f'Erro na API do Escavador: {e.response.status_code}'}, status=500)
         except requests.exceptions.RequestException as e:
             return JsonResponse({'status': 'error', 'message': f'Erro de conexão com a API do Escavador: {e}'}, status=500)
-

@@ -100,6 +100,45 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const csrftoken = getCookie('csrftoken');
 
+    // Botão "Atualizar andamentos agora" ao lado do checkbox de Busca Ativa
+    const buscaAtivaInput = document.getElementById('id_busca_ativa');
+    if (buscaAtivaInput && !document.getElementById('btn_atualizar_andamentos')) {
+        const btn = document.createElement('button');
+        btn.id = 'btn_atualizar_andamentos';
+        btn.type = 'button';
+        btn.className = 'button';
+        btn.innerText = '🔄 Atualizar andamentos agora';
+        btn.style.marginRight = '10px';
+
+        const container = buscaAtivaInput.parentNode;
+        container.insertBefore(btn, buscaAtivaInput);
+
+        btn.addEventListener('click', () => {
+            const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+            if (!match) {
+                alert('Salve o processo antes de atualizar andamentos.');
+                return;
+            }
+            const objectId = match[1];
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Buscando andamentos...';
+
+            fetch(`/admin/contratos/processojudicial/${objectId}/atualizar-andamentos/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken }
+            }).then(resp => {
+                if (!resp.ok) throw new Error('Erro ao acionar atualização.');
+                window.location.reload();
+            }).catch(err => {
+                alert(err.message || 'Falha ao atualizar andamentos.');
+            }).finally(() => {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            });
+        });
+    }
+
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
