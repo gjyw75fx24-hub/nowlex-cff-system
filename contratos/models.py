@@ -283,11 +283,6 @@ class BuscaAtivaConfig(models.Model):
     def __str__(self):
         return "Configuração de Busca Ativa"
 
-    class Meta:
-        verbose_name = "Prazo"
-        verbose_name_plural = "Prazos"
-        ordering = ['data_limite']
-
 
 # --- Modelos para o Motor da Árvore de Decisão de Análise ---
 

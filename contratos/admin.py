@@ -352,15 +352,6 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             super().save_formset(request, form, formset, change)
 
 
-@admin.register(BuscaAtivaConfig)
-class BuscaAtivaConfigAdmin(admin.ModelAdmin):
-    list_display = ("horario", "habilitado", "ultima_execucao")
-    readonly_fields = ("ultima_execucao",)
-
-    def has_add_permission(self, request):
-        # Impede múltiplos registros; apenas edição do único registro
-        return not BuscaAtivaConfig.objects.exists()
-
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
         changelist = self.get_changelist_instance(request)
@@ -584,6 +575,55 @@ class BuscaAtivaConfigAdmin(admin.ModelAdmin):
             'media': self.media, # Inclui os assets do admin para o formulário
         }
         return render(request, 'admin/contratos/processojudicial/delegate_select_user.html', context)
+
+def delegate_select_user_view(self, request):
+        opts = self.model._meta
+        app_label = opts.app_label
+        
+        # Recupera os IDs dos processos selecionados da URL
+        selected_ids = request.GET.get('ids', '')
+        if not selected_ids:
+            self.message_user(request, "Nenhum processo selecionado para delegar.", messages.WARNING)
+            return HttpResponseRedirect("../")
+        
+        process_pks = [int(pk) for pk in selected_ids.split(',')]
+        
+        if request.method == 'POST':
+            form = UserForm(request.POST)
+            if form.is_valid():
+                selected_user = form.cleaned_data['user']
+                
+                # Atualiza os processos
+                self.model.objects.filter(pk__in=process_pks).update(delegado_para=selected_user)
+                
+                user_name = selected_user.username if selected_user else "Ninguém"
+                self.message_user(request, f"{len(process_pks)} processo(s) delegados para {user_name} com sucesso.", messages.SUCCESS)
+                return HttpResponseRedirect("../") # Volta para a changelist
+            else:
+                self.message_user(request, "Por favor, selecione um usuário válido.", messages.ERROR)
+        else:
+            form = UserForm()
+        
+        context = {
+            'form': form,
+            'process_pks': process_pks,
+            'opts': opts,
+            'app_label': app_label,
+            'title': "Delegar Processos Selecionados",
+            'is_popup': False,
+            'media': self.media, # Inclui os assets do admin para o formulário
+        }
+        return render(request, 'admin/contratos/processojudicial/delegate_select_user.html', context)
+
+
+@admin.register(BuscaAtivaConfig)
+class BuscaAtivaConfigAdmin(admin.ModelAdmin):
+    list_display = ("horario", "habilitado", "ultima_execucao")
+    readonly_fields = ("ultima_execucao",)
+
+    def has_add_permission(self, request):
+        # Impede múltiplos registros; apenas edição do único registro
+        return not BuscaAtivaConfig.objects.exists()
 
 @admin.register(StatusProcessual)
 class StatusProcessualAdmin(admin.ModelAdmin):
