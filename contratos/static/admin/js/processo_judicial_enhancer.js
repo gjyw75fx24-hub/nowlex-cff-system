@@ -239,27 +239,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Atualiza o estado visual da inline de parte (ex: cor de fundo, visibilidade do botão CIA)
     function updateParteDisplay(parteInline) {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
-        const enderecoField = parteInline.querySelector('.field-endereco');
-        const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
-        const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
-        const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
-
-        if (isPassive) {
+        if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
             parteInline.style.backgroundColor = 'rgba(220, 230, 255, 0.5)'; // Azul claro sutil
         } else {
             parteInline.style.backgroundColor = ''; // Remove cor se não for passivo
         }
-
-        // Minimiza endereço para polo ativo, expande para passivo
-        if (enderecoGrid) {
-            if (isPassive) {
-                enderecoGrid.style.display = 'grid';
-            } else {
-                enderecoGrid.style.display = 'none';
-            }
-            if (toggleBtn) toggleBtn.style.display = 'inline-block';
-        }
-
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
     }
 
@@ -268,7 +252,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const enderecoInput = parteInline.querySelector('[id$="-endereco"]');
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         const documentoInput = parteInline.querySelector('[id$="-documento"]'); // Necessário para a API do CIA
-        const enderecoField = parteInline.querySelector('.field-endereco');
         let ciaButton = parteInline.querySelector('.cia-button');
         let clearButton = parteInline.querySelector('.endereco-clear-button');
 
@@ -281,14 +264,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 ciaButton.type = 'button';
                 ciaButton.className = 'button cia-button';
                 ciaButton.innerText = 'CEP';
-                ciaButton.style.marginLeft = '30px';
-                ciaButton.style.fontSize = '0.85em';
-                const label = enderecoField ? enderecoField.querySelector('label') : null;
-                if (label) {
-                    label.appendChild(ciaButton);
-                } else {
-                    enderecoInput.parentNode.appendChild(ciaButton);
-                }
+                ciaButton.style.marginLeft = '5px';
+                enderecoInput.parentNode.appendChild(ciaButton);
             } else if (!isPassive && ciaButton) {
                 // Remove o botão se não for polo passivo e ele existir
                 ciaButton.remove();
@@ -345,17 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 clearButton.innerText = '🧹';
                 clearButton.title = 'Limpar endereço';
                 clearButton.style.marginLeft = '5px';
-                clearButton.style.background = 'transparent';
-                clearButton.style.border = 'none';
-                clearButton.style.color = '#555';
-                clearButton.style.cursor = 'pointer';
-                clearButton.style.float = 'right';
-                const label = enderecoField ? enderecoField.querySelector('label') : null;
-                if (label) {
-                    label.appendChild(clearButton);
-                } else {
-                    enderecoInput.parentNode.appendChild(clearButton);
-                }
+                enderecoInput.parentNode.appendChild(clearButton);
             }
             clearButton.onclick = function() {
                 enderecoInput.value = '';
@@ -402,38 +369,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Função principal para configurar uma inline de parte
     function setupParteInline(parteInline) {
         setupDocumentoField(parteInline);
-
-        // Cria toggle para endereço (minimiza por padrão no polo ativo)
-        const enderecoField = parteInline.querySelector('.field-endereco');
-        if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
-            const label = enderecoField.querySelector('label');
-            if (label) {
-                label.style.display = 'inline-flex';
-                label.style.alignItems = 'center';
-                label.style.gap = '6px';
-            }
-            const toggleBtn = document.createElement('button');
-            toggleBtn.type = 'button';
-            toggleBtn.className = 'button endereco-toggle-button';
-            toggleBtn.innerText = '▸';
-            toggleBtn.title = 'Expandir endereço';
-            toggleBtn.style.marginLeft = '5px';
-            toggleBtn.style.background = 'transparent';
-            toggleBtn.style.border = 'none';
-            toggleBtn.style.color = '#555';
-            toggleBtn.style.cursor = 'pointer';
-            toggleBtn.addEventListener('click', () => {
-                const grid = enderecoField.querySelector('.endereco-fields-grid');
-                if (!grid) return;
-                const showing = grid.style.display !== 'none';
-                grid.style.display = showing ? 'none' : 'grid';
-                toggleBtn.innerText = showing ? '▸' : '▾';
-                toggleBtn.title = showing ? 'Expandir endereço' : 'Recolher endereço';
-            });
-            if (label) {
-                label.appendChild(toggleBtn);
-            }
-        }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         if (tipoPoloSelect) {
