@@ -159,7 +159,7 @@ class ParteForm(forms.ModelForm):
 class ParteInline(admin.StackedInline):
     model = Parte
     form = ParteForm
-    extra = 1
+    extra = 0
     fk_name = "processo"
     classes = ('dynamic-partes',)
     can_delete = True
