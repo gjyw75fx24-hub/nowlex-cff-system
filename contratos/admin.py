@@ -16,6 +16,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
+    AdvogadoPassivo,
 )
 from .widgets import EnderecoWidget
 
@@ -105,6 +106,12 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
     search_fields = ('nome',)
 
 
+@admin.register(Parte)
+class ParteAdmin(admin.ModelAdmin):
+    search_fields = ("nome", "documento")
+    list_display = ("nome", "tipo_polo", "processo")
+
+
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
@@ -164,6 +171,39 @@ class ParteInline(admin.StackedInline):
     classes = ('dynamic-partes',)
     can_delete = True
     fieldsets = ((None, {"fields": (("tipo_polo", "tipo_pessoa"), ("nome", "documento"), "endereco")}),)
+
+
+class AdvogadoPassivoInline(admin.StackedInline):
+    model = AdvogadoPassivo
+    fk_name = "processo"
+    extra = 0
+    autocomplete_fields = ('parte', 'responsavel')
+    classes = ('advogado-passivo-inline',)
+    verbose_name_plural = "Advogado Parte Passiva"
+    fieldsets = (
+        (
+            None,
+            {"fields": (
+                ("nome", "responsavel"),
+                ("uf_oab", "oab_numero"),
+                ("email", "telefone"),
+                "parte",
+                "observacao",
+                ("agendar_ligacao_em", "lembrete_enviado"),
+            )},
+        ),
+    )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        if db_field.name == 'parte':
+            processo_id = request.resolver_match.kwargs.get('object_id')
+            qs = Parte.objects.filter(tipo_polo='PASSIVO')
+            if processo_id:
+                qs = qs.filter(processo_id=processo_id)
+            formfield.queryset = qs
+        return formfield
+
 
 class ContratoForm(forms.ModelForm):
     class Meta:
@@ -286,7 +326,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_filter = ["busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
-    inlines = [ParteInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
+    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),

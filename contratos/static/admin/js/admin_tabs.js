@@ -1,10 +1,23 @@
 // static/admin/js/admin_tabs.js
 
 window.addEventListener('load', function() {
-    const inlineGroups = document.querySelectorAll('.inline-group');
+    const allInlineGroups = Array.from(document.querySelectorAll('.inline-group'));
+    if (allInlineGroups.length === 0) {
+        return;
+    }
+
+    const isAdvPassivo = group => {
+        const title = (group.querySelector('h2')?.textContent || '').toLowerCase();
+        return group.classList.contains('advogado-passivo-inline') || title.includes('advogado') && title.includes('passiva');
+    };
+
+    const advPassivoGroup = allInlineGroups.find(isAdvPassivo);
+    const inlineGroups = allInlineGroups.filter(group => !isAdvPassivo(group));
     if (inlineGroups.length === 0) {
         return;
     }
+
+    const partesGroup = inlineGroups.find(group => (group.id && group.id.includes('partes_processuais')) || group.classList.contains('dynamic-partes'));
 
     const tabsContainer = document.createElement('div');
     tabsContainer.className = 'inline-group-tabs';
@@ -29,6 +42,7 @@ window.addEventListener('load', function() {
 
             tabButton.classList.add('active');
             group.classList.add('active');
+            syncAdvogadoPassivo();
         });
 
         tabsContainer.appendChild(tabButton);
@@ -49,4 +63,17 @@ window.addEventListener('load', function() {
         tabButtons[activeTabIndex].button.classList.add('active');
         tabButtons[activeTabIndex].group.classList.add('active');
     }
+
+    function syncAdvogadoPassivo() {
+        if (!advPassivoGroup || !partesGroup) {
+            return;
+        }
+        if (partesGroup.classList.contains('active')) {
+            advPassivoGroup.classList.add('active');
+        } else {
+            advPassivoGroup.classList.remove('active');
+        }
+    }
+
+    syncAdvogadoPassivo();
 });

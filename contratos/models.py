@@ -166,6 +166,52 @@ class Advogado(models.Model):
     def __str__(self):
         return self.nome
 
+
+class AdvogadoPassivo(models.Model):
+    UF_CHOICES = [
+        ('AC', 'AC'), ('AL', 'AL'), ('AP', 'AP'), ('AM', 'AM'), ('BA', 'BA'),
+        ('CE', 'CE'), ('DF', 'DF'), ('ES', 'ES'), ('GO', 'GO'), ('MA', 'MA'),
+        ('MT', 'MT'), ('MS', 'MS'), ('MG', 'MG'), ('PA', 'PA'), ('PB', 'PB'),
+        ('PR', 'PR'), ('PE', 'PE'), ('PI', 'PI'), ('RJ', 'RJ'), ('RN', 'RN'),
+        ('RS', 'RS'), ('RO', 'RO'), ('RR', 'RR'), ('SC', 'SC'), ('SP', 'SP'),
+        ('SE', 'SE'), ('TO', 'TO'),
+    ]
+
+    processo = models.ForeignKey(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='advogados_passivos'
+    )
+    parte = models.ForeignKey(
+        Parte,
+        on_delete=models.CASCADE,
+        related_name='advogados_passivos',
+        limit_choices_to={'tipo_polo': 'PASSIVO'}
+    )
+    responsavel = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Responsável pelo contato"
+    )
+    nome = models.CharField(max_length=255, verbose_name="Nome completo")
+    uf_oab = models.CharField(max_length=2, choices=UF_CHOICES, verbose_name="UF da OAB")
+    oab_numero = models.CharField(max_length=10, verbose_name="Número da OAB")
+    email = models.EmailField(blank=True, null=True, verbose_name="E-mail")
+    telefone = models.CharField(max_length=20, blank=True, null=True, verbose_name="Telefone")
+    observacao = models.TextField(blank=True, null=True, verbose_name="Observação")
+    agendar_ligacao_em = models.DateTimeField(blank=True, null=True, verbose_name="Agendar ligação em")
+    lembrete_enviado = models.BooleanField(default=False, verbose_name="Lembrete enviado")
+
+    class Meta:
+        verbose_name = "Advogado da Parte Passiva"
+        verbose_name_plural = "Advogados da Parte Passiva"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
 class Contrato(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='contratos')
     numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato", blank=True, null=True)
