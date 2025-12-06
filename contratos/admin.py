@@ -187,11 +187,20 @@ class AdvogadoPassivoInline(admin.StackedInline):
                 ("nome", "responsavel"),
                 ("uf_oab", "oab_numero"),
                 ("email", "telefone"),
+                "acordo_status",
+                "valor_acordado",
                 "observacao",
                 ("agendar_ligacao_em", "lembrete_enviado"),
             )},
         ),
     )
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'valor_acordado':
+            css = formfield.widget.attrs.get('class', '')
+            formfield.widget.attrs['class'] = (css + ' money-mask').strip()
+        return formfield
 
 
 class ContratoForm(forms.ModelForm):

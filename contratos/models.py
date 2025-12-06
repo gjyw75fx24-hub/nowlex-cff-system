@@ -168,6 +168,11 @@ class Advogado(models.Model):
 
 
 class AdvogadoPassivo(models.Model):
+    class AcordoChoices(models.TextChoices):
+        PROPOSTO = 'PROPOSTO', 'Proposto'
+        FIRMADO = 'FIRMADO', 'Firmado'
+        RECUSADO = 'RECUSADO', 'Recusado'
+
     UF_CHOICES = [
         ('AC', 'AC'), ('AL', 'AL'), ('AP', 'AP'), ('AM', 'AM'), ('BA', 'BA'),
         ('CE', 'CE'), ('DF', 'DF'), ('ES', 'ES'), ('GO', 'GO'), ('MA', 'MA'),
@@ -194,6 +199,19 @@ class AdvogadoPassivo(models.Model):
     oab_numero = models.CharField(max_length=10, verbose_name="Número da OAB")
     email = models.EmailField(blank=True, null=True, verbose_name="E-mail")
     telefone = models.CharField(max_length=20, blank=True, null=True, verbose_name="Telefone")
+    acordo_status = models.CharField(
+        max_length=10,
+        choices=AcordoChoices.choices,
+        blank=True,
+        verbose_name="Acordo"
+    )
+    valor_acordado = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Valor Acordado"
+    )
     observacao = models.TextField(blank=True, null=True, verbose_name="Observação")
     agendar_ligacao_em = models.DateTimeField(blank=True, null=True, verbose_name="Agendar ligação em")
     lembrete_enviado = models.BooleanField(default=False, verbose_name="Lembrete enviado")
