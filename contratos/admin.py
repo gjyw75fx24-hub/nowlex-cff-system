@@ -177,9 +177,10 @@ class AdvogadoPassivoInline(admin.StackedInline):
     model = AdvogadoPassivo
     fk_name = "processo"
     extra = 0
-    autocomplete_fields = ('parte', 'responsavel')
+    autocomplete_fields = ('responsavel',)
     classes = ('advogado-passivo-inline',)
     verbose_name_plural = "Advogado Parte Passiva"
+    exclude = ('parte',)
     fieldsets = (
         (
             None,
@@ -187,22 +188,11 @@ class AdvogadoPassivoInline(admin.StackedInline):
                 ("nome", "responsavel"),
                 ("uf_oab", "oab_numero"),
                 ("email", "telefone"),
-                "parte",
                 "observacao",
                 ("agendar_ligacao_em", "lembrete_enviado"),
             )},
         ),
     )
-
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
-        if db_field.name == 'parte':
-            processo_id = request.resolver_match.kwargs.get('object_id')
-            qs = Parte.objects.filter(tipo_polo='PASSIVO')
-            if processo_id:
-                qs = qs.filter(processo_id=processo_id)
-            formfield.queryset = qs
-        return formfield
 
 
 class ContratoForm(forms.ModelForm):
@@ -386,6 +376,17 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             for instance in instances:
                 if isinstance(instance, AnaliseProcesso):
                     instance.updated_by = request.user
+                    instance.save()
+            formset.save_m2m()
+        elif formset.model == AdvogadoPassivo:
+            instances = formset.save(commit=False)
+            parte_passiva = form.instance.partes_processuais.filter(tipo_polo='PASSIVO').first()
+            if not parte_passiva:
+                messages.error(request, "Cadastre uma parte passiva antes de adicionar advogados.")
+                return
+            for instance in instances:
+                if isinstance(instance, AdvogadoPassivo):
+                    instance.parte = parte_passiva
                     instance.save()
             formset.save_m2m()
         else:

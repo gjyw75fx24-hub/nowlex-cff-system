@@ -34,6 +34,7 @@ window.addEventListener('load', function() {
         tabButton.type = 'button';
 
         tabButton.addEventListener('click', () => {
+            const scrollPos = window.pageYOffset || document.documentElement.scrollTop || 0;
             // Salva o título da aba ativa no localStorage
             localStorage.setItem(lastActiveTabKey, title);
             
@@ -43,6 +44,10 @@ window.addEventListener('load', function() {
             tabButton.classList.add('active');
             group.classList.add('active');
             syncAdvogadoPassivo();
+            // Restaura a rolagem após o reflow das abas
+            window.requestAnimationFrame(() => {
+                window.scrollTo({ top: scrollPos, behavior: 'auto' });
+            });
         });
 
         tabsContainer.appendChild(tabButton);
