@@ -2,6 +2,7 @@ from django.contrib import admin, messages
 from django.db import models
 from django.db.models import FloatField
 from django.db.models.functions import Now, Abs
+from django.utils import timezone
 from django.db.models import Count, Max
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -164,6 +165,12 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         queryset = queryset.annotate(
             primeira_prescricao=models.Min('contratos__data_prescricao'),
         )
+        # Ignora contratos já prescritos por padrão (controlado pelo checkbox complementar)
+        if request.GET.get('ignorar_prescritos', 'ignorar') != 'incluir':
+            today = timezone.now().date()
+            queryset = queryset.filter(
+                models.Q(primeira_prescricao__gte=today) | models.Q(primeira_prescricao__isnull=True)
+            )
         # Converte a diferença para segundos para usar ABS numérico (evita ABS de interval no Postgres)
         queryset = queryset.annotate(
             distancia_segundos=Abs(
@@ -186,6 +193,40 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
             return queryset
         # Default: sem filtro especial
         return queryset
+
+
+class IgnorarContratosPrescritosFilter(admin.SimpleListFilter):
+    title = "Ignorar contratos prescritos"
+    parameter_name = "ignorar_prescritos"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("incluir", "Incluir prescritos"),
+        )
+
+    def queryset(self, request, queryset):
+        # A aplicação efetiva do filtro é feita no PrescricaoOrderFilter
+        return queryset
+
+
+class IgnorarPrescritosFilter(admin.SimpleListFilter):
+    title = "Ignorar contratos prescritos"
+    parameter_name = "ignorar_prescritos"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("incluir", "Incluir prescritos"),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == "incluir":
+            return queryset
+        today = timezone.now().date()
+        return queryset.annotate(
+            primeira_prescricao=models.Min('contratos__data_prescricao'),
+        ).filter(
+            models.Q(primeira_prescricao__gte=today) | models.Q(primeira_prescricao__isnull=True)
+        )
 
 
 class AndamentoProcessualForm(forms.ModelForm):
@@ -372,7 +413,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [EquipeDelegadoFilter, IgnorarContratosPrescritosFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
