@@ -264,19 +264,20 @@ document.addEventListener('DOMContentLoaded', function() {
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
     }
 
-    // Configura o botão CIA (Completar Informações de Endereço) para uma inline de parte
+    // Configura o botão CIA (Completar Informações de Endereço) e limpeza para uma inline de parte
     function setupCiaButton(parteInline) {
         const enderecoInput = parteInline.querySelector('[id$="-endereco"]');
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         const documentoInput = parteInline.querySelector('[id$="-documento"]'); // Necessário para a API do CIA
+        const enderecoField = parteInline.querySelector('.field-endereco');
         let ciaButton = parteInline.querySelector('.cia-button');
         let clearButton = parteInline.querySelector('.endereco-clear-button');
 
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
         if (enderecoInput) {
+            // CIA apenas para passivo (mas permanece mesmo com endereço preenchido)
             if (isPassive && !ciaButton) {
-                // Cria o botão se for polo passivo e ainda não existir
                 ciaButton = document.createElement('button');
                 ciaButton.type = 'button';
                 ciaButton.className = 'button cia-button';
@@ -284,7 +285,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 ciaButton.style.marginLeft = '5px';
                 enderecoInput.parentNode.appendChild(ciaButton);
             } else if (!isPassive && ciaButton) {
-                // Remove o botão se não for passivo
                 ciaButton.remove();
                 ciaButton = null;
             }
@@ -311,7 +311,6 @@ document.addEventListener('DOMContentLoaded', function() {
             };
 
             if (ciaButton) {
-                // Configura o handler do botão (se ele existir)
                 ciaButton.onclick = function() {
                     const cpfCnpj = documentoInput ? documentoInput.value.replace(/\D/g, '') : '';
                     if (!cpfCnpj) {
@@ -322,7 +321,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
             }
 
-            // Dispara automaticamente ao preencher o CPF/CNPJ do polo passivo (menos cliques)
             if (documentoInput) {
                 documentoInput.addEventListener('blur', () => {
                     if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
@@ -331,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
-            // Botão de limpar endereço (sempre disponível)
+            // Botão de limpar endereço (todos os polos)
             if (!clearButton) {
                 clearButton = document.createElement('button');
                 clearButton.type = 'button';
@@ -344,7 +342,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 clearButton.style.color = '#555';
                 clearButton.style.cursor = 'pointer';
                 clearButton.style.float = 'right';
-                enderecoInput.parentNode.appendChild(clearButton);
+                if (enderecoField) {
+                    const label = enderecoField.querySelector('label');
+                    if (label) {
+                        label.appendChild(clearButton);
+                    }
+                }
             }
             clearButton.onclick = function() {
                 enderecoInput.value = '';
@@ -413,7 +416,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 toggleBtn.innerText = showing ? '▸' : '▾';
                 toggleBtn.title = showing ? 'Expandir endereço' : 'Recolher endereço';
             });
-            enderecoField.querySelector('label')?.appendChild(toggleBtn);
+            const label = enderecoField.querySelector('label');
+            if (label) {
+                label.appendChild(toggleBtn);
+            }
         }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
