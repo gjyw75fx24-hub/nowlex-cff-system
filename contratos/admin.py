@@ -106,12 +106,6 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
     search_fields = ('nome',)
 
 
-@admin.register(Parte)
-class ParteAdmin(admin.ModelAdmin):
-    search_fields = ("nome", "documento")
-    list_display = ("nome", "tipo_polo", "processo")
-
-
 admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
