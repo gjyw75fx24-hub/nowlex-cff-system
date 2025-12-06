@@ -400,11 +400,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const enderecoField = parteInline.querySelector('.field-endereco');
         if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
             const label = enderecoField.querySelector('label');
-            if (label) {
-                label.style.display = 'inline-flex';
-                label.style.alignItems = 'center';
-                label.style.gap = '6px';
-            }
             const toggleBtn = document.createElement('button');
             toggleBtn.type = 'button';
             toggleBtn.className = 'button endereco-toggle-button';

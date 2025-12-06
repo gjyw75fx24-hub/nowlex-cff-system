@@ -153,6 +153,9 @@ class Parte(models.Model):
     def __str__(self):
         return self.nome
 
+    class Meta:
+        ordering = ['tipo_polo', 'id']
+
 class Advogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE, related_name='advogados')
     nome = models.CharField(max_length=255, verbose_name="Nome")
