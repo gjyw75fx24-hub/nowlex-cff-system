@@ -253,6 +253,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         const documentoInput = parteInline.querySelector('[id$="-documento"]'); // Necessário para a API do CIA
         let ciaButton = parteInline.querySelector('.cia-button');
+        let clearButton = parteInline.querySelector('.endereco-clear-button');
 
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
@@ -312,6 +313,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
             }
+
+            // Botão de limpar endereço (sempre disponível)
+            if (!clearButton) {
+                clearButton = document.createElement('button');
+                clearButton.type = 'button';
+                clearButton.className = 'button endereco-clear-button';
+                clearButton.innerText = '🧹';
+                clearButton.title = 'Limpar endereço';
+                clearButton.style.marginLeft = '5px';
+                enderecoInput.parentNode.appendChild(clearButton);
+            }
+            clearButton.onclick = function() {
+                enderecoInput.value = '';
+                const fieldWrapper = enderecoInput.closest('.field-endereco');
+                if (fieldWrapper) {
+                    fieldWrapper.querySelectorAll('input[data-part]').forEach(inp => {
+                        inp.value = '';
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }
+                enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+            };
         }
     }
 
