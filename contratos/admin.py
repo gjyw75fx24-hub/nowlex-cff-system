@@ -1,5 +1,6 @@
 from django.contrib import admin, messages
 from django.db import models
+from django.db.models import FloatField
 from django.db.models.functions import Now, Abs
 from django.db.models import Count, Max
 from django.http import HttpResponseRedirect, JsonResponse
@@ -156,22 +157,34 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         return (
             ("az", "A → Z (mais próxima primeiro)"),
             ("za", "Z → A (mais distante primeiro)"),
-            ("prox", "Mais próxima de hoje"),
+            ("clear", "Limpar"),
         )
 
     def queryset(self, request, queryset):
         queryset = queryset.annotate(
             primeira_prescricao=models.Min('contratos__data_prescricao'),
         )
+        # Converte a diferença para segundos para usar ABS numérico (evita ABS de interval no Postgres)
         queryset = queryset.annotate(
-            distancia_prescricao=Abs(models.F('primeira_prescricao') - Now())
+            distancia_segundos=Abs(
+                models.Func(
+                    models.F('primeira_prescricao') - Now(),
+                    function="DATE_PART",
+                    template="DATE_PART('epoch', %(expressions)s)",
+                    output_field=FloatField(),
+                )
+            )
         )
-        if self.value() == "prox" or self.value() is None:
-            return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
+        queryset = queryset.annotate(
+            distancia_prescricao=models.F('distancia_segundos')
+        )
         if self.value() == "az":
             return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
         if self.value() == "za":
             return queryset.order_by(models.F('distancia_prescricao').desc(nulls_last=True), '-pk')
+        if self.value() == "clear":
+            return queryset
+        # Default: sem filtro especial
         return queryset
 
 
