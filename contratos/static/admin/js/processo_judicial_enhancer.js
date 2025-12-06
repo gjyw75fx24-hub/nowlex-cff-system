@@ -242,7 +242,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const enderecoField = parteInline.querySelector('.field-endereco');
         const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
         const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
-        const clearBtn = enderecoField ? enderecoField.querySelector('.endereco-clear-button') : null;
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
         if (isPassive) {
@@ -253,15 +252,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Minimiza endereço para polo ativo, expande para passivo
         if (enderecoGrid) {
-            const showGrid = isPassive;
-            enderecoGrid.style.display = showGrid ? 'grid' : 'none';
-            if (toggleBtn) {
-                toggleBtn.style.display = 'inline-block';
-                toggleBtn.innerText = showGrid ? '▾' : '▸';
-                toggleBtn.title = showGrid ? 'Recolher endereço' : 'Expandir endereço';
-            }
-            if (clearBtn) {
-                clearBtn.style.display = showGrid ? 'inline-block' : 'none';
+            if (isPassive) {
+                enderecoGrid.style.display = 'grid';
+                if (toggleBtn) toggleBtn.style.display = 'none';
+            } else {
+                enderecoGrid.style.display = 'none';
+                if (toggleBtn) toggleBtn.style.display = 'inline-block';
             }
         }
 
@@ -399,12 +395,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Cria toggle para endereço (minimiza por padrão no polo ativo)
         const enderecoField = parteInline.querySelector('.field-endereco');
         if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
-            const label = enderecoField.querySelector('label');
-            if (label) {
-                label.style.display = 'inline-flex';
-                label.style.alignItems = 'center';
-                label.style.gap = '6px';
-            }
             const toggleBtn = document.createElement('button');
             toggleBtn.type = 'button';
             toggleBtn.className = 'button endereco-toggle-button';
@@ -417,19 +407,13 @@ document.addEventListener('DOMContentLoaded', function() {
             toggleBtn.style.cursor = 'pointer';
             toggleBtn.addEventListener('click', () => {
                 const grid = enderecoField.querySelector('.endereco-fields-grid');
-                const clearBtn = enderecoField.querySelector('.endereco-clear-button');
                 if (!grid) return;
                 const showing = grid.style.display !== 'none';
                 grid.style.display = showing ? 'none' : 'grid';
                 toggleBtn.innerText = showing ? '▸' : '▾';
                 toggleBtn.title = showing ? 'Expandir endereço' : 'Recolher endereço';
-                if (clearBtn) clearBtn.style.display = showing ? 'none' : 'inline-block';
             });
-            if (label) {
-                label.appendChild(toggleBtn);
-            } else {
-                enderecoField.appendChild(toggleBtn);
-            }
+            enderecoField.querySelector('label')?.appendChild(toggleBtn);
         }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
