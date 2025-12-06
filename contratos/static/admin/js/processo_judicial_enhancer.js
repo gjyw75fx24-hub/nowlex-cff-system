@@ -139,6 +139,31 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Máscara e formatação CNJ no input principal
+    if (cnjInput) {
+        const formatCnj = (raw) => {
+            const d = (raw || '').replace(/\D/g, '').slice(0, 20);
+            const parts = [
+                d.slice(0, 7),
+                d.slice(7, 9),
+                d.slice(9, 13),
+                d.slice(13, 14),
+                d.slice(14, 16),
+                d.slice(16, 20),
+            ];
+            if (d.length <= 7) return d;
+            return `${parts[0]}-${parts[1]}${parts[2] ? '.' + parts[2] : ''}${parts[3] ? '.' + parts[3] : ''}${parts[4] ? '.' + parts[4] : ''}${parts[5] ? '.' + parts[5] : ''}`;
+        };
+
+        cnjInput.addEventListener('input', (e) => {
+            const pos = e.target.selectionStart;
+            const formatted = formatCnj(e.target.value);
+            e.target.value = formatted;
+            // Best effort to keep cursor near the end
+            e.target.setSelectionRange(formatted.length, formatted.length);
+        });
+    }
+
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
@@ -246,6 +271,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 ciaButton = null;
             }
 
+            const fetchEnderecoCIA = () => {
+                const cpfCnpj = documentoInput ? documentoInput.value.replace(/\D/g, '') : '';
+                if (!cpfCnpj || cpfCnpj.length < 11) {
+                    return;
+                }
+                const url = `/api/fetch-address/${cpfCnpj}/`;
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.endereco_formatado) {
+                            enderecoInput.value = data.endereco_formatado;
+                            enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        } else if (data.error) {
+                            console.warn('Erro ao buscar endereço:', data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erro na requisição da API de endereço:', error);
+                    });
+            };
+
             if (ciaButton) {
                 // Configura o handler do botão (se ele existir)
                 ciaButton.onclick = function() {
@@ -254,22 +300,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Por favor, informe o CPF/CNPJ da parte para buscar o endereço.');
                         return;
                     }
-                    const url = `/contratos/api/fetch-address/${cpfCnpj}/`;
-                    fetch(url)
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.endereco_formatado) {
-                                enderecoInput.value = data.endereco_formatado;
-                                enderecoInput.dispatchEvent(new Event('change', { bubbles: true })); // Dispara evento de mudança para o widget EnderecoWidget
-                            } else if (data.error) {
-                                alert('Erro ao buscar endereço: ' + data.error);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Erro na requisição da API de endereço:', error);
-                            alert('Erro de conexão ao buscar endereço.');
-                        });
+                    fetchEnderecoCIA();
                 };
+            }
+
+            // Dispara automaticamente ao preencher o CPF/CNPJ do polo passivo (menos cliques)
+            if (documentoInput) {
+                documentoInput.addEventListener('blur', () => {
+                    if (isPassive) {
+                        fetchEnderecoCIA();
+                    }
+                });
             }
         }
     }
