@@ -1,5 +1,6 @@
 from django.contrib import admin, messages
 from django.db import models
+from django.db.models.functions import Now, Abs
 from django.db.models import Count, Max
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -144,6 +145,33 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         if self.value():
             return queryset.filter(delegado_para_id=self.value())
+        return queryset
+
+
+class PrescricaoOrderFilter(admin.SimpleListFilter):
+    title = "Por Prescrição"
+    parameter_name = "ord_prescricao"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("az", "A → Z (mais antiga primeiro)"),
+            ("za", "Z → A (mais recente primeiro)"),
+            ("prox", "Mais próxima de hoje"),
+        )
+
+    def queryset(self, request, queryset):
+        queryset = queryset.annotate(
+            primeira_prescricao=models.Min('contratos__data_prescricao'),
+        )
+        queryset = queryset.annotate(
+            distancia_prescricao=Abs(models.F('primeira_prescricao') - Now())
+        )
+        if self.value() == "prox" or self.value() is None:
+            return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
+        if self.value() == "az":
+            return queryset.order_by('primeira_prescricao', 'pk')
+        if self.value() == "za":
+            return queryset.order_by(models.F('primeira_prescricao').desc(nulls_last=True), '-pk')
         return queryset
 
 
@@ -331,7 +359,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [EquipeDelegadoFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
