@@ -307,7 +307,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Dispara automaticamente ao preencher o CPF/CNPJ do polo passivo (menos cliques)
             if (documentoInput) {
                 documentoInput.addEventListener('blur', () => {
-                    if (isPassive) {
+                    if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
                         fetchEnderecoCIA();
                     }
                 });

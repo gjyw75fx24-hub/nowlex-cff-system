@@ -505,6 +505,14 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(request.path)
         return super().response_change(request, obj)
 
+    def response_add(self, request, obj, post_url_continue=None):
+        """
+        Após salvar um novo processo, permanece na tela de detalhes.
+        """
+        return HttpResponseRedirect(
+            reverse('admin:contratos_processojudicial_change', args=[obj.pk])
+        )
+
     def excluir_andamentos_selecionados(self, request, queryset):
         # Esta função será chamada quando a ação for executada
         # O queryset aqui será dos ProcessoJudicial, mas precisamos dos AndamentoProcessual
