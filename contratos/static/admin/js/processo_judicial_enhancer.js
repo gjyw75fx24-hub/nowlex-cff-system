@@ -255,14 +255,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (enderecoGrid) {
             const showGrid = isPassive;
             enderecoGrid.style.display = showGrid ? 'grid' : 'none';
-            if (toggleBtn) {
-                toggleBtn.style.display = 'inline-block';
-                toggleBtn.innerText = showGrid ? '▾' : '▸';
-                toggleBtn.title = showGrid ? 'Recolher endereço' : 'Expandir endereço';
-            }
-            if (clearBtn) {
-                clearBtn.style.display = showGrid ? 'inline-block' : 'none';
-            }
+            if (toggleBtn) toggleBtn.style.display = 'inline-block';
+            if (clearBtn) clearBtn.style.display = showGrid ? 'inline-block' : 'none';
         }
 
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
@@ -399,7 +393,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Cria toggle para endereço (minimiza por padrão no polo ativo)
         const enderecoField = parteInline.querySelector('.field-endereco');
         if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
-            const label = enderecoField.querySelector('label');
             const toggleBtn = document.createElement('button');
             toggleBtn.type = 'button';
             toggleBtn.className = 'button endereco-toggle-button';
@@ -415,16 +408,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const clearBtn = enderecoField.querySelector('.endereco-clear-button');
                 if (!grid) return;
                 const showing = grid.style.display !== 'none';
-                grid.style.display = showing ? 'none' : 'grid';
-                toggleBtn.innerText = showing ? '▸' : '▾';
-                toggleBtn.title = showing ? 'Expandir endereço' : 'Recolher endereço';
-                if (clearBtn) clearBtn.style.display = showing ? 'none' : 'inline-block';
+                const willShow = !showing;
+                grid.style.display = willShow ? 'grid' : 'none';
+                if (clearBtn) clearBtn.style.display = willShow ? 'inline-block' : 'none';
+                toggleBtn.innerText = willShow ? '▾' : '▸';
+                toggleBtn.title = willShow ? 'Recolher endereço' : 'Expandir endereço';
             });
-            if (label) {
-                label.appendChild(toggleBtn);
-            } else {
-                enderecoField.appendChild(toggleBtn);
-            }
+            enderecoField.querySelector('label')?.appendChild(toggleBtn);
         }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
