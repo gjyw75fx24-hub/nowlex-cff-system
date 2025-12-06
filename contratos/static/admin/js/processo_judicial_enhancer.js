@@ -239,11 +239,28 @@ document.addEventListener('DOMContentLoaded', function() {
     // Atualiza o estado visual da inline de parte (ex: cor de fundo, visibilidade do botão CIA)
     function updateParteDisplay(parteInline) {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
-        if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
+        const enderecoField = parteInline.querySelector('.field-endereco');
+        const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
+        const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
+        const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
+
+        if (isPassive) {
             parteInline.style.backgroundColor = 'rgba(220, 230, 255, 0.5)'; // Azul claro sutil
         } else {
             parteInline.style.backgroundColor = ''; // Remove cor se não for passivo
         }
+
+        // Minimiza endereço para polo ativo, expande para passivo
+        if (enderecoGrid) {
+            if (isPassive) {
+                enderecoGrid.style.display = 'grid';
+                if (toggleBtn) toggleBtn.style.display = 'none';
+            } else {
+                enderecoGrid.style.display = 'none';
+                if (toggleBtn) toggleBtn.style.display = 'inline-block';
+            }
+        }
+
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
     }
 
@@ -322,6 +339,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 clearButton.innerText = '🧹';
                 clearButton.title = 'Limpar endereço';
                 clearButton.style.marginLeft = '5px';
+                clearButton.style.background = 'transparent';
+                clearButton.style.border = 'none';
+                clearButton.style.color = '#555';
+                clearButton.style.cursor = 'pointer';
+                clearButton.style.float = 'right';
                 enderecoInput.parentNode.appendChild(clearButton);
             }
             clearButton.onclick = function() {
@@ -369,6 +391,30 @@ document.addEventListener('DOMContentLoaded', function() {
     // Função principal para configurar uma inline de parte
     function setupParteInline(parteInline) {
         setupDocumentoField(parteInline);
+
+        // Cria toggle para endereço (minimiza por padrão no polo ativo)
+        const enderecoField = parteInline.querySelector('.field-endereco');
+        if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'button endereco-toggle-button';
+            toggleBtn.innerText = '▸';
+            toggleBtn.title = 'Expandir endereço';
+            toggleBtn.style.marginLeft = '5px';
+            toggleBtn.style.background = 'transparent';
+            toggleBtn.style.border = 'none';
+            toggleBtn.style.color = '#555';
+            toggleBtn.style.cursor = 'pointer';
+            toggleBtn.addEventListener('click', () => {
+                const grid = enderecoField.querySelector('.endereco-fields-grid');
+                if (!grid) return;
+                const showing = grid.style.display !== 'none';
+                grid.style.display = showing ? 'none' : 'grid';
+                toggleBtn.innerText = showing ? '▸' : '▾';
+                toggleBtn.title = showing ? 'Expandir endereço' : 'Recolher endereço';
+            });
+            enderecoField.querySelector('label')?.appendChild(toggleBtn);
+        }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         if (tipoPoloSelect) {
