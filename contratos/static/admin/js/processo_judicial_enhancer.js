@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 ciaButton.style.marginLeft = '5px';
                 enderecoInput.parentNode.appendChild(ciaButton);
             } else if (!isPassive && ciaButton) {
-                // Remove o botão se não for polo passivo e ele existir
+                // Remove o botão se não for passivo
                 ciaButton.remove();
                 ciaButton = null;
             }
