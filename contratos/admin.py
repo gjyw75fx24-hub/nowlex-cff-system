@@ -180,7 +180,6 @@ class AdvogadoPassivoInline(admin.StackedInline):
     autocomplete_fields = ('responsavel',)
     classes = ('advogado-passivo-inline',)
     verbose_name_plural = "Advogado Parte Passiva"
-    exclude = ('parte',)
     fieldsets = (
         (
             None,
@@ -376,17 +375,6 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             for instance in instances:
                 if isinstance(instance, AnaliseProcesso):
                     instance.updated_by = request.user
-                    instance.save()
-            formset.save_m2m()
-        elif formset.model == AdvogadoPassivo:
-            instances = formset.save(commit=False)
-            parte_passiva = form.instance.partes_processuais.filter(tipo_polo='PASSIVO').first()
-            if not parte_passiva:
-                messages.error(request, "Cadastre uma parte passiva antes de adicionar advogados.")
-                return
-            for instance in instances:
-                if isinstance(instance, AdvogadoPassivo):
-                    instance.parte = parte_passiva
                     instance.save()
             formset.save_m2m()
         else:

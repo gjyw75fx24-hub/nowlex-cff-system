@@ -182,12 +182,6 @@ class AdvogadoPassivo(models.Model):
         on_delete=models.CASCADE,
         related_name='advogados_passivos'
     )
-    parte = models.ForeignKey(
-        Parte,
-        on_delete=models.CASCADE,
-        related_name='advogados_passivos',
-        limit_choices_to={'tipo_polo': 'PASSIVO'}
-    )
     responsavel = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
