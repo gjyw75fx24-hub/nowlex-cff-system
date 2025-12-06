@@ -383,6 +383,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
         extra_context['prev_obj_url'] = base_url.format(f'{prev_obj_id}/change/{filter_params}') if prev_obj_id else None
         extra_context['next_obj_url'] = base_url.format(f'{next_obj_id}/change/{filter_params}') if next_obj_id else None
+        extra_context['delegar_users'] = User.objects.order_by('username')
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
@@ -448,6 +449,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
+            path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
         ]
         return custom_urls + urls
 
@@ -630,6 +632,20 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'media': self.media, # Inclui os assets do admin para o formulário
         }
         return render(request, 'admin/contratos/processojudicial/delegate_select_user.html', context)
+
+    def delegar_inline_view(self, request, object_id):
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        if request.method == 'POST':
+            user_id = request.POST.get('delegado_para')
+            if user_id:
+                user = User.objects.filter(pk=user_id).first()
+                processo.delegado_para = user
+            else:
+                processo.delegado_para = None
+            processo.save()
+            user_name = (processo.delegado_para.get_full_name() or processo.delegado_para.username) if processo.delegado_para else "Ninguém"
+            self.message_user(request, f"Processo delegado para {user_name}.", messages.SUCCESS)
+        return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
 def delegate_select_user_view(self, request):
         opts = self.model._meta

@@ -84,6 +84,78 @@
 {{ block.super }}
 {% endblock %}
 
+{% block object-tools-items %}
+    {{ block.super }}
+    {% if original %}
+        <style>
+            /* Alinhar botões Histórico e Delegar em coluna */
+            #content-main .object-tools {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                align-items: flex-start;
+            }
+            #content-main .object-tools li {
+                float: none;
+                margin: 0;
+            }
+            #delegar-tool {
+                position: relative;
+            }
+            #delegar-form {
+                position: absolute;
+                z-index: 9999;
+                background: #fff;
+                border: 1px solid #d9d9d9;
+                border-radius: 6px;
+                padding: 6px 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                min-width: 200px;
+                max-height: 320px;
+                overflow-y: auto;
+            }
+            #delegar-list {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+            #delegar-list li {
+                margin: 0;
+            }
+            #delegar-list button {
+                width: 100%;
+                text-align: left;
+                background: none;
+                border: none;
+                padding: 6px 4px;
+                font-size: 12px;
+                cursor: pointer;
+                color: #333;
+            }
+            #delegar-list button:hover {
+                background: #f2f2f2;
+            }
+        </style>
+        <li id="delegar-tool">
+            <a href="#" id="delegar-toggle" class="historylink" style="display: inline-block;">Delegar</a>
+            <form id="delegar-form" method="post" action="{% url 'admin:processo_delegate_inline' original.pk %}" style="display: none;">
+                {% csrf_token %}
+                <input type="hidden" name="delegado_para" id="delegado-para-hidden">
+                <ul id="delegar-list">
+                    <li>
+                        <button type="button" data-user-id="">Remover delegação</button>
+                    </li>
+                    {% for user in delegar_users %}
+                    <li>
+                        <button type="button" data-user-id="{{ user.id }}">{{ user.get_full_name|default:user.username }}</button>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </form>
+        </li>
+    {% endif %}
+{% endblock %}
+
 {% block submit_buttons_bottom %}
     {{ block.super }}
     <div class="submit-row">
@@ -146,4 +218,74 @@
         </div>
     </div>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const toggle = document.getElementById('delegar-toggle');
+    const form = document.getElementById('delegar-form');
+    const hiddenInput = document.getElementById('delegado-para-hidden');
+    const buttons = Array.from(document.querySelectorAll('#delegar-list button'));
+    let formInDom = false;
+
+    function placeDropdown() {
+        if (!toggle || !form) return;
+        if (!formInDom) {
+            document.body.appendChild(form);
+            formInDom = true;
+        }
+        const wasHidden = form.style.display === 'none';
+        if (wasHidden) {
+            form.style.visibility = 'hidden';
+            form.style.display = 'block';
+        }
+        const formWidth = form.offsetWidth || 220;
+        const rect = toggle.getBoundingClientRect();
+        const top = rect.bottom + window.scrollY + 6;
+        // Alinha a borda direita da lista à borda esquerda do botão
+        const rawLeft = rect.left + window.scrollX - formWidth;
+        const minLeft = window.scrollX + 8;
+        const maxLeft = window.scrollX + window.innerWidth - formWidth - 8;
+        const left = Math.max(minLeft, Math.min(rawLeft, maxLeft));
+        form.style.left = `${left}px`;
+        form.style.top = `${top}px`;
+        if (wasHidden) {
+            form.style.display = 'none';
+            form.style.visibility = '';
+        }
+    }
+
+    function closeDropdown() {
+        if (form) form.style.display = 'none';
+    }
+    if (toggle && form && hiddenInput && buttons.length) {
+        closeDropdown();
+        toggle.addEventListener('click', function(e) {
+            e.preventDefault();
+            placeDropdown();
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        });
+        buttons.forEach(btn => {
+            btn.addEventListener('click', function() {
+                hiddenInput.value = this.dataset.userId;
+                form.submit();
+                closeDropdown();
+            });
+        });
+        document.addEventListener('click', function(e) {
+            if (!form.contains(e.target) && !toggle.contains(e.target)) {
+                closeDropdown();
+            }
+        });
+        window.addEventListener('scroll', function() {
+            if (form.style.display !== 'none') {
+                placeDropdown();
+            }
+        });
+        window.addEventListener('resize', function() {
+            if (form.style.display !== 'none') {
+                placeDropdown();
+            }
+        });
+    }
+});
+</script>
 {% endblock %}
