@@ -132,6 +132,21 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
             return queryset.filter(status__id=self.value())
         return queryset
 
+
+class EquipeDelegadoFilter(admin.SimpleListFilter):
+    title = "Equipe"
+    parameter_name = "delegado_para"
+
+    def lookups(self, request, model_admin):
+        users = User.objects.filter(processos_delegados__isnull=False).distinct().order_by('username')
+        return [(u.id, u.get_full_name() or u.username) for u in users]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(delegado_para_id=self.value())
+        return queryset
+
+
 class AndamentoProcessualForm(forms.ModelForm):
     class Meta:
         model = AndamentoProcessual
@@ -316,7 +331,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = ["busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [EquipeDelegadoFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
