@@ -154,8 +154,8 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         return (
-            ("az", "A → Z (mais antiga primeiro)"),
-            ("za", "Z → A (mais recente primeiro)"),
+            ("az", "A → Z (mais próxima primeiro)"),
+            ("za", "Z → A (mais distante primeiro)"),
             ("prox", "Mais próxima de hoje"),
         )
 
@@ -169,9 +169,9 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         if self.value() == "prox" or self.value() is None:
             return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
         if self.value() == "az":
-            return queryset.order_by('primeira_prescricao', 'pk')
+            return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
         if self.value() == "za":
-            return queryset.order_by(models.F('primeira_prescricao').desc(nulls_last=True), '-pk')
+            return queryset.order_by(models.F('distancia_prescricao').desc(nulls_last=True), '-pk')
         return queryset
 
 
