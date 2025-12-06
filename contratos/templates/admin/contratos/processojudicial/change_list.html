@@ -19,6 +19,52 @@
             height: 40px;
             overflow: hidden;
         }
+        /* Filtros personalizados */
+        /* Filtros personalizados dentro da barra lateral */
+        #changelist-filter .custom-filters-header {
+            background: #3f708a;
+            color: #fff;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-weight: 400;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            margin: 0;
+        }
+        #changelist-filter .custom-filters-toggle {
+            color: #d9e6ef;
+            font-weight: 400;
+            }
+        #changelist-filter .custom-filters-panel {
+            display: none;
+            padding: 10px 12px;
+            background: #f4f7f9;
+            border-bottom: 1px solid #d9d9d9;
+            border-left: 1px solid #d9d9d9;
+            border-right: 1px solid #d9d9d9;
+        }
+        #changelist-filter .custom-filters-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        #changelist-filter .custom-filters-actions button,
+        #changelist-filter .custom-filters-actions select {
+            font-size: 11px;
+            padding: 3px 8px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: #fff;
+        }
+        #changelist-filter .custom-filters-saved {
+            font-size: 11px;
+            color: #417690;
+            display: none;
+        }
     </style>
 {% endblock %}
 
@@ -39,6 +85,125 @@
         });
     </script>
     {{ block.super }}
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const STORAGE_KEY = 'processo_filtros_salvos';
+        const filterDiv = document.getElementById('changelist-filter');
+        if (!filterDiv) return;
+
+        const header = document.createElement('div');
+        header.className = 'custom-filters-header';
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = 'FILTROS PERSONALIZADOS';
+        const toggleSpan = document.createElement('span');
+        toggleSpan.className = 'custom-filters-toggle';
+        toggleSpan.id = 'custom-filters-toggle';
+        toggleSpan.textContent = '[+]';
+        header.appendChild(titleSpan);
+        header.appendChild(toggleSpan);
+
+        const panel = document.createElement('div');
+        panel.className = 'custom-filters-panel';
+        panel.id = 'custom-filters-panel';
+
+        const savedLabel = document.createElement('span');
+        savedLabel.id = 'custom-filters-saved';
+        savedLabel.className = 'custom-filters-saved';
+
+        const actions = document.createElement('div');
+        actions.className = 'custom-filters-actions';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.id = 'custom-save';
+        saveBtn.textContent = 'Salvar combinação atual';
+
+        const select = document.createElement('select');
+        select.id = 'custom-select';
+        const opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = 'Selecione um filtro salvo...';
+        select.appendChild(opt0);
+
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.id = 'custom-apply';
+        applyBtn.textContent = 'Aplicar';
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.id = 'custom-clear';
+        clearBtn.textContent = 'Limpar';
+
+        actions.appendChild(saveBtn);
+        actions.appendChild(select);
+        actions.appendChild(applyBtn);
+        actions.appendChild(clearBtn);
+
+        panel.appendChild(actions);
+        panel.appendChild(savedLabel);
+
+        filterDiv.insertBefore(panel, filterDiv.firstChild);
+        filterDiv.insertBefore(header, filterDiv.firstChild);
+
+        function loadSaved() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+            catch(e){ return []; }
+        }
+        function saveSaved(list) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        }
+        function refreshSelect() {
+            const list = loadSaved();
+            select.innerHTML = '';
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'Selecione um filtro salvo...';
+            select.appendChild(opt);
+            list.forEach(item => {
+                const o = document.createElement('option');
+                o.value = item.qs;
+                o.textContent = item.name;
+                select.appendChild(o);
+            });
+        }
+        refreshSelect();
+
+        toggleSpan.addEventListener('click', () => {
+            const isOpen = panel.style.display === 'block';
+            panel.style.display = isOpen ? 'none' : 'block';
+            toggleSpan.textContent = isOpen ? '[+]' : '[–]';
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const name = prompt('Nome do filtro:');
+            if (!name) return;
+            const qs = window.location.search || '';
+            const list = loadSaved();
+            const idx = list.findIndex(i => i.name === name);
+            if (idx >= 0) list[idx] = { name, qs }; else list.push({ name, qs });
+            saveSaved(list);
+            refreshSelect();
+            savedLabel.textContent = `Filtro salvo: ${name}`;
+            savedLabel.style.display = 'inline';
+        });
+
+        applyBtn.addEventListener('click', () => {
+            const qs = select.value;
+            if (!qs) return;
+            window.location.search = qs;
+        });
+
+        clearBtn.addEventListener('click', () => {
+            const list = loadSaved().filter(i => i.qs !== select.value);
+            saveSaved(list);
+            refreshSelect();
+            select.value = '';
+            savedLabel.textContent = '';
+            savedLabel.style.display = 'none';
+        });
+    });
+    </script>
 {% endblock %}
 
 {% block extrahead %}
