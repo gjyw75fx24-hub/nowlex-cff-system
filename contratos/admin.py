@@ -156,9 +156,9 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         return (
-            ("incluir", "Incluir prescritos"),
             ("az", "A → Z (mais próxima primeiro)"),
             ("za", "Z → A (mais distante primeiro)"),
+            ("incluir", "Incluir prescritos"),
             ("clear", "Limpar"),
         )
 
