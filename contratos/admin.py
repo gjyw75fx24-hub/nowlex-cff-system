@@ -21,7 +21,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo,
+    AdvogadoPassivo, ProcessoArquivo,
 )
 from .widgets import EnderecoWidget
 
@@ -420,6 +420,15 @@ class PrazoInline(admin.TabularInline):
     model = Prazo
     extra = 0
 
+class ProcessoArquivoInline(admin.TabularInline):
+    model = ProcessoArquivo
+    extra = 0
+    fields = ('nome', 'arquivo', 'enviado_por', 'criado_em')
+    readonly_fields = ('criado_em',)
+    autocomplete_fields = ['enviado_por']
+    verbose_name = "Arquivo"
+    verbose_name_plural = "Arquivos"
+
 # Definir um formulário para AnaliseProcesso para garantir o widget correto
 class AnaliseProcessoAdminForm(forms.ModelForm):
     class Meta:
@@ -512,7 +521,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
-    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
+    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
@@ -582,12 +591,36 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     def save_formset(self, request, form, formset, change):
         if formset.model == AnaliseProcesso:
-            instances = formset.save(commit=False)
-            for instance in instances:
+            # Salva manualmente para garantir persistência do JSON (contratos para monitória)
+            # e ainda alimentar as listas usadas pelo Django para mensagens.
+            new_objects = []
+            changed_objects = []
+            deleted_objects = []
+
+            for inline_form in formset.forms:
+                if inline_form.cleaned_data.get('DELETE'):
+                    obj = inline_form.instance
+                    if obj.pk:
+                        obj.delete()
+                        deleted_objects.append(obj)
+                    continue
+
+                instance = inline_form.save(commit=False)
                 if isinstance(instance, AnaliseProcesso):
                     instance.updated_by = request.user
-                    instance.save()
-            formset.save_m2m()
+
+                is_new = instance.pk is None
+                instance.save()
+                inline_form.save_m2m()
+
+                if is_new:
+                    new_objects.append(instance)
+                else:
+                    changed_objects.append((instance, inline_form.changed_data))
+
+            formset.new_objects = new_objects
+            formset.changed_objects = changed_objects
+            formset.deleted_objects = deleted_objects
         else:
             super().save_formset(request, form, formset, change)
 

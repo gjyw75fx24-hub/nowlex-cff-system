@@ -33,6 +33,9 @@
         }
 
         function updateContratoStatus(contratoId, statusKey, value) {
+            // Recarrega do campo para não sobrescrever dados salvos por outros scripts (ex.: árvore)
+            loadResponses();
+
             if (!userResponses.contratos_status[contratoId]) {
                 userResponses.contratos_status[contratoId] = {};
             }

@@ -84,6 +84,10 @@
         }
 
         function updateContractStars() {
+            if (!allAvailableContratos || allAvailableContratos.length === 0) {
+                return;
+            }
+
             $('.monitoria-star').remove();
 
             let contratosParaMonitoria = userResponses.contratos_para_monitoria || [];
@@ -252,103 +256,14 @@
                 ? resumoContratos.join(', ')
                 : 'Nenhum';
 
-            const judicializadoDisplay =
-                userResponses.judicializado_pela_massa || 'Não informado';
-
-            const analiseCnjRaw = $responseField.data('analise-cnj') || 'Não Atribuído';
-            const analiseCnj =
-                analiseCnjRaw && analiseCnjRaw !== 'Não Atribuído'
-                    ? formatCnjDigits(analiseCnjRaw)
-                    : analiseCnjRaw;
+            const cnjFieldVal = $('input[name="cnj"]').val() || '';
+            const analiseCnjRaw = $responseField.data('analise-cnj') || cnjFieldVal || '';
+            const analiseCnj = analiseCnjRaw ? formatCnjDigits(analiseCnjRaw) : '';
 
             const updatedAtRaw = $responseField.data('analise-updated-at');
             const updatedBy = $responseField.data('analise-updated-by');
 
             const tipoAcaoPrincipal = userResponses.tipo_de_acao || 'Não informado';
-
-            /* ---------- Card principal ---------- */
-
-            const $analiseCardContent = $('<div class="analise-summary-card-content"></div>');
-            
-            const $dateSpan = buildDateSpan(updatedAtRaw, updatedBy);
-            if ($dateSpan) $analiseCardContent.append($dateSpan);
-
-            $analiseCardContent.append(
-                `<span>Processo Principal: <strong>${analiseCnj}</strong></span>`
-            );
-            $analiseCardContent.append(
-                `<span>Contratos: <strong>${contratosDisplay}</strong></span>`
-            );
-            $analiseCardContent.append(
-                `<span>Judicializado pela Massa: <strong>${judicializadoDisplay}</strong></span>`
-            );
-            $analiseCardContent.append(
-                `<span>Tipo de Ação: <strong>${tipoAcaoPrincipal}</strong></span>`
-            );
-
-            const $toggleBtn = $('<button type="button" class="analise-toggle-btn"> + </button>');
-            const $editBtn = $('<button type="button" class="analise-edit-btn">Editar</button>');
-
-            $cardHeader.append($analiseCardContent);
-            $cardHeader.append($toggleBtn);
-            $cardHeader.append($editBtn);
-
-            $analiseCard.append($cardHeader);
-
-            const $ulDetalhes = $('<ul></ul>');
-
-            for (const key in userResponses) {
-                if (!Object.prototype.hasOwnProperty.call(userResponses, key)) continue;
-                if (['processos_vinculados', 'contratos_para_monitoria'].includes(key)) continue;
-
-                if (key === 'contratos_status') {
-                    const $liContratos = $(
-                        '<li><strong>Contratos Selecionados:</strong><ul></ul></li>'
-                    );
-                    const $ulContratos = $liContratos.find('ul');
-
-                    let hasSelectedContract = false;
-                    for (const contratoId in contratosStatus) {
-                        if (!contratosStatus[contratoId].selecionado) continue;
-                        hasSelectedContract = true;
-
-                        const contratoInfo = allAvailableContratos.find(
-                            c => String(c.id) === String(contratoId)
-                        );
-                        const nomeContrato = contratoInfo
-                            ? contratoInfo.numero_contrato
-                            : `ID ${contratoId}`;
-
-                        $ulContratos.append(
-                            `<li>${nomeContrato} (Quitado: ${contratosStatus[contratoId].quitado ? 'Sim' : 'Não'})</li>`
-                        );
-                    }
-
-                    if (!hasSelectedContract) {
-                        $ulContratos.append('<li>Nenhum contrato selecionado.</li>');
-                    }
-                    $ulDetalhes.append($liContratos);
-                } else {
-                    $ulDetalhes.append(`<li><strong>${key}:</strong> ${userResponses[key]}</li>`);
-                }
-            }
-
-            $cardBody.append($ulDetalhes);
-            $analiseCard.append($cardBody);
-            $formattedResponsesContainer.append($analiseCard);
-
-            $toggleBtn.on('click', function() {
-                $cardBody.slideToggle(200, function() {
-                    $toggleBtn.text($cardBody.is(':visible') ? ' - ' : ' + ');
-                });
-            });
-
-            $editBtn.on('click', function() {
-                $('html, body').animate(
-                    { scrollTop: $dynamicQuestionsContainer.offset().top - 50 },
-                    300
-                );
-            });
 
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
@@ -1038,34 +953,40 @@
             );
             const selection = currentResponses.contratos_para_monitoria || [];
 
-            if (selectedInInfoCard.length === 0) {
+            // Conjunto final: mantém os já marcados e os selecionados no info-card
+            const idsParaListar = Array.from(new Set([
+                ...selection,
+                ...selectedInInfoCard.map(c => String(c.id)),
+            ]));
+
+            if (idsParaListar.length === 0) {
                 $selectorDiv.append(
-                    '<p>Nenhum contrato selecionado nos "Dados Básicos".</p>'
+                    '<p>Nenhum contrato selecionado para monitória.</p>'
                 );
                 $container.append($selectorDiv);
                 return;
             }
 
-            selectedInInfoCard.forEach(function(contrato) {
-                const contratoIdStr = String(contrato.id);
-                const isChecked = selection.includes(contratoIdStr);
-                const isDisabled = contrato.is_prescrito || contrato.is_quitado;
+            idsParaListar.forEach(function(idStr) {
+                const contratoInfo = allAvailableContratos.find(c => String(c.id) === idStr);
+                const isChecked = selection.includes(idStr);
+                const isDisabled = contratoInfo ? (contratoInfo.is_prescrito || contratoInfo.is_quitado) : false;
 
-                let label = `${contrato.numero_contrato}`;
-                if (contrato.is_prescrito) {
+                let label = contratoInfo ? `${contratoInfo.numero_contrato}` : `Contrato ${idStr}`;
+                if (contratoInfo && contratoInfo.is_prescrito) {
                     label += ' <span style="color:#c62828;font-style:italic;">(Prescrito)</span>';
-                } else if (contrato.is_quitado) {
+                } else if (contratoInfo && contratoInfo.is_quitado) {
                     label += ' <span style="color:#007bff;font-style:italic;">(Quitado)</span>';
                 }
 
                 const $checkboxWrapper = $(
                     `<div>
                         <input type="checkbox"
-                               id="monitoria_contrato_${contratoIdStr}"
-                               value="${contratoIdStr}"
+                               id="monitoria_contrato_${idStr}"
+                               value="${idStr}"
                                ${isChecked ? 'checked' : ''}
                                ${isDisabled ? 'disabled' : ''}>
-                        <label for="monitoria_contrato_${contratoIdStr}">${label}</label>
+                        <label for="monitoria_contrato_${idStr}">${label}</label>
                     </div>`
                 );
 

@@ -16,4 +16,166 @@
   {% endif %}
 </div>
 {{ block.super }} {# Render the content from the parent template #}
+
+<div id="file-preview-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center;">
+  <div id="file-preview-content" style="background:#fff; padding:12px; border-radius:6px; max-width:90%; max-height:90%; position:relative; box-shadow:0 8px 24px rgba(0,0,0,0.25);"></div>
+  <button id="file-preview-close" style="position:absolute; top:12px; right:16px; background:#444; color:#fff; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">Fechar</button>
+</div>
+
+<style>
+#processoarquivo_set-group th.delete,
+#processoarquivo_set-group td.delete,
+#processoarquivo_set-group th.column-delete,
+#processoarquivo_set-group td.column-delete,
+#processoarquivo_set-group thead th:last-child,
+#processoarquivo_set-group tbody td:last-child {
+  display: none !important;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const modal = document.getElementById('file-preview-modal');
+  const content = document.getElementById('file-preview-content');
+  const closeBtn = document.getElementById('file-preview-close');
+  let currentObjectUrl = null;
+  if (!modal || !content || !closeBtn) return;
+
+  function closeModal() {
+    modal.style.display = 'none';
+    content.innerHTML = '';
+    if (currentObjectUrl) {
+      URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = null;
+    }
+  }
+
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) closeModal();
+  });
+
+  function renderFile(href) {
+    if (!href) return;
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
+    const isPdf = /\.pdf$/i.test(href);
+    if (!isImage && !isPdf) return;
+
+    if (currentObjectUrl) {
+      URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = null;
+    }
+
+    if (isImage) {
+      content.innerHTML = `<img src="${href}" alt="Pré-visualização" style="max-width:100%; max-height:80vh; display:block; margin:0 auto;">`;
+      modal.style.display = 'flex';
+      return;
+    }
+
+    content.innerHTML = `<p style="color:#555; text-align:center;">Carregando PDF...</p>`;
+    fetch(href).then(res => {
+      if (!res.ok) throw new Error('Falha ao carregar PDF');
+      return res.blob();
+    }).then(blob => {
+      currentObjectUrl = URL.createObjectURL(blob);
+      content.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
+          <iframe src="${currentObjectUrl}" title="Pré-visualização PDF" style="width:80vw; height:80vh; border:none;" loading="lazy"></iframe>
+        </div>`;
+    }).catch(() => {
+      content.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
+          <p style="color:#c00;">Não foi possível pré-visualizar o PDF.</p>
+        </div>`;
+    });
+    modal.style.display = 'flex';
+  }
+
+  document.body.addEventListener('click', function(e) {
+    const link = e.target.closest('a');
+    if (!link) return;
+    const href = link.getAttribute('href') || '';
+    // Apenas links de arquivo da pasta do processo
+    if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
+    // Extensões suportadas (imagens e PDFs)
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
+    const isPdf = /\.pdf$/i.test(href);
+    if (!isImage && !isPdf) return;
+    e.preventDefault();
+    renderFile(href);
+  }, true);
+
+  // Troca o checkbox de remover por botão com confirmação no inline de Arquivos
+  (function enhanceArquivoInlineDeletes() {
+    const inlineGroup = document.querySelector('#processoarquivo_set-group');
+    if (!inlineGroup) return;
+    // esconde coluna Remover? (admin default)
+    const headers = inlineGroup.querySelectorAll('th.delete, th.column-delete, thead th:last-child');
+    headers.forEach(h => { h.style.display = 'none'; });
+    // esconde células de delete via CSS direto
+    inlineGroup.querySelectorAll('td.delete, td.column-delete').forEach(td => td.style.display = 'none');
+    // fallback: esconde última coluna do thead/tbody
+    const headCells = inlineGroup.querySelectorAll('table thead tr th');
+    const lastIdx = headCells.length ? headCells.length - 1 : -1;
+    if (lastIdx >= 0) {
+      headCells[lastIdx].style.display = 'none';
+      inlineGroup.querySelectorAll('table tbody tr').forEach(tr => {
+        const cells = tr.querySelectorAll('td, th');
+        if (cells[lastIdx]) cells[lastIdx].style.display = 'none';
+      });
+    }
+
+    // Cria contêiner de remoção abaixo do bloco de andamentos
+    const deleteBlockParent = Array.from(document.querySelectorAll('.submit-row')).find(el => el.textContent.includes('Excluir Andamentos Selecionados')) || document.querySelector('#content-main') || document.body;
+    let removeContainer = document.getElementById('arquivo-delete-actions');
+    if (!removeContainer) {
+      removeContainer = document.createElement('div');
+      removeContainer.id = 'arquivo-delete-actions';
+      removeContainer.style.marginTop = '10px';
+      removeContainer.style.display = 'flex';
+      removeContainer.style.flexDirection = 'column';
+      removeContainer.style.gap = '6px';
+      removeContainer.innerHTML = '<strong>Remover arquivos:</strong>';
+      deleteBlockParent.appendChild(removeContainer);
+    }
+
+    const rows = inlineGroup.querySelectorAll('.dynamic-processoarquivo');
+    rows.forEach(row => {
+      const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+      if (!deleteCheckbox) return;
+      if (row.dataset.deleteBtnAdded) return;
+      const td = deleteCheckbox.closest('td, th, label');
+      if (td) td.style.display = 'none';
+      deleteCheckbox.style.display = 'none';
+
+      // pega nome do arquivo
+      const nomeInput = row.querySelector('input[name$="-nome"]');
+      const fileName = (nomeInput && nomeInput.value) ? nomeInput.value : 'Arquivo';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `Remover "${fileName}"`;
+      btn.className = 'button';
+      btn.style.backgroundColor = '#ba2121';
+      btn.style.color = '#fff';
+      btn.style.alignSelf = 'flex-start';
+      btn.addEventListener('click', () => {
+        const ok = confirm(`Remover o arquivo "${fileName}"?`);
+        if (!ok) return;
+        deleteCheckbox.checked = true;
+        row.style.opacity = '0.5';
+        row.style.pointerEvents = 'none';
+      });
+      removeContainer.appendChild(btn);
+      row.dataset.deleteBtnAdded = '1';
+    });
+    // última garantia: remove checkboxes remanescentes
+    inlineGroup.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(cb => {
+      cb.style.display = 'none';
+      const wrap = cb.closest('td, th, label');
+      if (wrap) wrap.style.display = 'none';
+    });
+  })();
+});
+</script>
 {% endblock %}
