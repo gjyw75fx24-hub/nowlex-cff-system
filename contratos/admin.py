@@ -126,13 +126,38 @@ class TerceiroInteressadoFilter(admin.SimpleListFilter):
         return queryset
 
 class AtivoStatusProcessualFilter(admin.SimpleListFilter):
-    title = 'Status Processual'
+    title = 'Classe Processual'
     parameter_name = 'status'
+
     def lookups(self, request, model_admin):
-        return [(s.id, s.nome) for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem')]
+        # Conta quantos processos há por classe usando o queryset já filtrado
+        qs = model_admin.get_queryset(request)
+        counts = {row['status__id']: row['total'] for row in qs.values('status__id').annotate(total=models.Count('id'))}
+        items = []
+        for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem'):
+            total = counts.get(s.id, 0)
+            label = f"{s.nome} ({total})"
+            items.append((s.id, label))
+        return items
+
     def queryset(self, request, queryset):
         if self.value():
             return queryset.filter(status__id=self.value())
+        return queryset
+
+
+class UFCountFilter(admin.SimpleListFilter):
+    title = 'UF'
+    parameter_name = 'uf'
+
+    def lookups(self, request, model_admin):
+        qs = model_admin.get_queryset(request)
+        counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
+        return [(uf, f"{uf} ({counts.get(uf, 0)})") for uf in sorted(counts.keys())]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(uf=self.value())
         return queryset
 
 
@@ -397,7 +422,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", "uf", TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (

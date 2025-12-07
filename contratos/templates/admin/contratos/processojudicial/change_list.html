@@ -243,16 +243,41 @@
             });
         }
 
-        // Toggle mostrar/ocultar contagem (números das etiquetas/listas)
+        // Toggle mostrar/ocultar contagem (todos os filtros)
         const countToggle = Array.from(filterDiv.querySelectorAll('a, button, span')).find(el => {
             return /contagem/i.test((el.textContent || '').trim());
         });
-        const countElems = filterDiv.querySelectorAll('.filter-count, .count, .counter');
-        if (countToggle && countElems) {
+        if (countToggle) {
             countToggle.style.cursor = 'pointer';
+            const liItems = Array.from(filterDiv.querySelectorAll('li'));
+            liItems.forEach(li => {
+                if (!li.dataset.fullHtml) li.dataset.fullHtml = li.innerHTML;
+            });
+
+            function stripCountsFromHtml(html) {
+                const tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                // remove spans de contagem comuns
+                tmp.querySelectorAll('.filter-count, .count, .counter, .badge, .small, .quiet').forEach(el => el.remove());
+                // remove textos entre parênteses
+                Array.from(tmp.childNodes).forEach(node => {
+                    if (node.nodeType === 3 && /\(\s*\d+.*\)/.test(node.textContent || '')) {
+                        node.remove();
+                    }
+                });
+                // também limpa parênteses dentro de links
+                tmp.querySelectorAll('a').forEach(a => {
+                    a.textContent = (a.textContent || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+                });
+                return tmp.innerHTML;
+            }
+
             let showCounts = true;
             const applyCount = () => {
-                countElems.forEach(el => { el.style.display = showCounts ? '' : 'none'; });
+                liItems.forEach(li => {
+                    const full = li.dataset.fullHtml || li.innerHTML;
+                    li.innerHTML = showCounts ? full : stripCountsFromHtml(full);
+                });
                 countToggle.textContent = showCounts ? 'Ocultar contagem' : 'Mostrar contagem';
             };
             applyCount();
