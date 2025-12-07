@@ -304,6 +304,16 @@
                 link.style.textDecoration = 'underline';
             }
         });
+
+        // Preserva filtros ao entrar no detalhe (adiciona _changelist_filters nos links da lista)
+        const currentFilters = window.location.search.replace(/^\?/, '');
+        if (currentFilters) {
+            document.querySelectorAll('#result_list tbody tr th a').forEach(a => {
+                const url = new URL(a.href, window.location.origin);
+                url.searchParams.set('_changelist_filters', currentFilters);
+                a.href = url.toString();
+            });
+        }
     });
     </script>
 {% endblock %}

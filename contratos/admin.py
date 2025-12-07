@@ -238,22 +238,22 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
-        counts = qs.values('last_edit_user_id').annotate(total=models.Count('id')).filter(last_edit_user_id__isnull=False)
-        user_map = {u.id: u for u in User.objects.filter(id__in=[c['last_edit_user_id'] for c in counts])}
+        counts = qs.values('delegado_para_id').annotate(total=models.Count('id')).filter(delegado_para_id__isnull=False)
+        user_map = {u.id: u for u in User.objects.filter(id__in=[c['delegado_para_id'] for c in counts])}
         items = []
         for row in counts:
-            user = user_map.get(row['last_edit_user_id'])
+            user = user_map.get(row['delegado_para_id'])
             username = user.username if user else ''
             full_name = user.get_full_name() if user else ''
             label = full_name or username or 'Sem nome'
             label = mark_safe(f"{label} <span class='filter-count'>({row['total']})</span>")
-            items.append((row['last_edit_user_id'], label))
+            items.append((row['delegado_para_id'], label))
         items.sort(key=lambda x: str(x[1]).lower())
         return items
 
     def queryset(self, request, queryset):
         if self.value():
-            return queryset.filter(last_edit_user_id=self.value())
+            return queryset.filter(delegado_para_id=self.value())
         return queryset
 
 
