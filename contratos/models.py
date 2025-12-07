@@ -134,32 +134,6 @@ class AndamentoProcessual(models.Model):
         return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
 
 
-def processo_arquivo_upload_path(instance, filename):
-    processo_id = instance.processo_id or 'novo'
-    return f'processos/{processo_id}/pasta/{filename}'
-
-
-class ProcessoArquivo(models.Model):
-    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='arquivos')
-    nome = models.CharField(max_length=255, blank=True, verbose_name="Nome do arquivo")
-    arquivo = models.FileField(upload_to=processo_arquivo_upload_path, verbose_name="Arquivo")
-    enviado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Enviado por")
-    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
-
-    class Meta:
-        verbose_name = "Arquivo do Processo"
-        verbose_name_plural = "Arquivos do Processo"
-        ordering = ['-criado_em']
-
-    def save(self, *args, **kwargs):
-        if not self.nome and self.arquivo:
-            self.nome = self.arquivo.name.split('/')[-1]
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.nome or f"Arquivo #{self.pk}"
-
-
 class Parte(models.Model):
     TIPO_POLO_CHOICES = [('ATIVO', 'Polo Ativo'), ('PASSIVO', 'Polo Passivo')]
     TIPO_PESSOA_CHOICES = [('PF', 'Pessoa Física'), ('PJ', 'Pessoa Jurídica')]

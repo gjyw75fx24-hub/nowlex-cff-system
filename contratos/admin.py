@@ -21,7 +21,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo, ProcessoArquivo,
+    AdvogadoPassivo,
 )
 from .widgets import EnderecoWidget
 
@@ -420,13 +420,6 @@ class PrazoInline(admin.TabularInline):
     model = Prazo
     extra = 0
 
-class ProcessoArquivoInline(admin.TabularInline):
-    model = ProcessoArquivo
-    extra = 0
-    fields = ('nome', 'arquivo', 'enviado_por', 'criado_em')
-    readonly_fields = ('criado_em',)
-    autocomplete_fields = ['enviado_por']
-
 # Definir um formulário para AnaliseProcesso para garantir o widget correto
 class AnaliseProcessoAdminForm(forms.ModelForm):
     class Meta:
@@ -461,12 +454,16 @@ class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para me
     model = AnaliseProcesso
     classes = ('analise-procedural-group',)
     can_delete = False # Geralmente, só queremos uma análise por processo, não deletável diretamente aqui.
-    verbose_name_plural = "" # Remover o título do inline
+    verbose_name_plural = "Análise de Processo"
     fk_name = 'processo_judicial' # Garantir que o fk_name esteja correto, pois é um OneToOneField
     fields = ('respostas',) # Apenas o campo JSONField será editável
     extra = 1 # Alterado para 1, para permitir a criação de uma nova instância se não houver
     max_num = 1 # Mantido em 1 por enquanto para a questão da visualização
-    # template = 'admin/contratos/analiseprocesso/stacked.html' # Removida a linha do template customizado
+    template = 'admin/contratos/analiseprocesso/stacked.html'
+
+    class Media:
+        css = {'all': ('admin/css/analise_processo.css',)}
+        js = ('admin/js/analise_processo_arvore.js',)
 
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
@@ -515,7 +512,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
-    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
+    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
