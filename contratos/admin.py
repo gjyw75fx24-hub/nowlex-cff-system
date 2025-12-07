@@ -3,7 +3,7 @@ from django.db import models
 from django.db.models import FloatField
 from django.db.models.functions import Now, Abs
 from django.utils import timezone
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Subquery, OuterRef
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils.html import format_html
@@ -14,6 +14,8 @@ from django import forms
 from django.utils.safestring import mark_safe
 from decimal import Decimal, InvalidOperation
 from django.contrib.auth.models import User # Importar o modelo User
+from django.contrib.admin.models import LogEntry, CHANGE
+from django.contrib.contenttypes.models import ContentType
 
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
@@ -156,6 +158,24 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
         return queryset
 
 
+class LastEditOrderFilter(admin.SimpleListFilter):
+    title = 'Por Última Edição'
+    parameter_name = 'ord_ultima_edicao'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('recente', 'A → Z (mais recente primeiro)'),
+            ('antigo', 'Z → A (mais distante primeiro)'),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'recente':
+            return queryset.order_by(models.F('last_edit_time').desc(nulls_last=True), '-pk')
+        if self.value() == 'antigo':
+            return queryset.order_by(models.F('last_edit_time').asc(nulls_last=True), 'pk')
+        return queryset
+
+
 class UFCountFilter(admin.SimpleListFilter):
     title = 'UF'
     parameter_name = 'uf'
@@ -166,8 +186,9 @@ class UFCountFilter(admin.SimpleListFilter):
         return [(uf, mark_safe(f"{uf} <span class='filter-count'>({counts.get(uf, 0)})</span>")) for uf in sorted(counts.keys())]
 
     def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(uf=self.value())
+        values = request.GET.getlist(self.parameter_name)
+        if values:
+            return queryset.filter(uf__in=values)
         return queryset
 
 
@@ -217,23 +238,22 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
-        counts = qs.values('delegado_para_id', 'delegado_para__username', 'delegado_para__first_name', 'delegado_para__last_name') \
-                   .annotate(total=models.Count('id')) \
-                   .filter(delegado_para_id__isnull=False) \
-                   .order_by('delegado_para__username')
+        counts = qs.values('last_edit_user_id').annotate(total=models.Count('id')).filter(last_edit_user_id__isnull=False)
+        user_map = {u.id: u for u in User.objects.filter(id__in=[c['last_edit_user_id'] for c in counts])}
         items = []
         for row in counts:
-            username = row['delegado_para__username'] or ''
-            full_name = f"{row['delegado_para__first_name']} {row['delegado_para__last_name']}".strip()
-            label = full_name or username
-            label = label or 'Sem nome'
-            label = f"{label} ({row['total']})"
-            items.append((row['delegado_para_id'], label))
+            user = user_map.get(row['last_edit_user_id'])
+            username = user.username if user else ''
+            full_name = user.get_full_name() if user else ''
+            label = full_name or username or 'Sem nome'
+            label = mark_safe(f"{label} <span class='filter-count'>({row['total']})</span>")
+            items.append((row['last_edit_user_id'], label))
+        items.sort(key=lambda x: str(x[1]).lower())
         return items
 
     def queryset(self, request, queryset):
         if self.value():
-            return queryset.filter(delegado_para_id=self.value())
+            return queryset.filter(last_edit_user_id=self.value())
         return queryset
 
 
@@ -487,7 +507,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
@@ -498,6 +518,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados', 'delegate_processes']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        ct = ContentType.objects.get_for_model(ProcessoJudicial)
+        last_logs = LogEntry.objects.filter(
+            content_type=ct,
+            object_id=OuterRef('pk'),
+            action_flag=CHANGE
+        ).order_by('-action_time')
+        return qs.annotate(
+            last_edit_time=Subquery(last_logs.values('action_time')[:1]),
+            last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
+        )
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
