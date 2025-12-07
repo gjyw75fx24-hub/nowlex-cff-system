@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from django.db import models
 from django.db.models import FloatField
-from django.db.models.functions import Now, Abs
+from django.db.models.functions import Now, Abs, Cast
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
 from django.http import HttpResponseRedirect, JsonResponse
@@ -524,7 +524,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
         last_logs = LogEntry.objects.filter(
             content_type=ct,
-            object_id=OuterRef('pk'),
+            object_id=Cast(OuterRef('pk'), models.CharField()),
             action_flag=CHANGE
         ).order_by('-action_time')
         return qs.annotate(
