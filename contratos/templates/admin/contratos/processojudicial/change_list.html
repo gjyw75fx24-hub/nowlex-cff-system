@@ -22,17 +22,17 @@
             clear: none;
         }
         /* Cabeçalho fixo e rolagem vertical na lista */
-        /* Restaura rolagem horizontal padrão na lista */
+        /* Rolagem com cabeçalho fixo */
         body.change-list #changelist-form .results {
-            max-height: none;
-            overflow-y: visible;
+            max-height: calc(100vh - 240px);
+            overflow-y: auto;
             overflow-x: auto;
         }
         body.change-list #result_list thead th {
-            position: relative;
-            top: auto;
-            z-index: auto;
-            background: inherit;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f5f5f5;
         }
         /* Filtros personalizados dentro da barra lateral */
         #changelist-filter .custom-filters-header {
