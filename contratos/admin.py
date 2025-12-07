@@ -116,14 +116,24 @@ admin.site.index_title = "Bem-vindo à Administração"
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
     parameter_name = "terceiro_interessado"
+
     def lookups(self, request, model_admin):
-        return [("sim", "Com terceiro interessado"), ("nao", "Apenas dois polos")]
+        base_qs = model_admin.get_queryset(request)
+        qs_counts = base_qs.annotate(num_partes=models.Count("partes_processuais"))
+        count_sim = qs_counts.filter(num_partes__gt=2).count()
+        count_nao = qs_counts.filter(num_partes__lte=2).count()
+        return [
+            ("sim", f"Com terceiro interessado ({count_sim})"),
+            ("nao", f"Apenas dois polos ({count_nao})"),
+        ]
+
     def queryset(self, request, queryset):
+        qs = queryset.annotate(num_partes=models.Count("partes_processuais"))
         if self.value() == "sim":
-            return queryset.annotate(num_partes=models.Count("partes_processuais")).filter(num_partes__gt=2)
+            return qs.filter(num_partes__gt=2)
         if self.value() == "nao":
-            return queryset.annotate(num_partes=models.Count("partes_processuais")).filter(num_partes__lte=2)
-        return queryset
+            return qs.filter(num_partes__lte=2)
+        return qs
 
 class AtivoStatusProcessualFilter(admin.SimpleListFilter):
     title = 'Classe Processual'
@@ -161,13 +171,65 @@ class UFCountFilter(admin.SimpleListFilter):
         return queryset
 
 
+class CarteiraCountFilter(admin.SimpleListFilter):
+    title = 'Carteira'
+    parameter_name = 'carteira'
+
+    def lookups(self, request, model_admin):
+        qs = model_admin.get_queryset(request)
+        counts = {row['carteira__id']: row['total'] for row in qs.values('carteira__id').annotate(total=models.Count('id')) if row['carteira__id']}
+        items = []
+        for cart in Carteira.objects.order_by('nome'):
+            total = counts.get(cart.id, 0)
+            items.append((cart.id, f"{cart.nome} ({total})"))
+        return items
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(carteira_id=self.value())
+        return queryset
+
+
+class NaoJudicializadoFilter(admin.SimpleListFilter):
+    title = 'Por Não Judicializado'
+    parameter_name = 'nao_judicializado'
+
+    def lookups(self, request, model_admin):
+        qs = model_admin.get_queryset(request)
+        count_sim = qs.filter(nao_judicializado=True).count()
+        count_nao = qs.filter(nao_judicializado=False).count()
+        return [
+            ('1', f"Sim ({count_sim})"),
+            ('0', f"Não ({count_nao})"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == '1':
+            return queryset.filter(nao_judicializado=True)
+        if self.value() == '0':
+            return queryset.filter(nao_judicializado=False)
+        return queryset
+
+
 class EquipeDelegadoFilter(admin.SimpleListFilter):
     title = "Equipe"
     parameter_name = "delegado_para"
 
     def lookups(self, request, model_admin):
-        users = User.objects.filter(processos_delegados__isnull=False).distinct().order_by('username')
-        return [(u.id, u.get_full_name() or u.username) for u in users]
+        qs = model_admin.get_queryset(request)
+        counts = qs.values('delegado_para_id', 'delegado_para__username', 'delegado_para__first_name', 'delegado_para__last_name') \
+                   .annotate(total=models.Count('id')) \
+                   .filter(delegado_para_id__isnull=False) \
+                   .order_by('delegado_para__username')
+        items = []
+        for row in counts:
+            username = row['delegado_para__username'] or ''
+            full_name = f"{row['delegado_para__first_name']} {row['delegado_para__last_name']}".strip()
+            label = full_name or username
+            label = label or 'Sem nome'
+            label = f"{label} ({row['total']})"
+            items.append((row['delegado_para_id'], label))
+        return items
 
     def queryset(self, request, queryset):
         if self.value():
@@ -422,7 +484,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", "nao_judicializado", AtivoStatusProcessualFilter, "carteira", UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
     fieldsets = (
