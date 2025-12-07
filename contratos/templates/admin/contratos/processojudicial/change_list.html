@@ -7,19 +7,20 @@
             font-weight: bold;
             text-decoration: underline;
         }
-        /* Estilos para o botão de colapsar filtro */
-        #filter-toggle {
-            cursor: pointer;
-            font-weight: bold;
-            margin-left: 10px;
-            font-size: 1.2em;
-            color: #5b80b2;
+        /* Container que mantém os blocos alinhados na mesma coluna */
+        .custom-filters-container {
+            width: 270px;
+            box-sizing: border-box;
+            float: right;
+            clear: right;
         }
-        #changelist-filter.collapsed {
-            height: 40px;
-            overflow: hidden;
+        #changelist-filter {
+            width: 100%;
+            box-sizing: border-box;
+            margin: 0;
+            float: none;
+            clear: none;
         }
-        /* Filtros personalizados */
         /* Filtros personalizados dentro da barra lateral */
         #changelist-filter .custom-filters-header {
             background: #3f708a;
@@ -143,8 +144,13 @@
         panel.appendChild(actions);
         panel.appendChild(savedLabel);
 
-        filterDiv.insertBefore(panel, filterDiv.firstChild);
-        filterDiv.insertBefore(header, filterDiv.firstChild);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'custom-filters-wrapper';
+        wrapper.appendChild(header);
+        wrapper.appendChild(panel);
+
+        // Insere o bloco personalizado no topo do filtro padrão
+        filterDiv.insertBefore(wrapper, filterDiv.firstChild);
 
         function loadSaved() {
             try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
@@ -202,6 +208,48 @@
             savedLabel.textContent = '';
             savedLabel.style.display = 'none';
         });
+
+        // Toggle para colapsar/expandir apenas os filtros padrão (mantém título e bloco personalizado)
+        const filterToggle = document.getElementById('filter-toggle');
+        if (filterDiv && filterToggle) {
+            const collapsible = Array.from(filterDiv.children).filter(el => {
+                return el.tagName !== 'H2' &&
+                       !el.classList.contains('custom-filters-wrapper') &&
+                       !el.classList.contains('custom-filters-header') &&
+                       !el.classList.contains('custom-filters-panel');
+            });
+            let collapsed = false;
+            const applyCollapse = () => {
+                collapsible.forEach(el => { el.style.display = collapsed ? 'none' : ''; });
+                filterToggle.textContent = collapsed ? ' [+]' : ' [–]';
+            };
+            applyCollapse();
+            filterToggle.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                collapsed = !collapsed;
+                applyCollapse();
+            });
+        }
+
+        // Toggle mostrar/ocultar contagem (números das etiquetas/listas)
+        const countToggle = Array.from(filterDiv.querySelectorAll('a, button, span')).find(el => {
+            return /contagem/i.test((el.textContent || '').trim());
+        });
+        const countElems = filterDiv.querySelectorAll('.filter-count, .count, .counter');
+        if (countToggle && countElems) {
+            countToggle.style.cursor = 'pointer';
+            let showCounts = true;
+            const applyCount = () => {
+                countElems.forEach(el => { el.style.display = showCounts ? '' : 'none'; });
+                countToggle.textContent = showCounts ? 'Ocultar contagem' : 'Mostrar contagem';
+            };
+            applyCount();
+            countToggle.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                showCounts = !showCounts;
+                applyCount();
+            });
+        }
     });
     </script>
 {% endblock %}
