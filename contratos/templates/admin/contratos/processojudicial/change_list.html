@@ -21,6 +21,18 @@
             float: none;
             clear: none;
         }
+        /* Cabeçalho fixo e rolagem vertical na lista */
+        body.change-list #changelist-form .results {
+            max-height: calc(100vh - 240px);
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        body.change-list #result_list thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f5f5f5;
+        }
         /* Filtros personalizados dentro da barra lateral */
         #changelist-filter .custom-filters-header {
             background: #3f708a;
