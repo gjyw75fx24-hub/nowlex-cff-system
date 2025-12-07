@@ -135,6 +135,18 @@
             #delegar-list button:hover {
                 background: #f2f2f2;
             }
+            #delegar-tool { position: relative; }
+            #delegar-form {
+                position: absolute;
+                top: 26px;
+                left: 0;
+                background: #fff;
+                border: 1px solid #d9d9d9;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                padding: 8px;
+                border-radius: 4px;
+                z-index: 999;
+            }
         </style>
         <li id="delegar-tool">
             <a href="#" id="delegar-toggle" class="historylink" style="display: inline-block;">Delegar</a>
@@ -237,11 +249,11 @@ document.addEventListener('DOMContentLoaded', function() {
             form.style.visibility = 'hidden';
             form.style.display = 'block';
         }
-        const formWidth = form.offsetWidth || 220;
         const rect = toggle.getBoundingClientRect();
         const top = rect.bottom + window.scrollY + 6;
-        // Alinha a borda direita da lista à borda esquerda do botão
-        const rawLeft = rect.left + window.scrollX - formWidth;
+        // Alinha o dropdown logo abaixo do botão (borda esquerda com o botão)
+        const formWidth = form.offsetWidth || Math.max(rect.width, 220);
+        const rawLeft = rect.left + window.scrollX;
         const minLeft = window.scrollX + 8;
         const maxLeft = window.scrollX + window.innerWidth - formWidth - 8;
         const left = Math.max(minLeft, Math.min(rawLeft, maxLeft));
@@ -264,10 +276,22 @@ document.addEventListener('DOMContentLoaded', function() {
             form.style.display = form.style.display === 'none' ? 'block' : 'none';
         });
         buttons.forEach(btn => {
-            btn.addEventListener('click', function() {
+            btn.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
                 hiddenInput.value = this.dataset.userId;
-                form.submit();
-                closeDropdown();
+                const formData = new FormData(form);
+                fetch(form.action, {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: formData,
+                }).then(() => {
+                    closeDropdown();
+                    window.location.reload();
+                }).catch(() => {
+                    closeDropdown();
+                    window.location.reload();
+                });
             });
         });
         document.addEventListener('click', function(e) {

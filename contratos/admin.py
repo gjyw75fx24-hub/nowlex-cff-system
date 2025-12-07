@@ -600,6 +600,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             etiquetas_data[processo.pk] = list(etiquetas)
         
         extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
+        extra_context['delegar_users'] = User.objects.order_by('username')
         
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -637,10 +638,30 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
+            path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
         ]
         return custom_urls + urls
+
+    def delegate_bulk_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido'}, status=405)
+        ids = request.POST.get('ids', '')
+        user_id = request.POST.get('user_id')
+        if not ids:
+            return JsonResponse({'error': 'Nenhum processo selecionado'}, status=400)
+        try:
+            pk_list = [int(i) for i in ids.split(',') if i]
+        except ValueError:
+            return JsonResponse({'error': 'IDs inválidos'}, status=400)
+        user = None
+        if user_id:
+            user = User.objects.filter(pk=user_id).first()
+            if not user:
+                return JsonResponse({'error': 'Usuário inválido'}, status=400)
+        updated = self.model.objects.filter(pk__in=pk_list).update(delegado_para=user)
+        return JsonResponse({'updated': updated})
 
     def etiquetas_view(self, request, object_id):
         processo = get_object_or_404(ProcessoJudicial, pk=object_id)
