@@ -251,9 +251,19 @@
         const countNodes = filterDiv.querySelectorAll('.filter-count');
         if (countToggle && countNodes.length) {
             countToggle.style.cursor = 'pointer';
+            const countLinks = Array.from(filterDiv.querySelectorAll('li a'));
+            countLinks.forEach(a => {
+                if (!a.dataset.fullText) a.dataset.fullText = (a.textContent || '').trim();
+            });
+            const stripParens = (text) => text.replace(/\s*\([^)]*\)\s*$/, '').trim();
+
             let showCounts = true;
             const applyCount = () => {
                 countNodes.forEach(n => { n.style.display = showCounts ? '' : 'none'; });
+                countLinks.forEach(a => {
+                    const full = a.dataset.fullText || a.textContent || '';
+                    a.textContent = showCounts ? full : stripParens(full);
+                });
                 countToggle.textContent = showCounts ? 'Ocultar contagem' : 'Mostrar contagem';
             };
             applyCount();
