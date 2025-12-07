@@ -263,6 +263,37 @@
                 applyCount();
             });
         }
+
+        // Multi-seleção de UF: permite marcar/desmarcar múltiplas UFs sem perder as já escolhidas
+        const ufLinks = Array.from(filterDiv.querySelectorAll('a[href*="uf="]'));
+        ufLinks.forEach(link => {
+            link.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                const target = new URL(link.href, window.location.origin);
+                const ufValue = target.searchParams.get('uf');
+                if (!ufValue) return;
+
+                const current = new URLSearchParams(window.location.search);
+                const values = current.getAll('uf').filter(Boolean);
+                const exists = values.includes(ufValue);
+                const next = exists ? values.filter(v => v !== ufValue) : [...values, ufValue];
+                current.delete('uf');
+                next.forEach(v => current.append('uf', v));
+                const newSearch = current.toString();
+                window.location.search = newSearch ? `?${newSearch}` : '';
+            }, { passive: false });
+        });
+
+        // Destaque visual nas UFs selecionadas (lista)
+        const params = new URLSearchParams(window.location.search);
+        const selectedUFs = new Set(params.getAll('uf').map(v => v.toUpperCase()).filter(Boolean));
+        ufLinks.forEach(link => {
+            const ufValue = new URL(link.href, window.location.origin).searchParams.get('uf');
+            if (ufValue && selectedUFs.has(ufValue.toUpperCase())) {
+                link.style.fontWeight = 'bold';
+                link.style.textDecoration = 'underline';
+            }
+        });
     });
     </script>
 {% endblock %}
