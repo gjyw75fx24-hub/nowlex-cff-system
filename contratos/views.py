@@ -391,19 +391,22 @@ def number_to_words_pt_br(num):
     return result.capitalize()
 
 @require_POST
-def generate_monitoria_petition(request):
-    processo_id = request.POST.get('processo_id')
+def generate_monitoria_petition(request, processo_id=None):
+    # aceita tanto o ID vindo na URL quanto no POST (fallback)
+    processo_id = processo_id or request.POST.get('processo_id')
     
-    if not processo_id:
-        return HttpResponse("ID do processo não fornecido.", status=400)
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return HttpResponse("ID do processo inválido.", status=400)
 
     try:
-        processo = get_object_or_404(ProcessoJudicial, pk=processo_id)
-        analise = processo.analise_processo # OneToOneField
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+        analise = processo.analise_processo  # OneToOneField
     except ProcessoJudicial.DoesNotExist:
         return HttpResponse("Processo Judicial não encontrado.", status=404)
     except Exception as e:
-        logger.error(f"Erro ao buscar análise do processo {processo_id}: {e}", exc_info=True)
+        logger.error(f"Erro ao buscar análise do processo {processo_id_int}: {e}", exc_info=True)
         return HttpResponse(f"Erro ao buscar dados do processo: {e}", status=500)
 
     # Buscar a parte passiva
@@ -411,8 +414,18 @@ def generate_monitoria_petition(request):
     if not polo_passivo:
         return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
     
-    # Buscar contratos selecionados para monitória
-    contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
+    # Buscar contratos selecionados para monitória (POST tem prioridade)
+    contratos_para_monitoria_ids = []
+    try:
+        posted_json = request.POST.get('contratos_para_monitoria')
+        if posted_json:
+            contratos_para_monitoria_ids = json.loads(posted_json)
+    except (TypeError, json.JSONDecodeError):
+        contratos_para_monitoria_ids = []
+
+    if not contratos_para_monitoria_ids:
+        contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
+
     contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
 
     if not contratos_monitoria.exists():
