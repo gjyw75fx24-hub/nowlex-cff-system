@@ -21,7 +21,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo,
+    AdvogadoPassivo, ProcessoArquivo,
 )
 from .widgets import EnderecoWidget
 
@@ -419,7 +419,13 @@ class TarefaInline(admin.TabularInline):
 class PrazoInline(admin.TabularInline):
     model = Prazo
     extra = 0
-    autocomplete_fields = ['responsavel']
+
+class ProcessoArquivoInline(admin.TabularInline):
+    model = ProcessoArquivo
+    extra = 0
+    fields = ('nome', 'arquivo', 'enviado_por', 'criado_em')
+    readonly_fields = ('criado_em',)
+    autocomplete_fields = ['enviado_por']
 
 # Definir um formulário para AnaliseProcesso para garantir o widget correto
 class AnaliseProcessoAdminForm(forms.ModelForm):
@@ -509,7 +515,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
-    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline]
+    inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),

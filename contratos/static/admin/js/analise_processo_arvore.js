@@ -22,7 +22,14 @@
         let treeConfig = {};
         let userResponses = {};
         let firstQuestionKey = null;
-        const currentProcessoId = $('input[name="object_id"]').val() || null;
+        const currentProcessoId = (function resolveProcessoId() {
+            const hiddenId = $('input[name="object_id"]').val();
+            if (hiddenId) return hiddenId;
+            const pathMatch = window.location.pathname.match(/processojudicial\/(\\d+)\\//i);
+            if (pathMatch && pathMatch[1]) return pathMatch[1];
+            const qsId = new URLSearchParams(window.location.search).get('object_id');
+            return qsId || null;
+        })();
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
