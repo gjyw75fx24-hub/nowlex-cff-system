@@ -22,16 +22,17 @@
             clear: none;
         }
         /* Cabeçalho fixo e rolagem vertical na lista */
+        /* Restaura rolagem horizontal padrão na lista */
         body.change-list #changelist-form .results {
-            max-height: calc(100vh - 240px);
-            overflow-y: auto;
-            overflow-x: hidden;
+            max-height: none;
+            overflow-y: visible;
+            overflow-x: auto;
         }
         body.change-list #result_list thead th {
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            background: #f5f5f5;
+            position: relative;
+            top: auto;
+            z-index: auto;
+            background: inherit;
         }
         /* Filtros personalizados dentro da barra lateral */
         #changelist-filter .custom-filters-header {
@@ -243,41 +244,16 @@
             });
         }
 
-        // Toggle mostrar/ocultar contagem (todos os filtros)
+        // Toggle mostrar/ocultar contagem (usa spans .filter-count)
         const countToggle = Array.from(filterDiv.querySelectorAll('a, button, span')).find(el => {
             return /contagem/i.test((el.textContent || '').trim());
         });
-        if (countToggle) {
+        const countNodes = filterDiv.querySelectorAll('.filter-count');
+        if (countToggle && countNodes.length) {
             countToggle.style.cursor = 'pointer';
-            const liItems = Array.from(filterDiv.querySelectorAll('li'));
-            liItems.forEach(li => {
-                if (!li.dataset.fullHtml) li.dataset.fullHtml = li.innerHTML;
-            });
-
-            function stripCountsFromHtml(html) {
-                const tmp = document.createElement('div');
-                tmp.innerHTML = html;
-                // remove spans de contagem comuns
-                tmp.querySelectorAll('.filter-count, .count, .counter, .badge, .small, .quiet').forEach(el => el.remove());
-                // remove textos entre parênteses
-                Array.from(tmp.childNodes).forEach(node => {
-                    if (node.nodeType === 3 && /\(\s*\d+.*\)/.test(node.textContent || '')) {
-                        node.remove();
-                    }
-                });
-                // também limpa parênteses dentro de links
-                tmp.querySelectorAll('a').forEach(a => {
-                    a.textContent = (a.textContent || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
-                });
-                return tmp.innerHTML;
-            }
-
             let showCounts = true;
             const applyCount = () => {
-                liItems.forEach(li => {
-                    const full = li.dataset.fullHtml || li.innerHTML;
-                    li.innerHTML = showCounts ? full : stripCountsFromHtml(full);
-                });
+                countNodes.forEach(n => { n.style.display = showCounts ? '' : 'none'; });
                 countToggle.textContent = showCounts ? 'Ocultar contagem' : 'Mostrar contagem';
             };
             applyCount();

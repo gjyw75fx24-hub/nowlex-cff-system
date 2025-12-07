@@ -123,8 +123,8 @@ class TerceiroInteressadoFilter(admin.SimpleListFilter):
         count_sim = qs_counts.filter(num_partes__gt=2).count()
         count_nao = qs_counts.filter(num_partes__lte=2).count()
         return [
-            ("sim", f"Com terceiro interessado ({count_sim})"),
-            ("nao", f"Apenas dois polos ({count_nao})"),
+            ("sim", mark_safe(f"Com terceiro interessado <span class='filter-count'>({count_sim})</span>")),
+            ("nao", mark_safe(f"Apenas dois polos <span class='filter-count'>({count_nao})</span>")),
         ]
 
     def queryset(self, request, queryset):
@@ -146,7 +146,7 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
         items = []
         for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem'):
             total = counts.get(s.id, 0)
-            label = f"{s.nome} ({total})"
+            label = mark_safe(f"{s.nome} <span class='filter-count'>({total})</span>")
             items.append((s.id, label))
         return items
 
@@ -163,7 +163,7 @@ class UFCountFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
         counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
-        return [(uf, f"{uf} ({counts.get(uf, 0)})") for uf in sorted(counts.keys())]
+        return [(uf, mark_safe(f"{uf} <span class='filter-count'>({counts.get(uf, 0)})</span>")) for uf in sorted(counts.keys())]
 
     def queryset(self, request, queryset):
         if self.value():
@@ -181,7 +181,7 @@ class CarteiraCountFilter(admin.SimpleListFilter):
         items = []
         for cart in Carteira.objects.order_by('nome'):
             total = counts.get(cart.id, 0)
-            items.append((cart.id, f"{cart.nome} ({total})"))
+            items.append((cart.id, mark_safe(f"{cart.nome} <span class='filter-count'>({total})</span>")))
         return items
 
     def queryset(self, request, queryset):
@@ -199,8 +199,8 @@ class NaoJudicializadoFilter(admin.SimpleListFilter):
         count_sim = qs.filter(nao_judicializado=True).count()
         count_nao = qs.filter(nao_judicializado=False).count()
         return [
-            ('1', f"Sim ({count_sim})"),
-            ('0', f"Não ({count_nao})"),
+            ('1', mark_safe(f"Sim <span class=\"filter-count\">({count_sim})</span>")),
+            ('0', mark_safe(f"Não <span class=\"filter-count\">({count_nao})</span>")),
         ]
 
     def queryset(self, request, queryset):
@@ -265,6 +265,9 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
             }
 
     def queryset(self, request, queryset):
+        # Se filtrando explicitamente por não judicializado, não aplicamos ordenação/filtro de prescrição
+        if request.GET.get('nao_judicializado') is not None:
+            return queryset
         queryset = queryset.annotate(
             primeira_prescricao=models.Min('contratos__data_prescricao'),
         )
