@@ -543,6 +543,25 @@ def generate_monitoria_petition(request, processo_id=None):
 
         def _convert_docx_to_pdf_bytes(docx_bytes_local: bytes):
             try:
+                # Ajusta somente para o PDF (não altera o DOCX original)
+                try:
+                    temp_doc = Document(BytesIO(docx_bytes_local))
+                    for section in temp_doc.sections:
+                        try:
+                            # adiciona um leve “colchão” para evitar cortes no cabeçalho/rodapé
+                            section.top_margin = max(Cm(1.0), section.top_margin + Cm(0.5))
+                            section.bottom_margin = max(Cm(1.0), section.bottom_margin + Cm(0.5))
+                            section.right_margin = max(Cm(1.0), section.right_margin + Cm(0.3))
+                            section.footer_distance = Cm(1.5)
+                        except Exception:
+                            pass
+                    tmp_bytes = BytesIO()
+                    temp_doc.save(tmp_bytes)
+                    tmp_bytes.seek(0)
+                    docx_bytes_local = tmp_bytes.getvalue()
+                except Exception:
+                    pass
+
                 with tempfile.TemporaryDirectory() as tmpdir:
                     tmpdir_path = Path(tmpdir)
                     docx_path = tmpdir_path / "input.docx"
