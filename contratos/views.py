@@ -90,14 +90,11 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
 
     document = Document(template_path)
 
-    # Ajusta margens e posição do rodapé para evitar cortes no PDF
+    # Ajusta posição do rodapé para evitar cortes no PDF (mantém margens do template)
     for section in document.sections:
         try:
-            section.left_margin = Cm(2.0)   # reduz leve deslocamento à esquerda
-            section.right_margin = Cm(2.0)
-            section.top_margin = section.top_margin  # mantém
-            section.bottom_margin = section.bottom_margin  # mantém
-            section.footer_distance = Cm(1.8)  # sobe um pouco o rodapé
+            # mantém margens originais do template, apenas sobe o rodapé
+            section.footer_distance = Cm(1.5)
         except Exception:
             pass
 
