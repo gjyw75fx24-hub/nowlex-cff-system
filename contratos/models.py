@@ -195,6 +195,7 @@ class Advogado(models.Model):
 
 class AdvogadoPassivo(models.Model):
     class AcordoChoices(models.TextChoices):
+        PROPOR = 'PROPOR', 'Propor'
         PROPOSTO = 'PROPOSTO', 'Proposto'
         FIRMADO = 'FIRMADO', 'Firmado'
         RECUSADO = 'RECUSADO', 'Recusado'

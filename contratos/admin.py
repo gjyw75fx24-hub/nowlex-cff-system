@@ -321,6 +321,32 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         return queryset
 
 
+class AcordoStatusFilter(admin.SimpleListFilter):
+    title = "Por Acordo"
+    parameter_name = "acordo_status"
+
+    def lookups(self, request, model_admin):
+        from contratos.models import AdvogadoPassivo
+        return (
+            (AdvogadoPassivo.AcordoChoices.PROPOR, "Propor"),
+            (AdvogadoPassivo.AcordoChoices.PROPOSTO, "Proposto"),
+            (AdvogadoPassivo.AcordoChoices.FIRMADO, "Firmado"),
+            (AdvogadoPassivo.AcordoChoices.RECUSADO, "Recusado"),
+            ("sem", "Sem acordo"),
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if not value:
+            return queryset
+        if value == "sem":
+            return queryset.filter(
+                models.Q(advogados_passivos__acordo_status__isnull=True)
+                | models.Q(advogados_passivos__acordo_status="")
+            ).distinct()
+        return queryset.filter(advogados_passivos__acordo_status=value).distinct()
+
+
 
 
 class AndamentoProcessualForm(forms.ModelForm):
@@ -519,7 +545,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
