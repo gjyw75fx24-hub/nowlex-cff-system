@@ -23,6 +23,20 @@
     color: #000;
 }
 
+.inline-group-tabs button.has-errors {
+    border-color: #ba2121;
+    color: #ba2121;
+    position: relative;
+}
+
+.inline-group-tabs button.has-errors::after {
+    content: '•';
+    color: #ba2121;
+    margin-left: 6px;
+    font-size: 16px;
+    line-height: 1;
+}
+
 /* Esconde todos os inlines por padrão */
 .inline-group {
     display: none;

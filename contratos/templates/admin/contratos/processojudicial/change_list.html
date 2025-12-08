@@ -79,6 +79,17 @@
             color: #417690;
             display: none;
         }
+        #custom-clear-all {
+            margin: 8px 0 6px 0;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-family: inherit;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: #f7f7f7;
+            cursor: pointer;
+            transform: translateY(-20%);
+        }
     </style>
 {% endblock %}
 
@@ -156,7 +167,6 @@
                 sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
             });
         }
-
         const header = document.createElement('div');
         header.className = 'custom-filters-header';
         const titleSpan = document.createElement('span');
@@ -327,6 +337,24 @@
                 showCounts = !showCounts;
                 applyCount();
             });
+        }
+
+        // Botão custom de limpar filtros (caso o link nativo não apareça)
+        const clearAllBtn = document.createElement('button');
+        clearAllBtn.type = 'button';
+        clearAllBtn.id = 'custom-clear-all';
+        clearAllBtn.textContent = 'Limpar filtros';
+        clearAllBtn.addEventListener('click', () => {
+            localStorage.removeItem(LAST_FILTERS_KEY);
+            sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
+            const url = new URL(window.location.href);
+            url.search = '';
+            window.location.href = url.pathname;
+        });
+        if (countToggle && countToggle.parentNode) {
+            countToggle.parentNode.insertBefore(clearAllBtn, countToggle);
+        } else {
+            filterDiv.insertBefore(clearAllBtn, filterDiv.firstChild);
         }
 
         // Multi-seleção de UF: permite marcar/desmarcar múltiplas UFs sem perder as já escolhidas

@@ -38,20 +38,33 @@ window.addEventListener('load', function() {
             // Salva o título da aba ativa no localStorage
             localStorage.setItem(lastActiveTabKey, title);
             
-            tabButtons.forEach(item => item.button.classList.remove('active'));
-            inlineGroups.forEach(grp => grp.classList.remove('active'));
-
-            tabButton.classList.add('active');
-            group.classList.add('active');
-            syncAdvogadoPassivo();
-            // Restaura a rolagem após o reflow das abas
-            window.requestAnimationFrame(() => {
-                window.scrollTo({ top: scrollPos, behavior: 'auto' });
-            });
+            activateTab(group, tabButton, scrollPos);
         });
 
         tabsContainer.appendChild(tabButton);
         tabButtons.push({ button: tabButton, title: title, group: group });
+    });
+
+    function activateTab(group, tabButton, scrollPos) {
+        tabButtons.forEach(item => item.button.classList.remove('active'));
+        inlineGroups.forEach(grp => grp.classList.remove('active'));
+
+        tabButton.classList.add('active');
+        group.classList.add('active');
+        syncAdvogadoPassivo();
+        // Restaura a rolagem após o reflow das abas
+        window.requestAnimationFrame(() => {
+            window.scrollTo({ top: scrollPos || 0, behavior: 'auto' });
+        });
+    }
+
+    // Marca abas com erros e prioriza a primeira aba com erro
+    const errorSelector = '.errorlist, .errors, .form-row.errors, .inline-related.errors';
+    const firstErrorTabIndex = tabButtons.findIndex(item => item.group.querySelector(errorSelector));
+    tabButtons.forEach(item => {
+        if (item.group.querySelector(errorSelector)) {
+            item.button.classList.add('has-errors');
+        }
     });
 
     // Tenta carregar a última aba ativa do localStorage
@@ -63,10 +76,17 @@ window.addEventListener('load', function() {
         }
     }
 
+    // Se houver erro, essa aba tem prioridade sobre a aba salva
+    if (firstErrorTabIndex !== -1) {
+        activeTabIndex = firstErrorTabIndex;
+    }
+
     // Ativa a aba correspondente ao activeTabIndex
     if (tabButtons.length > 0) {
-        tabButtons[activeTabIndex].button.classList.add('active');
-        tabButtons[activeTabIndex].group.classList.add('active');
+        activateTab(
+            tabButtons[activeTabIndex].group,
+            tabButtons[activeTabIndex].button
+        );
     }
 
     function syncAdvogadoPassivo() {

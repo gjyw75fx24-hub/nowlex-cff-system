@@ -466,6 +466,8 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Campo não obrigatório: a análise pode começar vazia e ser preenchida via JS
+        self.fields['respostas'].required = False
         # Verifica se a instância existe e tem uma primary key (ou seja, já foi salva)
         # e tenta acessar processo_judicial de forma segura.
         if self.instance and self.instance.pk:
@@ -483,6 +485,12 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
                 # associado (o que não deveria acontecer para um OneToOneField salvo),
                 # ou se for uma instância nova ainda não associada.
                 pass
+
+    def clean_respostas(self):
+        # Garante que retornamos um dict mesmo quando vazio ou não enviado,
+        # evitando erros de validação e permitindo que o default seja usado.
+        data = self.cleaned_data.get('respostas')
+        return data or {}
 
 class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
     form = AnaliseProcessoAdminForm # Usar o formulário customizado
@@ -557,6 +565,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados', 'delegate_processes']
 
+    def save_model(self, request, obj, form, change):
+        # Garante que a carteira escolhida no formulário seja persistida
+        obj.carteira = form.cleaned_data.get('carteira')
+        super().save_model(request, obj, form, change)
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
@@ -624,6 +637,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             deleted_objects = []
 
             for inline_form in formset.forms:
+                # Ignore completely empty inline rows that Django still validates,
+                # otherwise we end up persisting a blank AnaliseProcesso without FK.
+                if not inline_form.has_changed() and not inline_form.cleaned_data.get('DELETE'):
+                    continue
+
                 if inline_form.cleaned_data.get('DELETE'):
                     obj = inline_form.instance
                     if obj.pk:
@@ -633,6 +651,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
                 instance = inline_form.save(commit=False)
                 if isinstance(instance, AnaliseProcesso):
+                    # Assegura que o FK seja preenchido ao criar novo processo
+                    if not instance.processo_judicial_id:
+                        instance.processo_judicial = form.instance
                     instance.updated_by = request.user
 
                 is_new = instance.pk is None
