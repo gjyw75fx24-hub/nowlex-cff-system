@@ -123,3 +123,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Token da API do Escavador
 ESCAVADOR_API_TOKEN = os.getenv("ESCAVADOR_API_TOKEN")
 
+# Arquivos enviados (uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

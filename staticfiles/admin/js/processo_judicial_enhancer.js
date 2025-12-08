@@ -100,6 +100,70 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const csrftoken = getCookie('csrftoken');
 
+    // Botão "Atualizar andamentos agora" ao lado do checkbox de Busca Ativa
+    const buscaAtivaInput = document.getElementById('id_busca_ativa');
+    if (buscaAtivaInput && !document.getElementById('btn_atualizar_andamentos')) {
+        const btn = document.createElement('button');
+        btn.id = 'btn_atualizar_andamentos';
+        btn.type = 'button';
+        btn.className = 'button';
+        btn.innerText = '🔄 Atualizar andamentos agora';
+        btn.style.marginRight = '10px';
+
+        const container = buscaAtivaInput.parentNode;
+        container.insertBefore(btn, buscaAtivaInput);
+
+        btn.addEventListener('click', () => {
+            const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+            if (!match) {
+                alert('Salve o processo antes de atualizar andamentos.');
+                return;
+            }
+            const objectId = match[1];
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Buscando andamentos...';
+
+            fetch(`/admin/contratos/processojudicial/${objectId}/atualizar-andamentos/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken }
+            }).then(resp => {
+                if (!resp.ok) throw new Error('Erro ao acionar atualização.');
+                window.location.reload();
+            }).catch(err => {
+                alert(err.message || 'Falha ao atualizar andamentos.');
+            }).finally(() => {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            });
+        });
+    }
+
+    // Máscara e formatação CNJ no input principal
+    if (cnjInput) {
+        const formatCnj = (raw) => {
+            const d = (raw || '').replace(/\D/g, '').slice(0, 20);
+            const parts = [
+                d.slice(0, 7),
+                d.slice(7, 9),
+                d.slice(9, 13),
+                d.slice(13, 14),
+                d.slice(14, 16),
+                d.slice(16, 20),
+            ];
+            if (d.length <= 7) return d;
+            return `${parts[0]}-${parts[1]}${parts[2] ? '.' + parts[2] : ''}${parts[3] ? '.' + parts[3] : ''}${parts[4] ? '.' + parts[4] : ''}${parts[5] ? '.' + parts[5] : ''}`;
+        };
+
+        cnjInput.addEventListener('input', (e) => {
+            const pos = e.target.selectionStart;
+            const formatted = formatCnj(e.target.value);
+            e.target.value = formatted;
+            // Best effort to keep cursor near the end
+            e.target.setSelectionRange(formatted.length, formatted.length);
+        });
+    }
+
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
@@ -175,11 +239,26 @@ document.addEventListener('DOMContentLoaded', function() {
     // Atualiza o estado visual da inline de parte (ex: cor de fundo, visibilidade do botão CIA)
     function updateParteDisplay(parteInline) {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
-        if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
+        const enderecoField = parteInline.querySelector('.field-endereco');
+        const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
+        const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
+        const clearBtn = enderecoField ? enderecoField.querySelector('.endereco-clear-button') : null;
+        const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
+
+        if (isPassive) {
             parteInline.style.backgroundColor = 'rgba(220, 230, 255, 0.5)'; // Azul claro sutil
         } else {
             parteInline.style.backgroundColor = ''; // Remove cor se não for passivo
         }
+
+        // Minimiza endereço para polo ativo, expande para passivo
+        if (enderecoGrid) {
+            const showGrid = isPassive;
+            enderecoGrid.style.display = showGrid ? 'grid' : 'none';
+            if (toggleBtn) toggleBtn.style.display = 'inline-block';
+            if (clearBtn) clearBtn.style.display = showGrid ? 'inline-block' : 'none';
+        }
+
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
     }
 
@@ -189,6 +268,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         const documentoInput = parteInline.querySelector('[id$="-documento"]'); // Necessário para a API do CIA
         let ciaButton = parteInline.querySelector('.cia-button');
+        let clearButton = parteInline.querySelector('.endereco-clear-button');
 
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
@@ -207,6 +287,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 ciaButton = null;
             }
 
+            const fetchEnderecoCIA = () => {
+                const cpfCnpj = documentoInput ? documentoInput.value.replace(/\D/g, '') : '';
+                if (!cpfCnpj || cpfCnpj.length < 11) {
+                    return;
+                }
+                const url = `/api/fetch-address/${cpfCnpj}/`;
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.endereco_formatado) {
+                            enderecoInput.value = data.endereco_formatado;
+                            enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        } else if (data.error) {
+                            console.warn('Erro ao buscar endereço:', data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erro na requisição da API de endereço:', error);
+                    });
+            };
+
             if (ciaButton) {
                 // Configura o handler do botão (se ele existir)
                 ciaButton.onclick = function() {
@@ -215,23 +316,45 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Por favor, informe o CPF/CNPJ da parte para buscar o endereço.');
                         return;
                     }
-                    const url = `/contratos/api/fetch-address/${cpfCnpj}/`;
-                    fetch(url)
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.endereco_formatado) {
-                                enderecoInput.value = data.endereco_formatado;
-                                enderecoInput.dispatchEvent(new Event('change', { bubbles: true })); // Dispara evento de mudança para o widget EnderecoWidget
-                            } else if (data.error) {
-                                alert('Erro ao buscar endereço: ' + data.error);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Erro na requisição da API de endereço:', error);
-                            alert('Erro de conexão ao buscar endereço.');
-                        });
+                    fetchEnderecoCIA();
                 };
             }
+
+            // Dispara automaticamente ao preencher o CPF/CNPJ do polo passivo (menos cliques)
+            if (documentoInput) {
+                documentoInput.addEventListener('blur', () => {
+                    if (tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO') {
+                        fetchEnderecoCIA();
+                    }
+                });
+            }
+
+            // Botão de limpar endereço (sempre disponível)
+            if (!clearButton) {
+                clearButton = document.createElement('button');
+                clearButton.type = 'button';
+                clearButton.className = 'button endereco-clear-button';
+                clearButton.innerText = '🧹';
+                clearButton.title = 'Limpar endereço';
+                clearButton.style.marginLeft = '5px';
+                clearButton.style.background = 'transparent';
+                clearButton.style.border = 'none';
+                clearButton.style.color = '#555';
+                clearButton.style.cursor = 'pointer';
+                clearButton.style.float = 'right';
+                enderecoInput.parentNode.appendChild(clearButton);
+            }
+            clearButton.onclick = function() {
+                enderecoInput.value = '';
+                const fieldWrapper = enderecoInput.closest('.field-endereco');
+                if (fieldWrapper) {
+                    fieldWrapper.querySelectorAll('input[data-part]').forEach(inp => {
+                        inp.value = '';
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }
+                enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+            };
         }
     }
 
@@ -266,6 +389,33 @@ document.addEventListener('DOMContentLoaded', function() {
     // Função principal para configurar uma inline de parte
     function setupParteInline(parteInline) {
         setupDocumentoField(parteInline);
+
+        // Cria toggle para endereço (minimiza por padrão no polo ativo)
+        const enderecoField = parteInline.querySelector('.field-endereco');
+        if (enderecoField && !enderecoField.querySelector('.endereco-toggle-button')) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'button endereco-toggle-button';
+            toggleBtn.innerText = '▸';
+            toggleBtn.title = 'Expandir endereço';
+            toggleBtn.style.marginLeft = '5px';
+            toggleBtn.style.background = 'transparent';
+            toggleBtn.style.border = 'none';
+            toggleBtn.style.color = '#555';
+            toggleBtn.style.cursor = 'pointer';
+            toggleBtn.addEventListener('click', () => {
+                const grid = enderecoField.querySelector('.endereco-fields-grid');
+                const clearBtn = enderecoField.querySelector('.endereco-clear-button');
+                if (!grid) return;
+                const showing = grid.style.display !== 'none';
+                const willShow = !showing;
+                grid.style.display = willShow ? 'grid' : 'none';
+                if (clearBtn) clearBtn.style.display = willShow ? 'inline-block' : 'none';
+                toggleBtn.innerText = willShow ? '▾' : '▸';
+                toggleBtn.title = willShow ? 'Recolher endereço' : 'Expandir endereço';
+            });
+            enderecoField.querySelector('label')?.appendChild(toggleBtn);
+        }
 
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         if (tipoPoloSelect) {

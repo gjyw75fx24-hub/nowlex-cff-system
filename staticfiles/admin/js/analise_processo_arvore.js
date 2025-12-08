@@ -22,7 +22,10 @@
         let treeConfig = {};
         let userResponses = {};
         let firstQuestionKey = null;
-        const currentProcessoId = $('input[name="object_id"]').val() || null;
+        const currentProcessoId =
+            $('input[name="object_id"]').val() ||
+            (window.location.pathname.match(/processojudicial\/([^/]+)/) || [])[1] ||
+            null;
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
@@ -84,6 +87,7 @@
         }
 
         function updateContractStars() {
+            // Evita limpar seleção antes de termos os contratos carregados do DOM
             if (!allAvailableContratos || allAvailableContratos.length === 0) {
                 return;
             }
@@ -212,12 +216,14 @@
             $formattedResponsesContainer.empty();
             
             // Container flex para título e botão (posicionado discretamente alinhado à direita)
-            const $headerContainer = $('<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;"></div>');
+            const $headerContainer = $('<div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px;"></div>');
             $headerContainer.append('<h3>Respostas da Análise</h3>');
 
-            // Botão Gerar Petição Monitória (criado e anexado dinamicamente)
-            const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white; margin-left: auto;">Gerar Petição Monitória</button>');
-            $headerContainer.append($gerarMonitoriaBtnDynamic);
+            // Botões de ação
+            const $btnGroup = $('<div style="display:flex; gap:8px; margin-left:auto;"></div>');
+            const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
+            $btnGroup.append($gerarMonitoriaBtnDynamic);
+            $headerContainer.append($btnGroup);
             $formattedResponsesContainer.append($headerContainer);
 
 
@@ -1067,7 +1073,7 @@
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria/`;
+            const url = `/processo/${currentProcessoId}/gerar-monitoria/`;
 
             $.ajax({
                 url: url,
@@ -1077,34 +1083,23 @@
                     processo_id: currentProcessoId,
                     contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
                 },
-                xhrFields: { responseType: 'blob' },
+                dataType: 'json',
                 beforeSend: function() {
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', true)
                         .text('Gerando...');
                 },
-                success: function(blob, status, xhr) {
-                    try {
-                        const disposition = xhr.getResponseHeader('Content-Disposition') || '';
-                        let filename = 'monitoria.docx';
-                        const match = disposition.match(/filename="?([^\"]+)"?/i);
-                        if (match && match[1]) {
-                            filename = decodeURIComponent(match[1]);
-                        }
-
-                        const urlBlob = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = urlBlob;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        window.URL.revokeObjectURL(urlBlob);
-                        alert('Petição generada com sucesso e download iniciado!');
-                    } catch (err) {
-                        console.error('Erro ao processar download da monitória:', err);
-                        alert('Monitória gerada, mas houve um problema ao iniciar o download.');
+                success: function(data) {
+                    const msg = data && data.message ? data.message : 'Petição gerada com sucesso.';
+                    let extra = '';
+                    if (data && data.pdf_url) {
+                        extra += `\nPDF salvo em Arquivos.`;
+                    } else {
+                        extra += `\nPDF não foi gerado; verifique o conversor.`;
                     }
+                    alert(`${msg}${extra}`);
+                    // Recarrega a página para que a aba Arquivos reflita os novos anexos
+                    window.location.reload();
                 },
                 error: function(xhr, status, error) {
                     let errorMessage =
@@ -1121,6 +1116,115 @@
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição Monitória');
+                }
+            });
+        });
+
+        // Botão para baixar DOC editável (gera DOCX on-demand; não salva em Arquivos)
+        $(document).on('click', '#id_baixar_doc_monitoria_btn', function(e) {
+            e.preventDefault();
+
+            if (!currentProcessoId) {
+                alert('Erro: ID do processo não encontrado.');
+                return;
+            }
+            if (!userResponses.contratos_para_monitoria || userResponses.contratos_para_monitoria.length === 0) {
+                alert('Selecione pelo menos um contrato para a monitória.');
+                return;
+            }
+
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            const url = `/processo/${currentProcessoId}/gerar-monitoria-docx/`;
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: {
+                    processo_id: currentProcessoId,
+                    contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
+                },
+                xhrFields: { responseType: 'blob' },
+                beforeSend: function() {
+                    $('#id_baixar_doc_monitoria_btn').prop('disabled', true).text('Baixando...');
+                },
+                success: function(blob, status, xhr) {
+                    try {
+                        const disposition = xhr.getResponseHeader('Content-Disposition') || '';
+                        let filename = 'monitoria.docx';
+                        const match = disposition.match(/filename=\"?([^\"]+)\"?/i);
+                        if (match && match[1]) {
+                            filename = decodeURIComponent(match[1]);
+                        }
+                        const urlBlob = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = urlBlob;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(urlBlob);
+                    } catch (err) {
+                        console.error('Erro ao baixar doc:', err);
+                        alert('Documento gerado, mas houve problema ao iniciar o download.');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    let errorMessage = 'Erro ao gerar DOC editável.';
+                    if (xhr.responseText) errorMessage = xhr.responseText;
+                    alert(errorMessage);
+                },
+                complete: function() {
+                    $('#id_baixar_doc_monitoria_btn').prop('disabled', false).text('DOC');
+                }
+            });
+        });
+
+        // Botão para baixar PDF com nome amigável (via endpoint dedicado)
+        $(document).on('click', '#id_baixar_pdf_monitoria_btn', function(e) {
+            e.preventDefault();
+            if (!currentProcessoId) {
+                alert('Erro: ID do processo não encontrado.');
+                return;
+            }
+            const url = `/processo/${currentProcessoId}/download-monitoria-pdf/`;
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            $.ajax({
+                url: url,
+                method: 'GET',
+                headers: { 'X-CSRFToken': csrftoken },
+                xhrFields: { responseType: 'blob' },
+                beforeSend: function() {
+                    $('#id_baixar_pdf_monitoria_btn').prop('disabled', true).text('Baixando...');
+                },
+                success: function(blob, status, xhr) {
+                    try {
+                        const disposition = xhr.getResponseHeader('Content-Disposition') || '';
+                        let filename = 'monitoria.pdf';
+                        const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+                        if (match && match[1]) {
+                            filename = decodeURIComponent(match[1]);
+                        }
+                        const urlBlob = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = urlBlob;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(urlBlob);
+                    } catch (err) {
+                        console.error('Erro ao baixar pdf:', err);
+                        alert('PDF disponível, mas houve problema ao iniciar o download.');
+                    }
+                },
+                error: function(xhr) {
+                    let msg = 'PDF da monitória não encontrado. Gere o PDF e tente novamente.';
+                    if (xhr.responseText) msg = xhr.responseText;
+                    alert(msg);
+                },
+                complete: function() {
+                    $('#id_baixar_pdf_monitoria_btn').prop('disabled', false).text('Baixar PDF');
                 }
             });
         });

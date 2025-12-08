@@ -41,6 +41,39 @@ document.addEventListener('DOMContentLoaded', function() {
   let currentObjectUrl = null;
   if (!modal || !content || !closeBtn) return;
 
+  // Botões "Baixar Doc Editável" e "Baixar PDF" na aba Arquivos + transformar links em "Visualizar"
+  // Converte links de arquivo em botão "Visualizar" (apenas no campo de arquivo)
+  (function applyVisualizarButtons() {
+    const apply = () => {
+      const fileLinks = document.querySelectorAll('#arquivos-group td.field-arquivo a[href], #processoarquivo_set-group td.field-arquivo a[href]');
+      fileLinks.forEach(link => {
+        if (link.dataset.visualizarApplied === '1') return;
+        // não mexe no botão de adicionar novo arquivo
+        if (link.closest('.add-row')) return;
+        link.textContent = 'Visualizar';
+        link.classList.add('button');
+        link.style.backgroundColor = '#555';
+        link.style.color = '#fff';
+        link.style.padding = '3px 7px';
+        link.style.fontSize = '0.85em';
+        link.style.display = 'inline-block';
+        link.style.marginTop = '4px';
+        link.dataset.visualizarApplied = '1';
+      });
+
+      // Remove o prefixo "Atualmente:" / "Currently:" do widget de upload
+      document.querySelectorAll('#arquivos-group p.file-upload, #processoarquivo_set-group p.file-upload').forEach(p => {
+        const txtNode = Array.from(p.childNodes).find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim().match(/Atualmente:|Currently:/i));
+        if (txtNode) {
+          txtNode.textContent = '';
+        }
+      });
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.body, { childList: true, subtree: true });
+  })();
+
   function closeModal() {
     modal.style.display = 'none';
     content.innerHTML = '';
@@ -97,13 +130,112 @@ document.addEventListener('DOMContentLoaded', function() {
     const href = link.getAttribute('href') || '';
     // Apenas links de arquivo da pasta do processo
     if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
-    // Extensões suportadas (imagens e PDFs)
+    // Extensões suportadas (imagens, PDFs; DOCX tenta abrir o PDF-irmão, senão alerta)
     const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
     const isPdf = /\.pdf$/i.test(href);
-    if (!isImage && !isPdf) return;
+    const isDocx = /\.docx$/i.test(href);
+    if (!isImage && !isPdf && !isDocx) return;
     e.preventDefault();
+
+    if (isDocx) {
+      const pdfHref = href.replace(/\.docx$/i, '.pdf');
+      fetch(pdfHref, { method: 'HEAD' })
+        .then(res => {
+          if (res.ok) {
+            renderFile(pdfHref);
+          } else {
+            alert('Pré-visualização disponível apenas em PDF. Gere/aguarde o PDF na aba Arquivos.');
+          }
+        })
+        .catch(() => {
+          alert('Pré-visualização disponível apenas em PDF. Gere/aguarde o PDF na aba Arquivos.');
+        });
+      return;
+    }
+
     renderFile(href);
   }, true);
+
+  // Insere botões de Baixar DOC e Baixar PDF dentro do inline de Arquivos
+  (function injectDownloadButtons() {
+    const tryInsert = () => {
+      const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
+      if (!arquivosGroup) return;
+
+      // só insere uma vez por inline de monitoria; usa a primeira linha que tenha arquivo pdf/docx de monitoria
+      if (arquivosGroup.querySelector('#id_baixar_doc_monitoria_btn') || arquivosGroup.querySelector('#id_baixar_pdf_monitoria_btn')) return;
+
+      const targetLink = arquivosGroup.querySelector('td.field-arquivo a[href*="Monitoria"], td.field-arquivo a[href*="monitoria"], td.field-arquivo a[href$=".pdf"], td.field-arquivo a[href$=".docx"]');
+      if (!targetLink) return;
+
+      const row = targetLink.closest('tr.dynamic-processoarquivo') || targetLink.closest('tr');
+      const nomeCell = row ? row.querySelector('td.field-nome') : null;
+      const arquivoCell = targetLink.closest('td.field-arquivo');
+      if (!row || !nomeCell || !arquivoCell) return;
+
+      // esconde o link original (evita duplicar)
+      targetLink.style.display = 'none';
+
+      const btnRow = document.createElement('div');
+      btnRow.style.display = 'flex';
+      btnRow.style.flexWrap = 'wrap';
+      btnRow.style.gap = '6px';
+      btnRow.style.margin = '6px 0 4px 0';
+      btnRow.style.alignItems = 'center';
+      btnRow.style.justifyContent = 'flex-start';
+
+      const makeBtn = (text, id) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        if (id) b.id = id;
+        b.className = 'button';
+        b.style.padding = '4px 7px';
+        b.style.background = '#555';
+        b.style.color = '#fff';
+        b.style.border = '1px solid #444';
+        b.style.boxShadow = 'none';
+        b.style.fontWeight = '400';
+        b.style.fontSize = '0.85em';
+        return b;
+      };
+
+      const btnVisual = document.createElement('a');
+      btnVisual.href = targetLink.href;
+      btnVisual.textContent = 'VISUALIZAR';
+      btnVisual.className = 'button';
+      btnVisual.style.padding = '4px 7px';
+      btnVisual.style.background = '#555';
+      btnVisual.style.color = '#fff';
+      btnVisual.style.border = '1px solid #444';
+      btnVisual.style.boxShadow = 'none';
+      btnVisual.style.fontWeight = '400';
+      btnVisual.style.fontSize = '0.85em';
+      btnVisual.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        targetLink.click();
+      });
+
+      const btnPdf = makeBtn('PDF', 'id_baixar_pdf_monitoria_btn');
+      const btnDoc = makeBtn('DOC', 'id_baixar_doc_monitoria_btn');
+
+      btnRow.appendChild(btnVisual);
+      btnRow.appendChild(btnPdf);
+      btnRow.appendChild(btnDoc);
+
+      // insere abaixo do campo de nome, alinhado à direita
+      const nomeInput = nomeCell.querySelector('input, textarea');
+      if (nomeInput && nomeInput.parentNode) {
+        nomeInput.parentNode.appendChild(btnRow);
+      } else {
+        nomeCell.appendChild(btnRow);
+      }
+    };
+
+    tryInsert();
+    const observer = new MutationObserver(tryInsert);
+    observer.observe(document.body, { childList: true, subtree: true });
+  })();
 
   // Troca o checkbox de remover por botão com confirmação no inline de Arquivos
   (function enhanceArquivoInlineDeletes() {

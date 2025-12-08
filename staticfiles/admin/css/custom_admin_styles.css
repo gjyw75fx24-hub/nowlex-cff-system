@@ -147,3 +147,49 @@ a.historylink {
     /* Ajusta a origem da transformação para o canto superior direito */
     transform-origin: top right !important;
 }
+
+/* --- Estilos para o campo de CPF copiável --- */
+.cpf-copy-field {
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+    border-bottom: 1px dotted #888;
+}
+
+.cpf-copy-field:hover {
+    background-color: #e0e0e0;
+}
+
+.cpf-copy-field.copied {
+    background-color: #198754; /* Verde sucesso */
+    color: white;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border-bottom: none;
+}
+
+/* --- Estilos para a seleção de contratos no card --- */
+.contrato-item-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.contrato-quitado-toggle {
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    color: #555;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.contrato-quitado-toggle.active {
+    background-color: #ffc107; /* Amarelo */
+    color: white;
+    border-color: #f5b300;
+}
+

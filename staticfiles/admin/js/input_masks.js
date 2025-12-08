@@ -38,28 +38,27 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function inicializarMascaras() {
-        const valorInput = document.querySelector('input.money-mask');
+        const moneyInputs = document.querySelectorAll('input.money-mask');
         const form = document.querySelector('form');
 
-        if (valorInput) {
+        moneyInputs.forEach(input => {
             // Aplica formatação ao carregar valor existente
-            if (valorInput.value) {
-                const numero = Number(valorInput.value.replace(/\s/g, '').replace(/[\R$\u00A0]/g, '').replace(',', '.'));
+            if (input.value) {
+                const numero = Number(input.value.replace(/\s/g, '').replace(/[\R$\u00A0]/g, '').replace(/\./g, '').replace(',', '.'));
                 if (!isNaN(numero)) {
-                    valorInput.value = numero.toLocaleString('pt-BR', {
+                    input.value = numero.toLocaleString('pt-BR', {
                         style: 'currency',
                         currency: 'BRL'
                     });
                 }
             }
-
             // Aplica formatação ao sair do campo
-            valorInput.addEventListener('blur', formatarMoedaAoFinalizar);
-        }
+            input.addEventListener('blur', formatarMoedaAoFinalizar);
+        });
 
         if (form) {
             form.addEventListener('submit', (e) => {
-                if (valorInput) prepararValorParaEnvio(valorInput);
+                moneyInputs.forEach(input => prepararValorParaEnvio(input));
 
                 // Força botão "Salvar e continuar editando"
                 const hiddenInput = document.createElement('input');

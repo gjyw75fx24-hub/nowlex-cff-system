@@ -30,7 +30,9 @@ function setupCompletarDados() {
     // Adiciona o listener de clique
     botao.addEventListener("click", async () => {
         const cnj = cnjInput.value.trim();
-        if (cnj.length < 20) {
+        const cnjNumerico = cnj.replace(/\\D/g, '');
+
+        if (cnjNumerico.length < 20) {
             alert("Informe um CNJ completo (mínimo 20 dígitos).");
             return;
         }
@@ -39,28 +41,10 @@ function setupCompletarDados() {
         const originalText = botao.textContent;
         botao.textContent = "⏳ Buscando…";
 
-        // Prepara os dados para a requisição POST
-        const formData = new FormData();
-        formData.append('cnj', cnj);
-        
-        // Pega o token CSRF do formulário
-        const csrfTokenInput = document.querySelector('[name=csrfmiddlewaretoken]');
-        if (!csrfTokenInput) {
-            alert("Erro de segurança: Token CSRF não encontrado.");
-            botao.disabled = false;
-            botao.textContent = originalText;
-            return;
-        }
-        const csrfToken = csrfTokenInput.value;
-
         try {
-            // Faz a requisição para a API
-            const response = await fetch('/api/contratos/buscar-dados-escavador/', {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-CSRFToken': csrfToken
-                }
+            // Faz a requisição para a API (GET unificado com o endpoint usado no enhancer)
+            const response = await fetch(`/api/buscar-dados-escavador/${cnjNumerico}/`, {
+                method: 'GET'
             });
             
             const data = await response.json();

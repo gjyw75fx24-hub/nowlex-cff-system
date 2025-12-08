@@ -3,16 +3,22 @@
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
-from .models import ProcessoJudicial, StatusProcessual, QuestaoAnalise, OpcaoResposta, Contrato
+from .models import ProcessoJudicial, StatusProcessual, QuestaoAnalise, OpcaoResposta, Contrato, ProcessoArquivo
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from decimal import Decimal, InvalidOperation
 from django.db.models import Max
 from django.db import transaction
 from django.contrib.admin.views.decorators import staff_member_required
+from django.urls import reverse
 import re
 import logging
 from contratos.data.decision_tree_config import DECISION_TREE_CONFIG # <--- Nova importação
 import copy # Para cópia profunda do dicionário
+import json
+import tempfile
+from pathlib import Path
+import subprocess
+import threading
 
 # Imports para geração de DOCX
 from docx import Document
@@ -20,9 +26,100 @@ from io import BytesIO
 from datetime import datetime
 import os
 from django.conf import settings
+from django.core.files.base import ContentFile
+from django.utils.text import slugify
+from django.utils.timezone import now
+from django.db.models import Q
 
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_filename(name: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|]+', ' ', name or '')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned or 'arquivo'
+
+
+def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
+    dados = {}
+    dados['PARTE CONTRÁRIA'] = polo_passivo.nome
+    dados['CPF'] = polo_passivo.documento
+
+    endereco_parts = parse_endereco(polo_passivo.endereco)
+    dados['A'] = endereco_parts.get('A', '')
+    dados['B'] = endereco_parts.get('B', '')
+    dados['C'] = endereco_parts.get('C', '')
+    dados['D'] = endereco_parts.get('D', '')
+    dados['E'] = endereco_parts.get('E', '')
+    dados['F'] = endereco_parts.get('F', '')
+    dados['G'] = endereco_parts.get('G', '')
+    dados['H'] = endereco_parts.get('H', '')
+
+    dados['E_FORO'] = processo.vara
+    dados['H_FORO'] = processo.uf
+
+    dados['CONTRATO'] = ", ".join([c.numero_contrato for c in contratos_monitoria if c.numero_contrato])
+
+    if processo.valor_causa is not None:
+        total_valor_causa = processo.valor_causa
+    else:
+        total_valor_causa = sum(
+            (contrato.valor_causa for contrato in contratos_monitoria if contrato.valor_causa is not None),
+            Decimal('0')
+        )
+
+    dados['VALOR DA CAUSA'] = f'{total_valor_causa:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+    dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
+
+    dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
+        'January', 'janeiro').replace('February', 'fevereiro').replace('March', 'março').replace(
+        'April', 'abril').replace('May', 'maio').replace('June', 'junho').replace(
+        'July', 'julho').replace('August', 'agosto').replace('September', 'setembro').replace(
+        'October', 'outubro').replace('November', 'novembro').replace('December', 'dezembro')
+
+    template_path = os.path.join(
+        settings.BASE_DIR,
+        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
+        '1 - Base - Inicial Monitoria - B6.docx'
+    )
+
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
+
+    document = Document(template_path)
+
+    for p in document.paragraphs:
+        for key, value in dados.items():
+            if key == 'E_FORO' and '[E]/[H]' in p.text:
+                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+            p.text = p.text.replace(f'[{key}]', str(value))
+
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for key, value in dados.items():
+                        if key == 'E_FORO' and '[E]/[H]' in p.text:
+                            p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+                        p.text = p.text.replace(f'[{key}]', str(value))
+
+    file_stream = BytesIO()
+    document.save(file_stream)
+    file_stream.seek(0)
+    return file_stream.getvalue()
+
+
+def _build_monitoria_base_filename(polo_passivo, contratos_monitoria):
+    contratos_labels = [
+        (c.numero_contrato or f"contrato-{c.id}") for c in contratos_monitoria
+    ]
+    if not contratos_labels:
+        contratos_labels = ['contratos']
+    contratos_segment = " - ".join(contratos_labels)
+    nome_parte = polo_passivo.nome or "parte"
+    base = f"01 - Monitoria Inicial - {contratos_segment} - {nome_parte}"
+    return _sanitize_filename(base)
 
 @require_POST
 def buscar_dados_escavador_view(request):
@@ -431,86 +528,160 @@ def generate_monitoria_petition(request, processo_id=None):
     if not contratos_monitoria.exists():
         return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
 
-    # Mapeamento de dados
-    dados = {}
-    dados['PARTE CONTRÁRIA'] = polo_passivo.nome
-    dados['CPF'] = polo_passivo.documento # Pode ser CPF ou CNPJ
-
-    # Parsear endereço
-    endereco_parts = parse_endereco(polo_passivo.endereco)
-    dados['A'] = endereco_parts.get('A', '') # Logradouro
-    dados['B'] = endereco_parts.get('B', '') # Número
-    dados['C'] = endereco_parts.get('C', '') # Complemento
-    dados['D'] = endereco_parts.get('D', '') # Bairro
-    dados['E'] = endereco_parts.get('E', '') # Cidade
-    dados['F'] = endereco_parts.get('F', '') # Estado por extenso (ex: Rondônia)
-    dados['G'] = endereco_parts.get('G', '') # CEP
-    dados['H'] = endereco_parts.get('H', '') # UF (ex: RO)
-
-    # Outros dados do processo
-    dados['E_FORO'] = processo.vara # Ex: COMARCA DE PORTO VELHO
-    dados['H_FORO'] = processo.uf # Ex: RO
-
-    # Contratos
-    # Assume que [CONTRATO] espera uma lista de números de contrato separados por vírgula
-    dados['CONTRATO'] = ", ".join([c.numero_contrato for c in contratos_monitoria if c.numero_contrato])
-    
-    # Calcular Valor da Causa
-    total_valor_causa = sum(contrato.valor_causa for contrato in contratos_monitoria if contrato.valor_causa is not None)
-    dados['VALOR DA CAUSA'] = f'{total_valor_causa:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.') # Formato BR
-    dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
-
-    # Data de Hoje
-    dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
-        'January', 'janeiro').replace('February', 'fevereiro').replace('March', 'março').replace(
-        'April', 'abril').replace('May', 'maio').replace('June', 'junho').replace(
-        'July', 'julho').replace('August', 'agosto').replace('September', 'setembro').replace(
-        'October', 'outubro').replace('November', 'novembro').replace('December', 'dezembro')
-
-
-    # Caminho para o template DOCX
-    template_path = os.path.join(
-        settings.BASE_DIR, 
-        'contratos', 'documents', 'Base de Minutas Oficiais Modelo', 
-        '1 - Base - Inicial Monitoria - B6.docx'
-    )
-
-    if not os.path.exists(template_path):
-        return HttpResponse(f"Arquivo de template não encontrado em: {template_path}", status=500)
-
     try:
-        document = Document(template_path)
+        docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
+        base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
 
-        for p in document.paragraphs:
-            for key, value in dados.items():
-                # Substituir [E]/[H] que está no mesmo parágrafo
-                if key == 'E_FORO' and '[E]/[H]' in p.text:
-                    p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-                # Substituir outros placeholders
-                p.text = p.text.replace(f'[{key}]', str(value))
-        
-        # Iterar sobre tabelas, se houver
-        for table in document.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for p in cell.paragraphs:
-                        for key, value in dados.items():
-                            if key == 'E_FORO' and '[E]/[H]' in p.text:
-                                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-                            p.text = p.text.replace(f'[{key}]', str(value))
+        def _convert_docx_to_pdf_bytes(docx_bytes_local: bytes):
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmpdir_path = Path(tmpdir)
+                    docx_path = tmpdir_path / "input.docx"
+                    pdf_path = tmpdir_path / "input.pdf"
+                    docx_path.write_bytes(docx_bytes_local)
+                    cmd = [
+                        "soffice",
+                        "--headless",
+                        "--convert-to",
+                        "pdf",
+                        "--outdir",
+                        str(tmpdir_path),
+                        str(docx_path),
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, timeout=90)
+                    if result.returncode != 0:
+                        logger.error(
+                            "Falha na conversão para PDF (soffice): rc=%s stdout=%s stderr=%s",
+                            result.returncode,
+                            result.stdout.decode(errors="ignore"),
+                            result.stderr.decode(errors="ignore"),
+                        )
+                        return None
+                    if pdf_path.exists():
+                        return pdf_path.read_bytes()
+            except Exception as exc:
+                logger.error("Erro ao converter DOCX para PDF: %s", exc, exc_info=True)
+            return None
 
+        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+        if not pdf_bytes:
+            return HttpResponse("Não foi possível converter o DOCX para PDF. Verifique o conversor.", status=500)
 
-        # Salvar o documento em um buffer de memória
-        file_stream = BytesIO()
-        document.save(file_stream)
-        file_stream.seek(0)
+        pdf_name = f"{base_filename}.pdf"
+        pdf_file = ContentFile(pdf_bytes)
+        try:
+            arquivo_pdf = ProcessoArquivo(
+                processo=processo,
+                nome=pdf_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+            pdf_url = arquivo_pdf.arquivo.url
+        except Exception as exc:
+            logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
+            return HttpResponse("Falha ao salvar o PDF gerado nos Arquivos.", status=500)
 
-        # Retornar o documento como uma resposta de download
-        filename = f"Petição_Monitoria_{polo_passivo.nome}_{datetime.now().strftime('%Y%m%d')}.docx"
-        response = FileResponse(file_stream, content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
+        response_payload = {
+            "status": "success",
+            "message": "Petição gerada (PDF salvo em Arquivos).",
+            "pdf_url": pdf_url,
+            "pdf_pending": False,
+            "docx_download_url": request.build_absolute_uri(
+                reverse('contratos:generate_monitoria_docx', kwargs={'processo_id': processo_id_int})
+            ),
+        }
+        return JsonResponse(response_payload)
 
     except Exception as e:
         logger.error(f"Erro ao gerar a petição para o processo {processo_id}: {e}", exc_info=True)
         return HttpResponse(f"Erro ao gerar a petição: {e}", status=500)
+
+
+@require_POST
+def generate_monitoria_docx_download(request, processo_id=None):
+    processo_id = processo_id or request.POST.get('processo_id')
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return HttpResponse("ID do processo inválido.", status=400)
+
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+        analise = processo.analise_processo
+    except ProcessoJudicial.DoesNotExist:
+        return HttpResponse("Processo Judicial não encontrado.", status=404)
+    except Exception as e:
+        logger.error(f"Erro ao buscar análise do processo {processo_id_int}: {e}", exc_info=True)
+        return HttpResponse(f"Erro ao buscar dados do processo: {e}", status=500)
+
+    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+    if not polo_passivo:
+        return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
+
+    contratos_para_monitoria_ids = []
+    try:
+        posted_json = request.POST.get('contratos_para_monitoria')
+        if posted_json:
+            contratos_para_monitoria_ids = json.loads(posted_json)
+    except (TypeError, json.JSONDecodeError):
+        contratos_para_monitoria_ids = []
+
+    if not contratos_para_monitoria_ids:
+        contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
+
+    contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
+    if not contratos_monitoria.exists():
+        return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
+
+    try:
+        docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
+        base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
+        filename = f"{base_filename}.docx"
+
+        return FileResponse(
+            BytesIO(docx_bytes),
+            content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            filename=filename,
+        )
+    except FileNotFoundError as fe:
+        return HttpResponse(str(fe), status=500)
+    except Exception as e:
+        logger.error(f"Erro ao gerar DOCX editável para processo {processo_id}: {e}", exc_info=True)
+        return HttpResponse(f"Erro ao gerar DOCX editável: {e}", status=500)
+
+
+@require_GET
+def download_monitoria_pdf(request, processo_id=None):
+    """
+    Download do PDF da monitória com Content-Disposition amigável,
+    usando o nome padronizado (substitui underscores por espaços).
+    """
+    try:
+        processo_id_int = int(processo_id or 0)
+    except (TypeError, ValueError):
+        return HttpResponse("ID do processo inválido.", status=400)
+
+    arquivo_pdf = (
+        ProcessoArquivo.objects
+        .filter(processo_id=processo_id_int, arquivo__iendswith='.pdf')
+        .order_by('-criado_em')
+        .first()
+    )
+    if not arquivo_pdf or not arquivo_pdf.arquivo:
+        return HttpResponse("PDF da monitória não encontrado para este processo.", status=404)
+
+    try:
+        arquivo_pdf.arquivo.open('rb')
+        filename = arquivo_pdf.nome or os.path.basename(arquivo_pdf.arquivo.name)
+        # reforça nome legível removendo underscores (storage padrão os adiciona)
+        filename = filename.replace('_', ' ')
+        return FileResponse(
+            arquivo_pdf.arquivo,
+            as_attachment=True,
+            filename=filename,
+            content_type='application/pdf'
+        )
+    except Exception as exc:
+        logger.error("Erro ao preparar download do PDF da monitória: %s", exc, exc_info=True)
+        return HttpResponse("Erro ao preparar download do PDF.", status=500)

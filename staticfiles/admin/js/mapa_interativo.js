@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!mapa) return;
 
     const urlParams = new URLSearchParams(window.location.search);
-    const ufAtiva = urlParams.get("uf"); 
+    const ufAtivas = new Set(urlParams.getAll("uf").filter(Boolean));
 
     const ufsComProcessos = new Set();
     ufList.querySelectorAll('a').forEach(link => {
@@ -48,14 +48,29 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    if (ufAtiva) {
-        const estadoSelecionado = mapa.querySelector(`#UF-${ufAtiva.toUpperCase()}`);
-        if (estadoSelecionado) {
-            estadoSelecionado.classList.add("highlighted");
-        }
-    }
-
     const linkTodos = Array.from(ufList.querySelectorAll('a')).find(a => a.textContent.trim().toLowerCase() === 'todos');
+
+    const toggleUF = (uf) => {
+        const current = new URLSearchParams(window.location.search);
+        const values = new Set(current.getAll('uf').filter(Boolean));
+        if (values.has(uf)) {
+            values.delete(uf);
+        } else {
+            values.add(uf);
+        }
+        current.delete('uf');
+        values.forEach(v => current.append('uf', v));
+        const newSearch = current.toString();
+        window.location.search = newSearch ? `?${newSearch}` : window.location.pathname;
+    };
+
+    // Marcar as UFs já selecionadas visualmente
+    ufAtivas.forEach(uf => {
+        const path = mapa.querySelector(`#UF-${uf.toUpperCase()}`);
+        if (path) path.classList.add('highlighted');
+        const linkUF = Array.from(ufList.querySelectorAll('a')).find(a => a.href.includes(`uf=${uf}`));
+        if (linkUF) linkUF.classList.add('selected');
+    });
 
     mapa.querySelectorAll("path[id^='UF-']").forEach(path => {
         const uf = path.id.replace("UF-", "");
@@ -66,13 +81,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Hover no MAPA -> Destaque na LISTA
             path.addEventListener("mouseenter", () => {
-                if (uf.toUpperCase() !== ufAtiva) {
+                if (!ufAtivas.has(uf.toUpperCase())) {
                     path.classList.add("highlighted");
                     if (linkUF) linkUF.style.fontWeight = 'bold';
                 }
             });
             path.addEventListener("mouseleave", () => {
-                if (uf.toUpperCase() !== ufAtiva) {
+                if (!ufAtivas.has(uf.toUpperCase())) {
                     path.classList.remove("highlighted");
                     if (linkUF) linkUF.style.fontWeight = 'normal';
                 }
@@ -81,20 +96,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (linkUF) {
                 // Hover na LISTA -> Destaque no MAPA (Restaurado)
                 linkUF.addEventListener('mouseenter', () => {
-                    if (uf.toUpperCase() !== ufAtiva) path.classList.add('highlighted');
+                    if (!ufAtivas.has(uf.toUpperCase())) path.classList.add('highlighted');
                 });
                 linkUF.addEventListener('mouseleave', () => {
-                    if (uf.toUpperCase() !== ufAtiva) path.classList.remove('highlighted');
+                    if (!ufAtivas.has(uf.toUpperCase())) path.classList.remove('highlighted');
                 });
 
                 // Lógica de clique unificada
                 const clickHandler = (event) => {
                     event.preventDefault();
-                    if (uf.toUpperCase() === ufAtiva) {
-                        if (linkTodos) window.location.href = linkTodos.href;
-                    } else {
-                        window.location.href = linkUF.href;
-                    }
+                    toggleUF(uf.toUpperCase());
                 };
                 
                 path.addEventListener("click", clickHandler);
