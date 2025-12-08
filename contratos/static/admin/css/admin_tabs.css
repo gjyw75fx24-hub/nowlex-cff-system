@@ -46,3 +46,81 @@
 .inline-group.active {
     display: block;
 }
+
+/* Aba falsa e caderno flutuante de Observações */
+.inline-group-tabs .fake-observacoes-tab {
+    background-color: #fffbea;
+    border: 1px solid #d9c46b;
+    color: #6a5b23;
+}
+
+.inline-group-tabs .fake-observacoes-tab:hover {
+    background-color: #fff4c2;
+}
+
+.notebook-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10500;
+    padding: 16px;
+    pointer-events: none; /* permite clicar na página enquanto o caderno está aberto */
+}
+
+.notebook-overlay.open {
+    display: flex;
+}
+
+.notebook {
+    background: #fffbf0;
+    border: 2px solid #d9c46b;
+    border-radius: 8px;
+    width: min(600px, 90vw);
+    min-height: 360px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    pointer-events: auto; /* caderno continua interativo */
+}
+
+.notebook-header {
+    padding: 10px 12px;
+    background: #f3e6b3;
+    border-bottom: 1px solid #d9c46b;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: bold;
+    color: #5a4b1a;
+    cursor: move;
+}
+
+.notebook-close {
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    cursor: pointer;
+    color: #5a4b1a;
+}
+
+.notebook-textarea {
+    flex: 1;
+    border: none;
+    padding: 14px;
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background: repeating-linear-gradient(
+        #fffbf0,
+        #fffbf0 28px,
+        #f1e8c6 28px,
+        #f1e8c6 29px
+    );
+    color: #403515;
+    outline: none;
+    resize: vertical;
+}

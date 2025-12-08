@@ -45,6 +45,102 @@ window.addEventListener('load', function() {
         tabButtons.push({ button: tabButton, title: title, group: group });
     });
 
+    // Aba falsa "Observações" abre caderno flutuante
+    (function addNotebookTab() {
+        const notebookBtn = document.createElement('button');
+        notebookBtn.type = 'button';
+        notebookBtn.textContent = 'Observações';
+        notebookBtn.className = 'fake-observacoes-tab';
+
+        // insere após a aba Arquivos, se encontrada, senão no fim
+        const arquivosIndex = tabButtons.findIndex(item => (item.title || '').toLowerCase().includes('arquivo'));
+        const refButton = arquivosIndex !== -1 ? tabButtons[arquivosIndex].button : null;
+        if (refButton && refButton.nextSibling) {
+            tabsContainer.insertBefore(notebookBtn, refButton.nextSibling);
+        } else {
+            tabsContainer.appendChild(notebookBtn);
+        }
+
+        const noteKey = `observacoes_livres_${window.location.pathname}`;
+        let notebookOverlay = null;
+        let notebookTextarea = null;
+
+        const ensureNotebook = () => {
+            if (notebookOverlay) return;
+            notebookOverlay = document.createElement('div');
+            notebookOverlay.className = 'notebook-overlay';
+            notebookOverlay.innerHTML = `
+                <div class="notebook" draggable="false">
+                    <div class="notebook-header" data-drag-handle="1">
+                        <span>Observações rápidas</span>
+                        <button type="button" class="notebook-close" aria-label="Fechar">×</button>
+                    </div>
+                    <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
+                </div>
+            `;
+            document.body.appendChild(notebookOverlay);
+            notebookTextarea = notebookOverlay.querySelector('.notebook-textarea');
+
+            const saved = localStorage.getItem(noteKey) || '';
+            notebookTextarea.value = saved;
+            const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
+            notebookTextarea.addEventListener('input', save);
+
+            const close = () => notebookOverlay.classList.remove('open');
+            notebookOverlay.querySelector('.notebook-close').addEventListener('click', close);
+            document.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Escape' && notebookOverlay.classList.contains('open')) {
+                    close();
+                }
+            });
+
+            // Drag manual do caderno
+            const notebook = notebookOverlay.querySelector('.notebook');
+            const dragHandle = notebookOverlay.querySelector('[data-drag-handle]');
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+            let origX = 0;
+            let origY = 0;
+
+            const onMouseDown = (ev) => {
+                isDragging = true;
+                startX = ev.clientX;
+                startY = ev.clientY;
+                const rect = notebook.getBoundingClientRect();
+                origX = rect.left;
+                origY = rect.top;
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            };
+
+            const onMouseMove = (ev) => {
+                if (!isDragging) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                notebook.style.position = 'fixed';
+                notebook.style.left = `${origX + dx}px`;
+                notebook.style.top = `${origY + dy}px`;
+                notebook.style.transform = 'translate(0, 0)';
+            };
+
+            const onMouseUp = () => {
+                isDragging = false;
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            };
+
+            dragHandle.addEventListener('mousedown', onMouseDown);
+        };
+
+        notebookBtn.addEventListener('click', () => {
+            ensureNotebook();
+            if (!notebookOverlay) return;
+            notebookOverlay.classList.add('open');
+            notebookTextarea?.focus();
+        });
+    })();
+
     function activateTab(group, tabButton, scrollPos) {
         tabButtons.forEach(item => item.button.classList.remove('active'));
         inlineGroups.forEach(grp => grp.classList.remove('active'));
