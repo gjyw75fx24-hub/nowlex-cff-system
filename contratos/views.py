@@ -542,8 +542,12 @@ def generate_monitoria_petition(request, processo_id=None):
                     cmd = [
                         "soffice",
                         "--headless",
+                        "--nologo",
+                        "--nodefault",
+                        "--norestore",
+                        "--nofirststartwizard",
                         "--convert-to",
-                        "pdf",
+                        "pdf:writer_pdf_Export",
                         "--outdir",
                         str(tmpdir_path),
                         str(docx_path),
