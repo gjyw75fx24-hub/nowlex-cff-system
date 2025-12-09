@@ -1,5 +1,5 @@
 {% extends "admin/change_form.html" %}
-{% load i18n admin_urls static %}
+{% load i18n admin_urls static custom_filters %}
 
 {% block content %}
 <style>
@@ -64,13 +64,13 @@
                             <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
                             <span class="contrato-numero">
                                 {{ contrato.numero_contrato }}
-                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|stringformat:".2f" }}){% endif %}
+                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|brl }}){% endif %}
                             </span>
                             {% if contrato.data_prescricao %}
                                 {% if contrato.is_prescrito %}
-                                    <span class="prescrito-p">P</span>
+                                    <span class="prescrito-p" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">P</span>
                                 {% else %}
-                                    <span class="prescrito-np">NP</span>
+                                    <span class="prescrito-np" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">NP</span>
                                 {% endif %}
                             {% endif %}
                         </span>{% if not forloop.last %} - {% endif %}
