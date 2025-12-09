@@ -422,13 +422,35 @@ class ContratoForm(forms.ModelForm):
     valor_total_devido = forms.DecimalField(
         required=False,
         decimal_places=2,
-        max_digits=14
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField'})
     )
     valor_causa = forms.DecimalField(
         required=False,
         decimal_places=2,
-        max_digits=14
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField'})
     )
+
+    def _clean_decimal(self, field_name):
+        raw = self.data.get(self.add_prefix(field_name), '')
+        if raw is None:
+            return None
+        raw = str(raw).strip()
+        if raw == '':
+            return None
+        if ',' in raw:
+            raw = raw.replace('.', '').replace(',', '.')
+        try:
+            return Decimal(raw)
+        except InvalidOperation:
+            raise forms.ValidationError("Informe um número válido.")
+
+    def clean_valor_total_devido(self):
+        return self._clean_decimal('valor_total_devido')
+
+    def clean_valor_causa(self):
+        return self._clean_decimal('valor_causa')
 
 
 class ContratoInline(admin.StackedInline):
