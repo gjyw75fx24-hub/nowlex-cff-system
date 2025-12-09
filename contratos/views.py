@@ -12,6 +12,8 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 import re
 import logging
+import requests
+from urllib.parse import quote
 from contratos.data.decision_tree_config import DECISION_TREE_CONFIG # <--- Nova importação
 import copy # Para cópia profunda do dicionário
 import json
@@ -40,6 +42,48 @@ def _sanitize_filename(name: str) -> str:
     cleaned = re.sub(r'[\\/:*?"<>|]+', ' ', name or '')
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned or 'arquivo'
+
+
+def _format_currency_brl(value):
+    try:
+        amount = Decimal(value or 0)
+    except (TypeError, InvalidOperation):
+        amount = Decimal('0')
+    quantized = amount.quantize(Decimal('0.01'))
+    formatted = f'{quantized:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f'R$ {formatted}'
+
+
+def _format_cpf(cpf_value):
+    digits = re.sub(r'\D', '', str(cpf_value or ''))
+    if len(digits) == 11:
+        return f'{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}'
+    return str(cpf_value or '')
+
+
+def _extrair_primeiros_nomes(nome, max_nomes=2):
+    if not nome:
+        return ''
+    STOP = {'da', 'de', 'do', 'das', 'dos', 'e', "d’", "d'", 'a', 'o'}
+    tokens = [t for t in re.split(r'\s+', nome.strip()) if t]
+    out = []
+    for tok in tokens:
+        if tok.lower() in STOP:
+            continue
+        out.append(tok)
+        if len(out) >= max_nomes:
+            break
+    return ' '.join(out).strip()
+
+
+def _formatar_lista_contratos(contratos):
+    valores = [str(c.numero_contrato).strip() for c in contratos if getattr(c, 'numero_contrato', None)]
+    if not valores:
+        return ''
+    if len(valores) == 1:
+        return valores[0]
+    ultimo = valores.pop()
+    return f"{', '.join(valores)} e {ultimo}"
 
 
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
@@ -129,6 +173,166 @@ def _build_monitoria_base_filename(polo_passivo, contratos_monitoria):
     nome_parte = polo_passivo.nome or "parte"
     base = f"01 - Monitoria Inicial - {contratos_segment} - {nome_parte}"
     return _sanitize_filename(base)
+
+
+def _get_total_contrato_value(contratos, processo):
+    total = Decimal('0')
+    for contrato in contratos:
+        valor = contrato.valor_total_devido if contrato.valor_total_devido is not None else contrato.valor_causa
+        if valor is not None:
+            total += valor
+    if total == Decimal('0') and processo.valor_causa is not None:
+        total = processo.valor_causa
+    return total
+
+
+def _build_cobranca_base_filename(polo_passivo, contratos):
+    label = _formatar_lista_contratos(contratos) or 'contratos'
+    nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
+    base = f"01 - Cobranca Judicial - {label} - {nome_parte}"
+    return _sanitize_filename(base)
+
+
+def _convert_docx_to_pdf_bytes(docx_bytes):
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            docx_path = tmpdir_path / "input.docx"
+            pdf_path = tmpdir_path / "input.pdf"
+            docx_path.write_bytes(docx_bytes)
+            cmd = [
+                "soffice",
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--norestore",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf:writer_pdf_Export",
+                "--outdir",
+                str(tmpdir_path),
+                str(docx_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=90)
+            if result.returncode != 0:
+                logger.error(
+                    "Falha na conversão para PDF (soffice): rc=%s stdout=%s stderr=%s",
+                    result.returncode,
+                    result.stdout.decode(errors="ignore"),
+                    result.stderr.decode(errors="ignore"),
+                )
+                return None
+            if pdf_path.exists():
+                return pdf_path.read_bytes()
+    except Exception as exc:
+        logger.error("Erro ao converter DOCX para PDF: %s", exc, exc_info=True)
+    return None
+
+
+def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
+    contratos = sorted(contratos, key=lambda c: (c.numero_contrato or '', c.id))
+    dados = {
+        'PARTE CONTRÁRIA': (polo_passivo.nome or '').upper(),
+        'CPF': _format_cpf(polo_passivo.documento),
+    }
+
+    endereco_parts = parse_endereco(polo_passivo.endereco)
+    for key in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
+        dados[key] = endereco_parts.get(key, '') or ''
+
+    dados['E_FORO'] = processo.vara or ''
+    dados['H_FORO'] = processo.uf or ''
+    dados['UF'] = processo.uf or ''
+    dados['CONTRATO'] = _formatar_lista_contratos(contratos)
+
+    total_valor = _get_total_contrato_value(contratos, processo)
+    dados['VALOR'] = _format_currency_brl(total_valor)
+    valor_extenso = number_to_words_pt_br(total_valor)
+    dados['VALOR POR EXTENSO'] = valor_extenso
+    dados['VALOR DA CAUSA'] = dados['VALOR']
+    dados['VALOR DA CAUSA POR EXTENSO'] = valor_extenso
+    dados['DATA DE HOJE'] = datetime.now().strftime("%d/%m/%Y")
+
+    template_path = os.path.join(
+        settings.BASE_DIR,
+        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
+        '4 - Modelo da Ação de Cobrança.docx'
+    )
+
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
+
+    document = Document(template_path)
+    for section in document.sections:
+        try:
+            section.footer_distance = Cm(1.5)
+        except Exception:
+            pass
+
+    for p in document.paragraphs:
+        for key, value in dados.items():
+            if key == 'E_FORO' and '[E]/[H]' in p.text:
+                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+            p.text = p.text.replace(f'[{key}]', str(value))
+
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for key, value in dados.items():
+                        if key == 'E_FORO' and '[E]/[H]' in p.text:
+                            p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
+                        p.text = p.text.replace(f'[{key}]', str(value))
+
+    stream = BytesIO()
+    document.save(stream)
+    stream.seek(0)
+    return stream.getvalue()
+
+
+def _only_digits(value):
+    return re.sub(r'\D', '', str(value or ''))
+
+
+def _fetch_extrato_titularidade(processo, polo_passivo, contratos, user):
+    api_key = getattr(settings, 'JUDICIAL_API_KEY', None)
+    if not api_key:
+        return None
+
+    cpf_digits = _only_digits(polo_passivo.documento)
+    if len(cpf_digits) != 11:
+        logger.warning("CPF inválido para extrato de titularidade: %s", polo_passivo.documento)
+        return None
+
+    contratos_numeros = [
+        _only_digits(contrato.numero_contrato) for contrato in contratos
+        if _only_digits(contrato.numero_contrato)
+    ]
+    if not contratos_numeros:
+        return None
+
+    include_param = quote(','.join(contratos_numeros))
+    url = f'https://erp-api.nowlex.com/api/judicial/cpf/{cpf_digits}/pdf?include_contracts={include_param}'
+    headers = {'X-API-Key': api_key}
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+        response.raise_for_status()
+        contratos_label = _formatar_lista_contratos(contratos) or 'contratos'
+        nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
+        file_name = f"05 - Extrato de Titularidade - {contratos_label} - {nome_parte}.pdf"
+
+        arquivo_extrato = ProcessoArquivo(
+            processo=processo,
+            nome=file_name,
+            enviado_por=user if user and user.is_authenticated else None,
+        )
+        arquivo_extrato.arquivo.save(_sanitize_filename(file_name), ContentFile(response.content), save=True)
+        return arquivo_extrato.arquivo.url
+    except requests.RequestException as exc:
+        logger.warning("Erro ao buscar extrato de titularidade: %s", exc)
+    except Exception as exc:
+        logger.warning("Erro ao salvar extrato de titularidade: %s", exc, exc_info=True)
+    return None
 
 @require_POST
 def buscar_dados_escavador_view(request):
@@ -540,61 +744,6 @@ def generate_monitoria_petition(request, processo_id=None):
     try:
         docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
         base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
-
-        def _convert_docx_to_pdf_bytes(docx_bytes_local: bytes):
-            try:
-                # Ajusta somente para o PDF (não altera o DOCX original)
-                try:
-                    temp_doc = Document(BytesIO(docx_bytes_local))
-                    for section in temp_doc.sections:
-                        try:
-                            # adiciona um leve “colchão” para evitar cortes no cabeçalho/rodapé
-                            section.top_margin = max(Cm(1.0), section.top_margin + Cm(0.5))
-                            section.bottom_margin = max(Cm(1.0), section.bottom_margin + Cm(0.5))
-                            section.right_margin = max(Cm(1.0), section.right_margin + Cm(0.3))
-                            section.footer_distance = Cm(1.5)
-                        except Exception:
-                            pass
-                    tmp_bytes = BytesIO()
-                    temp_doc.save(tmp_bytes)
-                    tmp_bytes.seek(0)
-                    docx_bytes_local = tmp_bytes.getvalue()
-                except Exception:
-                    pass
-
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmpdir_path = Path(tmpdir)
-                    docx_path = tmpdir_path / "input.docx"
-                    pdf_path = tmpdir_path / "input.pdf"
-                    docx_path.write_bytes(docx_bytes_local)
-                    cmd = [
-                        "soffice",
-                        "--headless",
-                        "--nologo",
-                        "--nodefault",
-                        "--norestore",
-                        "--nofirststartwizard",
-                        "--convert-to",
-                        "pdf:writer_pdf_Export",
-                        "--outdir",
-                        str(tmpdir_path),
-                        str(docx_path),
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, timeout=90)
-                    if result.returncode != 0:
-                        logger.error(
-                            "Falha na conversão para PDF (soffice): rc=%s stdout=%s stderr=%s",
-                            result.returncode,
-                            result.stdout.decode(errors="ignore"),
-                            result.stderr.decode(errors="ignore"),
-                        )
-                        return None
-                    if pdf_path.exists():
-                        return pdf_path.read_bytes()
-            except Exception as exc:
-                logger.error("Erro ao converter DOCX para PDF: %s", exc, exc_info=True)
-            return None
-
         pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
         if not pdf_bytes:
             return HttpResponse("Não foi possível converter o DOCX para PDF. Verifique o conversor.", status=500)
@@ -627,6 +776,88 @@ def generate_monitoria_petition(request, processo_id=None):
     except Exception as e:
         logger.error(f"Erro ao gerar a petição para o processo {processo_id}: {e}", exc_info=True)
         return HttpResponse(f"Erro ao gerar a petição: {e}", status=500)
+
+
+@require_POST
+def generate_cobranca_judicial_petition(request, processo_id=None):
+    processo_id = processo_id or request.POST.get('processo_id')
+    
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return HttpResponse("ID do processo inválido.", status=400)
+
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+        analise = processo.analise_processo
+    except ProcessoJudicial.DoesNotExist:
+        return HttpResponse("Processo Judicial não encontrado.", status=404)
+    except Exception as e:
+        logger.error(f"Erro ao buscar análise do processo {processo_id_int}: {e}", exc_info=True)
+        return HttpResponse(f"Erro ao buscar dados do processo: {e}", status=500)
+
+    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+    if not polo_passivo:
+        return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
+
+    contratos_para_cobranca_ids = []
+    try:
+        posted_json = request.POST.get('contratos_para_monitoria')
+        if posted_json:
+            contratos_para_cobranca_ids = json.loads(posted_json)
+    except (TypeError, json.JSONDecodeError):
+        contratos_para_cobranca_ids = []
+
+    contratos_queryset = processo.contratos.all()
+    if contratos_para_cobranca_ids:
+        contratos_queryset = contratos_queryset.filter(id__in=contratos_para_cobranca_ids)
+    else:
+        fallback_ids = getattr(analise, 'respostas', {}).get('contratos_para_monitoria', [])
+        if fallback_ids:
+            contratos_queryset = contratos_queryset.filter(id__in=fallback_ids)
+
+    contratos_lista = list(contratos_queryset)
+    if not contratos_lista:
+        return HttpResponse("Nenhum contrato disponível para gerar a cobrança judicial.", status=404)
+
+    if not polo_passivo.endereco:
+        return HttpResponse("Endereço da parte passiva não informado.", status=400)
+
+    try:
+        docx_bytes = _build_cobranca_docx_bytes(processo, polo_passivo, contratos_lista)
+        base_filename = _build_cobranca_base_filename(polo_passivo, contratos_lista)
+        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+        if not pdf_bytes:
+            return HttpResponse("Não foi possível converter o DOCX para PDF. Verifique o conversor.", status=500)
+
+        pdf_name = f"{base_filename}.pdf"
+        pdf_file = ContentFile(pdf_bytes)
+        arquivo_pdf = ProcessoArquivo(
+            processo=processo,
+            nome=pdf_name,
+            enviado_por=request.user if request.user.is_authenticated else None,
+        )
+        arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+        pdf_url = arquivo_pdf.arquivo.url
+    except FileNotFoundError as fe:
+        logger.error("Template de cobrança não encontrado: %s", fe)
+        return HttpResponse(str(fe), status=500)
+    except Exception as exc:
+        logger.error(f"Erro ao gerar petição de cobrança para o processo {processo_id}: {exc}", exc_info=True)
+        return HttpResponse(f"Erro ao gerar a petição de cobrança: {exc}", status=500)
+
+    extrato_url = _fetch_extrato_titularidade(processo, polo_passivo, contratos_lista, request.user)
+
+    response_payload = {
+        "status": "success",
+        "message": "Petição de cobrança gerada (PDF salvo em Arquivos).",
+        "pdf_url": pdf_url,
+    }
+    if extrato_url:
+        response_payload["extrato_url"] = extrato_url
+        response_payload["message"] += " Extrato de titularidade salvo."
+
+    return JsonResponse(response_payload)
 
 
 @require_POST

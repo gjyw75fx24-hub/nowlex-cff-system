@@ -222,7 +222,9 @@
             // Botões de ação
             const $btnGroup = $('<div style="display:flex; gap:8px; margin-left:auto;"></div>');
             const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
+            const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
             $btnGroup.append($gerarMonitoriaBtnDynamic);
+            $btnGroup.append($gerarCobrancaBtnDynamic);
             $headerContainer.append($btnGroup);
             $formattedResponsesContainer.append($headerContainer);
 
@@ -1116,6 +1118,68 @@
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição Monitória');
+                }
+            });
+        });
+
+        $(document).on('click', '#id_gerar_cobranca_btn', function(e) {
+            e.preventDefault();
+
+            if (!currentProcessoId) {
+                alert('Erro: ID do processo não encontrado para gerar a cobrança.');
+                return;
+            }
+            if (
+                !userResponses.contratos_para_monitoria ||
+                userResponses.contratos_para_monitoria.length === 0
+            ) {
+                alert('Selecione pelo menos um contrato antes de gerar a petição de cobrança.');
+                return;
+            }
+
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            const url = `/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: {
+                    processo_id: currentProcessoId,
+                    contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
+                },
+                dataType: 'json',
+                beforeSend: function() {
+                    $('#id_gerar_cobranca_btn')
+                        .prop('disabled', true)
+                        .text('Gerando cobrança...');
+                },
+                success: function(data) {
+                    const msg = data && data.message ? data.message : 'Petição de cobrança gerada com sucesso.';
+                    let extra = '';
+                    if (data && data.pdf_url) {
+                        extra += `\nPDF salvo em Arquivos.`;
+                    }
+                    if (data && data.extrato_url) {
+                        extra += `\nExtrato de titularidade disponível.`;
+                    }
+                    alert(`${msg}${extra}`);
+                    window.location.reload();
+                },
+                error: function(xhr, status, error) {
+                    let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMessage = xhr.responseJSON.message;
+                    } else if (xhr.responseText) {
+                        errorMessage = xhr.responseText;
+                    }
+                    alert(errorMessage);
+                    console.error('Erro na geração da cobrança judicial:', status, error, xhr);
+                },
+                complete: function() {
+                    $('#id_gerar_cobranca_btn')
+                        .prop('disabled', false)
+                        .text('Petição Cobrança Judicial (PDF)');
                 }
             });
         });
