@@ -270,6 +270,40 @@ class Contrato(models.Model):
         return self.numero_contrato if self.numero_contrato else f"Contrato do processo {self.processo.cnj}"
 
 
+class DocumentoModelo(models.Model):
+    class SlugChoices(models.TextChoices):
+        MONITORIA_INICIAL = 'monitoria_inicial', 'Monitoria Inicial'
+        COBRANCA_JUDICIAL = 'cobranca_judicial', 'Cobrança Judicial'
+
+    slug = models.CharField(
+        max_length=50,
+        unique=True,
+        choices=SlugChoices.choices,
+        verbose_name="Chave",
+        help_text="Identificador usado no backend para localizar o modelo."
+    )
+    nome = models.CharField(max_length=150, verbose_name="Nome exibido")
+    arquivo = models.FileField(
+        upload_to='documentos_modelo/',
+        verbose_name="Arquivo DOCX",
+        help_text="Envie o arquivo .docx que servirá como minuta."
+    )
+    descricao = models.TextField(
+        blank=True,
+        verbose_name="Orientações",
+        help_text="Informações extras sobre placeholders ou variantes."
+    )
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Última atualização")
+
+    class Meta:
+        verbose_name = "Documento Modelo"
+        verbose_name_plural = "Documentos Modelo"
+        ordering = ['slug', 'nome']
+
+    def __str__(self):
+        return self.nome
+
+
 class ParteProcessoAdvogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE)
     advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)

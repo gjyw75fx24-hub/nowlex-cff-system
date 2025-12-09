@@ -3,7 +3,10 @@
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
-from .models import ProcessoJudicial, StatusProcessual, QuestaoAnalise, OpcaoResposta, Contrato, ProcessoArquivo
+from .models import (
+    ProcessoJudicial, StatusProcessual, QuestaoAnalise,
+    OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo
+)
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from decimal import Decimal, InvalidOperation
 from django.db.models import Max
@@ -86,6 +89,22 @@ def _formatar_lista_contratos(contratos):
     return f"{', '.join(valores)} e {ultimo}"
 
 
+def _load_template_document(slug, fallback_path):
+    try:
+        template = DocumentoModelo.objects.get(slug=slug)
+        with template.arquivo.open('rb') as handle:
+            data = BytesIO(handle.read())
+        data.seek(0)
+        return Document(data)
+    except (DocumentoModelo.DoesNotExist, ValueError, FileNotFoundError):
+        return Document(fallback_path)
+    except Exception:
+        try:
+            return Document(fallback_path)
+        except Exception:
+            raise
+
+
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados = {}
     dados['PARTE CONTRÁRIA'] = polo_passivo.nome
@@ -132,7 +151,7 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
 
-    document = Document(template_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, template_path)
 
     # Ajusta posição do rodapé para evitar cortes no PDF (mantém margens do template)
     for section in document.sections:
@@ -262,7 +281,7 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
 
-    document = Document(template_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, template_path)
     for section in document.sections:
         try:
             section.footer_distance = Cm(1.5)

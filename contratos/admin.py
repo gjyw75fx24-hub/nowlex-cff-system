@@ -21,7 +21,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo, ProcessoArquivo,
+    AdvogadoPassivo, ProcessoArquivo, DocumentoModelo,
 )
 from .widgets import EnderecoWidget
 
@@ -104,6 +104,22 @@ class EtiquetaAdmin(admin.ModelAdmin):
         max_order = Etiqueta.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
         initial['ordem'] = max_order + 1
         return initial
+
+
+@admin.register(DocumentoModelo)
+class DocumentoModeloAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'slug', 'arquivo', 'atualizado_em')
+    readonly_fields = ('atualizado_em',)
+    search_fields = ('nome', 'slug')
+    ordering = ('slug', 'nome')
+    fieldsets = (
+        (None, {
+            'fields': ('slug', 'nome', 'arquivo', 'descricao')
+        }),
+        ('Informações', {
+            'fields': ('atualizado_em',),
+        }),
+    )
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
