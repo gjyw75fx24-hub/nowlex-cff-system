@@ -64,7 +64,11 @@
                             <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
                             <span class="contrato-numero">
                                 {{ contrato.numero_contrato }}
-                                {% if contrato.valor_causa %}(R$ {{ contrato.valor_causa|brl }}){% endif %}
+                                {% if contrato.valor_total_devido %}
+                                    (R$ {{ contrato.valor_total_devido|brl }})
+                                {% elif contrato.valor_causa %}
+                                    (R$ {{ contrato.valor_causa|brl }})
+                                {% endif %}
                             </span>
                             {% if contrato.data_prescricao %}
                                 {% if contrato.is_prescrito %}
