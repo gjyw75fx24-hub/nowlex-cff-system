@@ -27,7 +27,9 @@ import threading
 
 # Imports para geração de DOCX
 from docx import Document
-from docx.shared import Cm
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, RGBColor
 from io import BytesIO
 from datetime import datetime
 import os
@@ -55,6 +57,17 @@ def _format_currency_brl(value):
     quantized = amount.quantize(Decimal('0.01'))
     formatted = f'{quantized:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
     return f'R$ {formatted}'
+
+
+def _to_decimal(value):
+    if isinstance(value, Decimal):
+        return value
+    if value is None:
+        return Decimal('0')
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal('0')
 
 
 def _format_cpf(cpf_value):
@@ -87,6 +100,109 @@ def _formatar_lista_contratos(contratos):
         return valores[0]
     ultimo = valores.pop()
     return f"{', '.join(valores)} e {ultimo}"
+
+
+def _iter_container_paragraphs(container):
+    for paragraph in container.paragraphs:
+        yield paragraph
+    for table in getattr(container, 'tables', []):
+        for row in table.rows:
+            for cell in row.cells:
+                yield from _iter_container_paragraphs(cell)
+
+
+def _bold_keywords_in_document(document, keywords):
+    upper_keywords = [kw.upper() for kw in keywords]
+    for paragraph in _iter_container_paragraphs(document):
+        for run in paragraph.runs:
+            run_text_upper = run.text.upper()
+            if any(kw in run_text_upper for kw in upper_keywords):
+                run.font.bold = True
+                run.font.name = 'Times New Roman'
+
+
+def _set_run_shading(run, fill_color):
+    if not fill_color:
+        return
+    rPr = run._element.get_or_add_rPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), fill_color)
+    rPr.append(shd)
+
+
+def _parse_placeholder_segments(text):
+    if not text:
+        return []
+    pattern = re.compile(r'\[(lg|n|a|ag|m)\]')
+    segments = []
+    state = {
+        'bold': False,
+        'blue_font': False,
+        'highlight_blue': False,
+        'highlight_line': False,
+        'line_highlight_open': False,
+        'uppercase': False,
+    }
+    last_index = 0
+
+    def _snapshot():
+        return {
+            'bold': state['bold'],
+            'blue_font': state['blue_font'],
+            'highlight_blue': state['highlight_blue'],
+            'highlight_line': state['highlight_line'],
+            'uppercase': state['uppercase'],
+        }
+
+    for match in pattern.finditer(text):
+        if match.start() > last_index:
+            segments.append((text[last_index:match.start()], _snapshot()))
+        token = match.group(1)
+        if token == 'n':
+            state['bold'] = not state['bold']
+            if not state['bold'] and state['line_highlight_open']:
+                state['highlight_line'] = False
+                state['line_highlight_open'] = False
+        elif token == 'lg':
+            state['highlight_line'] = True
+            state['line_highlight_open'] = True
+        elif token == 'a':
+            state['blue_font'] = not state['blue_font']
+        elif token == 'ag':
+            state['highlight_blue'] = not state['highlight_blue']
+        elif token == 'm':
+            state['uppercase'] = not state['uppercase']
+        last_index = match.end()
+
+    if last_index < len(text):
+        segments.append((text[last_index:], _snapshot()))
+    return [seg for seg in segments if seg[0]]
+
+
+def _apply_placeholder_styles(document):
+    markers = ['[n]', '[a]', '[ag]', '[lg]', '[m]']
+    highlight_fill = 'DCE7FB'
+    blue_rgb = RGBColor(0x33, 0x3A, 0xF1)
+
+    for paragraph in _iter_container_paragraphs(document):
+        source_text = paragraph.text
+        if not source_text or not any(marker in source_text for marker in markers):
+            continue
+        segments = _parse_placeholder_segments(source_text)
+        if not segments:
+            continue
+        for run in paragraph.runs:
+            run.text = ''
+        for text_segment, style in segments:
+            run_text = text_segment.upper() if style['uppercase'] else text_segment
+            run = paragraph.add_run(run_text)
+            run.font.name = 'Times New Roman'
+            run.font.bold = style['bold']
+            run.font.color.rgb = blue_rgb if (style['blue_font'] or style['highlight_blue']) else None
+            if style['highlight_line'] or style['highlight_blue']:
+                _set_run_shading(run, highlight_fill)
 
 
 def _load_template_document(slug, fallback_path):
@@ -125,13 +241,13 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
 
     dados['CONTRATO'] = ", ".join([c.numero_contrato for c in contratos_monitoria if c.numero_contrato])
 
-    if processo.valor_causa is not None:
-        total_valor_causa = processo.valor_causa
-    else:
-        total_valor_causa = sum(
-            (contrato.valor_causa for contrato in contratos_monitoria if contrato.valor_causa is not None),
-            Decimal('0')
-        )
+    contrato_total = sum(
+        (_to_decimal(contrato.valor_causa) for contrato in contratos_monitoria),
+        Decimal('0')
+    ) if contratos_monitoria else Decimal('0')
+    total_valor_causa = contrato_total
+    if total_valor_causa == Decimal('0'):
+        total_valor_causa = _to_decimal(processo.valor_causa)
 
     dados['VALOR DA CAUSA'] = f'{total_valor_causa:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
     dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
@@ -175,6 +291,9 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
                         if key == 'E_FORO' and '[E]/[H]' in p.text:
                             p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
                         p.text = p.text.replace(f'[{key}]', str(value))
+
+    _apply_placeholder_styles(document)
+    _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
 
     file_stream = BytesIO()
     document.save(file_stream)
@@ -302,6 +421,9 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
                         if key == 'E_FORO' and '[E]/[H]' in p.text:
                             p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
                         p.text = p.text.replace(f'[{key}]', str(value))
+
+    _apply_placeholder_styles(document)
+    _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
 
     stream = BytesIO()
     document.save(stream)
