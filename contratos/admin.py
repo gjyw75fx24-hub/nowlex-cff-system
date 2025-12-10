@@ -472,7 +472,7 @@ class ContratoForm(forms.ModelForm):
 class ContratoInline(admin.StackedInline):
     form = ContratoForm
     model = Contrato
-    extra = 1
+    extra = 0
     fk_name = "processo"
 
 class TarefaInline(admin.TabularInline):
