@@ -541,11 +541,29 @@ class CarteiraAdmin(admin.ModelAdmin):
     class Media:
         js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js')
 
+class ValorCausaOrderFilter(admin.SimpleListFilter):
+    title = 'Por Valor da Causa'
+    parameter_name = 'valor_causa_order'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('desc', 'Z a A (Maior primeiro)'),
+            ('asc', 'A a Z (Menor primeiro)'),
+        ]
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == 'desc':
+            return queryset.order_by('-valor_causa')
+        if value == 'asc':
+            return queryset.order_by('valor_causa')
+        return queryset
+
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ValorCausaOrderFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
