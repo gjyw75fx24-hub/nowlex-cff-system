@@ -1,6 +1,14 @@
 (function($) {
     $(document).ready(function() {
         console.log("analise_processo_arvore.js carregado.");
+        const savedScroll = sessionStorage.getItem('scrollPosition');
+        if ('scrollRestoration' in history) {
+            history.scrollRestoration = 'manual';
+        }
+        if (savedScroll !== null) {
+            window.scrollTo(0, parseInt(savedScroll, 10));
+            sessionStorage.removeItem('scrollPosition');
+        }
 
         /**
          * =========================================================
@@ -1100,6 +1108,10 @@
                         extra += `\nPDF não foi gerado; verifique o conversor.`;
                     }
                     alert(`${msg}${extra}`);
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
+                    }
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
                     // Recarrega a página para que a aba Arquivos reflita os novos anexos
                     window.location.reload();
                 },
@@ -1164,6 +1176,10 @@
                         extra += `\nExtrato de titularidade disponível.`;
                     }
                     alert(`${msg}${extra}`);
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
+                    }
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
                     window.location.reload();
                 },
                 error: function(xhr, status, error) {
