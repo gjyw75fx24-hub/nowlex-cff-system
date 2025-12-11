@@ -182,6 +182,11 @@
 
 {% block object-tools-items %}
     {{ block.super }}
+    {% if history_url %}
+        <li>
+            <a href="{{ history_url }}" class="historylink" style="display:inline-block;">Histórico</a>
+        </li>
+    {% endif %}
     {% if original %}
         <style>
             /* Alinhar botões Histórico e Delegar em coluna */
