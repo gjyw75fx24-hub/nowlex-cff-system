@@ -199,6 +199,10 @@ a.historylink {
     justify-content: flex-start;
     width: 100%;
 }
+.field-status .related-widget-wrapper a,
+.field-carteira .related-widget-wrapper a {
+    display: none !important;
+}
 .supervision-toggle {
     display: inline-flex;
     align-items: center;

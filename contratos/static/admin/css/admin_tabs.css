@@ -113,16 +113,7 @@
     font-family: "Courier New", monospace;
     font-size: 14px;
     line-height: 28px;
-    background: repeating-linear-gradient(
-        180deg,
-        #eef4ff 0,
-        #eef4ff 26px,
-        #cdd8f1 26px,
-        #cdd8f1 27px,
-        #cdd8f1 28px
-    );
-    background-size: 100% 28px;
-    background-position: 0 -6px;
+    background: #eef4ff;
     color: #0f1f3b;
     outline: none;
     resize: vertical;
@@ -134,14 +125,7 @@
     gap: 12px;
     padding: 0 16px 16px;
     border-radius: 0 0 8px 8px;
-    background: repeating-linear-gradient(
-        180deg,
-        #eef4ff 0,
-        #eef4ff 26px,
-        #cdd8f1 26px,
-        #cdd8f1 27px,
-        #cdd8f1 28px
-    );
+    background: #eef4ff;
     position: relative;
     overflow: hidden;
 }
