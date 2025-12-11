@@ -83,8 +83,6 @@ window.addEventListener('load', function() {
             `;
             document.body.appendChild(notebookOverlay);
             notebookTextarea = notebookOverlay.querySelector('.notebook-textarea');
-            notebookMentionWrapper = notebookOverlay.querySelector('.notebook-mention');
-            notebookMentionText = notebookOverlay.querySelector('[data-notebook-mention]');
 
             const saved = localStorage.getItem(noteKey) || '';
             notebookTextarea.value = saved;
@@ -163,7 +161,6 @@ window.addEventListener('load', function() {
         notebookBtn.addEventListener('click', () => {
             ensureNotebook();
             if (!notebookOverlay) return;
-            setNotebookMention('');
             notebookOverlay.classList.add('open');
             notebookTextarea?.focus();
         });
