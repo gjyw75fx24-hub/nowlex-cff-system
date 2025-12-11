@@ -145,9 +145,42 @@
             displayFormattedResponses(); // Isso vai criar o botão
             updateContractStars();
             updateGenerateButtonState(); // Isso vai atualizar o estado do botão
+            initAutoSaveListeners();
+        }
+
+        let autoSaveTimer = null;
+        let autoSaveListenersAttached = false;
+
+        function scheduleAutoSave() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+            }
+            autoSaveTimer = setTimeout(() => {
+                autoSaveTimer = null;
+                saveResponses();
+            }, 400);
+        }
+
+        function initAutoSaveListeners() {
+            if (autoSaveListenersAttached) {
+                return;
+            }
+            const container = $dynamicQuestionsContainer.get(0);
+            if (!container) {
+                return;
+            }
+            const handler = () => scheduleAutoSave();
+            ['input', 'change'].forEach(eventName => {
+                container.addEventListener(eventName, handler, true);
+            });
+            autoSaveListenersAttached = true;
         }
 
         function saveResponses() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+                autoSaveTimer = null;
+            }
             ensureUserResponsesShape();
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
