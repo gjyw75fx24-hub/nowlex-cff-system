@@ -108,18 +108,22 @@
 }
 .notebook-textarea {
     flex: 1;
+    width: 100%;
+    min-height: 220px;
     border: none;
     padding: 20px 14px 12px;
     font-family: "Courier New", monospace;
     font-size: 14px;
-    line-height: 28px;
+    line-height: 1.6;
     background: #eef4ff;
     color: #0f1f3b;
     outline: none;
-    resize: vertical;
+    resize: none;
+    box-sizing: border-box;
 }
 
 .notebook-body {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 12px;
