@@ -64,8 +64,6 @@ window.addEventListener('load', function() {
         const noteKey = `observacoes_livres_${window.location.pathname}`;
         let notebookOverlay = null;
         let notebookTextarea = null;
-        let notebookMentionWrapper = null;
-        let notebookMentionText = null;
         let notebookMentionSaver = null;
 
         const ensureNotebook = () => {
@@ -79,10 +77,6 @@ window.addEventListener('load', function() {
                         <button type="button" class="notebook-close" aria-label="Fechar">×</button>
                     </div>
                     <div class="notebook-body">
-                        <div class="notebook-mention" style="display:none;">
-                            <strong>Mencionar:</strong>
-                            <span data-notebook-mention></span>
-                        </div>
                         <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
                     </div>
                 </div>
@@ -156,19 +150,8 @@ window.addEventListener('load', function() {
             dragHandle.addEventListener('mousedown', onMouseDown);
         };
 
-        function setNotebookMention(text) {
-            if (!notebookMentionWrapper || !notebookMentionText) return;
-            if (text) {
-                notebookMentionText.textContent = text;
-                notebookMentionWrapper.style.display = '';
-            } else {
-                notebookMentionWrapper.style.display = 'none';
-            }
-        }
-
         window.openNotebookWithMention = function(text = '') {
             ensureNotebook();
-            setNotebookMention(text);
             if (text && notebookMentionSaver) {
                 notebookMentionSaver(text);
             }
