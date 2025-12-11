@@ -193,3 +193,59 @@ a.historylink {
     border-color: #f5b300;
 }
 
+.field-supervision {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-start;
+    width: 100%;
+}
+.supervision-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 600;
+    color: #333;
+    user-select: none;
+}
+.supervision-toggle-input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.supervision-switch {
+    width: 48px;
+    height: 26px;
+    border-radius: 999px;
+    background: #ccc;
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+}
+.supervision-switch::after {
+    content: "";
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.supervision-toggle-input:checked + .supervision-switch {
+    background: #0d6efd;
+}
+.supervision-toggle-input:checked + .supervision-switch::after {
+    transform: translateX(22px);
+}
+.supervision-label-text {
+    font-size: 0.95rem;
+}
+.add-processo-card {
+    display: inline-flex;
+    margin-top: 40px !important;
+    align-self: flex-start;
+}

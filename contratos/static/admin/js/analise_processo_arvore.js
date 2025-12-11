@@ -798,11 +798,12 @@
             });
 
             $addCardButton.on('click', function() {
-                const newCardData = {
-                    cnj: '',
-                    contratos: [],
-                    tipo_de_acao_respostas: {}
-                };
+            const newCardData = {
+                cnj: '',
+                contratos: [],
+                tipo_de_acao_respostas: {},
+                supervisionado: false
+            };
                 userResponses[questionKey].push(newCardData);
                 renderProcessoVinculadoCard(
                     questionKey,
@@ -827,6 +828,7 @@
             cardData.contratos = Array.isArray(cardData.contratos)
                 ? cardData.contratos
                 : [];
+            cardData.supervisionado = Boolean(cardData.supervisionado);
 
             const indexLabel = cardIndex + 1;
 
@@ -940,6 +942,24 @@
                     cardIndex
                 );
             }
+
+            const $supervisionWrapper = $('<div class="field-supervision"></div>');
+            const $supervisionToggle = $(`
+                <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
+                    <input type="checkbox" class="supervision-toggle-input">
+                    <span class="supervision-switch" aria-hidden="true"></span>
+                    <span class="supervision-label-text">Supervisionar</span>
+                </label>
+            `);
+            $supervisionWrapper.append($supervisionToggle);
+            $body.append($supervisionWrapper);
+
+            const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
+            $supervisionInput.prop('checked', cardData.supervisionado);
+            $supervisionInput.on('change', function() {
+                cardData.supervisionado = $(this).is(':checked');
+                saveResponses();
+            });
 
             $card.append($body);
             $cardsContainer.append($card);
