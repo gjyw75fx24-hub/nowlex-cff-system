@@ -54,6 +54,7 @@ class ProcessoJudicial(models.Model):
     VIABILIDADE_INVIAVEL = 'INVIAVEL'
     VIABILIDADE_INCONCLUSIVO = 'INCONCLUSIVO'
     VIABILIDADE_CHOICES = [
+        ('', '---'),
         (VIABILIDADE_VIAVEL, 'Viável'),
         (VIABILIDADE_INVIAVEL, 'Inviável'),
         (VIABILIDADE_INCONCLUSIVO, 'Inconclusivo'),
@@ -61,7 +62,8 @@ class ProcessoJudicial(models.Model):
     viabilidade = models.CharField(
         max_length=15,
         choices=VIABILIDADE_CHOICES,
-        default=VIABILIDADE_INCONCLUSIVO,
+        default='',
+        blank=True,
         verbose_name="Viabilidade",
         help_text="Indique se o processo está financeiramente viável, inviável ou inconclusivo."
     )
