@@ -72,7 +72,7 @@ window.addEventListener('load', function() {
             notebookOverlay.innerHTML = `
                 <div class="notebook" draggable="false">
                     <div class="notebook-header" data-drag-handle="1">
-                        <span>Observações rápidas</span>
+                        <span>Observações</span>
                         <button type="button" class="notebook-close" aria-label="Fechar">×</button>
                     </div>
                     <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
