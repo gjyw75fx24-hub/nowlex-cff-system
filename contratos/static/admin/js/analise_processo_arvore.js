@@ -838,12 +838,18 @@
             );
 
             const $header = $('<div class="processo-card-header"></div>');
-            $header.append(`<strong>Processo CNJ #${indexLabel}</strong>`);
-
-            const $removeBtn = $(
-                '<button type="button" class="button processo-card-remove">Remover</button>'
+            const $titleWrapper = $(
+                '<div class="processo-card-title"><span>Processo CNJ</span></div>'
             );
-            $header.append($removeBtn);
+            const $hashtagBtn = $(
+                `<button type="button" class="processo-cnj-hashtag" aria-label="Mencionar processo CNJ #${indexLabel}">#${indexLabel}</button>`
+            );
+            $hashtagBtn.on('click', function() {
+                mentionProcessoInNotas(cardData);
+            });
+            $titleWrapper.append($hashtagBtn);
+            $header.append($titleWrapper);
+
             $card.append($header);
 
             const $body = $('<div class="processo-card-body"></div>');
@@ -851,6 +857,7 @@
             // Campo CNJ com formatação padrão
             const $cnjWrapper = $('<div class="field-cnj"></div>');
             $cnjWrapper.append('<label>Nº Processo CNJ</label>');
+            const $cnjInputRow = $('<div class="cnj-input-row"></div>');
             const $cnjInput = $(`
                 <input type="text" class="vTextField processo-cnj-input"
                        placeholder="0000000-00.0000.0.00.0000">
@@ -871,7 +878,20 @@
                 saveResponses();
             });
 
-            $cnjWrapper.append($cnjInput);
+            $cnjInputRow.append($cnjInput);
+            const $removeBtnInline = $(
+                '<button type="button" class="button button-secondary processo-card-remove-inline">×</button>'
+            );
+            $cnjInputRow.append($removeBtnInline);
+            $cnjWrapper.append($cnjInputRow);
+            $removeBtnInline.on('click', function() {
+                if (!confirm('Remover este processo vinculado?')) return;
+                const arr = userResponses[parentQuestionKey] || [];
+                arr.splice(cardIndex, 1);
+                userResponses[parentQuestionKey] = arr;
+                saveResponses();
+                renderDecisionTree();
+            });
             $body.append($cnjWrapper);
 
             // Contratos vinculados a esse processo
@@ -963,15 +983,21 @@
 
             $card.append($body);
             $cardsContainer.append($card);
+        }
 
-            $removeBtn.on('click', function() {
-                if (!confirm('Remover este processo vinculado?')) return;
-                const arr = userResponses[parentQuestionKey] || [];
-                arr.splice(cardIndex, 1);
-                userResponses[parentQuestionKey] = arr;
-                saveResponses();
-                renderDecisionTree();
-            });
+        function mentionProcessoInNotas(cardData) {
+            if (typeof window.openNotebookWithMention !== 'function') {
+                return;
+            }
+            const formattedCnj = cardData.cnj ? formatCnjDigits(cardData.cnj) : 'CNJ não informado';
+            const contractNames = (cardData.contratos || [])
+                .map(id => allAvailableContratos.find(c => String(c.id) === String(id)))
+                .filter(Boolean)
+                .map(c => c.numero_contrato);
+            const contractsText =
+                contractNames.length > 0 ? contractNames.join(', ') : 'Nenhum contrato selecionado';
+            const mention = `CNJ ${formattedCnj} — Contratos: ${contractsText}`;
+            window.openNotebookWithMention(mention);
         }
 
         /* =========================================================

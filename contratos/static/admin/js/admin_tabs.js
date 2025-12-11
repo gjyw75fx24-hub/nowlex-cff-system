@@ -64,6 +64,9 @@ window.addEventListener('load', function() {
         const noteKey = `observacoes_livres_${window.location.pathname}`;
         let notebookOverlay = null;
         let notebookTextarea = null;
+        let notebookMentionWrapper = null;
+        let notebookMentionText = null;
+        let notebookMentionSaver = null;
 
         const ensureNotebook = () => {
             if (notebookOverlay) return;
@@ -75,16 +78,36 @@ window.addEventListener('load', function() {
                         <span>Observações</span>
                         <button type="button" class="notebook-close" aria-label="Fechar">×</button>
                     </div>
-                    <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
+                    <div class="notebook-body">
+                        <div class="notebook-mention" style="display:none;">
+                            <strong>Mencionar:</strong>
+                            <span data-notebook-mention></span>
+                        </div>
+                        <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
+                    </div>
                 </div>
             `;
             document.body.appendChild(notebookOverlay);
             notebookTextarea = notebookOverlay.querySelector('.notebook-textarea');
+            notebookMentionWrapper = notebookOverlay.querySelector('.notebook-mention');
+            notebookMentionText = notebookOverlay.querySelector('[data-notebook-mention]');
 
             const saved = localStorage.getItem(noteKey) || '';
             notebookTextarea.value = saved;
             const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
             notebookTextarea.addEventListener('input', save);
+            notebookMentionSaver = (text) => {
+                if (!text || !notebookTextarea) {
+                    return;
+                }
+                const mention = text.trim();
+                if (!mention) {
+                    return;
+                }
+                const current = notebookTextarea.value.trim();
+                notebookTextarea.value = mention + (current ? `\n${current}` : '');
+                save();
+            };
 
             const close = () => notebookOverlay.classList.remove('open');
             notebookOverlay.querySelector('.notebook-close').addEventListener('click', close);
@@ -133,9 +156,31 @@ window.addEventListener('load', function() {
             dragHandle.addEventListener('mousedown', onMouseDown);
         };
 
+        function setNotebookMention(text) {
+            if (!notebookMentionWrapper || !notebookMentionText) return;
+            if (text) {
+                notebookMentionText.textContent = text;
+                notebookMentionWrapper.style.display = '';
+            } else {
+                notebookMentionWrapper.style.display = 'none';
+            }
+        }
+
+        window.openNotebookWithMention = function(text = '') {
+            ensureNotebook();
+            setNotebookMention(text);
+            if (text && notebookMentionSaver) {
+                notebookMentionSaver(text);
+            }
+            if (!notebookOverlay) return;
+            notebookOverlay.classList.add('open');
+            notebookTextarea?.focus();
+        };
+
         notebookBtn.addEventListener('click', () => {
             ensureNotebook();
             if (!notebookOverlay) return;
+            setNotebookMention('');
             notebookOverlay.classList.add('open');
             notebookTextarea?.focus();
         });
