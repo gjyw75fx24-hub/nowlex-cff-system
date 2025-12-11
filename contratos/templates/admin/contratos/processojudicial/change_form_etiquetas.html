@@ -15,10 +15,56 @@
     .info-card-header {
         display: flex;
         justify-content: space-between;
+        align-items: flex-start;
         font-weight: bold;
         border-bottom: 1px solid #e0e0e0;
         padding-bottom: 10px;
         margin-bottom: 10px;
+    }
+    .info-card-header-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .info-card-header-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 3px;
+    }
+    .parte-documento {
+        font-weight: normal;
+    }
+    .parte-status-toggle {
+        border: none;
+        background: none;
+        color: #0d6efd;
+        font-size: 0.85em;
+        text-decoration: underline;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1.2;
+    }
+    .parte-status-toggle:focus {
+        outline: 2px solid #0d6efd;
+        outline-offset: 2px;
+    }
+    .parte-luto-ribbon {
+        display: none;
+    }
+    .parte-luto-ribbon img {
+        display: block;
+        width: 20px;
+        height: auto;
+    }
+    .info-card-dead .parte-nome {
+        background: #000;
+        color: #fff;
+        padding: 3px 6px;
+        border-radius: 4px;
+    }
+    .info-card-dead .parte-luto-ribbon {
+        display: inline-flex;
     }
     .info-card-body .contrato-item {
         display: inline-block;
@@ -54,8 +100,16 @@
         {% if parte.tipo_polo == 'PASSIVO' %}
             <div class="info-card">
                 <div class="info-card-header">
-                    <span>{{ parte.nome }}</span>
-                    <span>{{ parte.documento }}</span>
+                    <div class="info-card-header-left">
+                        <span class="parte-nome">{{ parte.nome }}</span>
+                        <span class="parte-luto-ribbon" aria-hidden="true">
+                            <img src="{% static 'admin/img/fita-preta.png' %}" alt="Fita preta de luto">
+                        </span>
+                    </div>
+                    <div class="info-card-header-right">
+                        <span class="parte-documento">{{ parte.documento }}</span>
+                        <button type="button" class="parte-status-toggle" data-status="regular" aria-pressed="false">Regular</button>
+                    </div>
                 </div>
                 <div class="info-card-body">
                     {% for contrato in original.contratos.all %}
