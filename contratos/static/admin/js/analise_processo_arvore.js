@@ -176,6 +176,16 @@
             autoSaveListenersAttached = true;
         }
 
+        function flushPendingSave() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+                autoSaveTimer = null;
+                saveResponses();
+            }
+        }
+
+        window.addEventListener('beforeunload', flushPendingSave);
+
         function saveResponses() {
             if (autoSaveTimer) {
                 clearTimeout(autoSaveTimer);
