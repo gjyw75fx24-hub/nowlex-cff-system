@@ -388,6 +388,7 @@ class ParteForm(forms.ModelForm):
         fields = '__all__'
         widgets = {
             'endereco': EnderecoWidget(),
+            'obito': forms.HiddenInput(),
         }
 
 class ParteInline(admin.StackedInline):
@@ -397,7 +398,19 @@ class ParteInline(admin.StackedInline):
     fk_name = "processo"
     classes = ('dynamic-partes',)
     can_delete = True
-    fieldsets = ((None, {"fields": (("tipo_polo", "tipo_pessoa"), ("nome", "documento"), "endereco")}),)
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    ("tipo_polo", "tipo_pessoa"),
+                    ("nome", "documento"),
+                    "endereco",
+                    "obito",
+                )
+            },
+        ),
+    )
 
 
 class AdvogadoPassivoInline(admin.StackedInline):

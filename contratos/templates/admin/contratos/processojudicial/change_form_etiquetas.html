@@ -98,7 +98,7 @@
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-obito="{{ parte.obito|yesno:'1,0' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <span class="parte-nome">{{ parte.nome }}</span>
@@ -108,7 +108,7 @@
                     </div>
                     <div class="info-card-header-right">
                         <span class="parte-documento">{{ parte.documento }}</span>
-                        <button type="button" class="parte-status-toggle" data-status="regular" aria-pressed="false">Regular</button>
+                        <button type="button" class="parte-status-toggle" data-status="{{ parte.obito|yesno:'obito,regular' }}" aria-pressed="false">{{ parte.obito|yesno:'Óbito,Regular' }}</button>
                     </div>
                 </div>
                 <div class="info-card-body">

@@ -31,6 +31,23 @@
             });
         };
 
+        const updateHiddenObitoField = ($card, isDead) => {
+            const parteId = $card.data('parte-id');
+            if (!parteId) {
+                return;
+            }
+            const $idInput = $(`input[name$="-id"][value="${parteId}"]`);
+            if (!$idInput.length) {
+                return;
+            }
+            const inputName = $idInput.attr('name');
+            const prefix = inputName.replace(/-id$/, '');
+            const $obitoInput = $(`input[name="${prefix}-obito"]`);
+            if ($obitoInput.length) {
+                $obitoInput.val(isDead ? '1' : '0');
+            }
+        };
+
         const setDeathState = ($card, isDead) => {
             if (!$card.length) {
                 return;
@@ -52,11 +69,14 @@
                 $toggle.attr('aria-pressed', 'false');
                 $toggle.data('status', 'regular');
             }
+            updateHiddenObitoField($card, isDead);
         };
 
         $('.parte-status-toggle').each(function() {
             const $card = $(this).closest('.info-card');
-            setDeathState($card, false);
+            const obitoValue = $card.data('obito');
+            const isDead = obitoValue === '1' || obitoValue === 1 || obitoValue === true;
+            setDeathState($card, Boolean(isDead));
         });
 
         $('.parte-status-toggle').on('click', function(e) {

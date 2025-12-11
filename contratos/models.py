@@ -175,6 +175,7 @@ class Parte(models.Model):
         null=True,
         verbose_name="Informações dos Advogados"
     )
+    obito = models.BooleanField(default=False, verbose_name="Óbito")
 
     def __str__(self):
         return self.nome
