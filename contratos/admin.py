@@ -605,11 +605,36 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
             return queryset.order_by('valor_causa')
         return queryset
 
+
+class ObitoFilter(admin.SimpleListFilter):
+    title = 'Por Óbito'
+    parameter_name = 'obito'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('sim', 'Com Óbito'),
+            ('nao', 'Sem Óbito'),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val == 'sim':
+            return queryset.filter(
+                models.Q(analise_processo__respostas__icontains='obito') |
+                models.Q(analise_processo__respostas__icontains='óbito')
+            )
+        if val == 'nao':
+            return queryset.exclude(
+                models.Q(analise_processo__respostas__icontains='obito') |
+                models.Q(analise_processo__respostas__icontains='óbito')
+            )
+        return queryset
+
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ValorCausaOrderFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
