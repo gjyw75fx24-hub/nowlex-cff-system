@@ -34,6 +34,9 @@
             $('input[name="object_id"]').val() ||
             (window.location.pathname.match(/processojudicial\/([^/]+)/) || [])[1] ||
             null;
+        const localResponsesKey = currentProcessoId
+            ? `analise_respostas_${currentProcessoId}`
+            : 'analise_respostas_rascunho';
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
@@ -43,6 +46,11 @@
 
         const $responseField = $inlineGroup.find('textarea[name$="-respostas"]');
         $responseField.closest('.form-row').hide();
+        let $adminForm = $('form#processojudicial_form');
+        if (!$adminForm.length) {
+            $adminForm = $('form').first();
+        }
+        $adminForm.on('submit', clearLocalResponses);
 
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
         $inlineGroup.append($dynamicQuestionsContainer);
@@ -81,6 +89,61 @@
                         .map(v => String(v))
                 )
             );
+        }
+
+        function getServerUpdatedTimestamp() {
+            const raw = $responseField.data('analise-updated-at');
+            const parsed = raw ? Date.parse(raw) : NaN;
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function restoreLocalResponsesIfNewer() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            const saved = localStorage.getItem(localResponsesKey);
+            if (!saved) {
+                return;
+            }
+            try {
+                const parsed = JSON.parse(saved);
+                if (!parsed || typeof parsed !== 'object') return;
+                const storedData = parsed.data;
+                const storedTs = Number(parsed.ts) || 0;
+                if (!storedData) return;
+                const serverTs = getServerUpdatedTimestamp();
+                if (storedTs > serverTs) {
+                    userResponses = storedData;
+                    ensureUserResponsesShape();
+                    console.info('Restaurando resposta da análise salva localmente.');
+                }
+            } catch (error) {
+                console.warn('Falha ao restaurar rascunho local da análise:', error);
+            }
+        }
+
+        function persistLocalResponses() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            try {
+                localStorage.setItem(
+                    localResponsesKey,
+                    JSON.stringify({
+                        ts: Date.now(),
+                        data: userResponses
+                    })
+                );
+            } catch (error) {
+                console.warn('Não foi possível salvar localmente as respostas da análise:', error);
+            }
+        }
+
+        function clearLocalResponses() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            localStorage.removeItem(localResponsesKey);
         }
 
         function updateGenerateButtonState() {
@@ -137,6 +200,7 @@
             }
 
             ensureUserResponsesShape();
+            restoreLocalResponsesIfNewer();
             console.log(
                 "DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregarః",
                 JSON.stringify(userResponses)
@@ -204,6 +268,7 @@
             displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
             updateContractStars();
             updateGenerateButtonState();
+            persistLocalResponses();
         }
 
         /* =========================================================
