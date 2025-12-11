@@ -632,15 +632,9 @@ class ObitoFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         val = self.value()
         if val == 'sim':
-            return queryset.filter(
-                models.Q(analise_processo__respostas__icontains='obito') |
-                models.Q(analise_processo__respostas__icontains='óbito')
-            )
+            return queryset.filter(partes_processuais__obito=True).distinct()
         if val == 'nao':
-            return queryset.exclude(
-                models.Q(analise_processo__respostas__icontains='obito') |
-                models.Q(analise_processo__respostas__icontains='óbito')
-            )
+            return queryset.exclude(partes_processuais__obito=True).distinct()
         return queryset
 
 @admin.register(ProcessoJudicial)
