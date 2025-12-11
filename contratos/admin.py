@@ -337,6 +337,24 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
+    title = mark_safe('Por Viabilidade <span class="viabilidade-dollar" title="Financeira">$</span>')
+    parameter_name = 'viabilidade_financeira'
+
+    def lookups(self, request, model_admin):
+        return [
+            (ProcessoJudicial.VIABILIDADE_VIAVEL, mark_safe('<span class="viabilidade-option viavel">Viável</span>')),
+            (ProcessoJudicial.VIABILIDADE_INVIAVEL, mark_safe('<span class="viabilidade-option inviavel">Inviável</span>')),
+            (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, mark_safe('<span class="viabilidade-option inconclusivo">Inconclusivo</span>')),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val:
+            return queryset.filter(viabilidade=val)
+        return queryset
+
+
 class AcordoStatusFilter(admin.SimpleListFilter):
     title = "Por Acordo"
     parameter_name = "acordo_status"
@@ -641,11 +659,11 @@ class ObitoFilter(admin.SimpleListFilter):
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
-        ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
+        ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"

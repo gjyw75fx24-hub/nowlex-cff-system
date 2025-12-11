@@ -49,6 +49,22 @@ class ProcessoJudicial(models.Model):
     vara = models.CharField(max_length=255, verbose_name="Vara", blank=True, null=True)
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
     valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa", blank=True, null=True)
+
+    VIABILIDADE_VIAVEL = 'VIAVEL'
+    VIABILIDADE_INVIAVEL = 'INVIAVEL'
+    VIABILIDADE_INCONCLUSIVO = 'INCONCLUSIVO'
+    VIABILIDADE_CHOICES = [
+        (VIABILIDADE_VIAVEL, 'Viável'),
+        (VIABILIDADE_INVIAVEL, 'Inviável'),
+        (VIABILIDADE_INCONCLUSIVO, 'Inconclusivo'),
+    ]
+    viabilidade = models.CharField(
+        max_length=15,
+        choices=VIABILIDADE_CHOICES,
+        default=VIABILIDADE_INCONCLUSIVO,
+        verbose_name="Viabilidade",
+        help_text="Indique se o processo está financeiramente viável, inviável ou inconclusivo."
+    )
     
     status = models.ForeignKey(
         StatusProcessual,
