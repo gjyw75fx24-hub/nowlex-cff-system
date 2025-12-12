@@ -10,3 +10,9 @@ build/
 
 # macOS
 .DS_Store
+# Django uploads
+media/
+
+# Python cache
+__pycache__/
+*.pyc

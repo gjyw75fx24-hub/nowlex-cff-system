@@ -4,6 +4,7 @@ from django.contrib import admin
 class ContratosConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'contratos'
+    verbose_name = 'Menu ADM'
 
     def ready(self):
         from .models import ProcessoJudicial, StatusProcessual, Carteira

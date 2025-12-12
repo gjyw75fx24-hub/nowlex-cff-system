@@ -1,6 +1,14 @@
 (function($) {
     $(document).ready(function() {
         console.log("analise_processo_arvore.js carregado.");
+        const savedScroll = sessionStorage.getItem('scrollPosition');
+        if ('scrollRestoration' in history) {
+            history.scrollRestoration = 'manual';
+        }
+        if (savedScroll !== null) {
+            window.scrollTo(0, parseInt(savedScroll, 10));
+            sessionStorage.removeItem('scrollPosition');
+        }
 
         /**
          * =========================================================
@@ -26,6 +34,9 @@
             $('input[name="object_id"]').val() ||
             (window.location.pathname.match(/processojudicial\/([^/]+)/) || [])[1] ||
             null;
+        const localResponsesKey = currentProcessoId
+            ? `analise_respostas_${currentProcessoId}`
+            : 'analise_respostas_rascunho';
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
@@ -35,6 +46,11 @@
 
         const $responseField = $inlineGroup.find('textarea[name$="-respostas"]');
         $responseField.closest('.form-row').hide();
+        let $adminForm = $('form#processojudicial_form');
+        if (!$adminForm.length) {
+            $adminForm = $('form').first();
+        }
+        $adminForm.on('submit', clearLocalResponses);
 
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
         $inlineGroup.append($dynamicQuestionsContainer);
@@ -73,6 +89,61 @@
                         .map(v => String(v))
                 )
             );
+        }
+
+        function getServerUpdatedTimestamp() {
+            const raw = $responseField.data('analise-updated-at');
+            const parsed = raw ? Date.parse(raw) : NaN;
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function restoreLocalResponsesIfNewer() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            const saved = localStorage.getItem(localResponsesKey);
+            if (!saved) {
+                return;
+            }
+            try {
+                const parsed = JSON.parse(saved);
+                if (!parsed || typeof parsed !== 'object') return;
+                const storedData = parsed.data;
+                const storedTs = Number(parsed.ts) || 0;
+                if (!storedData) return;
+                const serverTs = getServerUpdatedTimestamp();
+                if (storedTs > serverTs) {
+                    userResponses = storedData;
+                    ensureUserResponsesShape();
+                    console.info('Restaurando resposta da análise salva localmente.');
+                }
+            } catch (error) {
+                console.warn('Falha ao restaurar rascunho local da análise:', error);
+            }
+        }
+
+        function persistLocalResponses() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            try {
+                localStorage.setItem(
+                    localResponsesKey,
+                    JSON.stringify({
+                        ts: Date.now(),
+                        data: userResponses
+                    })
+                );
+            } catch (error) {
+                console.warn('Não foi possível salvar localmente as respostas da análise:', error);
+            }
+        }
+
+        function clearLocalResponses() {
+            if (!localResponsesKey || typeof localStorage === 'undefined') {
+                return;
+            }
+            localStorage.removeItem(localResponsesKey);
         }
 
         function updateGenerateButtonState() {
@@ -129,6 +200,7 @@
             }
 
             ensureUserResponsesShape();
+            restoreLocalResponsesIfNewer();
             console.log(
                 "DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregarః",
                 JSON.stringify(userResponses)
@@ -137,9 +209,52 @@
             displayFormattedResponses(); // Isso vai criar o botão
             updateContractStars();
             updateGenerateButtonState(); // Isso vai atualizar o estado do botão
+            initAutoSaveListeners();
         }
 
+        let autoSaveTimer = null;
+        let autoSaveListenersAttached = false;
+
+        function scheduleAutoSave() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+            }
+            autoSaveTimer = setTimeout(() => {
+                autoSaveTimer = null;
+                saveResponses();
+            }, 400);
+        }
+
+        function initAutoSaveListeners() {
+            if (autoSaveListenersAttached) {
+                return;
+            }
+            const container = $dynamicQuestionsContainer.get(0);
+            if (!container) {
+                return;
+            }
+            const handler = () => scheduleAutoSave();
+            ['input', 'change'].forEach(eventName => {
+                container.addEventListener(eventName, handler, true);
+            });
+            autoSaveListenersAttached = true;
+        }
+
+        function flushPendingSave() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+                autoSaveTimer = null;
+                saveResponses();
+            }
+        }
+
+        window.addEventListener('beforeunload', flushPendingSave);
+
         function saveResponses() {
+            if (autoSaveTimer) {
+                clearTimeout(autoSaveTimer);
+                autoSaveTimer = null;
+            }
             ensureUserResponsesShape();
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
@@ -153,6 +268,7 @@
             displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
             updateContractStars();
             updateGenerateButtonState();
+            persistLocalResponses();
         }
 
         /* =========================================================
@@ -222,7 +338,9 @@
             // Botões de ação
             const $btnGroup = $('<div style="display:flex; gap:8px; margin-left:auto;"></div>');
             const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
+            const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
             $btnGroup.append($gerarMonitoriaBtnDynamic);
+            $btnGroup.append($gerarCobrancaBtnDynamic);
             $headerContainer.append($btnGroup);
             $formattedResponsesContainer.append($headerContainer);
 
@@ -788,11 +906,12 @@
             });
 
             $addCardButton.on('click', function() {
-                const newCardData = {
-                    cnj: '',
-                    contratos: [],
-                    tipo_de_acao_respostas: {}
-                };
+            const newCardData = {
+                cnj: '',
+                contratos: [],
+                tipo_de_acao_respostas: {},
+                supervisionado: false
+            };
                 userResponses[questionKey].push(newCardData);
                 renderProcessoVinculadoCard(
                     questionKey,
@@ -817,6 +936,7 @@
             cardData.contratos = Array.isArray(cardData.contratos)
                 ? cardData.contratos
                 : [];
+            cardData.supervisionado = Boolean(cardData.supervisionado);
 
             const indexLabel = cardIndex + 1;
 
@@ -826,12 +946,18 @@
             );
 
             const $header = $('<div class="processo-card-header"></div>');
-            $header.append(`<strong>Processo CNJ #${indexLabel}</strong>`);
-
-            const $removeBtn = $(
-                '<button type="button" class="button processo-card-remove">Remover</button>'
+            const $titleWrapper = $(
+                '<div class="processo-card-title"><span>Processo CNJ</span></div>'
             );
-            $header.append($removeBtn);
+            const $hashtagBtn = $(
+                `<button type="button" class="processo-cnj-hashtag" aria-label="Mencionar processo CNJ #${indexLabel}">#${indexLabel}</button>`
+            );
+            $hashtagBtn.on('click', function() {
+                mentionProcessoInNotas(cardData);
+            });
+            $titleWrapper.append($hashtagBtn);
+            $header.append($titleWrapper);
+
             $card.append($header);
 
             const $body = $('<div class="processo-card-body"></div>');
@@ -839,6 +965,7 @@
             // Campo CNJ com formatação padrão
             const $cnjWrapper = $('<div class="field-cnj"></div>');
             $cnjWrapper.append('<label>Nº Processo CNJ</label>');
+            const $cnjInputRow = $('<div class="cnj-input-row"></div>');
             const $cnjInput = $(`
                 <input type="text" class="vTextField processo-cnj-input"
                        placeholder="0000000-00.0000.0.00.0000">
@@ -859,7 +986,20 @@
                 saveResponses();
             });
 
-            $cnjWrapper.append($cnjInput);
+            $cnjInputRow.append($cnjInput);
+            const $removeBtnInline = $(
+                '<button type="button" class="button button-secondary processo-card-remove-inline">×</button>'
+            );
+            $cnjInputRow.append($removeBtnInline);
+            $cnjWrapper.append($cnjInputRow);
+            $removeBtnInline.on('click', function() {
+                if (!confirm('Remover este processo vinculado?')) return;
+                const arr = userResponses[parentQuestionKey] || [];
+                arr.splice(cardIndex, 1);
+                userResponses[parentQuestionKey] = arr;
+                saveResponses();
+                renderDecisionTree();
+            });
             $body.append($cnjWrapper);
 
             // Contratos vinculados a esse processo
@@ -931,17 +1071,41 @@
                 );
             }
 
+            const $supervisionWrapper = $('<div class="field-supervision"></div>');
+            const $supervisionToggle = $(`
+                <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
+                    <input type="checkbox" class="supervision-toggle-input">
+                    <span class="supervision-switch" aria-hidden="true"></span>
+                    <span class="supervision-label-text">Supervisionar</span>
+                </label>
+            `);
+            $supervisionWrapper.append($supervisionToggle);
+            $body.append($supervisionWrapper);
+
+            const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
+            $supervisionInput.prop('checked', cardData.supervisionado);
+            $supervisionInput.on('change', function() {
+                cardData.supervisionado = $(this).is(':checked');
+                saveResponses();
+            });
+
             $card.append($body);
             $cardsContainer.append($card);
+        }
 
-            $removeBtn.on('click', function() {
-                if (!confirm('Remover este processo vinculado?')) return;
-                const arr = userResponses[parentQuestionKey] || [];
-                arr.splice(cardIndex, 1);
-                userResponses[parentQuestionKey] = arr;
-                saveResponses();
-                renderDecisionTree();
-            });
+        function mentionProcessoInNotas(cardData) {
+            if (typeof window.openNotebookWithMention !== 'function') {
+                return;
+            }
+            const formattedCnj = cardData.cnj ? formatCnjDigits(cardData.cnj) : 'CNJ não informado';
+            const contractNames = (cardData.contratos || [])
+                .map(id => allAvailableContratos.find(c => String(c.id) === String(id)))
+                .filter(Boolean)
+                .map(c => c.numero_contrato);
+            const contractsText =
+                contractNames.length > 0 ? contractNames.join(', ') : 'Nenhum contrato selecionado';
+            const mention = `CNJ ${formattedCnj} — Contratos: ${contractsText}`;
+            window.openNotebookWithMention(mention);
         }
 
         /* =========================================================
@@ -1098,6 +1262,10 @@
                         extra += `\nPDF não foi gerado; verifique o conversor.`;
                     }
                     alert(`${msg}${extra}`);
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
+                    }
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
                     // Recarrega a página para que a aba Arquivos reflita os novos anexos
                     window.location.reload();
                 },
@@ -1116,6 +1284,72 @@
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição Monitória');
+                }
+            });
+        });
+
+        $(document).on('click', '#id_gerar_cobranca_btn', function(e) {
+            e.preventDefault();
+
+            if (!currentProcessoId) {
+                alert('Erro: ID do processo não encontrado para gerar a cobrança.');
+                return;
+            }
+            if (
+                !userResponses.contratos_para_monitoria ||
+                userResponses.contratos_para_monitoria.length === 0
+            ) {
+                alert('Selecione pelo menos um contrato antes de gerar a petição de cobrança.');
+                return;
+            }
+
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            const url = `/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: {
+                    processo_id: currentProcessoId,
+                    contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
+                },
+                dataType: 'json',
+                beforeSend: function() {
+                    $('#id_gerar_cobranca_btn')
+                        .prop('disabled', true)
+                        .text('Gerando cobrança...');
+                },
+                success: function(data) {
+                    const msg = data && data.message ? data.message : 'Petição de cobrança gerada com sucesso.';
+                    let extra = '';
+                    if (data && data.pdf_url) {
+                        extra += `\nPDF salvo em Arquivos.`;
+                    }
+                    if (data && data.extrato_url) {
+                        extra += `\nExtrato de titularidade disponível.`;
+                    }
+                    alert(`${msg}${extra}`);
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
+                    }
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                    window.location.reload();
+                },
+                error: function(xhr, status, error) {
+                    let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMessage = xhr.responseJSON.message;
+                    } else if (xhr.responseText) {
+                        errorMessage = xhr.responseText;
+                    }
+                    alert(errorMessage);
+                    console.error('Erro na geração da cobrança judicial:', status, error, xhr);
+                },
+                complete: function() {
+                    $('#id_gerar_cobranca_btn')
+                        .prop('disabled', false)
+                        .text('Petição Cobrança Judicial (PDF)');
                 }
             });
         });

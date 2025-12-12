@@ -10,6 +10,7 @@ urlpatterns = [
     path('api/decision-tree/', views.get_decision_tree_data, name='get_decision_tree_data'), # <-- Nova URL
     path('api/processo/<int:processo_id>/contratos/', views.get_processo_contratos_api, name='get_processo_contratos_api'), # <-- Nova URL
     path('processo/<int:processo_id>/gerar-monitoria/', views.generate_monitoria_petition, name='generate_monitoria_petition'),
+    path('processo/<int:processo_id>/gerar-cobranca-judicial/', views.generate_cobranca_judicial_petition, name='generate_cobranca_judicial_petition'),
     path('processo/<int:processo_id>/gerar-monitoria-docx/', views.generate_monitoria_docx_download, name='generate_monitoria_docx'),
     path('processo/<int:processo_id>/download-monitoria-pdf/', views.download_monitoria_pdf, name='download_monitoria_pdf'),
     path('api/', include('contratos.api.urls', namespace='contratos_api')),

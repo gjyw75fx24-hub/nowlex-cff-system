@@ -122,6 +122,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Token da API do Escavador
 ESCAVADOR_API_TOKEN = os.getenv("ESCAVADOR_API_TOKEN")
+JUDICIAL_API_KEY = os.getenv("JUDICIAL_API_KEY")
 
 # Arquivos enviados (uploads)
 MEDIA_URL = '/media/'

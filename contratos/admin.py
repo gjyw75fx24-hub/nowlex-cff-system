@@ -21,7 +21,7 @@ from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo, ProcessoArquivo,
+    AdvogadoPassivo, ProcessoArquivo, DocumentoModelo,
 )
 from .widgets import EnderecoWidget
 
@@ -104,6 +104,22 @@ class EtiquetaAdmin(admin.ModelAdmin):
         max_order = Etiqueta.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
         initial['ordem'] = max_order + 1
         return initial
+
+
+@admin.register(DocumentoModelo)
+class DocumentoModeloAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'slug', 'arquivo', 'atualizado_em')
+    readonly_fields = ('atualizado_em',)
+    search_fields = ('nome', 'slug')
+    ordering = ('slug', 'nome')
+    fieldsets = (
+        (None, {
+            'fields': ('slug', 'nome', 'arquivo', 'descricao')
+        }),
+        ('Informações', {
+            'fields': ('atualizado_em',),
+        }),
+    )
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
@@ -321,6 +337,24 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
+    title = "Viabilidade"
+    parameter_name = 'viabilidade_financeira'
+
+    def lookups(self, request, model_admin):
+        return [
+            (ProcessoJudicial.VIABILIDADE_VIAVEL, mark_safe('<span class="viabilidade-option viavel">Viável</span>')),
+            (ProcessoJudicial.VIABILIDADE_INVIAVEL, mark_safe('<span class="viabilidade-option inviavel">Inviável</span>')),
+            (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, mark_safe('<span class="viabilidade-option inconclusivo">Inconclusivo</span>')),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val:
+            return queryset.filter(viabilidade=val)
+        return queryset
+
+
 class AcordoStatusFilter(admin.SimpleListFilter):
     title = "Por Acordo"
     parameter_name = "acordo_status"
@@ -372,6 +406,7 @@ class ParteForm(forms.ModelForm):
         fields = '__all__'
         widgets = {
             'endereco': EnderecoWidget(),
+            'obito': forms.HiddenInput(),
         }
 
 class ParteInline(admin.StackedInline):
@@ -381,7 +416,19 @@ class ParteInline(admin.StackedInline):
     fk_name = "processo"
     classes = ('dynamic-partes',)
     can_delete = True
-    fieldsets = ((None, {"fields": (("tipo_polo", "tipo_pessoa"), ("nome", "documento"), "endereco")}),)
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    ("tipo_polo", "tipo_pessoa"),
+                    ("nome", "documento"),
+                    "endereco",
+                    "obito",
+                )
+            },
+        ),
+    )
 
 
 class AdvogadoPassivoInline(admin.StackedInline):
@@ -422,19 +469,41 @@ class ContratoForm(forms.ModelForm):
     valor_total_devido = forms.DecimalField(
         required=False,
         decimal_places=2,
-        max_digits=14
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField'})
     )
     valor_causa = forms.DecimalField(
         required=False,
         decimal_places=2,
-        max_digits=14
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField'})
     )
+
+    def _clean_decimal(self, field_name):
+        raw = self.data.get(self.add_prefix(field_name), '')
+        if raw is None:
+            return None
+        raw = str(raw).strip()
+        if raw == '':
+            return None
+        if ',' in raw:
+            raw = raw.replace('.', '').replace(',', '.')
+        try:
+            return Decimal(raw)
+        except InvalidOperation:
+            raise forms.ValidationError("Informe um número válido.")
+
+    def clean_valor_total_devido(self):
+        return self._clean_decimal('valor_total_devido')
+
+    def clean_valor_causa(self):
+        return self._clean_decimal('valor_causa')
 
 
 class ContratoInline(admin.StackedInline):
     form = ContratoForm
     model = Contrato
-    extra = 1
+    extra = 0
     fk_name = "processo"
 
 class TarefaInline(admin.TabularInline):
@@ -466,6 +535,8 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Campo não obrigatório: a análise pode começar vazia e ser preenchida via JS
+        self.fields['respostas'].required = False
         # Verifica se a instância existe e tem uma primary key (ou seja, já foi salva)
         # e tenta acessar processo_judicial de forma segura.
         if self.instance and self.instance.pk:
@@ -483,6 +554,12 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
                 # associado (o que não deveria acontecer para um OneToOneField salvo),
                 # ou se for uma instância nova ainda não associada.
                 pass
+
+    def clean_respostas(self):
+        # Garante que retornamos um dict mesmo quando vazio ou não enviado,
+        # evitando erros de validação e permitindo que o default seja usado.
+        data = self.cleaned_data.get('respostas')
+        return data or {}
 
 class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
     form = AnaliseProcessoAdminForm # Usar o formulário customizado
@@ -559,21 +636,46 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
             return queryset.order_by('valor_causa')
         return queryset
 
+
+class ObitoFilter(admin.SimpleListFilter):
+    title = 'Por Óbito'
+    parameter_name = 'obito'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('sim', 'Com Óbito'),
+            ('nao', 'Sem Óbito'),
+        ]
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val == 'sim':
+            return queryset.filter(partes_processuais__obito=True).distinct()
+        if val == 'nao':
+            return queryset.exclude(partes_processuais__obito=True).distinct()
+        return queryset
+
+
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa',)
     list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ValorCausaOrderFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
-        ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa")}),
+        ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
         ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados', 'delegate_processes']
+
+    def save_model(self, request, obj, form, change):
+        # Garante que a carteira escolhida no formulário seja persistida
+        obj.carteira = form.cleaned_data.get('carteira')
+        super().save_model(request, obj, form, change)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -642,6 +744,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             deleted_objects = []
 
             for inline_form in formset.forms:
+                # Ignore completely empty inline rows that Django still validates,
+                # otherwise we end up persisting a blank AnaliseProcesso without FK.
+                if not inline_form.has_changed() and not inline_form.cleaned_data.get('DELETE'):
+                    continue
+
                 if inline_form.cleaned_data.get('DELETE'):
                     obj = inline_form.instance
                     if obj.pk:
@@ -651,6 +758,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
                 instance = inline_form.save(commit=False)
                 if isinstance(instance, AnaliseProcesso):
+                    # Assegura que o FK seja preenchido ao criar novo processo
+                    if not instance.processo_judicial_id:
+                        instance.processo_judicial = form.instance
                     instance.updated_by = request.user
 
                 is_new = instance.pk is None

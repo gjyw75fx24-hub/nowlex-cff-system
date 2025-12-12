@@ -49,6 +49,24 @@ class ProcessoJudicial(models.Model):
     vara = models.CharField(max_length=255, verbose_name="Vara", blank=True, null=True)
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
     valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa", blank=True, null=True)
+
+    VIABILIDADE_VIAVEL = 'VIAVEL'
+    VIABILIDADE_INVIAVEL = 'INVIAVEL'
+    VIABILIDADE_INCONCLUSIVO = 'INCONCLUSIVO'
+    VIABILIDADE_CHOICES = [
+        ('', '---'),
+        (VIABILIDADE_VIAVEL, 'Viável'),
+        (VIABILIDADE_INVIAVEL, 'Inviável'),
+        (VIABILIDADE_INCONCLUSIVO, 'Inconclusivo'),
+    ]
+    viabilidade = models.CharField(
+        max_length=15,
+        choices=VIABILIDADE_CHOICES,
+        default='',
+        blank=True,
+        verbose_name="Viabilidade",
+        help_text="Indique se o processo está financeiramente viável, inviável ou inconclusivo."
+    )
     
     status = models.ForeignKey(
         StatusProcessual,
@@ -175,6 +193,7 @@ class Parte(models.Model):
         null=True,
         verbose_name="Informações dos Advogados"
     )
+    obito = models.BooleanField(default=False, verbose_name="Óbito")
 
     def __str__(self):
         return self.nome
@@ -268,6 +287,40 @@ class Contrato(models.Model):
 
     def __str__(self):
         return self.numero_contrato if self.numero_contrato else f"Contrato do processo {self.processo.cnj}"
+
+
+class DocumentoModelo(models.Model):
+    class SlugChoices(models.TextChoices):
+        MONITORIA_INICIAL = 'monitoria_inicial', 'Monitoria Inicial'
+        COBRANCA_JUDICIAL = 'cobranca_judicial', 'Cobrança Judicial'
+
+    slug = models.CharField(
+        max_length=50,
+        unique=True,
+        choices=SlugChoices.choices,
+        verbose_name="Chave",
+        help_text="Identificador usado no backend para localizar o modelo."
+    )
+    nome = models.CharField(max_length=150, verbose_name="Nome exibido")
+    arquivo = models.FileField(
+        upload_to='documentos_modelo/',
+        verbose_name="Arquivo DOCX",
+        help_text="Envie o arquivo .docx que servirá como minuta."
+    )
+    descricao = models.TextField(
+        blank=True,
+        verbose_name="Orientações",
+        help_text="Informações extras sobre placeholders ou variantes."
+    )
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Última atualização")
+
+    class Meta:
+        verbose_name = "Documento Modelo"
+        verbose_name_plural = "Documentos Modelo"
+        ordering = ['slug', 'nome']
+
+    def __str__(self):
+        return self.nome
 
 
 class ParteProcessoAdvogado(models.Model):

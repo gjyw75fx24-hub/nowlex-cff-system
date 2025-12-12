@@ -1,6 +1,7 @@
 # contratos/templatetags/custom_filters.py
 
 from django import template
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 register = template.Library()
 
@@ -19,3 +20,18 @@ def some(value, arg):
         (hasattr(item, arg) and getattr(item, arg))
         for item in value
     )
+
+
+@register.filter(name='brl')
+def brl(value):
+    """
+    Formata número como moeda brasileira: 12.345,67.
+    """
+    if value in (None, ''):
+        return ''
+    try:
+        quantized = Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, TypeError):
+        return value
+    formatted = f"{quantized:,.2f}"
+    return formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
