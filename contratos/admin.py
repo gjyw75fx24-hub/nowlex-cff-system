@@ -338,7 +338,7 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
 
 
 class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
-    title = "Viabilidade"
+    title = "Viabilidade $"
     parameter_name = 'viabilidade_financeira'
 
     def lookups(self, request, model_admin):
