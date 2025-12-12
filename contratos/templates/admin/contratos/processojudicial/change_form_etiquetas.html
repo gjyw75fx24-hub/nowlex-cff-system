@@ -23,6 +23,12 @@
     }
     .info-card-header-left {
         display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .info-card-name-row {
+        display: flex;
         align-items: center;
         gap: 6px;
     }
@@ -74,34 +80,34 @@
         display: inline-block;
         vertical-align: middle;
     }
-    .viabilidade-panel {
-        border: 1px solid #e1e5ec;
-        border-radius: 6px;
-        padding: 8px 10px;
-        background: #f4f6fb;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        font-size: 0.95rem;
-    }
-    .viabilidade-panel label {
-        font-weight: 500;
-        margin-bottom: 0;
-        display: block;
-        color: #4a5568;
-    }
-    .viabilidade-panel select {
-        min-width: 200px;
-        padding: 4px 6px;
-        border-radius: 4px;
-        border: 1px solid #c5cdd6;
-        background: #ffffff;
-        font-size: 0.95rem;
-        color: #1f1f1f;
-    }
     .field-viabilidade {
         display: none;
+    }
+    .viabilidade-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: #e5e8f0;
+        color: #4a5568;
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+    .viabilidade-pill.state-viavel {
+        background: #0d6efd;
+        color: #fff;
+    }
+    .viabilidade-pill.state-inconclusivo {
+        background: #6c757d;
+        color: #fff;
+    }
+    .viabilidade-pill.state-inviavel {
+        background: #c82333;
+        color: #fff;
     }
     .prescrito-p {
         background-color: #dc3545; /* Vermelho */
@@ -130,10 +136,15 @@
             <div class="info-card" data-parte-id="{{ parte.id }}" data-obito="{{ parte.obito|yesno:'1,0' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
-                        <span class="parte-nome">{{ parte.nome }}</span>
-                        <span class="parte-luto-ribbon" aria-hidden="true">
-                            <img src="{% static 'admin/img/fita-preta.png' %}" alt="Fita preta de luto">
-                        </span>
+                        <div class="info-card-name-row">
+                            <span class="parte-nome">{{ parte.nome }}</span>
+                            <span class="parte-luto-ribbon" aria-hidden="true">
+                                <img src="{% static 'admin/img/fita-preta.png' %}" alt="Fita preta de luto">
+                            </span>
+                        </div>
+                        <div class="viabilidade-pill" tabindex="0" role="button" data-target="id_viabilidade">
+                            <span class="viabilidade-label">Viabilidade</span>
+                        </div>
                     </div>
                     <div class="info-card-header-right">
                         <span class="parte-documento">{{ parte.documento }}</span>
@@ -166,15 +177,6 @@
             </div>
         {% endif %}
     {% endfor %}
-{% endif %}
-
-{% if adminform.form.viabilidade %}
-    <div class="viabilidade-panel">
-        {{ adminform.form.viabilidade.label_tag }}
-        <div class="viabilidade-field">
-            {{ adminform.form.viabilidade }}
-        </div>
-    </div>
 {% endif %}
 
 {{ block.super }}
@@ -411,6 +413,55 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const select = document.getElementById('id_viabilidade');
+    if (!select) return;
+    const pill = document.querySelector('.viabilidade-pill');
+    if (!pill) return;
+    const label = pill.querySelector('.viabilidade-label');
+    const states = ['', 'VIAVEL', 'INCONCLUSIVO', 'INVIAVEL'];
+    const texts = {
+        '': 'Viabilidade',
+        'VIAVEL': 'Viável',
+        'INCONCLUSIVO': 'Inconclusivo',
+        'INVIAVEL': 'Inviável',
+    };
+    const classes = {
+        'VIAVEL': 'state-viavel',
+        'INCONCLUSIVO': 'state-inconclusivo',
+        'INVIAVEL': 'state-inviavel',
+    };
+
+    function updatePill(value) {
+        label.textContent = texts[value] || texts[''];
+        pill.classList.remove('state-viavel', 'state-inconclusivo', 'state-inviavel');
+        if (classes[value]) {
+            pill.classList.add(classes[value]);
+        }
+    }
+
+    function cycle() {
+        const idx = states.indexOf(select.value);
+        const next = states[(idx + 1) % states.length];
+        select.value = next;
+        updatePill(next);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    pill.addEventListener('click', function() {
+        cycle();
+    });
+    pill.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            cycle();
+        }
+    });
+
+    updatePill(select.value);
 });
 </script>
 {% endblock %}
