@@ -622,31 +622,33 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
     title = 'Por Valor da Causa'
     parameter_name = 'valor_causa_order'
 
+    FILTER_OPTIONS = [
+        ('desc', 'Z a A (Maior primeiro)'),
+        ('asc', 'A a Z (Menor primeiro)'),
+        ('zerados', 'Zerados'),
+    ]
+
     def lookups(self, request, model_admin):
-        return [
-            ('desc', 'Z a A (Maior primeiro)'),
-            ('asc', 'A a Z (Menor primeiro)'),
-            ('zerados', 'Zerados'),
-        ]
+        return self.FILTER_OPTIONS
 
     def choices(self, changelist):
+        current = self.value()
+        # Todos sempre aparece como primeira opção e limpa o parâmetro
         yield {
-            'selected': self.value() is None,
+            'selected': current is None,
             'query_string': changelist.get_query_string(remove=[self.parameter_name]),
             'display': 'Todos',
         }
-
-        for lookup, title in self.lookup_choices:
-            lookup_value = str(lookup)
-            selected = self.value() == lookup_value
-            if selected:
-                query_string = changelist.get_query_string(remove=[self.parameter_name])
-            else:
-                query_string = changelist.get_query_string({self.parameter_name: lookup_value})
+        # Cada opção possui seu próprio link e seleciona apenas quando corresponder ao valor atual
+        for value, label in self.FILTER_OPTIONS:
+            selected = current == value
+            query_string = changelist.get_query_string(
+                {} if selected else {self.parameter_name: value}
+            )
             yield {
                 'selected': selected,
                 'query_string': query_string,
-                'display': title,
+                'display': label,
             }
 
     def queryset(self, request, queryset):
