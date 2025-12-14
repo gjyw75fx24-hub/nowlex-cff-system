@@ -367,7 +367,7 @@
             return currencyFormatter.format(numeric);
         }
 
-        function getObservationEntriesForCnj(cnj) {
+        function getObservationEntriesForCnj(cnj, relatedContracts) {
             if (!cnj || typeof localStorage === 'undefined') {
                 return [];
             }
@@ -381,16 +381,23 @@
                 .map(entry => entry.trim())
                 .filter(Boolean);
 
-            return entries.filter(entry => {
-                const lowerEntry = entry.toLowerCase();
-                if (lowerEntry.includes(cnj.toLowerCase())) {
-                    return true;
-                }
-                if (normalizedCnjDigits && entry.replace(/\D/g, '').includes(normalizedCnjDigits)) {
-                    return true;
-                }
-                return false;
-            });
+            return entries
+                .map(entry => {
+                    const cleaned = entry.replace(/CNJ\s*[:\-]?[^—\n]+—?/i, '').trim();
+                    return { raw: entry, cleaned: cleaned || entry };
+                })
+                .filter(entry => {
+                    const lowerEntry = entry.raw.toLowerCase();
+                    if (lowerEntry.includes(cnj.toLowerCase())) {
+                        return true;
+                    }
+                    if (normalizedCnjDigits && entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)) {
+                        return true;
+                    }
+                    return (relatedContracts || []).some(contractId =>
+                        entry.raw.includes(String(contractId))
+                    );
+                });
         }
 
         /* =========================================================
@@ -567,24 +574,35 @@
                         $ulDetalhesVinculado.append($liAcao);
                     }
 
-                    const observationLines = getObservationEntriesForCnj(cnjVinculado);
+                    const contractsReferenced = contratoInfos.map(c => c.id);
+                    const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append($ulDetalhesVinculado);
-                    if (observationLines.length > 0) {
+                    if (observationEntries.length > 0) {
                         const $note = $('<div class="analise-observation-note" role="status"></div>');
                         $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
                         const $noteContent = $('<div class="analise-observation-content"></div>');
                         $noteContent.append('<strong>Observações</strong>');
-                        const $noteText = $('<div class="analise-observation-text"></div>');
-                        observationLines.forEach(entry => {
-                            entry.split('\n').forEach(line => {
-                                const trimmed = line.trim();
-                                if (trimmed) {
-                                    $noteText.append($('<p></p>').text(trimmed));
-                                }
+                        const $noteSummary = $('<div class="analise-observation-summary"></div>');
+                        const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+                        observationEntries.forEach(entry => {
+                            const lines = entry.cleaned.split('\n').map(line => line.trim()).filter(Boolean);
+                            lines.forEach(line => {
+                                $noteText.append($('<p></p>').text(line));
                             });
                         });
+                        const summaryLine = observationEntries[0].cleaned.split('\n')[0].trim();
+                        $noteSummary.text(summaryLine);
+                        const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
+                        let toggled = false;
+                        $toggleBtn.on('click', function() {
+                            toggled = !toggled;
+                            $noteText.toggleClass('collapsed', !toggled);
+                            $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
+                        });
+                        $noteContent.append($noteSummary);
                         $noteContent.append($noteText);
+                        $noteContent.append($toggleBtn);
                         $note.append($noteContent);
                         $detailsRow.append($note);
                     }
