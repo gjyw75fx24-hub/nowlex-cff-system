@@ -138,8 +138,9 @@
 }
 
 .analise-observation-note {
-    width: 260px;
-    min-width: 160px;
+    width: min(100%, 320px);
+    min-width: 180px;
+    max-width: 360px;
     background: #fff9df;
     border: 1px solid #f3e1a1;
     border-radius: 12px;
@@ -148,6 +149,8 @@
     position: relative;
     display: flex;
     gap: 10px;
+    flex-direction: column;
+    align-self: flex-start;
 }
 
 .analise-observation-note strong {
@@ -170,7 +173,7 @@
 }
 
 .analise-observation-content {
-    flex: 1;
+    flex: 1 1 auto;
 }
 
 .analise-observation-summary {
@@ -191,7 +194,7 @@
 }
 
 .analise-observation-text.collapsed {
-    max-height: 68px;
+    max-height: 110px;
     overflow: hidden;
 }
 
