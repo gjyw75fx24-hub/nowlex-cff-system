@@ -367,7 +367,7 @@
             return currencyFormatter.format(numeric);
         }
 
-        function getObservationEntriesForCnj(cnj) {
+        function getObservationEntriesForCnj(cnj, relatedContracts) {
             if (!cnj || typeof localStorage === 'undefined') {
                 return [];
             }
@@ -381,16 +381,41 @@
                 .map(entry => entry.trim())
                 .filter(Boolean);
 
-            return entries.filter(entry => {
-                const lowerEntry = entry.toLowerCase();
-                if (lowerEntry.includes(cnj.toLowerCase())) {
-                    return true;
-                }
-                if (normalizedCnjDigits && entry.replace(/\D/g, '').includes(normalizedCnjDigits)) {
-                    return true;
-                }
-                return false;
-            });
+            return entries
+                .map(entry => {
+                    const lines = entry
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(Boolean);
+                    const mentionLines = lines.filter(line =>
+                        /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                    );
+                    const contentLines = lines.filter(line =>
+                        !mentionLines.includes(line)
+                    );
+                    const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                    return {
+                        raw: entry,
+                        mentionLines,
+                        contentLines,
+                        summary: summaryLine
+                    };
+                })
+                .filter(entry => {
+                    const lowerEntry = entry.raw.toLowerCase();
+                    if (lowerEntry.includes(cnj.toLowerCase())) {
+                        return true;
+                    }
+                    if (
+                        normalizedCnjDigits &&
+                        entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                    ) {
+                        return true;
+                    }
+                    return (relatedContracts || []).some(contractId =>
+                        entry.raw.includes(String(contractId))
+                    );
+                });
         }
 
         /* =========================================================
@@ -567,24 +592,45 @@
                         $ulDetalhesVinculado.append($liAcao);
                     }
 
-                    const observationLines = getObservationEntriesForCnj(cnjVinculado);
+                    const contractsReferenced = Array.from(
+                        new Set(contratoInfos.map(c => c.id))
+                    );
+                    const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append($ulDetalhesVinculado);
-                    if (observationLines.length > 0) {
+                    if (observationEntries.length > 0) {
                         const $note = $('<div class="analise-observation-note" role="status"></div>');
                         $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
                         const $noteContent = $('<div class="analise-observation-content"></div>');
                         $noteContent.append('<strong>Observações</strong>');
-                        const $noteText = $('<div class="analise-observation-text"></div>');
-                        observationLines.forEach(entry => {
-                            entry.split('\n').forEach(line => {
-                                const trimmed = line.trim();
-                                if (trimmed) {
-                                    $noteText.append($('<p></p>').text(trimmed));
-                                }
-                            });
+                        const $noteSummary = $('<div class="analise-observation-summary"></div>');
+                        const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+                        const contentLines = [];
+                        observationEntries.forEach(entry => {
+                            if (entry.contentLines.length > 0) {
+                                contentLines.push(...entry.contentLines);
+                            } else if (entry.mentionLines.length > 0) {
+                                contentLines.push(...entry.mentionLines);
+                            } else {
+                                contentLines.push(entry.raw);
+                            }
                         });
+                        contentLines.forEach(line => {
+                            $noteText.append($('<p></p>').text(line));
+                        });
+                        const summaryLine = observationEntries.find(entry => entry.contentLines.length > 0)?.contentLines[0]
+                            || observationEntries[0].summary;
+                        $noteSummary.text(summaryLine);
+                        const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
+                        let toggled = false;
+                        $toggleBtn.on('click', function() {
+                            toggled = !toggled;
+                            $noteText.toggleClass('collapsed', !toggled);
+                            $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
+                        });
+                        $noteContent.append($noteSummary);
                         $noteContent.append($noteText);
+                        $noteContent.append($toggleBtn);
                         $note.append($noteContent);
                         $detailsRow.append($note);
                     }

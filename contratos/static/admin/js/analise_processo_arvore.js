@@ -383,15 +383,33 @@
 
             return entries
                 .map(entry => {
-                    const cleaned = entry.replace(/CNJ\s*[:\-]?[^—\n]+—?/i, '').trim();
-                    return { raw: entry, cleaned: cleaned || entry };
+                    const lines = entry
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(Boolean);
+                    const mentionLines = lines.filter(line =>
+                        /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                    );
+                    const contentLines = lines.filter(line =>
+                        !mentionLines.includes(line)
+                    );
+                    const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                    return {
+                        raw: entry,
+                        mentionLines,
+                        contentLines,
+                        summary: summaryLine
+                    };
                 })
                 .filter(entry => {
                     const lowerEntry = entry.raw.toLowerCase();
                     if (lowerEntry.includes(cnj.toLowerCase())) {
                         return true;
                     }
-                    if (normalizedCnjDigits && entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)) {
+                    if (
+                        normalizedCnjDigits &&
+                        entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                    ) {
                         return true;
                     }
                     return (relatedContracts || []).some(contractId =>
@@ -574,7 +592,9 @@
                         $ulDetalhesVinculado.append($liAcao);
                     }
 
-                    const contractsReferenced = contratoInfos.map(c => c.id);
+                    const contractsReferenced = Array.from(
+                        new Set(contratoInfos.map(c => c.id))
+                    );
                     const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append($ulDetalhesVinculado);
@@ -585,13 +605,21 @@
                         $noteContent.append('<strong>Observações</strong>');
                         const $noteSummary = $('<div class="analise-observation-summary"></div>');
                         const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+                        const contentLines = [];
                         observationEntries.forEach(entry => {
-                            const lines = entry.cleaned.split('\n').map(line => line.trim()).filter(Boolean);
-                            lines.forEach(line => {
-                                $noteText.append($('<p></p>').text(line));
-                            });
+                            if (entry.contentLines.length > 0) {
+                                contentLines.push(...entry.contentLines);
+                            } else if (entry.mentionLines.length > 0) {
+                                contentLines.push(...entry.mentionLines);
+                            } else {
+                                contentLines.push(entry.raw);
+                            }
                         });
-                        const summaryLine = observationEntries[0].cleaned.split('\n')[0].trim();
+                        contentLines.forEach(line => {
+                            $noteText.append($('<p></p>').text(line));
+                        });
+                        const summaryLine = observationEntries.find(entry => entry.contentLines.length > 0)?.contentLines[0]
+                            || observationEntries[0].summary;
                         $noteSummary.text(summaryLine);
                         const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
                         let toggled = false;
