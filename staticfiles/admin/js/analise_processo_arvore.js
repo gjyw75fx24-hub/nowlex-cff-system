@@ -367,7 +367,7 @@
             return currencyFormatter.format(numeric);
         }
 
-        function getObservationLinesForCnj(cnj) {
+        function getObservationEntriesForCnj(cnj) {
             if (!cnj || typeof localStorage === 'undefined') {
                 return [];
             }
@@ -376,20 +376,21 @@
                 return [];
             }
             const normalizedCnjDigits = cnj.replace(/\D/g, '');
-            return rawNotes
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => {
-                    if (!line) return false;
-                    const lowerLine = line.toLowerCase();
-                    if (lowerLine.includes(cnj.toLowerCase())) {
-                        return true;
-                    }
-                    if (normalizedCnjDigits && line.replace(/\D/g, '').includes(normalizedCnjDigits)) {
-                        return true;
-                    }
-                    return false;
-                });
+            const entries = rawNotes
+                .split(/\n{2,}/)
+                .map(entry => entry.trim())
+                .filter(Boolean);
+
+            return entries.filter(entry => {
+                const lowerEntry = entry.toLowerCase();
+                if (lowerEntry.includes(cnj.toLowerCase())) {
+                    return true;
+                }
+                if (normalizedCnjDigits && entry.replace(/\D/g, '').includes(normalizedCnjDigits)) {
+                    return true;
+                }
+                return false;
+            });
         }
 
         /* =========================================================
@@ -566,7 +567,7 @@
                         $ulDetalhesVinculado.append($liAcao);
                     }
 
-                    const observationLines = getObservationLinesForCnj(cnjVinculado);
+                    const observationLines = getObservationEntriesForCnj(cnjVinculado);
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append($ulDetalhesVinculado);
                     if (observationLines.length > 0) {
@@ -575,8 +576,13 @@
                         const $noteContent = $('<div class="analise-observation-content"></div>');
                         $noteContent.append('<strong>Observações</strong>');
                         const $noteText = $('<div class="analise-observation-text"></div>');
-                        observationLines.forEach(line => {
-                            $noteText.append($('<p></p>').text(line));
+                        observationLines.forEach(entry => {
+                            entry.split('\n').forEach(line => {
+                                const trimmed = line.trim();
+                                if (trimmed) {
+                                    $noteText.append($('<p></p>').text(trimmed));
+                                }
+                            });
                         });
                         $noteContent.append($noteText);
                         $note.append($noteContent);
