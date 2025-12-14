@@ -133,6 +133,27 @@
     position: relative;
     overflow: hidden;
 }
+.notebook-message {
+    margin: 0 16px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: none;
+}
+.notebook-message.visible {
+    display: block;
+}
+
+.notebook-message.success {
+    background: #198754;
+    color: #ffffff;
+}
+
+.notebook-message.error {
+    background: #f8d7da;
+    color: #842029;
+}
 .notebook-footer {
     padding: 0 16px 16px;
     display: flex;

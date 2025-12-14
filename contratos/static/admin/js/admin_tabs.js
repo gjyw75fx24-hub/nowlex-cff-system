@@ -79,6 +79,7 @@ window.addEventListener('load', function() {
                     <div class="notebook-body">
                         <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
                     </div>
+                    <div class="notebook-message" role="status" aria-live="polite"></div>
                     <div class="notebook-footer">
                         <button type="button" class="notebook-save-btn">Salvar</button>
                     </div>
@@ -104,6 +105,20 @@ window.addEventListener('load', function() {
                 save();
             };
 
+            const messageSlot = notebookOverlay.querySelector('.notebook-message');
+            let messageTimeout = null;
+            const showNotebookMessage = (text, type = 'success') => {
+                if (!messageSlot) return;
+                messageSlot.textContent = text;
+                messageSlot.className = `notebook-message visible ${type}`;
+                if (messageTimeout) {
+                    clearTimeout(messageTimeout);
+                }
+                messageTimeout = setTimeout(() => {
+                    messageSlot.classList.remove('visible');
+                }, 3500);
+            };
+
             const close = () => notebookOverlay.classList.remove('open');
             notebookOverlay.querySelector('.notebook-close').addEventListener('click', close);
             document.addEventListener('keydown', (ev) => {
@@ -116,13 +131,37 @@ window.addEventListener('load', function() {
             const notebook = notebookOverlay.querySelector('.notebook');
             const dragHandle = notebookOverlay.querySelector('[data-drag-handle]');
             const saveButton = notebookOverlay.querySelector('.notebook-save-btn');
-            saveButton.addEventListener('click', () => {
+            let isSaving = false;
+            saveButton.addEventListener('click', async () => {
+                if (isSaving) return;
                 const targetForm = document.querySelector('#processojudicial_form') || document.querySelector('form');
                 if (!targetForm) return;
-                if (typeof targetForm.requestSubmit === 'function') {
-                    targetForm.requestSubmit();
-                } else {
-                    targetForm.submit();
+                const formData = new FormData(targetForm);
+                formData.set('_continue', '1');
+                const actionUrl = targetForm.action || window.location.href;
+                isSaving = true;
+                const originalLabel = saveButton.textContent;
+                saveButton.textContent = 'Salvando...';
+                saveButton.disabled = true;
+                try {
+                    const response = await fetch(actionUrl, {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    if (!response.ok) {
+                        throw new Error(`status ${response.status}`);
+                    }
+                    showNotebookMessage('Salvo com sucesso', 'success');
+                } catch (error) {
+                    showNotebookMessage(`Falha ao salvar: ${error.message}`, 'error');
+                } finally {
+                    isSaving = false;
+                    saveButton.textContent = originalLabel;
+                    saveButton.disabled = false;
                 }
             });
 
