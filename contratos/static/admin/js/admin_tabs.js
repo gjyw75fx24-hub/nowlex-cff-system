@@ -79,6 +79,9 @@ window.addEventListener('load', function() {
                     <div class="notebook-body">
                         <textarea class="notebook-textarea" placeholder="Anote livremente aqui..."></textarea>
                     </div>
+                    <div class="notebook-footer">
+                        <button type="button" class="notebook-save-btn">Salvar</button>
+                    </div>
                 </div>
             `;
             document.body.appendChild(notebookOverlay);
@@ -112,6 +115,17 @@ window.addEventListener('load', function() {
             // Drag manual do caderno
             const notebook = notebookOverlay.querySelector('.notebook');
             const dragHandle = notebookOverlay.querySelector('[data-drag-handle]');
+            const saveButton = notebookOverlay.querySelector('.notebook-save-btn');
+            saveButton.addEventListener('click', () => {
+                const targetForm = document.querySelector('#processojudicial_form') || document.querySelector('form');
+                if (!targetForm) return;
+                if (typeof targetForm.requestSubmit === 'function') {
+                    targetForm.requestSubmit();
+                } else {
+                    targetForm.submit();
+                }
+            });
+
             let isDragging = false;
             let startX = 0;
             let startY = 0;

@@ -127,23 +127,26 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 0 16px 80px;
+    padding: 0 16px 16px;
     border-radius: 0 0 8px 8px;
     background: #eef4ff;
     position: relative;
     overflow: hidden;
 }
+.notebook-footer {
+    padding: 0 16px 16px;
+    display: flex;
+    justify-content: flex-end;
+    background: #eef4ff;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
 .notebook-save-btn {
-    position: absolute;
-    bottom: 16px;
-    right: 18px;
     background: #0d6efd;
     color: #ffffff;
     border: none;
     border-radius: 999px;
-    padding: 7px 18px;
+    padding: 8px 20px;
     font-weight: 600;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(13, 110, 253, 0.35);
-    z-index: 5;
 }
