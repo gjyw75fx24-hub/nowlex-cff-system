@@ -66,7 +66,10 @@ class EtiquetaFilter(admin.SimpleListFilter):
         
         yield {
             'selected': not self.value(),
-            'query_string': changelist.get_query_string(remove=[self.parameter_name]),
+            'query_string': changelist.get_query_string(
+                {'_skip_saved_filters': '1'},
+                remove=[self.parameter_name, 'o']
+            ),
             'display': 'Todos',
         }
 
@@ -81,10 +84,16 @@ class EtiquetaFilter(admin.SimpleListFilter):
                 new_selected_ids.append(lookup_str)
             
             new_selected_ids = [sid for sid in new_selected_ids if sid]
+            params = {}
+            if new_selected_ids:
+                params[self.parameter_name] = ','.join(new_selected_ids)
+            else:
+                params['_skip_saved_filters'] = '1'
             
-            query_string = changelist.get_query_string({
-                self.parameter_name: ','.join(new_selected_ids)
-            })
+            query_string = changelist.get_query_string(
+                params,
+                remove=[self.parameter_name, 'o', '_skip_saved_filters']
+            )
 
             yield {
                 'selected': selected,
@@ -145,6 +154,26 @@ class TerceiroInteressadoFilter(admin.SimpleListFilter):
             ("nao", mark_safe(f"Apenas dois polos <span class='filter-count'>({count_nao})</span>")),
         ]
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, title in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': title,
+            }
+
     def queryset(self, request, queryset):
         qs = queryset.annotate(num_partes=models.Count("partes_processuais"))
         if self.value() == "sim":
@@ -167,6 +196,26 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
             label = mark_safe(f"{s.nome} <span class='filter-count'>({total})</span>")
             items.append((s.id, label))
         return items
+
+    def choices(self, changelist):
+        current = str(self.value()) if self.value() is not None else None
+        for value, label in self.lookup_choices:
+            selected = str(value) == current
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         if self.value():
@@ -201,6 +250,26 @@ class UFCountFilter(admin.SimpleListFilter):
         counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
         return [(uf, mark_safe(f"{uf} <span class='filter-count'>({counts.get(uf, 0)})</span>")) for uf in sorted(counts.keys())]
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = value == current
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         values = request.GET.getlist(self.parameter_name)
         if values:
@@ -221,6 +290,26 @@ class CarteiraCountFilter(admin.SimpleListFilter):
             items.append((cart.id, mark_safe(f"{cart.nome} <span class='filter-count'>({total})</span>")))
         return items
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = str(value) == str(current) and current not in (None, '')
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         if self.value():
             return queryset.filter(carteira_id=self.value())
@@ -239,6 +328,26 @@ class NaoJudicializadoFilter(admin.SimpleListFilter):
             ('1', mark_safe(f"Sim <span class=\"filter-count\">({count_sim})</span>")),
             ('0', mark_safe(f"Não <span class=\"filter-count\">({count_nao})</span>")),
         ]
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, title in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': title,
+            }
 
     def queryset(self, request, queryset):
         if self.value() == '1':
@@ -391,6 +500,26 @@ class AcordoStatusFilter(admin.SimpleListFilter):
             ("sem", "Sem acordo"),
         )
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         value = self.value()
         if not value:
@@ -401,6 +530,47 @@ class AcordoStatusFilter(admin.SimpleListFilter):
                 | models.Q(advogados_passivos__acordo_status="")
             ).distinct()
         return queryset.filter(advogados_passivos__acordo_status=value).distinct()
+
+
+class BuscaAtivaFilter(admin.SimpleListFilter):
+    title = "Busca Ativa"
+    parameter_name = "busca_ativa"
+
+    OPTIONS = (
+        ('1', 'Com Busca Ativa'),
+        ('0', 'Sem Busca Ativa'),
+    )
+
+    def lookups(self, request, model_admin):
+        return self.OPTIONS
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == '1':
+            return queryset.filter(busca_ativa=True)
+        if value == '0':
+            return queryset.filter(busca_ativa=False)
+        return queryset
 
 
 
@@ -745,7 +915,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa_display',)
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_display_links = ("cnj_with_valor",)
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, BuscaAtivaFilter, NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
@@ -769,6 +939,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     def _handle_saved_filters(self, request):
         stored = request.session.get(self.FILTER_SESSION_KEY)
         skip = request.session.pop(self.FILTER_SKIP_KEY, False)
+        if stored and '=' not in stored:
+            stored = None
+            request.session.pop(self.FILTER_SESSION_KEY, None)
         sanitized = self._sanitize_filter_qs(request.GET.urlencode())
         if request.GET.get('_skip_saved_filters'):
             request.session.pop(self.FILTER_SESSION_KEY, None)
