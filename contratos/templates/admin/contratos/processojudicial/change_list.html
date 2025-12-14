@@ -142,15 +142,23 @@
 
         // Persiste filtros entre navegações: guarda o QS atual e reaplica se chegar sem parâmetros
         const currentQS = window.location.search.replace(/^\?/, '');
+        const sanitizeQS = (qs) => {
+            const params = new URLSearchParams(qs.replace(/^\?/, ''));
+            params.delete('valor_causa_order');
+            params.delete('o');
+            const result = params.toString();
+            return result ? `?${result}` : '';
+        };
         if (currentQS) {
-            localStorage.setItem(LAST_FILTERS_KEY, currentQS);
+            const sanitized = currentQS.startsWith('?') ? sanitizeQS(currentQS) : sanitizeQS(`?${currentQS}`);
+            localStorage.setItem(LAST_FILTERS_KEY, sanitized.replace(/^\?/, ''));
             sessionStorage.removeItem(SKIP_RESTORE_KEY);
         } else {
             const skipRestore = sessionStorage.getItem(SKIP_RESTORE_KEY);
             if (skipRestore) {
                 sessionStorage.removeItem(SKIP_RESTORE_KEY);
             } else {
-                const saved = (localStorage.getItem(LAST_FILTERS_KEY) || '').replace(/^\?/, '');
+                const saved = sanitizeQS(`?${localStorage.getItem(LAST_FILTERS_KEY) || ''}`);
                 if (saved) {
                     window.location.search = `?${saved}`;
                     return; // evita executar o restante antes de recarregar
