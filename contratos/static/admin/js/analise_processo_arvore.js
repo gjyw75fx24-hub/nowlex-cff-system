@@ -52,11 +52,57 @@
         }
         $adminForm.on('submit', clearLocalResponses);
 
+        const isSupervisorUser = Boolean(window.__analise_is_supervisor);
+        const $analysisTabButton = $(
+            '<button type="button" class="analise-inner-tab-button active" data-tab="analise">Análise do Processo</button>'
+        );
+        const $tabNavigation = $('<div class="analise-inner-tab-navigation"></div>').append($analysisTabButton);
+        let $supervisionTabButton = null;
+        if (isSupervisorUser) {
+            $supervisionTabButton = $(
+                '<button type="button" class="analise-inner-tab-button" data-tab="supervisionar">Supervisionar</button>'
+            );
+            $tabNavigation.append($supervisionTabButton);
+        }
+
+        const $tabPanels = $('<div class="analise-inner-tab-panels"></div>');
+        const $analysisPanel = $(
+            '<div class="analise-inner-tab-panel active" data-panel="analise"></div>'
+        );
+        $tabPanels.append($analysisPanel);
+        let $supervisionPanel = null;
+        if (isSupervisorUser) {
+            $supervisionPanel = $(
+                '<div class="analise-inner-tab-panel" data-panel="supervisionar"></div>'
+            );
+            $supervisionPanel.append('<p>Conteúdo reservado para supervisores.</p>');
+            $tabPanels.append($supervisionPanel);
+        }
+
+        const $tabWrapper = $('<div class="analise-inner-tab-wrapper"></div>').append(
+            $tabNavigation,
+            $tabPanels
+        );
+        $inlineGroup.append($tabWrapper);
+
+        $tabNavigation.on('click', '.analise-inner-tab-button', function() {
+            const selectedTab = $(this).data('tab');
+            $tabNavigation.find('.analise-inner-tab-button').removeClass('active');
+            $(this).addClass('active');
+            $tabPanels.find('.analise-inner-tab-panel').removeClass('active');
+            const $targetPanel = $tabPanels.find(
+                `.analise-inner-tab-panel[data-panel="${selectedTab}"]`
+            );
+            if ($targetPanel.length) {
+                $targetPanel.addClass('active');
+            }
+        });
+
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
-        $inlineGroup.append($dynamicQuestionsContainer);
+        $analysisPanel.append($dynamicQuestionsContainer);
 
         const $formattedResponsesContainer = $('<div class="formatted-responses-container"></div>');
-        $inlineGroup.append($formattedResponsesContainer);
+        $analysisPanel.append($formattedResponsesContainer);
 
         // REMOVIDO GLOBALMENTE, VAI SER CRIADO DINAMICAMENTE DENTRO DE displayFormattedResponses
         // const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn');

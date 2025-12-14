@@ -13,7 +13,10 @@ import json
 from django import forms
 from django.utils.safestring import mark_safe
 from decimal import Decimal, InvalidOperation
-from django.contrib.auth.models import User # Importar o modelo User
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
+from django.contrib.auth.models import User, Group # Importar os modelos User e Group
+from django.utils.translation import gettext_lazy as _
 from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.contenttypes.models import ContentType
 
@@ -33,6 +36,109 @@ class UserForm(forms.Form):
         label="Selecionar Usuário",
         empty_label="Nenhum (Remover Delegação)"
     )
+
+
+# --- Supervisor helpers e admin personalizado -------------------------------
+SUPERVISOR_GROUP_NAME = "Supervisor"
+
+def ensure_supervisor_group():
+    group, _ = Group.objects.get_or_create(name=SUPERVISOR_GROUP_NAME)
+    return group
+
+def is_user_supervisor(user):
+    if not user or not getattr(user, 'pk', None):
+        return False
+    return user.groups.filter(name=SUPERVISOR_GROUP_NAME).exists()
+
+class SupervisorUserCreationForm(UserCreationForm):
+    is_supervisor = forms.BooleanField(
+        required=False,
+        label="Supervisor",
+        help_text="Disponibiliza a aba Supervisionar na Análise do Processo."
+    )
+
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = UserCreationForm.Meta.fields
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        if commit:
+            user.save()
+            self.save_m2m()
+        return user
+
+class SupervisorUserChangeForm(UserChangeForm):
+    is_supervisor = forms.BooleanField(
+        required=False,
+        label="Supervisor",
+        help_text="Disponibiliza a aba Supervisionar na Análise do Processo."
+    )
+
+    class Meta(UserChangeForm.Meta):
+        model = User
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields['is_supervisor'].initial = is_user_supervisor(self.instance)
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        if commit:
+            user.save()
+            self.save_m2m()
+        return user
+
+admin.site.unregister(User)
+
+@admin.register(User)
+class SupervisorUserAdmin(DjangoUserAdmin):
+    form = SupervisorUserChangeForm
+    add_form = SupervisorUserCreationForm
+
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
+        (
+            _('Permissions'),
+            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor')}
+        ),
+        (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
+    )
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('username', 'password1', 'password2', 'is_supervisor'),
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        supervisor_flag = getattr(form.instance, '_is_supervisor_flag', None)
+        if supervisor_flag is None:
+            supervisor_flag = form.cleaned_data.get('is_supervisor')
+        if supervisor_flag is None:
+            supervisor_flag = request.POST.get('is_supervisor') in ('on', 'True', '1', 'true')
+        self._sync_supervisor_flag(form.instance, bool(supervisor_flag))
+
+    def response_change(self, request, obj):
+        if '_continue' not in request.POST and '_addanother' not in request.POST:
+            messages.success(request, "Usuário salvo com sucesso.")
+            return HttpResponseRedirect(request.path)
+        return super().response_change(request, obj)
+
+    def _sync_supervisor_flag(self, user, should_be_supervisor):
+        group = ensure_supervisor_group()
+        if should_be_supervisor:
+            user.groups.add(group)
+        else:
+            user.groups.remove(group)
 
 
 # --- Filtros ---
@@ -223,6 +329,19 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ParaSupervisionarFilter(admin.SimpleListFilter):
+    title = 'Para Supervisionar'
+    parameter_name = 'para_supervisionar'
+
+    def lookups(self, request, model_admin):
+        return (('1', 'Somente processos marcados'),)
+
+    def queryset(self, request, queryset):
+        if self.value() == '1':
+            return queryset.filter(analise_processo__para_supervisionar=True)
+        return queryset
+
+
 class LastEditOrderFilter(admin.SimpleListFilter):
     title = 'Por Última Edição'
     parameter_name = 'ord_ultima_edicao'
@@ -232,6 +351,26 @@ class LastEditOrderFilter(admin.SimpleListFilter):
             ('recente', 'A → Z (mais recente primeiro)'),
             ('antigo', 'Z → A (mais distante primeiro)'),
         )
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         if self.value() == 'recente':
@@ -375,6 +514,26 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
             items.append((row['delegado_para_id'], label))
         items.sort(key=lambda x: str(x[1]).lower())
         return items
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == str(value)
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         if self.value():
@@ -915,7 +1074,23 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa_display',)
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_display_links = ("cnj_with_valor",)
-    list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, BuscaAtivaFilter, NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
+    BASE_LIST_FILTERS = [
+        LastEditOrderFilter,
+        EquipeDelegadoFilter,
+        PrescricaoOrderFilter,
+        ViabilidadeFinanceiraFilter,
+        ValorCausaOrderFilter,
+        ObitoFilter,
+        AcordoStatusFilter,
+        BuscaAtivaFilter,
+        NaoJudicializadoFilter,
+        AtivoStatusProcessualFilter,
+        CarteiraCountFilter,
+        UFCountFilter,
+        TerceiroInteressadoFilter,
+        EtiquetaFilter,
+    ]
+    list_filter = BASE_LIST_FILTERS[:]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
@@ -929,6 +1104,12 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
+
+    def get_list_filter(self, request):
+        filters = list(self.BASE_LIST_FILTERS)
+        if is_user_supervisor(request.user):
+            filters.insert(0, ParaSupervisionarFilter)
+        return filters
 
     def _sanitize_filter_qs(self, qs):
         params = QueryDict(qs, mutable=True)
@@ -1043,6 +1224,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         extra_context['prev_obj_url'] = base_url.format(f'{prev_obj_id}/change/{filter_params}') if prev_obj_id else None
         extra_context['next_obj_url'] = base_url.format(f'{next_obj_id}/change/{filter_params}') if next_obj_id else None
         extra_context['delegar_users'] = User.objects.order_by('username')
+        extra_context['is_supervisor'] = is_user_supervisor(request.user)
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 

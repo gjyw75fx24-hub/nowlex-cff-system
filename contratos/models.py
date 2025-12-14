@@ -493,6 +493,11 @@ class AnaliseProcesso(models.Model):
         default=dict,
         verbose_name="Respostas da Análise"
     )
+    para_supervisionar = models.BooleanField(
+        default=False,
+        verbose_name="Marcar para Supervisionar",
+        help_text="Ativo quando algum processo vinculado estiver marcado para supervisão."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(
@@ -509,3 +514,17 @@ class AnaliseProcesso(models.Model):
 
     def __str__(self):
         return f"Análise para {self.processo_judicial.cnj}"
+
+    def save(self, *args, **kwargs):
+        self.para_supervisionar = self._respostas_requerem_supervisao()
+        super().save(*args, **kwargs)
+
+    def _respostas_requerem_supervisao(self):
+        respostas = getattr(self, 'respostas', {}) or {}
+        processos_vinculados = respostas.get('processos_vinculados')
+        if not processos_vinculados or not isinstance(processos_vinculados, list):
+            return False
+        for item in processos_vinculados:
+            if isinstance(item, dict) and item.get('supervisionado'):
+                return True
+        return False

@@ -1,6 +1,13 @@
 {% extends "admin/contratos/processojudicial/change_form_etiquetas.html" %}
 {% load i18n %}
 
+{% block extrahead %}
+{{ block.super }}
+<script>
+window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
+</script>
+{% endblock %}
+
 {% block content %}
 <div class="navigation-buttons" style="text-align: right; margin-bottom: 10px;">
   {% if prev_obj_url %}

@@ -253,7 +253,10 @@
             select.value = '';
             savedLabel.textContent = '';
             savedLabel.style.display = 'none';
-            window.location.href = window.location.pathname;
+            const url = new URL(window.location.href);
+            url.search = '';
+            url.searchParams.set('_skip_saved_filters', '1');
+            window.location.href = url.pathname + url.search;
         });
 
         // Toggle para colapsar/expandir apenas os filtros padrão (mantém título e bloco personalizado)
