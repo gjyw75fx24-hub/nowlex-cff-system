@@ -135,71 +135,9 @@
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         const STORAGE_KEY = 'processo_filtros_salvos';
-        const LAST_FILTERS_KEY = 'processo_last_filters';
-        const SKIP_RESTORE_KEY = 'processo_skip_restore_once';
         const filterDiv = document.getElementById('changelist-filter');
         if (!filterDiv) return;
 
-        // Persiste filtros entre navegações: guarda o QS atual e reaplica se chegar sem parâmetros
-        const currentQS = window.location.search.replace(/^\?/, '');
-        const sanitizeQS = (qs) => {
-            const params = new URLSearchParams(qs.replace(/^\?/, ''));
-            params.delete('valor_causa_order');
-            params.delete('o');
-            const result = params.toString();
-            return result ? `?${result}` : '';
-        };
-        if (currentQS) {
-            const sanitized = currentQS.startsWith('?') ? sanitizeQS(currentQS) : sanitizeQS(`?${currentQS}`);
-            localStorage.setItem(LAST_FILTERS_KEY, sanitized.replace(/^\?/, ''));
-            sessionStorage.removeItem(SKIP_RESTORE_KEY);
-        } else {
-            const skipRestore = sessionStorage.getItem(SKIP_RESTORE_KEY);
-            if (skipRestore) {
-                sessionStorage.removeItem(SKIP_RESTORE_KEY);
-            } else {
-                const saved = sanitizeQS(`?${localStorage.getItem(LAST_FILTERS_KEY) || ''}`);
-                if (saved) {
-                    window.location.search = `?${saved}`;
-                    return; // evita executar o restante antes de recarregar
-                }
-            }
-        }
-
-        // Botão nativo "Limpar todos os filtros" do Django admin
-        const clearAllLink = Array.from(filterDiv.querySelectorAll('a')).find(a => /limpar todos os filtros/i.test((a.textContent || '').trim()));
-        if (clearAllLink) {
-            clearAllLink.addEventListener('click', () => {
-                localStorage.removeItem(LAST_FILTERS_KEY);
-                sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
-            });
-        }
-        const valorFilterBlock = Array.from(filterDiv.querySelectorAll('.filter')).find(block => {
-            const header = block.querySelector('h3');
-            return header && /valor da causa/i.test(header.textContent || '');
-        });
-        if (valorFilterBlock) {
-            const todosLink = Array.from(valorFilterBlock.querySelectorAll('a')).find(link => {
-                const text = (link.textContent || '').trim().toLowerCase();
-                return text.startsWith('todos');
-            });
-            if (todosLink) {
-                todosLink.addEventListener('click', () => {
-                    const savedFilters = (localStorage.getItem(LAST_FILTERS_KEY) || '').replace(/^\?/, '');
-                    if (savedFilters) {
-                        const url = new URL(`?${savedFilters}`, window.location.origin);
-                        url.searchParams.delete('valor_causa_order');
-                        const normalized = url.search.replace(/^\?/, '');
-                        if (normalized) {
-                            localStorage.setItem(LAST_FILTERS_KEY, normalized);
-                        } else {
-                            localStorage.removeItem(LAST_FILTERS_KEY);
-                        }
-                    }
-                    sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
-                });
-            }
-        }
         const header = document.createElement('div');
         header.className = 'custom-filters-header';
         const titleSpan = document.createElement('span');
@@ -311,8 +249,6 @@
         clearBtn.addEventListener('click', () => {
             const list = loadSaved().filter(i => i.qs !== select.value);
             saveSaved(list);
-            localStorage.removeItem(LAST_FILTERS_KEY);
-            sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
             refreshSelect();
             select.value = '';
             savedLabel.textContent = '';
@@ -378,8 +314,6 @@
         clearAllBtn.id = 'custom-clear-all';
         clearAllBtn.textContent = 'Limpar filtros';
         clearAllBtn.addEventListener('click', () => {
-            localStorage.removeItem(LAST_FILTERS_KEY);
-            sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
             const url = new URL(window.location.href);
             url.search = '';
             window.location.href = url.pathname;

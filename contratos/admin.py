@@ -4,7 +4,7 @@ from django.db.models import FloatField, Q, Sum
 from django.db.models.functions import Now, Abs, Cast
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, render
 from django.utils.html import format_html
 from django.urls import reverse, path
@@ -341,12 +341,34 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
     title = "Viabilidade $"
     parameter_name = 'viabilidade_financeira'
 
+    OPTIONS = [
+        (ProcessoJudicial.VIABILIDADE_VIAVEL, mark_safe('<span class="viabilidade-option viavel">Viável</span>')),
+        (ProcessoJudicial.VIABILIDADE_INVIAVEL, mark_safe('<span class="viabilidade-option inviavel">Inviável</span>')),
+        (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, mark_safe('<span class="viabilidade-option inconclusivo">Inconclusivo</span>')),
+    ]
+
     def lookups(self, request, model_admin):
-        return [
-            (ProcessoJudicial.VIABILIDADE_VIAVEL, mark_safe('<span class="viabilidade-option viavel">Viável</span>')),
-            (ProcessoJudicial.VIABILIDADE_INVIAVEL, mark_safe('<span class="viabilidade-option inviavel">Inviável</span>')),
-            (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, mark_safe('<span class="viabilidade-option inconclusivo">Inconclusivo</span>')),
-        ]
+        return self.OPTIONS
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = str(value) == str(current)
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         val = self.value()
@@ -634,18 +656,18 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
     def choices(self, changelist):
         current = self.value() or None
 
-        yield {
-            'selected': current is None,
-            'query_string': changelist.get_query_string(remove=[self.parameter_name, 'o']),
-            'display': 'Todos',
-        }
-
         for value, label in self.FILTER_OPTIONS:
             selected = current == value
-            query_string = changelist.get_query_string(
-                {self.parameter_name: value},
-                remove=['o']
-            )
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o']
+                )
             yield {
                 'selected': selected,
                 'query_string': query_string,
@@ -681,11 +703,33 @@ class ObitoFilter(admin.SimpleListFilter):
     title = 'Por Óbito'
     parameter_name = 'obito'
 
+    OPTIONS = [
+        ('sim', 'Com Óbito'),
+        ('nao', 'Sem Óbito'),
+    ]
+
     def lookups(self, request, model_admin):
-        return [
-            ('sim', 'Com Óbito'),
-            ('nao', 'Sem Óbito'),
-        ]
+        return self.OPTIONS
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         val = self.value()
@@ -712,6 +756,37 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
     actions = ['excluir_andamentos_selecionados', 'delegate_processes']
+
+    FILTER_SESSION_KEY = 'processo_last_filters'
+    FILTER_SKIP_KEY = 'processo_skip_last_filters'
+
+    def _sanitize_filter_qs(self, qs):
+        params = QueryDict(qs, mutable=True)
+        for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+            params.pop(key, None)
+        return params.urlencode()
+
+    def _handle_saved_filters(self, request):
+        stored = request.session.get(self.FILTER_SESSION_KEY)
+        skip = request.session.pop(self.FILTER_SKIP_KEY, False)
+        sanitized = self._sanitize_filter_qs(request.GET.urlencode())
+        if request.GET.get('_skip_saved_filters'):
+            request.session.pop(self.FILTER_SESSION_KEY, None)
+            request.session[self.FILTER_SKIP_KEY] = True
+            clean_url = f"{request.path}?{sanitized}" if sanitized else request.path
+            if clean_url != request.get_full_path():
+                return HttpResponseRedirect(clean_url)
+            return None
+        if not request.GET and stored and not skip:
+            request.session[self.FILTER_SKIP_KEY] = True
+            return HttpResponseRedirect(f"{request.path}?{stored}")
+        if sanitized:
+            request.session[self.FILTER_SESSION_KEY] = sanitized
+            request.session.pop(self.FILTER_SKIP_KEY, None)
+        elif request.GET and not request.GET.get('_changelist_filters'):
+            request.session.pop(self.FILTER_SESSION_KEY, None)
+            request.session[self.FILTER_SKIP_KEY] = True
+        return None
 
     def save_model(self, request, obj, form, change):
         # Garante que a carteira escolhida no formulário seja persistida
@@ -763,7 +838,6 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
         # Clona os filtros para o queryset da changelist, evitando que o Django
         # tente filtrar pelo parâmetro especial "_changelist_filters"
-        from django.http import QueryDict
         original_get = request.GET
         if changelist_filters:
             request.GET = QueryDict(changelist_filters, mutable=False)
@@ -845,6 +919,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
 
     def changelist_view(self, request, extra_context=None):
+        redirect = self._handle_saved_filters(request)
+        if redirect:
+            return redirect
         extra_context = extra_context or {}
         changelist = self.get_changelist_instance(request)
         queryset = changelist.get_queryset(request)
