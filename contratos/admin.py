@@ -633,18 +633,17 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
-        # Todos sempre aparece como primeira opção e limpa o parâmetro
         yield {
             'selected': current is None,
             'query_string': changelist.get_query_string(remove=[self.parameter_name]),
             'display': 'Todos',
         }
-        # Cada opção possui seu próprio link e seleciona apenas quando corresponder ao valor atual
         for value, label in self.FILTER_OPTIONS:
             selected = current == value
-            query_string = changelist.get_query_string(
-                {} if selected else {self.parameter_name: value}
-            )
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: value})
             yield {
                 'selected': selected,
                 'query_string': query_string,
