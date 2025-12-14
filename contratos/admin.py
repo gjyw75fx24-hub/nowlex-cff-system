@@ -742,7 +742,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             formatted
         )
 
-    @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valor da Causa por Contratos</span>'))
+    @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valuation por Contratos</span>'))
     def valor_causa_display(self, obj):
         valor = obj.contratos.aggregate(total=models.Sum('valor_causa'))['total'] or Decimal('0.00')
         if valor == Decimal('0.00'):

@@ -172,10 +172,12 @@
         });
         if (valorFilterBlock) {
             const todosLink = Array.from(valorFilterBlock.querySelectorAll('a')).find(link => {
-                return (link.textContent || '').trim().toLowerCase() === 'todos';
+                const text = (link.textContent || '').trim().toLowerCase();
+                return text.startsWith('todos');
             });
             if (todosLink) {
                 todosLink.addEventListener('click', () => {
+                    localStorage.removeItem(LAST_FILTERS_KEY);
                     sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
                 });
             }
