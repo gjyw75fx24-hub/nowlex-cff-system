@@ -1,7 +1,7 @@
 // static/admin/js/soma_contratos.js
 
 document.addEventListener('DOMContentLoaded', function () {
-    const valorCausaProcessoField = document.querySelector('.field-valor_causa .readonly');
+    const valorCausaProcessoField = document.querySelector('.field-valor_causa_display .readonly');
     const inlinesContainer = document.getElementById('contratos-group');
 
     function parseCurrency(value) {

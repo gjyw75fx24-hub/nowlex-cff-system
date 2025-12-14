@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 from django.db import models
-from django.db.models import FloatField, Q
+from django.db.models import FloatField, Q, Sum
 from django.db.models.functions import Now, Abs, Cast
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
@@ -693,7 +693,7 @@ class ObitoFilter(admin.SimpleListFilter):
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    readonly_fields = ()
+    readonly_fields = ('valor_causa_display',)
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_display_links = ("cnj_with_valor",)
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
@@ -701,7 +701,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
-        ("Dados do Processo", {"fields": ("cnj", "valor_causa", "uf", "vara", "tribunal")}),
+        ("Dados do Processo", {"fields": ("cnj", "valor_causa", "valor_causa_display", "uf", "vara", "tribunal")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
@@ -742,10 +742,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             formatted
         )
 
-    @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valor da Causa</span>'))
+    @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valor da Causa por Contratos</span>'))
     def valor_causa_display(self, obj):
-        valor = obj.valor_causa
-        if valor is None:
+        valor = obj.contratos.aggregate(total=models.Sum('valor_causa'))['total'] or Decimal('0.00')
+        if valor == Decimal('0.00'):
             return "-"
         formatted = f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
         return formatted
