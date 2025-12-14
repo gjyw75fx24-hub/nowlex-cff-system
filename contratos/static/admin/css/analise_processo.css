@@ -115,6 +115,78 @@
     color: #666;
 }
 
+.analise-card-details-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.analise-card-details-row ul {
+    flex: 1;
+    margin: 0;
+    padding-left: 18px;
+}
+
+.analise-card-details-row ul li {
+    margin-bottom: 6px;
+}
+
+.analise-card-details-row strong {
+    font-weight: 600;
+}
+
+.analise-observation-note {
+    width: 230px;
+    min-width: 160px;
+    background: #fff9df;
+    border: 1px solid #f3e1a1;
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12);
+    position: relative;
+    display: flex;
+    gap: 10px;
+}
+
+.analise-observation-note strong {
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+    color: #8b5a00;
+}
+
+.analise-observation-note::after {
+    content: '';
+    position: absolute;
+    top: -6px;
+    right: 24px;
+    width: 14px;
+    height: 14px;
+    background: radial-gradient(circle, #f5c242 40%, #e0a832);
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.analise-observation-content {
+    flex: 1;
+}
+
+.analise-observation-text {
+    font-size: 0.8rem;
+    color: #5a3a04;
+}
+
+.analise-observation-text p {
+    margin: 0 0 6px;
+    line-height: 1.3;
+}
+
+.analise-observation-text p:last-child {
+    margin-bottom: 0;
+}
+
 .analise-summary-card-body ul,
 .analise-summary-card-body ol {
     list-style: none;

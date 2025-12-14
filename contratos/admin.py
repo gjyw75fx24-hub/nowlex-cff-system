@@ -1274,6 +1274,13 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
 
     def changelist_view(self, request, extra_context=None):
+        if not is_user_supervisor(request.user) and request.GET.get('para_supervisionar'):
+            params = request.GET.copy()
+            params.pop('para_supervisionar', None)
+            clean_url = request.path
+            if params:
+                clean_url = f"{clean_url}?{params.urlencode()}"
+            return HttpResponseRedirect(clean_url)
         redirect = self._handle_saved_filters(request)
         if redirect:
             return redirect

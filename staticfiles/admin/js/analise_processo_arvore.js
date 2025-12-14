@@ -37,6 +37,11 @@
         const localResponsesKey = currentProcessoId
             ? `analise_respostas_${currentProcessoId}`
             : 'analise_respostas_rascunho';
+        const notebookStorageKey = `observacoes_livres_${window.location.pathname}`;
+        const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        });
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
@@ -344,6 +349,49 @@
             return /^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$/.test(cnj);
         }
 
+        function parseDecimalValue(raw) {
+            if (raw === undefined || raw === null) {
+                return null;
+            }
+            const sanitized = String(raw).trim();
+            if (!sanitized) {
+                return null;
+            }
+            const normalized = sanitized.replace(',', '.').replace(/[^\d.-]/g, '');
+            const parsed = parseFloat(normalized);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function formatCurrency(value) {
+            const numeric = Number.isFinite(value) ? value : 0;
+            return currencyFormatter.format(numeric);
+        }
+
+        function getObservationLinesForCnj(cnj) {
+            if (!cnj || typeof localStorage === 'undefined') {
+                return [];
+            }
+            const rawNotes = localStorage.getItem(notebookStorageKey) || '';
+            if (!rawNotes.trim()) {
+                return [];
+            }
+            const normalizedCnjDigits = cnj.replace(/\D/g, '');
+            return rawNotes
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => {
+                    if (!line) return false;
+                    const lowerLine = line.toLowerCase();
+                    if (lowerLine.includes(cnj.toLowerCase())) {
+                        return true;
+                    }
+                    if (normalizedCnjDigits && line.replace(/\D/g, '').includes(normalizedCnjDigits)) {
+                        return true;
+                    }
+                    return false;
+                });
+        }
+
         /* =========================================================
          * Resumo da análise (cards)
          * ======================================================= */
@@ -462,24 +510,52 @@
                     $cardVinculado.append($headerVinculado);
 
                     const $ulDetalhesVinculado = $('<ul></ul>');
+                    const contratoInfos = (processo.contratos || []).map(cId => {
+                        const cInfo = allAvailableContratos.find(
+                            c => String(c.id) === String(cId)
+                        );
+                        if (cInfo) {
+                            return cInfo;
+                        }
+                        return {
+                            id: cId,
+                            numero_contrato: `ID ${cId}`,
+                            valor_total_devido: 0,
+                            valor_causa: 0
+                        };
+                    });
 
-                    if (Array.isArray(processo.contratos) && processo.contratos.length > 0) {
-                        const nomesContratos = processo.contratos
-                            .map(cId => {
-                                const cInfo = allAvailableContratos.find(
-                                    c => String(c.id) === String(cId)
-                                );
-                                return cInfo ? cInfo.numero_contrato : `ID ${cId}`;
-                            })
+                    if (contratoInfos.length > 0) {
+                        const nomesContratos = contratoInfos
+                            .map(c => c.numero_contrato || `ID ${c.id}`)
                             .join(', ');
                         $ulDetalhesVinculado.append(
                             `<li><strong>Contratos Vinculados:</strong> ${nomesContratos}</li>`
                         );
+                    } else {
+                        $ulDetalhesVinculado.append(
+                            '<li><strong>Contratos Vinculados:</strong> Nenhum</li>'
+                        );
                     }
+
+                    const totalDevido = contratoInfos.reduce(
+                        (acc, c) => acc + (c.valor_total_devido || 0),
+                        0
+                    );
+                    const totalCausa = contratoInfos.reduce(
+                        (acc, c) => acc + (c.valor_causa || 0),
+                        0
+                    );
+                    $ulDetalhesVinculado.append(
+                        `<li><strong>Valor Total Devido:</strong> ${formatCurrency(totalDevido)}</li>`
+                    );
+                    $ulDetalhesVinculado.append(
+                        `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
+                    );
 
                     if (processo.tipo_de_acao_respostas &&
                         Object.keys(processo.tipo_de_acao_respostas).length > 0) {
-                        const $liAcao = $('<li><strong>Respostas da Ação:</strong><ul></ul></li>');
+                        const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
                         const $ulAcao = $liAcao.find('ul');
                         for (const subKey in processo.tipo_de_acao_respostas) {
                             if (!Object.prototype.hasOwnProperty.call(processo.tipo_de_acao_respostas, subKey)) continue;
@@ -490,7 +566,23 @@
                         $ulDetalhesVinculado.append($liAcao);
                     }
 
-                    $bodyVinculado.append($ulDetalhesVinculado);
+                    const observationLines = getObservationLinesForCnj(cnjVinculado);
+                    const $detailsRow = $('<div class="analise-card-details-row"></div>');
+                    $detailsRow.append($ulDetalhesVinculado);
+                    if (observationLines.length > 0) {
+                        const $note = $('<div class="analise-observation-note" role="status"></div>');
+                        $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
+                        const $noteContent = $('<div class="analise-observation-content"></div>');
+                        $noteContent.append('<strong>Observações</strong>');
+                        const $noteText = $('<div class="analise-observation-text"></div>');
+                        observationLines.forEach(line => {
+                            $noteText.append($('<p></p>').text(line));
+                        });
+                        $noteContent.append($noteText);
+                        $note.append($noteContent);
+                        $detailsRow.append($note);
+                    }
+                    $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
 
@@ -530,6 +622,8 @@
                     .trim()
                     .split('\n')[0]
                     .trim();
+                const valorTotalRaw = $wrapper.attr('data-valor-total');
+                const valorCausaRaw = $wrapper.attr('data-valor-causa');
 
                 let isPrescrito = !!$wrapper.data('is-prescrito');
                 let isQuitado = !!$wrapper.data('is-quitado');
@@ -546,7 +640,9 @@
                         id: contratoId,
                         numero_contrato: numeroContrato,
                         is_prescrito: isPrescrito,
-                        is_quitado: isQuitado
+                        is_quitado: isQuitado,
+                        valor_total_devido: parseDecimalValue(valorTotalRaw),
+                        valor_causa: parseDecimalValue(valorCausaRaw)
                     });
                 }
             });
