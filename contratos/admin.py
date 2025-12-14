@@ -632,18 +632,20 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
         return self.FILTER_OPTIONS
 
     def choices(self, changelist):
-        current = self.value()
+        current = self.value() or None
+
         yield {
             'selected': current is None,
-            'query_string': changelist.get_query_string(remove=[self.parameter_name]),
+            'query_string': changelist.get_query_string(remove=[self.parameter_name, 'o']),
             'display': 'Todos',
         }
+
         for value, label in self.FILTER_OPTIONS:
             selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(remove=[self.parameter_name])
-            else:
-                query_string = changelist.get_query_string({self.parameter_name: value})
+            query_string = changelist.get_query_string(
+                {self.parameter_name: value},
+                remove=['o']
+            )
             yield {
                 'selected': selected,
                 'query_string': query_string,
@@ -651,25 +653,27 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
             }
 
     def queryset(self, request, queryset):
-        value = self.value()
+        value = self.value() or None
+        if not value:
+            return queryset
+
         if value == 'desc':
-            return queryset.filter(
-                Q(valor_causa__gt=0)
-            ).order_by(
+            return queryset.filter(valor_causa__gt=0).order_by(
                 models.F('valor_causa').desc(nulls_last=True),
                 '-pk'
             )
+
         if value == 'asc':
-            return queryset.filter(
-                Q(valor_causa__gt=0)
-            ).order_by(
+            return queryset.filter(valor_causa__gt=0).order_by(
                 models.F('valor_causa').asc(nulls_first=True),
                 'pk'
             )
+
         if value == 'zerados':
             return queryset.filter(
                 Q(valor_causa__lte=0) | Q(valor_causa__isnull=True)
             ).order_by('pk')
+
         return queryset
 
 
