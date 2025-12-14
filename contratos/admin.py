@@ -693,7 +693,7 @@ class ObitoFilter(admin.SimpleListFilter):
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    readonly_fields = ('valor_causa_display', 'valor_causa')
+    readonly_fields = ()
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_display_links = ("cnj_with_valor",)
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
@@ -701,7 +701,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
-        ("Dados do Processo", {"fields": ("cnj", "valor_causa_display", "uf", "vara", "tribunal", "valor_causa")}),
+        ("Dados do Processo", {"fields": ("cnj", "valor_causa", "uf", "vara", "tribunal")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
