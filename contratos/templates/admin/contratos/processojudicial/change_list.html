@@ -177,7 +177,17 @@
             });
             if (todosLink) {
                 todosLink.addEventListener('click', () => {
-                    localStorage.removeItem(LAST_FILTERS_KEY);
+                    const savedFilters = (localStorage.getItem(LAST_FILTERS_KEY) || '').replace(/^\?/, '');
+                    if (savedFilters) {
+                        const url = new URL(`?${savedFilters}`, window.location.origin);
+                        url.searchParams.delete('valor_causa_order');
+                        const normalized = url.search.replace(/^\?/, '');
+                        if (normalized) {
+                            localStorage.setItem(LAST_FILTERS_KEY, normalized);
+                        } else {
+                            localStorage.removeItem(LAST_FILTERS_KEY);
+                        }
+                    }
                     sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
                 });
             }
