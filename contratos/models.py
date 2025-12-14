@@ -48,7 +48,7 @@ class ProcessoJudicial(models.Model):
     uf = models.CharField(max_length=2, blank=True, verbose_name="UF")
     vara = models.CharField(max_length=255, verbose_name="Vara", blank=True, null=True)
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
-    valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa", blank=True, null=True)
+    valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa por Contratos", blank=True, null=True)
 
     VIABILIDADE_VIAVEL = 'VIAVEL'
     VIABILIDADE_INVIAVEL = 'INVIAVEL'

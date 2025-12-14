@@ -149,7 +149,6 @@
             const skipRestore = sessionStorage.getItem(SKIP_RESTORE_KEY);
             if (skipRestore) {
                 sessionStorage.removeItem(SKIP_RESTORE_KEY);
-                localStorage.removeItem(LAST_FILTERS_KEY);
             } else {
                 const saved = (localStorage.getItem(LAST_FILTERS_KEY) || '').replace(/^\?/, '');
                 if (saved) {
@@ -166,6 +165,20 @@
                 localStorage.removeItem(LAST_FILTERS_KEY);
                 sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
             });
+        }
+        const valorFilterBlock = Array.from(filterDiv.querySelectorAll('.filter')).find(block => {
+            const header = block.querySelector('h3');
+            return header && /valor da causa/i.test(header.textContent || '');
+        });
+        if (valorFilterBlock) {
+            const todosLink = Array.from(valorFilterBlock.querySelectorAll('a')).find(link => {
+                return (link.textContent || '').trim().toLowerCase() === 'todos';
+            });
+            if (todosLink) {
+                todosLink.addEventListener('click', () => {
+                    sessionStorage.setItem(SKIP_RESTORE_KEY, '1');
+                });
+            }
         }
         const header = document.createElement('div');
         header.className = 'custom-filters-header';

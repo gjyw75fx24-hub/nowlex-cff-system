@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 from django.db import models
-from django.db.models import FloatField
+from django.db.models import FloatField, Q
 from django.db.models.functions import Now, Abs, Cast
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
@@ -626,14 +626,49 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
         return [
             ('desc', 'Z a A (Maior primeiro)'),
             ('asc', 'A a Z (Menor primeiro)'),
+            ('zerados', 'Zerados'),
         ]
+
+    def choices(self, changelist):
+        yield {
+            'selected': self.value() is None,
+            'query_string': changelist.get_query_string(remove=[self.parameter_name]),
+            'display': 'Todos',
+        }
+
+        for lookup, title in self.lookup_choices:
+            lookup_value = str(lookup)
+            selected = self.value() == lookup_value
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: lookup_value})
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': title,
+            }
 
     def queryset(self, request, queryset):
         value = self.value()
         if value == 'desc':
-            return queryset.order_by('-valor_causa')
+            return queryset.filter(
+                Q(valor_causa__gt=0)
+            ).order_by(
+                models.F('valor_causa').desc(nulls_last=True),
+                '-pk'
+            )
         if value == 'asc':
-            return queryset.order_by('valor_causa')
+            return queryset.filter(
+                Q(valor_causa__gt=0)
+            ).order_by(
+                models.F('valor_causa').asc(nulls_first=True),
+                'pk'
+            )
+        if value == 'zerados':
+            return queryset.filter(
+                Q(valor_causa__lte=0) | Q(valor_causa__isnull=True)
+            ).order_by('pk')
         return queryset
 
 
@@ -658,14 +693,15 @@ class ObitoFilter(admin.SimpleListFilter):
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
-    readonly_fields = ('valor_causa',)
-    list_display = ("cnj", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
+    readonly_fields = ('valor_causa_display', 'valor_causa')
+    list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
+    list_display_links = ("cnj_with_valor",)
     list_filter = [LastEditOrderFilter, EquipeDelegadoFilter, PrescricaoOrderFilter, ViabilidadeFinanceiraFilter, ValorCausaOrderFilter, ObitoFilter, AcordoStatusFilter, "busca_ativa", NaoJudicializadoFilter, AtivoStatusProcessualFilter, CarteiraCountFilter, UFCountFilter, TerceiroInteressadoFilter, EtiquetaFilter]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
-        ("Dados do Processo", {"fields": ("cnj", "uf", "vara", "tribunal", "valor_causa")}),
+        ("Dados do Processo", {"fields": ("cnj", "valor_causa_display", "uf", "vara", "tribunal", "valor_causa")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
@@ -689,6 +725,30 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
         )
+
+    @admin.display(description="Número CNJ", ordering="cnj")
+    def cnj_with_valor(self, obj):
+        cnj_text = obj.cnj or f"Cadastro #{obj.pk}"
+        valor = obj.valor_causa or Decimal('0.00')
+        formatted = f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        change_url = reverse("admin:contratos_processojudicial_change", args=(obj.pk,))
+        return format_html(
+            '<div style="display:flex; flex-direction:column; align-items:flex-start;">'
+            '<a href="{}" style="font-weight:600;">{}</a>'
+            '<span style="font-size:0.82rem; color:#475569; margin-top:2px;">{}</span>'
+            '</div>',
+            change_url,
+            cnj_text,
+            formatted
+        )
+
+    @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valor da Causa</span>'))
+    def valor_causa_display(self, obj):
+        valor = obj.valor_causa
+        if valor is None:
+            return "-"
+        formatted = f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        return formatted
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
