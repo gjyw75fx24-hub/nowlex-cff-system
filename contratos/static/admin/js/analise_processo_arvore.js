@@ -53,6 +53,7 @@
             aprovado: 'status-aprovado',
             reprovado: 'status-reprovado'
         };
+        const currentSupervisorUsername = window.__analise_username || 'Supervisor';
 
 
         const $inlineGroup = $('.analise-procedural-group');
@@ -581,6 +582,38 @@
             return $note;
         }
 
+        function createSupervisorNoteElement(processo) {
+            const $note = $('<div class="analise-supervisor-note"></div>');
+            $note.append('<strong>Observações do Supervisor</strong>');
+            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="4" placeholder="Anote sua observação..."></textarea>');
+            const $footer = $('<div class="analise-supervisor-note-footer"></div>');
+            const $author = $('<span class="analise-supervisor-note-author"></span>');
+            const $saveBtn = $('<button type="button" class="analise-supervisor-note-save">Salvar observação</button>');
+            $note.append($textArea);
+            $note.append($footer);
+            $footer.append($author);
+            $footer.append($saveBtn);
+
+            const text = processo.supervisor_observacoes || '';
+            $textArea.val(text);
+            const authorName = processo.supervisor_observacoes_autor || '';
+            $author.text(authorName ? `Registrado por ${authorName}` : '');
+
+            $saveBtn.on('click', function() {
+                const value = $textArea.val().trim();
+                processo.supervisor_observacoes = value;
+                processo.supervisor_observacoes_autor = value ? currentSupervisorUsername : '';
+                if (value) {
+                    $author.text(`Registrado por ${currentSupervisorUsername}`);
+                } else {
+                    $author.text('');
+                }
+                saveResponses();
+            });
+
+            return $note;
+        }
+
         function ensureSupervisionFields(processo) {
             if (!processo || typeof processo !== 'object') {
                 return;
@@ -592,6 +625,10 @@
             processo.barrado.ativo = Boolean(processo.barrado.ativo);
             processo.barrado.inicio = processo.barrado.inicio || null;
             processo.barrado.retorno_em = processo.barrado.retorno_em || null;
+            if (typeof processo.awaiting_supervision_confirm === 'undefined') {
+                processo.awaiting_supervision_confirm = processo.supervisor_status !== 'pendente';
+            }
+            processo.awaiting_supervision_confirm = Boolean(processo.awaiting_supervision_confirm);
         }
 
         function displayFormattedResponses() {
@@ -681,6 +718,10 @@
                     if ($noteElement) {
                         $detailsRow.append($noteElement);
                     }
+                    const $supervisorNoteElement = createSupervisorNoteElement(processo);
+                    if ($supervisorNoteElement) {
+                        $detailsRow.append($supervisorNoteElement);
+                    }
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
@@ -717,9 +758,14 @@
                 const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
                 $statusBtn.removeClass(allStatusClasses);
                 $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
+                processo.awaiting_supervision_confirm = status !== 'pendente';
+                if (!processo.awaiting_supervision_confirm) {
+                    processo.supervisionado = true;
+                }
                 if (typeof onStatusChange === 'function') {
                     onStatusChange(status);
                 }
+                maybeToggleConfirmation();
             };
 
             const updateBarradoControls = () => {
@@ -743,7 +789,6 @@
 
             $statusBtn.on('click', () => {
                 processo.supervisor_status = getNextSupervisorStatus(processo.supervisor_status);
-                processo.supervisionado = processo.supervisor_status !== 'aprovado';
                 updateStatusButton();
                 saveResponses();
             });
@@ -784,6 +829,29 @@
             $barrarGroup.append($barradoNote);
             $footer.append($barrarGroup);
 
+            const $confirmationArea = $('<div class="analise-supervision-confirmation"></div>');
+            const $confirmBtn = $('<button type="button" class="button analise-supervision-confirm-btn">Confirmar saída da supervisão</button>');
+            const $confirmLabel = $('<span class="analise-supervision-confirm-label">Aprovação/Reprovação será mantida até confirmar.</span>');
+            $confirmationArea.append($confirmLabel);
+            $confirmationArea.append($confirmBtn);
+            $footer.append($confirmationArea);
+            function maybeToggleConfirmation() {
+                const status = processo.supervisor_status || 'pendente';
+                if (status !== 'pendente' && processo.awaiting_supervision_confirm) {
+                    $confirmationArea.show();
+                    $confirmBtn.text(`Confirmar ${SUPERVISION_STATUS_LABELS[status]}`);
+                } else {
+                    $confirmationArea.hide();
+                }
+            }
+            maybeToggleConfirmation();
+
+            $confirmBtn.on('click', () => {
+                processo.supervisionado = false;
+                processo.awaiting_supervision_confirm = false;
+                saveResponses();
+            });
+
             return $footer;
         }
 
@@ -817,6 +885,10 @@
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
             if ($noteElement) {
                 $detailsRow.append($noteElement);
+            }
+            const $supervisorNoteElement = createSupervisorNoteElement(processo);
+            if ($supervisorNoteElement) {
+                $detailsRow.append($supervisorNoteElement);
             }
             $body.append($detailsRow);
 
