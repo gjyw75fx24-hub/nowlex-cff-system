@@ -42,6 +42,18 @@
             style: 'currency',
             currency: 'BRL'
         });
+        const SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
+        const SUPERVISION_STATUS_LABELS = {
+            pendente: 'Pendente de Supervisão',
+            aprovado: 'Aprovado',
+            reprovado: 'Reprovado'
+        };
+        const SUPERVISION_STATUS_CLASSES = {
+            pendente: 'status-pendente',
+            aprovado: 'status-aprovado',
+            reprovado: 'status-reprovado'
+        };
+
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
@@ -76,11 +88,13 @@
         );
         $tabPanels.append($analysisPanel);
         let $supervisionPanel = null;
+        let $supervisionPanelContent = null;
         if (isSupervisorUser) {
             $supervisionPanel = $(
                 '<div class="analise-inner-tab-panel" data-panel="supervisionar"></div>'
             );
-            $supervisionPanel.append('<p>Conteúdo reservado para supervisores.</p>');
+            $supervisionPanelContent = $('<div class="analise-supervision-panel"></div>');
+            $supervisionPanel.append($supervisionPanelContent);
             $tabPanels.append($supervisionPanel);
         }
 
@@ -367,6 +381,20 @@
             return currencyFormatter.format(numeric);
         }
 
+        function formatDateDisplay(value) {
+            if (!value) return null;
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return null;
+            const pad = n => ('0' + n).slice(-2);
+            return `${pad(parsed.getDate())}/${pad(parsed.getMonth() + 1)}/${parsed.getFullYear()}`;
+        }
+
+        function getNextSupervisorStatus(current) {
+            const currentIndex = SUPERVISION_STATUS_SEQUENCE.indexOf(current);
+            const nextIndex = (currentIndex + 1) % SUPERVISION_STATUS_SEQUENCE.length;
+            return SUPERVISION_STATUS_SEQUENCE[nextIndex];
+        }
+
         function getObservationEntriesForCnj(cnj, relatedContracts) {
             if (!cnj || typeof localStorage === 'undefined') {
                 return [];
@@ -376,93 +404,46 @@
                 return [];
             }
             const normalizedCnjDigits = cnj.replace(/\D/g, '');
-            const rawBlocks = rawNotes
+            const entries = rawNotes
                 .split(/\n{2,}/)
                 .map(entry => entry.trim())
                 .filter(Boolean);
 
-            const mergedEntries = [];
-            let currentEntry = null;
-
-            rawBlocks.forEach(block => {
-                const lines = block
-                    .split('\n')
-                    .map(line => line.trim())
-                    .filter(Boolean);
-                if (!lines.length) {
-                    return;
-                }
-                const mentionLines = lines.filter(line =>
-                    /cnj/i.test(line) || /contratos?\s*:/i.test(line)
-                );
-                const contentLines = lines.filter(line =>
-                    !mentionLines.includes(line)
-                );
-
-                const entry = {
-                    raw: block,
-                    mentionLines,
-                    contentLines
-                };
-
-                if (mentionLines.length > 0) {
-                    if (currentEntry) {
-                        mergedEntries.push(currentEntry);
+            return entries
+                .map(entry => {
+                    const lines = entry
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(Boolean);
+                    const mentionLines = lines.filter(line =>
+                        /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                    );
+                    const contentLines = lines.filter(line =>
+                        !mentionLines.includes(line)
+                    );
+                    const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                    return {
+                        raw: entry,
+                        mentionLines,
+                        contentLines,
+                        summary: summaryLine
+                    };
+                })
+                .filter(entry => {
+                    const lowerEntry = entry.raw.toLowerCase();
+                    if (lowerEntry.includes(cnj.toLowerCase())) {
+                        return true;
                     }
-                    currentEntry = entry;
-                } else if (contentLines.length > 0 && currentEntry) {
-                    currentEntry.raw = `${currentEntry.raw}\n\n${block}`;
-                    currentEntry.contentLines.push(...contentLines);
-                } else {
-                    mergedEntries.push(entry);
-                    currentEntry = null;
-                }
-            });
-
-            if (currentEntry) {
-                mergedEntries.push(currentEntry);
-            }
-
-            const matchedEntries = mergedEntries.filter(entry => {
-                const lowerEntry = entry.raw.toLowerCase();
-                if (lowerEntry.includes(cnj.toLowerCase())) {
-                    return true;
-                }
-                if (
-                    normalizedCnjDigits &&
-                    entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
-                ) {
-                    return true;
-                }
-                return (relatedContracts || []).some(contractId =>
-                    entry.raw.includes(String(contractId))
-                );
-            });
-
-            return matchedEntries.map(entry => ({
-                ...entry,
-                summary: extractObservationSummary(entry)
-            }));
-        }
-
-        function extractObservationSummary(entry) {
-            if (!entry) {
-                return '';
-            }
-            const contractLine = entry.mentionLines.find(line =>
-                /contratos?\s*:/i.test(line)
-            );
-            if (contractLine) {
-                const match = contractLine.match(/contratos?\s*:\s*(.+)$/i);
-                if (match && match[1]) {
-                    return `Contratos: ${match[1].trim()}`;
-                }
-                return contractLine;
-            }
-            if (entry.contentLines && entry.contentLines.length) {
-                return entry.contentLines[0];
-            }
-            return entry.mentionLines[0] || '';
+                    if (
+                        normalizedCnjDigits &&
+                        entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                    ) {
+                        return true;
+                    }
+                    return (relatedContracts || []).some(contractId =>
+                        entry.raw.includes(String(contractId))
+                    );
+                });
         }
 
         /* =========================================================
@@ -493,6 +474,124 @@
                 $dateSpan.attr('title', `Atualizado por: ${updatedBy}`);
             }
             return $dateSpan;
+        }
+
+        function buildProcessoDetailsSnapshot(processo) {
+            const cnjVinculado = processo.cnj || 'Não informado';
+            const $ulDetalhes = $('<ul></ul>');
+            const contratoInfos = (processo.contratos || []).map(cId => {
+                const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
+                if (cInfo) {
+                    return cInfo;
+                }
+                return {
+                    id: cId,
+                    numero_contrato: `ID ${cId}`,
+                    valor_total_devido: 0,
+                    valor_causa: 0
+                };
+            });
+
+            if (contratoInfos.length > 0) {
+                const nomesContratos = contratoInfos
+                    .map(c => c.numero_contrato || `ID ${c.id}`)
+                    .join(', ');
+                $ulDetalhes.append(
+                    `<li><strong>Contratos Vinculados:</strong> ${nomesContratos}</li>`
+                );
+            } else {
+                $ulDetalhes.append(
+                    '<li><strong>Contratos Vinculados:</strong> Nenhum</li>'
+                );
+            }
+
+            const totalDevido = contratoInfos.reduce(
+                (acc, c) => acc + (c.valor_total_devido || 0),
+                0
+            );
+            const totalCausa = contratoInfos.reduce(
+                (acc, c) => acc + (c.valor_causa || 0),
+                0
+            );
+            $ulDetalhes.append(
+                `<li><strong>Valor Total Devido:</strong> ${formatCurrency(totalDevido)}</li>`
+            );
+            $ulDetalhes.append(
+                `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
+            );
+
+            if (processo.tipo_de_acao_respostas &&
+                Object.keys(processo.tipo_de_acao_respostas).length > 0) {
+                const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
+                const $ulAcao = $liAcao.find('ul');
+                for (const subKey in processo.tipo_de_acao_respostas) {
+                    if (!Object.prototype.hasOwnProperty.call(processo.tipo_de_acao_respostas, subKey)) continue;
+                    $ulAcao.append(
+                        `<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`
+                    );
+                }
+                $ulDetalhes.append($liAcao);
+            }
+
+            const contractsReferenced = Array.from(
+                new Set(contratoInfos.map(c => c.id))
+            );
+            const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
+
+            return {
+                cnj: cnjVinculado,
+                contratoInfos,
+                $detailsList: $ulDetalhes,
+                observationEntries
+            };
+        }
+
+        function createObservationNoteElement(observationEntries) {
+            if (!observationEntries || !observationEntries.length) {
+                return null;
+            }
+            const populatedEntries = observationEntries.filter(entry => entry.contentLines && entry.contentLines.length);
+            if (!populatedEntries.length) {
+                return null;
+            }
+            const $note = $('<div class="analise-observation-note" role="status"></div>');
+            $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
+            const $noteContent = $('<div class="analise-observation-content"></div>');
+            $noteContent.append('<strong>Observações</strong>');
+            const $noteSummary = $('<div class="analise-observation-summary"></div>');
+            const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+            populatedEntries.forEach(entry => {
+                entry.contentLines.forEach(line => {
+                    $noteText.append($('<p></p>').text(line));
+                });
+            });
+            const summaryLine = populatedEntries[0].summary || populatedEntries[0].contentLines[0] || '';
+            $noteSummary.text(summaryLine);
+            const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
+            let toggled = false;
+            $toggleBtn.on('click', function() {
+                toggled = !toggled;
+                $noteText.toggleClass('collapsed', !toggled);
+                $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
+            });
+            $noteContent.append($noteSummary);
+            $noteContent.append($noteText);
+            $noteContent.append($toggleBtn);
+            $note.append($noteContent);
+            return $note;
+        }
+
+        function ensureSupervisionFields(processo) {
+            if (!processo || typeof processo !== 'object') {
+                return;
+            }
+            if (!SUPERVISION_STATUS_SEQUENCE.includes(processo.supervisor_status)) {
+                processo.supervisor_status = 'pendente';
+            }
+            processo.barrado = processo.barrado || {};
+            processo.barrado.ativo = Boolean(processo.barrado.ativo);
+            processo.barrado.inicio = processo.barrado.inicio || null;
+            processo.barrado.retorno_em = processo.barrado.retorno_em || null;
         }
 
         function displayFormattedResponses() {
@@ -561,117 +660,26 @@
             const processosVinculados = userResponses.processos_vinculados || [];
             if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
                 processosVinculados.forEach((processo) => {
-                    const $cardVinculado = $(
-                        '<div class="analise-summary-card"></div>'
-                    );
-                    const $headerVinculado = $(
-                        '<div class="analise-summary-card-header"></div>'
-                    );
+                    const snapshot = buildProcessoDetailsSnapshot(processo);
+                    const $cardVinculado = $('<div class="analise-summary-card"></div>');
+                    const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
                     const $bodyVinculado = $(
                         '<div class="analise-summary-card-body" style="display:none;"></div>'
                     );
-                    const cnjVinculado = processo.cnj || 'Não informado';
 
                     $headerVinculado.append(
-                        `<span>Processo CNJ: <strong>${cnjVinculado}</strong></span>`
+                        `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
                     );
-                    const $toggleBtnVinculado = $(
-                        '<button type="button" class="analise-toggle-btn"> + </button>'
-                    );
+                    const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
                     $headerVinculado.append($toggleBtnVinculado);
 
                     $cardVinculado.append($headerVinculado);
 
-                    const $ulDetalhesVinculado = $('<ul></ul>');
-                    const contratoInfos = (processo.contratos || []).map(cId => {
-                        const cInfo = allAvailableContratos.find(
-                            c => String(c.id) === String(cId)
-                        );
-                        if (cInfo) {
-                            return cInfo;
-                        }
-                        return {
-                            id: cId,
-                            numero_contrato: `ID ${cId}`,
-                            valor_total_devido: 0,
-                            valor_causa: 0
-                        };
-                    });
-
-                    if (contratoInfos.length > 0) {
-                        const nomesContratos = contratoInfos
-                            .map(c => c.numero_contrato || `ID ${c.id}`)
-                            .join(', ');
-                        $ulDetalhesVinculado.append(
-                            `<li><strong>Contratos Vinculados:</strong> ${nomesContratos}</li>`
-                        );
-                    } else {
-                        $ulDetalhesVinculado.append(
-                            '<li><strong>Contratos Vinculados:</strong> Nenhum</li>'
-                        );
-                    }
-
-                    const totalDevido = contratoInfos.reduce(
-                        (acc, c) => acc + (c.valor_total_devido || 0),
-                        0
-                    );
-                    const totalCausa = contratoInfos.reduce(
-                        (acc, c) => acc + (c.valor_causa || 0),
-                        0
-                    );
-                    $ulDetalhesVinculado.append(
-                        `<li><strong>Valor Total Devido:</strong> ${formatCurrency(totalDevido)}</li>`
-                    );
-                    $ulDetalhesVinculado.append(
-                        `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
-                    );
-
-                    if (processo.tipo_de_acao_respostas &&
-                        Object.keys(processo.tipo_de_acao_respostas).length > 0) {
-                        const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
-                        const $ulAcao = $liAcao.find('ul');
-                        for (const subKey in processo.tipo_de_acao_respostas) {
-                            if (!Object.prototype.hasOwnProperty.call(processo.tipo_de_acao_respostas, subKey)) continue;
-                            $ulAcao.append(
-                                `<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`
-                            );
-                        }
-                        $ulDetalhesVinculado.append($liAcao);
-                    }
-
-                    const contractsReferenced = Array.from(
-                        new Set(contratoInfos.map(c => c.id))
-                    );
-                    const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
-                    $detailsRow.append($ulDetalhesVinculado);
-                    const populatedEntries = observationEntries.filter(entry => entry.contentLines && entry.contentLines.length);
-                    if (populatedEntries.length > 0) {
-                        const $note = $('<div class="analise-observation-note" role="status"></div>');
-                        $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
-                        const $noteContent = $('<div class="analise-observation-content"></div>');
-                        $noteContent.append('<strong>Observações</strong>');
-                        const $noteSummary = $('<div class="analise-observation-summary"></div>');
-                        const $noteText = $('<div class="analise-observation-text collapsed"></div>');
-                        populatedEntries.forEach(entry => {
-                            entry.contentLines.forEach(line => {
-                                $noteText.append($('<p></p>').text(line));
-                            });
-                        });
-                        const summaryLine = populatedEntries[0].summary || populatedEntries[0].contentLines[0] || '';
-                        $noteSummary.text(summaryLine);
-                        const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
-                        let toggled = false;
-                        $toggleBtn.on('click', function() {
-                            toggled = !toggled;
-                            $noteText.toggleClass('collapsed', !toggled);
-                            $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
-                        });
-                        $noteContent.append($noteSummary);
-                        $noteContent.append($noteText);
-                        $noteContent.append($toggleBtn);
-                        $note.append($noteContent);
-                        $detailsRow.append($note);
+                    $detailsRow.append(snapshot.$detailsList);
+                    const $noteElement = createObservationNoteElement(snapshot.observationEntries);
+                    if ($noteElement) {
+                        $detailsRow.append($noteElement);
                     }
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
@@ -686,6 +694,167 @@
                     });
                 });
             }
+            if (isSupervisorUser) {
+                renderSupervisionPanel();
+            }
+        }
+
+        function getTodayIso() {
+            return new Date().toISOString().slice(0, 10);
+        }
+
+        function createSupervisionFooter(processo, onStatusChange) {
+            const $footer = $('<div class="analise-supervision-footer"></div>');
+            const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
+            const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
+            const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
+            const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
+            const $barradoNote = $('<p class="analise-supervision-barrado-note"></p>');
+
+            const updateStatusButton = () => {
+                const status = processo.supervisor_status || 'pendente';
+                $statusBtn.text(`Status: ${SUPERVISION_STATUS_LABELS[status] || status}`);
+                const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
+                $statusBtn.removeClass(allStatusClasses);
+                $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
+                if (typeof onStatusChange === 'function') {
+                    onStatusChange(status);
+                }
+            };
+
+            const updateBarradoControls = () => {
+                const { barrado } = processo;
+                const hasInicio = Boolean(barrado.inicio);
+                const hasRetorno = Boolean(barrado.retorno_em);
+                $barrarToggle.text(barrado.ativo ? 'Desbloquear' : 'Barrar');
+                $barrarDate.val(barrado.retorno_em || '');
+                if (hasInicio) {
+                    const inicio = formatDateDisplay(barrado.inicio) || barrado.inicio;
+                    const retorno = hasRetorno
+                        ? (formatDateDisplay(barrado.retorno_em) || barrado.retorno_em)
+                        : 'sem data definida';
+                    $barradoNote.text(`Ficou barrado de ${inicio} a ${retorno}`);
+                    $barradoNote.show();
+                } else {
+                    $barradoNote.text('');
+                    $barradoNote.hide();
+                }
+            };
+
+            $statusBtn.on('click', () => {
+                processo.supervisor_status = getNextSupervisorStatus(processo.supervisor_status);
+                processo.supervisionado = processo.supervisor_status !== 'aprovado';
+                updateStatusButton();
+                saveResponses();
+            });
+
+            $barrarToggle.on('click', () => {
+                processo.barrado.ativo = !processo.barrado.ativo;
+                if (processo.barrado.ativo && !processo.barrado.inicio) {
+                    processo.barrado.inicio = getTodayIso();
+                }
+                if (!processo.barrado.ativo) {
+                    processo.barrado.retorno_em = null;
+                }
+                updateBarradoControls();
+                saveResponses();
+            });
+
+            $barrarDate.on('change', function() {
+                const value = $(this).val();
+                processo.barrado.retorno_em = value || null;
+                if (value) {
+                    processo.barrado.ativo = true;
+                    if (!processo.barrado.inicio) {
+                        processo.barrado.inicio = getTodayIso();
+                    }
+                } else {
+                    processo.barrado.ativo = false;
+                }
+                updateBarradoControls();
+                saveResponses();
+            });
+
+            updateStatusButton();
+            updateBarradoControls();
+
+            $footer.append($statusBtn);
+            $barrarGroup.append($barrarToggle);
+            $barrarGroup.append($barrarDate);
+            $barrarGroup.append($barradoNote);
+            $footer.append($barrarGroup);
+
+            return $footer;
+        }
+
+        function createSupervisionCard(processo, index) {
+            const snapshot = buildProcessoDetailsSnapshot(processo);
+            const $card = $('<div class="analise-supervision-card"></div>');
+            const $header = $('<div class="analise-supervision-card-header"></div>');
+            const $headerTitle = $(
+                `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
+            );
+            const $statusBadge = $('<span class="analise-supervision-status-badge"></span>');
+            const $toggleBtn = $('<button type="button" class="analise-toggle-btn"> + </button>');
+
+            const updateStatusBadge = (status) => {
+                $statusBadge.text(SUPERVISION_STATUS_LABELS[status] || status);
+                const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
+                $statusBadge.removeClass(allStatusClasses);
+                $statusBadge.addClass(SUPERVISION_STATUS_CLASSES[status]);
+            };
+
+            $header.append($headerTitle);
+            $header.append($statusBadge);
+            $header.append($toggleBtn);
+            $card.append($header);
+
+            const $body = $(
+                '<div class="analise-supervision-card-body" style="display:none;"></div>'
+            );
+            const $detailsRow = $('<div class="analise-card-details-row"></div>');
+            $detailsRow.append(snapshot.$detailsList);
+            const $noteElement = createObservationNoteElement(snapshot.observationEntries);
+            if ($noteElement) {
+                $detailsRow.append($noteElement);
+            }
+            $body.append($detailsRow);
+
+            const $footer = createSupervisionFooter(processo, updateStatusBadge);
+            $body.append($footer);
+            $card.append($body);
+
+            $toggleBtn.on('click', function() {
+                $body.slideToggle(200, function() {
+                    $toggleBtn.text(
+                        $body.is(':visible') ? ' - ' : ' + '
+                    );
+                });
+            });
+
+            return $card;
+        }
+
+        function renderSupervisionPanel() {
+            if (!isSupervisorUser || !$supervisionPanelContent) {
+                return;
+            }
+            const processos = (userResponses.processos_vinculados || []).filter(processo => {
+                ensureSupervisionFields(processo);
+                return Boolean(processo.supervisionado);
+            });
+            if (processos.length === 0) {
+                $supervisionPanelContent.html(
+                    '<p>Nenhum processo está aguardando supervisão.</p>'
+                );
+                return;
+            }
+            const $list = $('<div class="analise-supervision-card-list"></div>');
+            processos.forEach((processo, index) => {
+                const $card = createSupervisionCard(processo, index);
+                $list.append($card);
+            });
+            $supervisionPanelContent.empty().append($list);
         }
 
         /* =========================================================
@@ -1143,7 +1312,13 @@
                 cnj: '',
                 contratos: [],
                 tipo_de_acao_respostas: {},
-                supervisionado: false
+                supervisionado: false,
+                supervisor_status: 'pendente',
+                barrado: {
+                    ativo: false,
+                    inicio: null,
+                    retorno_em: null
+                }
             };
                 userResponses[questionKey].push(newCardData);
                 renderProcessoVinculadoCard(
@@ -1170,6 +1345,11 @@
                 ? cardData.contratos
                 : [];
             cardData.supervisionado = Boolean(cardData.supervisionado);
+            cardData.supervisor_status = cardData.supervisor_status || 'pendente';
+            cardData.barrado = cardData.barrado || {};
+            cardData.barrado.ativo = Boolean(cardData.barrado.ativo);
+            cardData.barrado.inicio = cardData.barrado.inicio || null;
+            cardData.barrado.retorno_em = cardData.barrado.retorno_em || null;
 
             const indexLabel = cardIndex + 1;
 

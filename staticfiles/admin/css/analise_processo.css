@@ -138,9 +138,8 @@
 }
 
 .analise-observation-note {
-    width: min(100%, 320px);
-    min-width: 180px;
-    max-width: 360px;
+    width: 260px;
+    min-width: 160px;
     background: #fff9df;
     border: 1px solid #f3e1a1;
     border-radius: 12px;
@@ -149,8 +148,6 @@
     position: relative;
     display: flex;
     gap: 10px;
-    flex-direction: column;
-    align-self: flex-start;
 }
 
 .analise-observation-note strong {
@@ -173,7 +170,7 @@
 }
 
 .analise-observation-content {
-    flex: 1 1 auto;
+    flex: 1;
 }
 
 .analise-observation-summary {
@@ -194,7 +191,7 @@
 }
 
 .analise-observation-text.collapsed {
-    max-height: 110px;
+    max-height: 68px;
     overflow: hidden;
 }
 
@@ -211,6 +208,118 @@
 .analise-observation-text p:last-child {
     margin-bottom: 0;
 }
+
+.analise-supervision-panel {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.analise-supervision-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    background: #fff;
+}
+
+.analise-supervision-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    background: #f4f5fb;
+    border-bottom: 1px solid #dcdcde;
+    gap: 12px;
+}
+
+.analise-supervision-card-header span strong {
+    color: #1b3155;
+}
+
+.analise-supervision-status-badge {
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.analise-supervision-card-body {
+    padding: 16px;
+    display: none;
+}
+
+.analise-supervision-footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px dashed #d1d5da;
+}
+
+.analise-supervision-status-btn {
+    background: #5361ff;
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.analise-supervision-status-btn:hover {
+    background: #3541d2;
+}
+
+.status-pendente {
+    background: #f6c343 !important;
+    color: #ffffff !important;
+}
+
+.status-aprovado {
+    background: #198754 !important;
+    color: #ffffff !important;
+}
+
+.status-reprovado {
+    background: #d6336c !important;
+    color: #ffffff !important;
+}
+
+.analise-supervision-barrar-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.analise-supervision-barrar-toggle {
+    border: 1px solid #c6c6c6;
+    background: #ffffff;
+    padding: 6px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.analise-supervision-barrar-date {
+    border: 1px solid #c6c6c6;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.analise-supervision-barrado-note {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #7c4dff;
+}
+
 
 .analise-summary-card-body ul,
 .analise-summary-card-body ol {
