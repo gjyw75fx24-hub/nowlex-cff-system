@@ -69,6 +69,7 @@
             $adminForm = $('form').first();
         }
         $adminForm.on('submit', function(event) {
+            flushPendingSave();
             const activeTab = $tabNavigation.find('.analise-inner-tab-button.active').data('tab');
             if (activeTab) {
                 sessionStorage.setItem(TAB_STORAGE_KEY, activeTab);
