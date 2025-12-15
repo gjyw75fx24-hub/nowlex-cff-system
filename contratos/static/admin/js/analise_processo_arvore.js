@@ -109,7 +109,8 @@
 
         $(document).on('click', '.analise-observation-toggle', function() {
             const $btn = $(this);
-            const $text = $btn.siblings('.analise-observation-text');
+            const $content = $btn.closest('.analise-observation-content');
+            const $text = $content.find('.analise-observation-text');
             if (!$text.length) {
                 return;
             }
