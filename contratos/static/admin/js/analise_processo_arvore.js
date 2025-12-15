@@ -178,6 +178,26 @@
             const parsed = raw ? Date.parse(raw) : NaN;
             return Number.isFinite(parsed) ? parsed : 0;
         }
+        function getNotebookText() {
+            let text = '';
+            const notebookTextarea = document.querySelector('.notebook-textarea');
+            if (notebookTextarea) {
+                text = notebookTextarea.value;
+            } else {
+                text = localStorage.getItem(notebookStorageKey) || '';
+            }
+            return text;
+        }
+
+        function dispatchObservationUpdate(detail = '') {
+            const value = detail || localStorage.getItem(notebookStorageKey) || '';
+            if (detail && typeof detail === 'string') {
+                localStorage.setItem(notebookStorageKey, detail);
+            }
+            window.dispatchEvent(new CustomEvent('analiseObservacoesSalvas', {
+                detail: value
+            }));
+        }
 
         function restoreLocalResponsesIfNewer() {
             if (!localResponsesKey || typeof localStorage === 'undefined') {
@@ -642,7 +662,10 @@
             $noteContent.append($noteTextarea);
             adjustObservationTextareaHeight($noteTextarea);
             const $refreshButton = $('<button type="button" class="analise-observation-refresh" title="Atualizar observações">A</button>');
-            $refreshButton.on('click', () => refreshObservationNotes());
+            $refreshButton.on('click', () => {
+                const updatedText = getNotebookText();
+                dispatchObservationUpdate(updatedText);
+            });
             $note.append($noteContent);
             $note.append($refreshButton);
             return $note;
