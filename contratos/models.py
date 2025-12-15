@@ -49,6 +49,13 @@ class ProcessoJudicial(models.Model):
     vara = models.CharField(max_length=255, verbose_name="Vara", blank=True, null=True)
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
     valor_causa = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor da Causa", blank=True, null=True)
+    soma_contratos = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=0,
+        verbose_name="Soma dos Contratos",
+        editable=False
+    )
 
     VIABILIDADE_VIAVEL = 'VIAVEL'
     VIABILIDADE_INVIAVEL = 'INVIAVEL'
