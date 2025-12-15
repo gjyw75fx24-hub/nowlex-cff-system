@@ -213,12 +213,16 @@ class EtiquetaAdmin(admin.ModelAdmin):
     list_display = ('nome', 'ordem')
     list_editable = ('ordem',)
     ordering = ('ordem', 'nome')
+    change_list_template = 'admin/contratos/etiqueta/change_list.html'
 
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
         max_order = Etiqueta.objects.aggregate(max_ordem=Max('ordem'))['max_ordem'] or 0
         initial['ordem'] = max_order + 1
         return initial
+
+    class Media:
+        js = ('admin/js/etiqueta_interface.js',)
 
 
 @admin.register(DocumentoModelo)

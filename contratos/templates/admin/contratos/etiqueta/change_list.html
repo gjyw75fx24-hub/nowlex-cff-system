@@ -1,0 +1,64 @@
+{% extends "admin/change_list.html" %}
+{% load static i18n admin_urls %}
+
+{% block object-tools %}
+  <ul class="object-tools">
+    <li>
+      <button type="button" class="button default" id="open-create-etiqueta-btn">Criar Nova Etiqueta</button>
+    </li>
+  </ul>
+{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" type="text/css" href="{% static 'admin/css/custom_admin_styles.css' %}">
+{% endblock %}
+
+{% block content %}
+  {{ block.super }}
+
+  <div id="etiqueta-elements-source" style="display: none;">
+    <button type="button" id="open-etiqueta-modal" class="button">Inserir Etiquetas</button>
+    <div id="etiquetas-aplicadas-container"></div>
+  </div>
+
+  <div id="etiqueta-modal" style="display:none; position: fixed; z-index: 1050; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.1);">
+    <div style="position: absolute; padding: 20px; width: 450px; background: #fff; border-radius: 5px; box-shadow: 0 5px 15px rgba(0,0,0,0.2);">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+        <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">Selecionar Etiquetas<button id="add-new-etiqueta-btn" title="Criar Nova Etiqueta" style="cursor: pointer; border: none; background: transparent; color: black; font-size: 22px; padding: 0;">+</button></h3>
+        <button id="close-etiqueta-modal" style="border: none; background: transparent; font-size: 24px; cursor: pointer;">&times;</button>
+      </div>
+      <div style="position: relative; margin-bottom: 15px;">
+        <input type="text" id="search-etiqueta-input" placeholder="Buscar etiqueta..." style="width: 100%; padding: 8px 30px 8px 10px; box-sizing: border-box;">
+        <span style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%);">🔍</span>
+      </div>
+      <div id="etiqueta-list" style="max-height: 300px; overflow-y: auto;"></div>
+      <div style="margin-top: 20px; text-align: right;">
+        <button id="save-etiquetas-btn" class="button default">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="create-etiqueta-modal" style="display:none; position: fixed; z-index: 1060; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+    <div style="position: relative; margin: 10% auto; padding: 20px; width: 90%; max-width: 450px; background: #fff; border-radius: 5px;">
+      <h3 style="margin-top: 0;">Criar Nova Etiqueta</h3>
+      <label for="new-etiqueta-name-input" style="display: block; margin-bottom: 5px;">Nome:</label>
+      <input type="text" id="new-etiqueta-name-input" placeholder="Nome da etiqueta" style="width: 100%; padding: 8px; box-sizing: border-box; margin-bottom: 15px;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 20px; gap: 20px;">
+        <div>
+          <label style="display: block; margin-bottom: 5px;">Cor de Fundo:</label>
+          <div id="color-picker-fundo"></div>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 5px;">Cor da Fonte:</label>
+          <div id="color-picker-fonte"></div>
+        </div>
+      </div>
+      <div id="create-etiqueta-error" style="color: red; margin-bottom: 10px; display: none;"></div>
+      <div style="text-align: right;">
+        <button id="cancel-create-etiqueta-btn" class="button">Cancelar</button>
+        <button id="save-new-etiqueta-btn" class="button default">Salvar</button>
+      </div>
+    </div>
+  </div>
+{% endblock content %}

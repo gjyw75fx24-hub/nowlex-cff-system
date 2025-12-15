@@ -226,7 +226,8 @@
             }
         }
 
-        addNewEtiquetaBtn.on('click', function() {
+        const openCreateEtiquetaBtn = $('#open-create-etiqueta-btn');
+        function showCreateEtiquetaModal() {
             createEtiquetaError.hide();
             newEtiquetaNameInput.val('');
             newEtiquetaNameInput.css({
@@ -245,6 +246,12 @@
             } else {
                 setupAndShow();
             }
+        }
+
+        addNewEtiquetaBtn.on('click', showCreateEtiquetaModal);
+        openCreateEtiquetaBtn.on('click', function(e) {
+            e.preventDefault();
+            showCreateEtiquetaModal();
         });
 
         newEtiquetaNameInput.on('keyup', updatePreview);
