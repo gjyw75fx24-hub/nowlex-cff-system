@@ -222,7 +222,15 @@ class EtiquetaAdmin(admin.ModelAdmin):
         return initial
 
     class Media:
-        js = ('admin/js/etiqueta_interface.js',)
+        css = {
+            'all': (
+                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
+            )
+        }
+        js = (
+            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
+            'admin/js/etiqueta_interface.js',
+        )
 
 
 @admin.register(DocumentoModelo)

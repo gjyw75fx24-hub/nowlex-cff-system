@@ -1,6 +1,26 @@
-'use strict';
-(function($) {
-    $(document).ready(function() {
+function waitForJQuery() {
+    const resolveJQuery = () => {
+        if (window.django && window.django.jQuery) {
+            return window.django.jQuery;
+        }
+        if (window.jQuery) {
+            return window.jQuery;
+        }
+        if (window.$) {
+            return window.$;
+        }
+        return null;
+    };
+
+    const $ = resolveJQuery();
+    if (!$) {
+        setTimeout(waitForJQuery, 50);
+        return;
+    }
+
+    'use strict';
+    (function($) {
+        $(document).ready(function() {
         // --- Configuração Inicial ---
         const processoId = window.location.pathname.split('/').filter(Boolean)[3];
         const memoryHasProcess = processoId && !isNaN(parseInt(processoId));
@@ -275,12 +295,16 @@
                     data: JSON.stringify({ 'nome': nome, 'cor_fundo': cor_fundo, 'cor_fonte': cor_fonte }),
                     contentType: 'application/json',
                     beforeSend: xhr => xhr.setRequestHeader("X-CSRFToken", csrftoken),
-                    success: response => {
-                        if(response.status === 'created') {
-                            createModal.hide();
+                success: response => {
+                    if(response.status === 'created') {
+                        createModal.hide();
+                        if (memoryHasProcess) {
                             fetchData();
+                        } else {
+                            window.location.reload();
                         }
-                    },
+                    }
+                },
                     error: response => {
                         createEtiquetaError.text(response.responseJSON.message || 'Ocorreu um erro.').show();
                     }
@@ -292,4 +316,6 @@
             fetchData();
         }
     });
-})(window.django && django.jQuery ? django.jQuery : window.jQuery || window.$);
+})($);
+}
+waitForJQuery();
