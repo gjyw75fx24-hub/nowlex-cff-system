@@ -606,10 +606,20 @@ class AprovacaoFilter(admin.SimpleListFilter):
         return items
 
     def choices(self, changelist):
-        # Sobrescreve para garantir que o HTML no label seja renderizado
+        # Sobrescreve para garantir que o HTML no label seja renderizado e permitir toggle
+        current = self.value()
         for value, label in self.lookup_choices:
-            selected = self.value() == value
-            query_string = changelist.get_query_string({self.parameter_name: value}, [])
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o', '_skip_saved_filters']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
             yield {
                 'selected': selected,
                 'query_string': query_string,
