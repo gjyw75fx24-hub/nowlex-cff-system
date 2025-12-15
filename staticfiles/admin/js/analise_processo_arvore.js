@@ -107,6 +107,25 @@
         );
         $inlineGroup.append($tabWrapper);
 
+        $(document).on('click', '.analise-observation-toggle', function() {
+            const $btn = $(this);
+            const $text = $btn.siblings('.analise-observation-text');
+            if (!$text.length) {
+                return;
+            }
+            const isCollapsed = $text.hasClass('collapsed');
+            if (isCollapsed) {
+                const naturalHeight = Math.max($text.prop('scrollHeight') || 0, 0);
+                $text.css('max-height', naturalHeight ? `${naturalHeight + 20}px` : 'none');
+                $text.removeClass('collapsed');
+                $btn.text('Recolher');
+            } else {
+                $text.css('max-height', '');
+                $text.addClass('collapsed');
+                $btn.text('Expandir');
+            }
+        });
+
         function activateInnerTab(tabName) {
             const $targetPanel = $tabPanels.find(
                 `.analise-inner-tab-panel[data-panel="${tabName}"]`
@@ -555,6 +574,7 @@
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
+                contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
                 observationEntries
             };
@@ -582,12 +602,6 @@
             const summaryLine = populatedEntries[0].summary || populatedEntries[0].contentLines[0] || '';
             $noteSummary.text(summaryLine);
             const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
-            let toggled = false;
-            $toggleBtn.on('click', function() {
-                toggled = !toggled;
-                $noteText.toggleClass('collapsed', !toggled);
-                $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
-            });
             $noteContent.append($noteSummary);
             $noteContent.append($noteText);
             $noteContent.append($toggleBtn);
@@ -595,35 +609,51 @@
             return $note;
         }
 
+        function appendNotesColumn($detailsRow, noteElements, options = {}) {
+            const notes = (noteElements || []).filter(Boolean);
+            if (!notes.length) {
+                return;
+            }
+            const $notesColumn = $('<div class="analise-card-notes-column"></div>');
+            notes.forEach(note => {
+                $notesColumn.append(note);
+            });
+            if (options.cnj) {
+                $notesColumn.attr('data-analise-cnj', options.cnj);
+            }
+            if (Array.isArray(options.contracts) && options.contracts.length) {
+                $notesColumn.attr('data-analise-contracts', options.contracts.join(','));
+            }
+            $detailsRow.append($notesColumn);
+        }
+
         function createSupervisorNoteElement(processo) {
+            if (!processo) {
+                return null;
+            }
             const $note = $('<div class="analise-supervisor-note"></div>');
             $note.append('<strong>Observações do Supervisor</strong>');
-            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="3" placeholder="Anote sua observação..."></textarea>');
-            const $footer = $('<div class="analise-supervisor-note-footer"></div>');
-            const $author = $('<span class="analise-supervisor-note-author"></span>');
-            const $saveBtn = $('<button type="button" class="analise-supervisor-note-save">Salvar observação</button>');
+            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="4" placeholder="Anote sua observação..."></textarea>');
 
             $note.append($textArea);
-            $note.append($footer);
-            $footer.append($author);
-            $footer.append($saveBtn);
 
             const currentText = processo.supervisor_observacoes || '';
             $textArea.val(currentText);
-            const authorName = processo.supervisor_observacoes_autor || '';
-            $author.text(authorName ? `Registrado por ${authorName}` : '');
-
-            $saveBtn.on('click', function() {
+            let saveTimeout = null;
+            const persistObservation = () => {
                 const value = $textArea.val().trim();
                 processo.supervisor_observacoes = value;
                 processo.supervisor_observacoes_autor = value ? currentSupervisorUsername : '';
-                if (value) {
-                    $author.text(`Registrado por ${currentSupervisorUsername}`);
-                } else {
-                    $author.text('');
-                }
                 saveResponses();
+            };
+
+            $textArea.on('input', () => {
+                if (saveTimeout) {
+                    clearTimeout(saveTimeout);
+                }
+                saveTimeout = setTimeout(persistObservation, 500);
             });
+            $textArea.on('change', persistObservation);
 
             return $note;
         }
@@ -731,9 +761,10 @@
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append(snapshot.$detailsList);
                     const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-                    if ($noteElement) {
-                        $detailsRow.append($noteElement);
-                    }
+                    appendNotesColumn($detailsRow, [$noteElement], {
+                        cnj: snapshot.cnj,
+                        contracts: snapshot.contractIds
+                    });
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
@@ -756,34 +787,33 @@
             return new Date().toISOString().slice(0, 10);
         }
 
-        function createSupervisionFooter(processo, onStatusChange) {
-            const $footer = $('<div class="analise-supervision-footer"></div>');
-            const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
+    function createSupervisionFooter(processo, onStatusChange) {
+        const $footer = $('<div class="analise-supervision-footer"></div>');
+        const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
         const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
         const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
         const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
         const $barradoInfoToggle = $('<button type="button" class="analise-supervision-barrado-info-toggle" aria-expanded="false">+</button>');
         const $barradoNote = $('<div class="analise-supervision-barrado-note" style="display:none;"></div>');
+        const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
+        const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
+        const updateConcludeButton = () => {
+            const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
+            $concludeBtn.prop('disabled', !needsConfirm);
+        };
 
-            const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
-            const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
-            const updateConcludeButton = () => {
-                const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
-                $concludeBtn.prop('disabled', !needsConfirm);
-            };
-
-            const updateStatusButton = () => {
-                const status = processo.supervisor_status || 'pendente';
-                $statusBtn.text(`Status: ${SUPERVISION_STATUS_LABELS[status] || status}`);
-                const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
-                $statusBtn.removeClass(allStatusClasses);
-                $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
-                processo.awaiting_supervision_confirm = status !== 'pendente';
-                if (typeof onStatusChange === 'function') {
-                    onStatusChange(status);
-                }
-                updateConcludeButton();
-            };
+        const updateStatusButton = () => {
+            const status = processo.supervisor_status || 'pendente';
+            $statusBtn.text(`Status: ${SUPERVISION_STATUS_LABELS[status] || status}`);
+            const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
+            $statusBtn.removeClass(allStatusClasses);
+            $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
+            processo.awaiting_supervision_confirm = status !== 'pendente';
+            if (typeof onStatusChange === 'function') {
+                onStatusChange(status);
+            }
+            updateConcludeButton();
+        };
 
             const updateBarradoControls = () => {
                 const { barrado } = processo;
@@ -802,7 +832,8 @@
                 } else {
                     $barradoNote.text('');
                     $barradoNote.hide();
-                    $barradoInfoToggle.hide().attr('aria-expanded', 'false').text('+');
+                    $barradoInfoToggle.hide();
+                    $barradoInfoToggle.attr('aria-expanded', 'false').text('+');
                 }
             };
 
@@ -848,16 +879,6 @@
             $barrarGroup.append($barradoInfoToggle);
             $footer.append($barrarGroup);
             $footer.append($barradoNote);
-            $concludeRow.append($concludeBtn);
-            $footer.append($concludeRow);
-            updateConcludeButton();
-            $concludeBtn.on('click', () => {
-                processo.supervisionado = false;
-                processo.awaiting_supervision_confirm = false;
-                updateConcludeButton();
-                saveResponses();
-                renderSupervisionPanel();
-            });
             $barradoInfoToggle.on('click', () => {
                 if ($barradoNote.is(':visible')) {
                     $barradoNote.slideUp(100);
@@ -866,6 +887,17 @@
                     $barradoNote.slideDown(120);
                     $barradoInfoToggle.text('-').attr('aria-expanded', 'true');
                 }
+            });
+            $concludeRow.append($concludeBtn);
+            $footer.append($concludeRow);
+            updateConcludeButton();
+
+            $concludeBtn.on('click', () => {
+                processo.supervisionado = false;
+                processo.awaiting_supervision_confirm = false;
+                updateConcludeButton();
+                saveResponses();
+                renderSupervisionPanel();
             });
 
             return $footer;
@@ -895,9 +927,11 @@
             const $detailsRow = $('<div class="analise-card-details-row"></div>');
             $detailsRow.append(snapshot.$detailsList);
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-            if ($noteElement) {
-                $detailsRow.append($noteElement);
-            }
+            const $supervisorNoteElement = createSupervisorNoteElement(processo);
+            appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
+                cnj: snapshot.cnj,
+                contracts: snapshot.contractIds
+            });
             $body.append($detailsRow);
 
             const $footer = createSupervisionFooter(processo, updateStatusBadge);
@@ -928,6 +962,37 @@
             });
             $supervisionPanelContent.empty().append($list);
         }
+
+        function refreshObservationNotes(event) {
+            if (event && typeof event.detail === 'string') {
+                localStorage.setItem(notebookStorageKey, event.detail);
+            }
+            $('[data-analise-cnj]').each(function() {
+                const $column = $(this);
+                const cnj = $column.attr('data-analise-cnj');
+                if (!cnj) {
+                    return;
+                }
+                const contractsAttr = $column.attr('data-analise-contracts') || '';
+                const contracts = contractsAttr
+                    .split(',')
+                    .map(id => id.trim())
+                    .filter(Boolean);
+                const entries = getObservationEntriesForCnj(cnj, contracts);
+                const $newObservation = createObservationNoteElement(entries);
+                $column.find('.analise-observation-note').remove();
+                if ($newObservation) {
+                    const supervisorNote = $column.find('.analise-supervisor-note');
+                    if (supervisorNote.length) {
+                        supervisorNote.before($newObservation);
+                    } else {
+                        $column.append($newObservation);
+                    }
+                }
+            });
+        }
+
+        window.addEventListener('analiseObservacoesSalvas', refreshObservationNotes);
 
         /* =========================================================
          * Utilidades de contratos

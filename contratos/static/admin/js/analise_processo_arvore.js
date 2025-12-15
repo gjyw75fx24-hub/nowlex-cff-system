@@ -53,6 +53,7 @@
             aprovado: 'status-aprovado',
             reprovado: 'status-reprovado'
         };
+        const currentSupervisorUsername = window.__analise_username || 'Supervisor';
 
 
         const $inlineGroup = $('.analise-procedural-group');
@@ -105,6 +106,25 @@
             $tabPanels
         );
         $inlineGroup.append($tabWrapper);
+
+        $(document).on('click', '.analise-observation-toggle', function() {
+            const $btn = $(this);
+            const $text = $btn.siblings('.analise-observation-text');
+            if (!$text.length) {
+                return;
+            }
+            const isCollapsed = $text.hasClass('collapsed');
+            if (isCollapsed) {
+                const naturalHeight = Math.max($text.prop('scrollHeight') || 0, 0);
+                $text.css('max-height', naturalHeight ? `${naturalHeight + 20}px` : 'none');
+                $text.removeClass('collapsed');
+                $btn.text('Recolher');
+            } else {
+                $text.css('max-height', '');
+                $text.addClass('collapsed');
+                $btn.text('Expandir');
+            }
+        });
 
         function activateInnerTab(tabName) {
             const $targetPanel = $tabPanels.find(
@@ -554,6 +574,7 @@
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
+                contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
                 observationEntries
             };
@@ -581,16 +602,59 @@
             const summaryLine = populatedEntries[0].summary || populatedEntries[0].contentLines[0] || '';
             $noteSummary.text(summaryLine);
             const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
-            let toggled = false;
-            $toggleBtn.on('click', function() {
-                toggled = !toggled;
-                $noteText.toggleClass('collapsed', !toggled);
-                $toggleBtn.text(toggled ? 'Recolher' : 'Expandir');
-            });
             $noteContent.append($noteSummary);
             $noteContent.append($noteText);
             $noteContent.append($toggleBtn);
             $note.append($noteContent);
+            return $note;
+        }
+
+        function appendNotesColumn($detailsRow, noteElements, options = {}) {
+            const notes = (noteElements || []).filter(Boolean);
+            if (!notes.length) {
+                return;
+            }
+            const $notesColumn = $('<div class="analise-card-notes-column"></div>');
+            notes.forEach(note => {
+                $notesColumn.append(note);
+            });
+            if (options.cnj) {
+                $notesColumn.attr('data-analise-cnj', options.cnj);
+            }
+            if (Array.isArray(options.contracts) && options.contracts.length) {
+                $notesColumn.attr('data-analise-contracts', options.contracts.join(','));
+            }
+            $detailsRow.append($notesColumn);
+        }
+
+        function createSupervisorNoteElement(processo) {
+            if (!processo) {
+                return null;
+            }
+            const $note = $('<div class="analise-supervisor-note"></div>');
+            $note.append('<strong>Observações do Supervisor</strong>');
+            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="4" placeholder="Anote sua observação..."></textarea>');
+
+            $note.append($textArea);
+
+            const currentText = processo.supervisor_observacoes || '';
+            $textArea.val(currentText);
+            let saveTimeout = null;
+            const persistObservation = () => {
+                const value = $textArea.val().trim();
+                processo.supervisor_observacoes = value;
+                processo.supervisor_observacoes_autor = value ? currentSupervisorUsername : '';
+                saveResponses();
+            };
+
+            $textArea.on('input', () => {
+                if (saveTimeout) {
+                    clearTimeout(saveTimeout);
+                }
+                saveTimeout = setTimeout(persistObservation, 500);
+            });
+            $textArea.on('change', persistObservation);
+
             return $note;
         }
 
@@ -697,9 +761,10 @@
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append(snapshot.$detailsList);
                     const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-                    if ($noteElement) {
-                        $detailsRow.append($noteElement);
-                    }
+                    appendNotesColumn($detailsRow, [$noteElement], {
+                        cnj: snapshot.cnj,
+                        contracts: snapshot.contractIds
+                    });
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
@@ -862,9 +927,11 @@
             const $detailsRow = $('<div class="analise-card-details-row"></div>');
             $detailsRow.append(snapshot.$detailsList);
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-            if ($noteElement) {
-                $detailsRow.append($noteElement);
-            }
+            const $supervisorNoteElement = createSupervisorNoteElement(processo);
+            appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
+                cnj: snapshot.cnj,
+                contracts: snapshot.contractIds
+            });
             $body.append($detailsRow);
 
             const $footer = createSupervisionFooter(processo, updateStatusBadge);
@@ -895,6 +962,37 @@
             });
             $supervisionPanelContent.empty().append($list);
         }
+
+        function refreshObservationNotes(event) {
+            if (event && typeof event.detail === 'string') {
+                localStorage.setItem(notebookStorageKey, event.detail);
+            }
+            $('[data-analise-cnj]').each(function() {
+                const $column = $(this);
+                const cnj = $column.attr('data-analise-cnj');
+                if (!cnj) {
+                    return;
+                }
+                const contractsAttr = $column.attr('data-analise-contracts') || '';
+                const contracts = contractsAttr
+                    .split(',')
+                    .map(id => id.trim())
+                    .filter(Boolean);
+                const entries = getObservationEntriesForCnj(cnj, contracts);
+                const $newObservation = createObservationNoteElement(entries);
+                $column.find('.analise-observation-note').remove();
+                if ($newObservation) {
+                    const supervisorNote = $column.find('.analise-supervisor-note');
+                    if (supervisorNote.length) {
+                        supervisorNote.before($newObservation);
+                    } else {
+                        $column.append($newObservation);
+                    }
+                }
+            });
+        }
+
+        window.addEventListener('analiseObservacoesSalvas', refreshObservationNotes);
 
         /* =========================================================
          * Utilidades de contratos

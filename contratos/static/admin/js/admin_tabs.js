@@ -156,6 +156,10 @@ window.addEventListener('load', function() {
                         throw new Error(`status ${response.status}`);
                     }
                     showNotebookMessage('Salvo com sucesso', 'success');
+                    const savedText = notebookTextarea ? notebookTextarea.value : '';
+                    window.dispatchEvent(new CustomEvent('analiseObservacoesSalvas', {
+                        detail: savedText
+                    }));
                 } catch (error) {
                     showNotebookMessage(`Falha ao salvar: ${error.message}`, 'error');
                 } finally {
