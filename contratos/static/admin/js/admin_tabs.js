@@ -100,8 +100,13 @@ window.addEventListener('load', function() {
                 if (!mention) {
                     return;
                 }
-                const current = notebookTextarea.value.trim();
-                notebookTextarea.value = mention + (current ? `\n${current}` : '');
+                let current = notebookTextarea.value;
+                const trimmed = current.trimEnd();
+                current = trimmed;
+                if (current && !current.endsWith('\n\n')) {
+                    current += '\n\n';
+                }
+                notebookTextarea.value = `${current}${mention}\n\n`;
                 save();
             };
 
