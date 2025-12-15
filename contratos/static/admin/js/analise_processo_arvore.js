@@ -653,10 +653,12 @@
             const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
             const allLines = [];
             populatedEntries.forEach(entry => {
-                const entryLines = [...(entry.mentionLines || []), ...(entry.contentLines || [])];
-                entryLines.forEach(line => {
-                    allLines.push(line);
-                });
+                const contentLines = (entry.contentLines || []).filter(Boolean);
+                if (contentLines.length) {
+                    contentLines.forEach(line => {
+                        allLines.push(line);
+                    });
+                }
             });
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
