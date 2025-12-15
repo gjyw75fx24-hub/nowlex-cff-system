@@ -997,19 +997,20 @@
                 ensureSupervisionFields(processo);
                 return Boolean(processo.supervisionado);
             });
-            if (processos.length === 0) {
-                $supervisionPanelContent.html(
-                    '<p>Nenhum processo está aguardando supervisão.</p>'
-                );
-                return;
-            }
-            const $list = $('<div class="analise-supervision-card-list"></div>');
-            processos.forEach((processo, index) => {
-                const $card = createSupervisionCard(processo, index);
-                $list.append($card);
-            });
-            $supervisionPanelContent.empty().append($list);
+        if (processos.length === 0) {
+            $supervisionPanelContent.html(
+                '<p>Nenhum processo está aguardando supervisão.</p>'
+            );
+            return;
         }
+        const $list = $('<div class="analise-supervision-card-list"></div>');
+        processos.forEach((processo, index) => {
+            const $card = createSupervisionCard(processo, index);
+            $list.append($card);
+        });
+        $supervisionPanelContent.empty().append($list);
+        refreshObservationNotes();
+    }
 
         function refreshObservationNotes(event) {
             if (event && typeof event.detail === 'string') {
