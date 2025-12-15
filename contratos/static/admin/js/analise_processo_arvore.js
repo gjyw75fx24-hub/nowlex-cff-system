@@ -68,7 +68,13 @@
         if (!$adminForm.length) {
             $adminForm = $('form').first();
         }
-        $adminForm.on('submit', clearLocalResponses);
+        $adminForm.on('submit', function(event) {
+            const activeTab = $tabNavigation.find('.analise-inner-tab-button.active').data('tab');
+            if (activeTab) {
+                sessionStorage.setItem(TAB_STORAGE_KEY, activeTab);
+            }
+            clearLocalResponses();
+        });
 
         const isSupervisorUser = Boolean(window.__analise_is_supervisor);
         const TAB_STORAGE_KEY = 'analise_active_tab';
