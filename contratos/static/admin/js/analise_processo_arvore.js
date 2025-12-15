@@ -1016,6 +1016,7 @@
                 $list.append($card);
             });
             $supervisionPanelContent.empty().append($list);
+            refreshObservationNotes();
         }
 
         function refreshObservationNotes(event) {
