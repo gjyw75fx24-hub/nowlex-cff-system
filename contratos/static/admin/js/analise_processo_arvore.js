@@ -408,6 +408,7 @@
                 autoSaveTimer = null;
             }
             ensureUserResponsesShape();
+            userResponses.contratos_para_monitoria = getMonitoriaContractIds();
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
                 JSON.stringify(userResponses)
