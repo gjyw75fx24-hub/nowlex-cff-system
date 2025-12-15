@@ -107,23 +107,6 @@
         );
         $inlineGroup.append($tabWrapper);
 
-        $(document).on('click', '.analise-observation-toggle', function() {
-            const $btn = $(this);
-            const $content = $btn.closest('.analise-observation-content');
-            const $text = $content.find('.analise-observation-text');
-            if (!$text.length) {
-                return;
-            }
-            const isCollapsed = $text.hasClass('collapsed');
-            if (isCollapsed) {
-                $text.removeClass('collapsed').addClass('expanded');
-                $btn.text('Recolher');
-            } else {
-                $text.removeClass('expanded').addClass('collapsed');
-                $btn.text('Expandir');
-            }
-        });
-
         function activateInnerTab(tabName) {
             const $targetPanel = $tabPanels.find(
                 `.analise-inner-tab-panel[data-panel="${tabName}"]`
@@ -638,26 +621,16 @@
             $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
             const $noteContent = $('<div class="analise-observation-content"></div>');
             $noteContent.append('<strong>Observações</strong>');
-            const $noteSummary = $('<div class="analise-observation-summary"></div>');
-            const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+            const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
             const allLines = [];
             populatedEntries.forEach(entry => {
-                entry.contentLines.forEach(line => {
+                const entryLines = [...(entry.mentionLines || []), ...(entry.contentLines || [])];
+                entryLines.forEach(line => {
                     allLines.push(line);
                 });
             });
-            const summaryLine = populatedEntries[0].summary || allLines[0] || '';
-            const linesToShow = allLines.filter((line, index) => {
-                return !(index === 0 && line === summaryLine);
-            });
-            linesToShow.forEach(line => {
-                $noteText.append($('<p></p>').text(line));
-            });
-            $noteSummary.text(summaryLine);
-            const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
-            $noteContent.append($noteSummary);
-            $noteContent.append($noteText);
-            $noteContent.append($toggleBtn);
+            $noteTextarea.val(allLines.join('\n'));
+            $noteContent.append($noteTextarea);
             $note.append($noteContent);
             return $note;
         }
