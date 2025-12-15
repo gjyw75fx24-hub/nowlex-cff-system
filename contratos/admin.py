@@ -415,6 +415,15 @@ class UFCountFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
+        all_query = changelist.get_query_string(
+            {'_skip_saved_filters': '1'},
+            remove=[self.parameter_name, 'o', '_skip_saved_filters']
+        )
+        yield {
+            'selected': current is None,
+            'query_string': all_query,
+            'display': 'Todos',
+        }
         for value, label in self.lookup_choices:
             selected = value == current
             if selected:
