@@ -713,6 +713,20 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
             items.append((value, label_html))
         return items
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookups(changelist.request, changelist.model_admin):
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: value})
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         val = self.value()
         if val:
@@ -751,6 +765,20 @@ class AcordoStatusFilter(admin.SimpleListFilter):
 
         return items
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookups(changelist.request, changelist.model_admin):
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: value})
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         value = self.value()
         if not value:
@@ -784,6 +812,20 @@ class BuscaAtivaFilter(admin.SimpleListFilter):
             label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
             items.append((value, label_html))
         return items
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookups(changelist.request, changelist.model_admin):
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: value})
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         value = self.value()
@@ -1111,6 +1153,20 @@ class ObitoFilter(admin.SimpleListFilter):
             label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
             items.append((value, label_html))
         return items
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookups(changelist.request, changelist.model_admin):
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(remove=[self.parameter_name])
+            else:
+                query_string = changelist.get_query_string({self.parameter_name: value})
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
     def queryset(self, request, queryset):
         val = self.value()
