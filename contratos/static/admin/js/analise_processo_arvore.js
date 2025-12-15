@@ -116,12 +116,10 @@
             }
             const isCollapsed = $text.hasClass('collapsed');
             if (isCollapsed) {
-                $text.css('max-height', 'none');
-                $text.removeClass('collapsed');
+                $text.removeClass('collapsed').addClass('expanded');
                 $btn.text('Recolher');
             } else {
-                $text.css('max-height', '');
-                $text.addClass('collapsed');
+                $text.removeClass('expanded').addClass('collapsed');
                 $btn.text('Expandir');
             }
         });

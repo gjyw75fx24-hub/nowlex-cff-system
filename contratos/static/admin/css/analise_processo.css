@@ -193,6 +193,8 @@
 .analise-observation-text.collapsed {
     max-height: 68px;
     overflow: hidden;
+.analise-observation-text.expanded {
+    max-height: none !important;
 }
 
 .analise-observation-text {
