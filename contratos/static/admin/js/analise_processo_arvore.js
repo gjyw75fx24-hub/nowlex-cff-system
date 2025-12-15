@@ -116,8 +116,7 @@
             }
             const isCollapsed = $text.hasClass('collapsed');
             if (isCollapsed) {
-                const naturalHeight = Math.max($text.prop('scrollHeight') || 0, 0);
-                $text.css('max-height', naturalHeight ? `${naturalHeight + 20}px` : 'none');
+                $text.css('max-height', 'none');
                 $text.removeClass('collapsed');
                 $btn.text('Recolher');
             } else {
