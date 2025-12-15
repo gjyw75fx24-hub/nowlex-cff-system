@@ -1391,7 +1391,7 @@
 
                 case 'CONTRATOS_MONITORIA':
                     // "Propor Monitória": só aparece quando a árvore chega aqui.
-                    renderMonitoriaContractSelector(question, $questionDiv, currentResponses);
+                    renderMonitoriaContractSelector(question, $questionDiv, currentResponses, cardIndex);
                     return;
 
                 case 'TEXTO':
@@ -1795,7 +1795,7 @@
          * Seleção de contratos para Monitória ("Propor Monitória")
          * ======================================================= */
 
-        function renderMonitoriaContractSelector(question, $container, currentResponses) {
+        function renderMonitoriaContractSelector(question, $container, currentResponses, cardIndex = null) {
             ensureUserResponsesShape();
 
             const $selectorDiv = $('<div class="form-row field-contratos-monitoria"></div>');
@@ -1805,8 +1805,13 @@
                 c => userResponses.contratos_status[c.id] && userResponses.contratos_status[c.id].selecionado
             );
             const selection = currentResponses.contratos_para_monitoria || [];
+            const processo = (cardIndex !== null && cardIndex >= 0 && Array.isArray(userResponses.processos_vinculados))
+                ? userResponses.processos_vinculados[cardIndex] || null
+                : null;
+
+            // Conjunto final: mantém os já marcados e os selecionados no info-card
             const contractCandidates = Array.from(new Set([
-                ...(processo.contratos || []),
+                ...(processo && Array.isArray(processo.contratos) ? processo.contratos : []),
                 ...selection,
                 ...selectedInInfoCard.map(c => String(c.id)),
             ].map(id => String(id))));
