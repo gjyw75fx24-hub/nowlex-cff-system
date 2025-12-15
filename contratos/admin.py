@@ -715,7 +715,7 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
-        for value, label in self.lookups(changelist.request, changelist.model_admin):
+        for value, label in self.lookup_choices:
             selected = current == value
             if selected:
                 query_string = changelist.get_query_string(remove=[self.parameter_name])
@@ -767,7 +767,7 @@ class AcordoStatusFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
-        for value, label in self.lookups(changelist.request, changelist.model_admin):
+        for value, label in self.lookup_choices:
             selected = current == value
             if selected:
                 query_string = changelist.get_query_string(remove=[self.parameter_name])
@@ -815,7 +815,7 @@ class BuscaAtivaFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
-        for value, label in self.lookups(changelist.request, changelist.model_admin):
+        for value, label in self.lookup_choices:
             selected = current == value
             if selected:
                 query_string = changelist.get_query_string(remove=[self.parameter_name])
@@ -1156,7 +1156,7 @@ class ObitoFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
-        for value, label in self.lookups(changelist.request, changelist.model_admin):
+        for value, label in self.lookup_choices:
             selected = current == value
             if selected:
                 query_string = changelist.get_query_string(remove=[self.parameter_name])
