@@ -209,54 +209,6 @@
     margin-bottom: 0;
 }
 
-.analise-supervisor-note {
-    width: 260px;
-    min-width: 160px;
-    background: #d8e9ff;
-    border: 1px solid #96c1ff;
-    border-radius: 12px;
-    padding: 12px 14px;
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12);
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    font-size: 0.85rem;
-}
-
-.analise-supervisor-note strong {
-    color: #25396b;
-}
-
-.analise-supervisor-note-text {
-    width: 100%;
-    border-radius: 6px;
-    border: 1px solid #aac3ff;
-    padding: 10px;
-    font-size: 0.85rem;
-    resize: vertical;
-}
-
-.analise-supervisor-note-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
-    color: #05335a;
-}
-
-.analise-supervisor-note-save {
-    background: #0d6efd;
-    border: none;
-    color: white;
-    padding: 6px 12px;
-    border-radius: 999px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
 .analise-supervision-panel {
     margin-top: 20px;
     display: flex;
@@ -295,7 +247,7 @@
 
 .analise-supervision-card-body {
     padding: 16px;
-    display: none;
+    display: block;
 }
 
 .analise-supervision-footer {
@@ -363,31 +315,59 @@
 }
 
 .analise-supervision-barrado-note {
-    margin: 0;
+    margin: 6px 0 0;
     font-size: 0.85rem;
     color: #7c4dff;
-}
-
-.analise-supervision-confirmation {
-    margin-top: 8px;
-    width: 100%;
+    background: #f5f5ff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #ccd7ff;
     display: none;
-    flex-direction: column;
-    gap: 6px;
 }
 
-.analise-supervision-confirm-label {
-    font-size: 0.8rem;
-    color: #3a4a68;
-}
-
-.analise-supervision-confirm-btn {
-    border-radius: 6px;
-    padding: 6px 14px;
-    border: 1px solid #57606a;
-    background: #57606a;
-    color: white;
+.analise-supervision-barrado-info-toggle {
+    border: 1px solid #c6c6c6;
+    background: #f8f8f8;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.analise-supervision-barrado-info-toggle:hover {
+    background: #ececec;
+}
+
+.analise-supervision-conclude-row {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.analise-supervision-conclude-btn {
+    background: #0d6efd;
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.analise-supervision-conclude-btn:hover {
+    background: #0a58ca;
+}
+.analise-supervision-conclude-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 

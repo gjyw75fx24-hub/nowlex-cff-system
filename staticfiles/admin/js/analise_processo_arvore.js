@@ -71,8 +71,10 @@
         $adminForm.on('submit', clearLocalResponses);
 
         const isSupervisorUser = Boolean(window.__analise_is_supervisor);
+        const TAB_STORAGE_KEY = 'analise_active_tab';
+        const desiredTab = sessionStorage.getItem(TAB_STORAGE_KEY);
         const $analysisTabButton = $(
-            '<button type="button" class="analise-inner-tab-button active" data-tab="analise">Análise do Processo</button>'
+            '<button type="button" class="analise-inner-tab-button" data-tab="analise">Análise do Processo</button>'
         );
         const $tabNavigation = $('<div class="analise-inner-tab-navigation"></div>').append($analysisTabButton);
         let $supervisionTabButton = null;
@@ -105,18 +107,29 @@
         );
         $inlineGroup.append($tabWrapper);
 
+        function activateInnerTab(tabName) {
+            const $targetPanel = $tabPanels.find(
+                `.analise-inner-tab-panel[data-panel="${tabName}"]`
+            );
+            if (!$targetPanel.length) {
+                return;
+            }
+            $tabNavigation.find('.analise-inner-tab-button').removeClass('active');
+            $tabNavigation
+                .find(`.analise-inner-tab-button[data-tab="${tabName}"]`)
+                .addClass('active');
+            $tabPanels.find('.analise-inner-tab-panel').removeClass('active');
+            $targetPanel.addClass('active');
+            sessionStorage.setItem(TAB_STORAGE_KEY, tabName);
+        }
+
         $tabNavigation.on('click', '.analise-inner-tab-button', function() {
             const selectedTab = $(this).data('tab');
-            $tabNavigation.find('.analise-inner-tab-button').removeClass('active');
-            $(this).addClass('active');
-            $tabPanels.find('.analise-inner-tab-panel').removeClass('active');
-            const $targetPanel = $tabPanels.find(
-                `.analise-inner-tab-panel[data-panel="${selectedTab}"]`
-            );
-            if ($targetPanel.length) {
-                $targetPanel.addClass('active');
-            }
+            activateInnerTab(selectedTab);
         });
+
+        const initialTab = isSupervisorUser && desiredTab === 'supervisionar' ? 'supervisionar' : 'analise';
+        activateInnerTab(initialTab);
 
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
         $analysisPanel.append($dynamicQuestionsContainer);
@@ -585,17 +598,18 @@
         function createSupervisorNoteElement(processo) {
             const $note = $('<div class="analise-supervisor-note"></div>');
             $note.append('<strong>Observações do Supervisor</strong>');
-            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="4" placeholder="Anote sua observação..."></textarea>');
+            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="3" placeholder="Anote sua observação..."></textarea>');
             const $footer = $('<div class="analise-supervisor-note-footer"></div>');
             const $author = $('<span class="analise-supervisor-note-author"></span>');
             const $saveBtn = $('<button type="button" class="analise-supervisor-note-save">Salvar observação</button>');
+
             $note.append($textArea);
             $note.append($footer);
             $footer.append($author);
             $footer.append($saveBtn);
 
-            const text = processo.supervisor_observacoes || '';
-            $textArea.val(text);
+            const currentText = processo.supervisor_observacoes || '';
+            $textArea.val(currentText);
             const authorName = processo.supervisor_observacoes_autor || '';
             $author.text(authorName ? `Registrado por ${authorName}` : '');
 
@@ -626,9 +640,11 @@
             processo.barrado.inicio = processo.barrado.inicio || null;
             processo.barrado.retorno_em = processo.barrado.retorno_em || null;
             if (typeof processo.awaiting_supervision_confirm === 'undefined') {
-                processo.awaiting_supervision_confirm = processo.supervisor_status !== 'pendente';
+                processo.awaiting_supervision_confirm = false;
             }
-            processo.awaiting_supervision_confirm = Boolean(processo.awaiting_supervision_confirm);
+            if (typeof processo.supervisionado === 'undefined') {
+                processo.supervisionado = true;
+            }
         }
 
         function displayFormattedResponses() {
@@ -718,10 +734,6 @@
                     if ($noteElement) {
                         $detailsRow.append($noteElement);
                     }
-                    const $supervisorNoteElement = createSupervisorNoteElement(processo);
-                    if ($supervisorNoteElement) {
-                        $detailsRow.append($supervisorNoteElement);
-                    }
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
@@ -747,10 +759,18 @@
         function createSupervisionFooter(processo, onStatusChange) {
             const $footer = $('<div class="analise-supervision-footer"></div>');
             const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
-            const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
-            const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
-            const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
-            const $barradoNote = $('<p class="analise-supervision-barrado-note"></p>');
+        const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
+        const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
+        const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
+        const $barradoInfoToggle = $('<button type="button" class="analise-supervision-barrado-info-toggle" aria-expanded="false">+</button>');
+        const $barradoNote = $('<div class="analise-supervision-barrado-note" style="display:none;"></div>');
+
+            const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
+            const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
+            const updateConcludeButton = () => {
+                const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
+                $concludeBtn.prop('disabled', !needsConfirm);
+            };
 
             const updateStatusButton = () => {
                 const status = processo.supervisor_status || 'pendente';
@@ -759,13 +779,10 @@
                 $statusBtn.removeClass(allStatusClasses);
                 $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
                 processo.awaiting_supervision_confirm = status !== 'pendente';
-                if (!processo.awaiting_supervision_confirm) {
-                    processo.supervisionado = true;
-                }
                 if (typeof onStatusChange === 'function') {
                     onStatusChange(status);
                 }
-                maybeToggleConfirmation();
+                updateConcludeButton();
             };
 
             const updateBarradoControls = () => {
@@ -781,9 +798,11 @@
                         : 'sem data definida';
                     $barradoNote.text(`Ficou barrado de ${inicio} a ${retorno}`);
                     $barradoNote.show();
+                    $barradoInfoToggle.show().text('+').attr('aria-expanded', 'false');
                 } else {
                     $barradoNote.text('');
                     $barradoNote.hide();
+                    $barradoInfoToggle.hide().attr('aria-expanded', 'false').text('+');
                 }
             };
 
@@ -826,30 +845,27 @@
             $footer.append($statusBtn);
             $barrarGroup.append($barrarToggle);
             $barrarGroup.append($barrarDate);
-            $barrarGroup.append($barradoNote);
+            $barrarGroup.append($barradoInfoToggle);
             $footer.append($barrarGroup);
-
-            const $confirmationArea = $('<div class="analise-supervision-confirmation"></div>');
-            const $confirmBtn = $('<button type="button" class="button analise-supervision-confirm-btn">Confirmar saída da supervisão</button>');
-            const $confirmLabel = $('<span class="analise-supervision-confirm-label">Aprovação/Reprovação será mantida até confirmar.</span>');
-            $confirmationArea.append($confirmLabel);
-            $confirmationArea.append($confirmBtn);
-            $footer.append($confirmationArea);
-            function maybeToggleConfirmation() {
-                const status = processo.supervisor_status || 'pendente';
-                if (status !== 'pendente' && processo.awaiting_supervision_confirm) {
-                    $confirmationArea.show();
-                    $confirmBtn.text(`Confirmar ${SUPERVISION_STATUS_LABELS[status]}`);
-                } else {
-                    $confirmationArea.hide();
-                }
-            }
-            maybeToggleConfirmation();
-
-            $confirmBtn.on('click', () => {
+            $footer.append($barradoNote);
+            $concludeRow.append($concludeBtn);
+            $footer.append($concludeRow);
+            updateConcludeButton();
+            $concludeBtn.on('click', () => {
                 processo.supervisionado = false;
                 processo.awaiting_supervision_confirm = false;
+                updateConcludeButton();
                 saveResponses();
+                renderSupervisionPanel();
+            });
+            $barradoInfoToggle.on('click', () => {
+                if ($barradoNote.is(':visible')) {
+                    $barradoNote.slideUp(100);
+                    $barradoInfoToggle.text('+').attr('aria-expanded', 'false');
+                } else if ($barradoNote.text().trim()) {
+                    $barradoNote.slideDown(120);
+                    $barradoInfoToggle.text('-').attr('aria-expanded', 'true');
+                }
             });
 
             return $footer;
@@ -863,7 +879,6 @@
                 `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
             );
             const $statusBadge = $('<span class="analise-supervision-status-badge"></span>');
-            const $toggleBtn = $('<button type="button" class="analise-toggle-btn"> + </button>');
 
             const updateStatusBadge = (status) => {
                 $statusBadge.text(SUPERVISION_STATUS_LABELS[status] || status);
@@ -874,35 +889,20 @@
 
             $header.append($headerTitle);
             $header.append($statusBadge);
-            $header.append($toggleBtn);
             $card.append($header);
 
-            const $body = $(
-                '<div class="analise-supervision-card-body" style="display:none;"></div>'
-            );
+            const $body = $('<div class="analise-supervision-card-body"></div>');
             const $detailsRow = $('<div class="analise-card-details-row"></div>');
             $detailsRow.append(snapshot.$detailsList);
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
             if ($noteElement) {
                 $detailsRow.append($noteElement);
             }
-            const $supervisorNoteElement = createSupervisorNoteElement(processo);
-            if ($supervisorNoteElement) {
-                $detailsRow.append($supervisorNoteElement);
-            }
             $body.append($detailsRow);
 
             const $footer = createSupervisionFooter(processo, updateStatusBadge);
             $body.append($footer);
             $card.append($body);
-
-            $toggleBtn.on('click', function() {
-                $body.slideToggle(200, function() {
-                    $toggleBtn.text(
-                        $body.is(':visible') ? ' - ' : ' + '
-                    );
-                });
-            });
 
             return $card;
         }
