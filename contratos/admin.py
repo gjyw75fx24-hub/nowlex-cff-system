@@ -340,6 +340,26 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
         label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
         return (('1', label_html),)
 
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
     def queryset(self, request, queryset):
         if self.value() == '1':
             return queryset.filter(analise_processo__para_supervisionar=True)

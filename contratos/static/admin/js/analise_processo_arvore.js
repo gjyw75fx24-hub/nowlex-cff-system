@@ -178,6 +178,9 @@
             if (!Array.isArray(userResponses.processos_vinculados)) {
                 userResponses.processos_vinculados = [];
             }
+            if (!userResponses.ativar_botao_monitoria) {
+                userResponses.ativar_botao_monitoria = '';
+            }
 
             // normaliza contratos_para_monitoria como array de strings únicos
             userResponses.contratos_para_monitoria = Array.from(
@@ -244,15 +247,60 @@
             localStorage.removeItem(localResponsesKey);
         }
 
+        function normalizeResponse(value) {
+            if (typeof value !== 'string') {
+                return '';
+            }
+            return value.trim().toUpperCase();
+        }
+
         function updateGenerateButtonState() {
             const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn'); // Buscar dinamicamente
             if (!$gerarMonitoriaBtn.length) return; // Se o botão ainda não existe, sai
 
-            const hasContratos =
-                userResponses.contratos_para_monitoria &&
-                userResponses.contratos_para_monitoria.length > 0;
+            const nestedContratoIds = (userResponses.processos_vinculados || []).flatMap(processo => {
+                if (!processo || typeof processo !== 'object') return [];
+                const tipoRespostas = processo.tipo_de_acao_respostas || {};
+                const contratos = tipoRespostas.contratos_para_monitoria || [];
+                return Array.isArray(contratos) ? contratos : [];
+            });
 
-            $gerarMonitoriaBtn.prop('disabled', !hasContratos);
+            const aggregatedContratoIds = [
+                ...(Array.isArray(userResponses.contratos_para_monitoria)
+                    ? userResponses.contratos_para_monitoria
+                    : []),
+                ...nestedContratoIds
+            ];
+
+            const hasContratos = aggregatedContratoIds.length > 0;
+
+            const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
+            const julgamento = normalizeResponse(userResponses.julgamento);
+            const proporMonitoria = normalizeResponse(userResponses.propor_monitoria);
+            const reproporMonitoria = normalizeResponse(userResponses.repropor_monitoria);
+
+            const isJudicializadoNao = judicializado === 'NÃO';
+            const wantsMonitoria = proporMonitoria === 'SIM';
+
+            const isExtintoSemMerito = judicializado.includes('EXTINTO');
+            const isSemMerito = julgamento.includes('SEM MÉRITO');
+            const wantsRepropor = reproporMonitoria === 'SIM';
+
+            const hasMonitoriaPath =
+                (isJudicializadoNao && wantsMonitoria) ||
+                (isExtintoSemMerito && isSemMerito && wantsRepropor);
+
+            const nestedManualOverride = (userResponses.processos_vinculados || []).some(processo => {
+                const tipoRespostas = processo && processo.tipo_de_acao_respostas;
+                if (!tipoRespostas) return false;
+                return normalizeResponse(tipoRespostas.ativar_botao_monitoria) === 'SIM';
+            });
+
+            const manualOverride =
+                normalizeResponse(userResponses.ativar_botao_monitoria) === 'SIM' ||
+                nestedManualOverride;
+
+            $gerarMonitoriaBtn.prop('disabled', !(hasContratos && (manualOverride || hasMonitoriaPath)));
         }
 
         function updateContractStars() {
@@ -1725,6 +1773,9 @@
                 }
 
                 currentResponses.contratos_para_monitoria = selection;
+                const overrideValue = selection.length > 0 ? 'SIM' : '';
+                currentResponses.ativar_botao_monitoria = overrideValue;
+
                 saveResponses();
             });
 
