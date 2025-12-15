@@ -51,12 +51,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const linkTodos = Array.from(ufList.querySelectorAll('a')).find(a => a.textContent.trim().toLowerCase() === 'todos');
 
     const toggleUF = (uf) => {
+        const ufUpper = uf.toUpperCase();
         const current = new URLSearchParams(window.location.search);
-        const values = new Set(current.getAll('uf').filter(Boolean));
-        if (values.has(uf)) {
-            values.delete(uf);
+        const values = new Set(current.getAll('uf').map(value => value.toUpperCase()).filter(Boolean));
+        if (values.has(ufUpper)) {
+            values.delete(ufUpper);
         } else {
-            values.add(uf);
+            values.add(ufUpper);
         }
         current.delete('uf');
         values.forEach(v => current.append('uf', v));
