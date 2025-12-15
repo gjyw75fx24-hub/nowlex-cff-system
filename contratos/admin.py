@@ -334,32 +334,16 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
     parameter_name = 'para_supervisionar'
 
     def lookups(self, request, model_admin):
-        return (('1', 'Enviados P/ Avaliar'),)
+        qs = model_admin.get_queryset(request)
+        count = qs.filter(analise_processo__para_supervisionar=True).count()
+        label = f"Enviados P/ Avaliar"
+        label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+        return (('1', label_html),)
 
     def queryset(self, request, queryset):
         if self.value() == '1':
             return queryset.filter(analise_processo__para_supervisionar=True)
         return queryset
-
-    def choices(self, changelist):
-        current = self.value()
-        for value, label in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
-            else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
-            yield {
-                'selected': selected,
-                'query_string': query_string,
-                'display': label,
-            }
 
 
 class LastEditOrderFilter(admin.SimpleListFilter):
@@ -577,22 +561,26 @@ class AprovacaoFilter(admin.SimpleListFilter):
     }
 
     def lookups(self, request, model_admin):
-        return self.OPTIONS
+        qs = model_admin.get_queryset(request)
+        items = []
+        for value, label in self.OPTIONS:
+            path = self.PATHS.get(value)
+            if path:
+                expr = self._json_path_expr(path)
+                # Clona o queryset para evitar que a anotação vaze
+                count_qs = qs.annotate(_aprovacao_match=expr).filter(_aprovacao_match=True)
+                count = count_qs.count()
+                label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+                items.append((value, label_html))
+            else:
+                items.append((value, label))
+        return items
 
     def choices(self, changelist):
-        current = self.value()
+        # Sobrescreve para garantir que o HTML no label seja renderizado
         for value, label in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
-            else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
+            selected = self.value() == value
+            query_string = changelist.get_query_string({self.parameter_name: value}, [])
             yield {
                 'selected': selected,
                 'query_string': query_string,
@@ -693,27 +681,17 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
     ]
 
     def lookups(self, request, model_admin):
-        return self.OPTIONS
-
-    def choices(self, changelist):
-        current = self.value()
-        for value, label in self.lookup_choices:
-            selected = str(value) == str(current)
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
-            else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
-            yield {
-                'selected': selected,
-                'query_string': query_string,
-                'display': label,
-            }
+        qs = model_admin.get_queryset(request) # Get the base queryset
+        items = []
+        for value, label_html_original in self.OPTIONS:
+            # Reconstruct the original label from the mark_safe object to get just the text
+            # This is a bit hacky, but necessary because the label is already mark_safe'd
+            label_text = label_html_original.split('>')[1].split('<')[0]
+            
+            count = qs.filter(viabilidade=value).count()
+            label_html = mark_safe(f"<span class='viabilidade-option {value}'>{label_text}</span> <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+        return items
 
     def queryset(self, request, queryset):
         val = self.value()
@@ -728,7 +706,10 @@ class AcordoStatusFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         from contratos.models import AdvogadoPassivo
-        return (
+        
+        qs = model_admin.get_queryset(request)
+        items = []
+        options = (
             (AdvogadoPassivo.AcordoChoices.PROPOR, "Propor"),
             (AdvogadoPassivo.AcordoChoices.PROPOSTO, "Proposto"),
             (AdvogadoPassivo.AcordoChoices.FIRMADO, "Firmado"),
@@ -736,25 +717,19 @@ class AcordoStatusFilter(admin.SimpleListFilter):
             ("sem", "Sem acordo"),
         )
 
-    def choices(self, changelist):
-        current = self.value()
-        for value, label in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
+        for value, label in options:
+            if value == "sem":
+                count = qs.filter(
+                    models.Q(advogados_passivos__acordo_status__isnull=True) |
+                    models.Q(advogados_passivos__acordo_status="")
+                ).distinct().count()
             else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
-            yield {
-                'selected': selected,
-                'query_string': query_string,
-                'display': label,
-            }
+                count = qs.filter(advogados_passivos__acordo_status=value).distinct().count()
+
+            label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+
+        return items
 
     def queryset(self, request, queryset):
         value = self.value()
@@ -778,27 +753,17 @@ class BuscaAtivaFilter(admin.SimpleListFilter):
     )
 
     def lookups(self, request, model_admin):
-        return self.OPTIONS
-
-    def choices(self, changelist):
-        current = self.value()
-        for value, label in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
-            else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
-            yield {
-                'selected': selected,
-                'query_string': query_string,
-                'display': label,
-            }
+        qs = model_admin.get_queryset(request)
+        items = []
+        for value, label in self.OPTIONS:
+            if value == '1':
+                count = qs.filter(busca_ativa=True).count()
+            else: # '0'
+                count = qs.filter(busca_ativa=False).count()
+            
+            label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+        return items
 
     def queryset(self, request, queryset):
         value = self.value()
@@ -1115,27 +1080,17 @@ class ObitoFilter(admin.SimpleListFilter):
     ]
 
     def lookups(self, request, model_admin):
-        return self.OPTIONS
-
-    def choices(self, changelist):
-        current = self.value()
-        for value, label in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
-            else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
-            yield {
-                'selected': selected,
-                'query_string': query_string,
-                'display': label,
-            }
+        qs = model_admin.get_queryset(request)
+        items = []
+        for value, label in self.OPTIONS:
+            if value == 'sim':
+                count = qs.filter(partes_processuais__obito=True).distinct().count()
+            else: # 'nao'
+                count = qs.exclude(partes_processuais__obito=True).distinct().count()
+            
+            label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+        return items
 
     def queryset(self, request, queryset):
         val = self.value()
