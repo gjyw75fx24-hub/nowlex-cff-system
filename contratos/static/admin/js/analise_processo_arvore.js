@@ -471,6 +471,16 @@
             return `${pad(parsed.getDate())}/${pad(parsed.getMonth() + 1)}/${parsed.getFullYear()}`;
         }
 
+
+        function extractCnjDigits(text) {
+            if (!text) return null;
+            const match = text.match(/(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})/);
+            if (match) {
+                return match[1].replace(/\D/g, '');
+            }
+            return null;
+        }
+
         function getNextSupervisorStatus(current) {
             const currentIndex = SUPERVISION_STATUS_SEQUENCE.indexOf(current);
             const nextIndex = (currentIndex + 1) % SUPERVISION_STATUS_SEQUENCE.length;
@@ -491,41 +501,57 @@
                 .map(entry => entry.trim())
                 .filter(Boolean);
 
-            return entries
-                .map(entry => {
-                    const lines = entry
-                        .split('\n')
-                        .map(line => line.trim())
-                        .filter(Boolean);
-                    const mentionLines = lines.filter(line =>
-                        /cnj/i.test(line) || /contratos?\s*:/i.test(line)
-                    );
-                    const contentLines = lines.filter(line =>
-                        !mentionLines.includes(line)
-                    );
-                    const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
-                    return {
-                        raw: entry,
-                        mentionLines,
-                        contentLines,
-                        summary: summaryLine
-                    };
-                })
-                .filter(entry => {
-                    const lowerEntry = entry.raw.toLowerCase();
-                    if (lowerEntry.includes(cnj.toLowerCase())) {
-                        return true;
-                    }
-                    if (
-                        normalizedCnjDigits &&
-                        entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
-                    ) {
-                        return true;
-                    }
-                    return (relatedContracts || []).some(contractId =>
+            const parsedEntries = entries.map(entry => {
+                const lines = entry
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean);
+                const mentionLines = lines.filter(line =>
+                    /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                );
+                const contentLines = lines.filter(line =>
+                    !mentionLines.includes(line)
+                );
+                const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                return {
+                    raw: entry,
+                    mentionLines,
+                    contentLines,
+                    summary: summaryLine,
+                    cnjDigits: extractCnjDigits(entry)
+                };
+            });
+
+            const matches = [];
+            let capturing = false;
+            parsedEntries.forEach(entry => {
+                const lowerRaw = (entry.raw || '').toLowerCase();
+                const hasTargetCnj = normalizedCnjDigits
+                    ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                    : lowerRaw.includes(cnj.toLowerCase());
+                if (hasTargetCnj) {
+                    capturing = true;
+                } else if (
+                    capturing &&
+                    entry.cnjDigits &&
+                    entry.cnjDigits !== normalizedCnjDigits
+                ) {
+                    capturing = false;
+                }
+                if (capturing) {
+                    matches.push(entry);
+                }
+            });
+
+            if (!matches.length && relatedContracts && relatedContracts.length) {
+                return parsedEntries.filter(entry =>
+                    relatedContracts.some(contractId =>
                         entry.raw.includes(String(contractId))
-                    );
-                });
+                    )
+                );
+            }
+
+            return matches;
         }
 
         /* =========================================================
