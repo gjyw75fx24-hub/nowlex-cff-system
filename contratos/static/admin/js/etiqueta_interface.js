@@ -292,4 +292,4 @@
             fetchData();
         }
     });
-})(django.jQuery);
+})(window.django && django.jQuery ? django.jQuery : window.jQuery || window.$);
