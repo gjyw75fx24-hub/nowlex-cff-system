@@ -334,12 +334,32 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
     parameter_name = 'para_supervisionar'
 
     def lookups(self, request, model_admin):
-        return (('1', 'Somente processos marcados'),)
+        return (('1', 'Enviados P/ Avaliar'),)
 
     def queryset(self, request, queryset):
         if self.value() == '1':
             return queryset.filter(analise_processo__para_supervisionar=True)
         return queryset
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
 
 
 class LastEditOrderFilter(admin.SimpleListFilter):
@@ -539,6 +559,63 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
         if self.value():
             return queryset.filter(delegado_para_id=self.value())
         return queryset
+
+
+class AprovacaoFilter(admin.SimpleListFilter):
+    title = "Por Aprovação"
+    parameter_name = "aprovacao"
+    OPTIONS = [
+        ("aprovado", "Aprovados"),
+        ("reprovado", "Reprovados"),
+        ("barrado", "Barrados"),
+    ]
+
+    PATHS = {
+        "aprovado": '$.processos_vinculados[*] ? (@.supervisor_status == "aprovado")',
+        "reprovado": '$.processos_vinculados[*] ? (@.supervisor_status == "reprovado")',
+        "barrado": '$.processos_vinculados[*] ? (@.barrado.ativo == true)',
+    }
+
+    def lookups(self, request, model_admin):
+        return self.OPTIONS
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
+    def _json_path_expr(self, path):
+        return models.Func(
+            models.F('analise_processo__respostas'),
+            models.Value(path),
+            function='jsonb_path_exists',
+            output_field=models.BooleanField()
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        path = self.PATHS.get(value)
+        if not path:
+            return queryset
+        expr = self._json_path_expr(path)
+        return queryset.annotate(
+            _aprovacao_match=expr
+        ).filter(_aprovacao_match=True)
 
 
 class PrescricaoOrderFilter(admin.SimpleListFilter):
@@ -1077,6 +1154,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
         EquipeDelegadoFilter,
+        AprovacaoFilter,
         PrescricaoOrderFilter,
         ViabilidadeFinanceiraFilter,
         ValorCausaOrderFilter,
@@ -1115,6 +1193,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         params = QueryDict(qs, mutable=True)
         for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
             params.pop(key, None)
+        params.pop('aprovacao', None)
         return params.urlencode()
 
     def _handle_saved_filters(self, request):
