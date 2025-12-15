@@ -642,12 +642,19 @@
             $noteContent.append('<strong>Observações</strong>');
             const $noteSummary = $('<div class="analise-observation-summary"></div>');
             const $noteText = $('<div class="analise-observation-text collapsed"></div>');
+            const allLines = [];
             populatedEntries.forEach(entry => {
                 entry.contentLines.forEach(line => {
-                    $noteText.append($('<p></p>').text(line));
+                    allLines.push(line);
                 });
             });
-            const summaryLine = populatedEntries[0].summary || populatedEntries[0].contentLines[0] || '';
+            const summaryLine = populatedEntries[0].summary || allLines[0] || '';
+            const linesToShow = allLines.filter((line, index) => {
+                return !(index === 0 && line === summaryLine);
+            });
+            linesToShow.forEach(line => {
+                $noteText.append($('<p></p>').text(line));
+            });
             $noteSummary.text(summaryLine);
             const $toggleBtn = $('<button type="button" class="analise-observation-toggle">Expandir</button>');
             $noteContent.append($noteSummary);
