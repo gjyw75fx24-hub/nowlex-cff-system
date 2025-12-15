@@ -641,7 +641,10 @@
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
             adjustObservationTextareaHeight($noteTextarea);
+            const $refreshButton = $('<button type="button" class="analise-observation-refresh" title="Atualizar observações">A</button>');
+            $refreshButton.on('click', () => refreshObservationNotes());
             $note.append($noteContent);
+            $note.append($refreshButton);
             return $note;
         }
 

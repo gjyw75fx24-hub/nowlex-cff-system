@@ -200,6 +200,29 @@
     box-shadow: none;
 }
 
+.analise-observation-refresh {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 50%;
+    background: #f5c242;
+    color: #a46200;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.analise-observation-refresh:hover {
+    background: #f7cb4d;
+}
+
 .analise-card-notes-column {
     display: flex;
     flex-direction: column;
