@@ -609,6 +609,15 @@
             };
         }
 
+        function adjustObservationTextareaHeight($textarea) {
+            if (!$textarea || !$textarea.length) {
+                return;
+            }
+            $textarea.css('height', 'auto');
+            const scrollHeight = $textarea.prop('scrollHeight');
+            $textarea.css('height', `${scrollHeight}px`);
+        }
+
         function createObservationNoteElement(observationEntries) {
             if (!observationEntries || !observationEntries.length) {
                 return null;
@@ -631,6 +640,7 @@
             });
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
+            adjustObservationTextareaHeight($noteTextarea);
             $note.append($noteContent);
             return $note;
         }
