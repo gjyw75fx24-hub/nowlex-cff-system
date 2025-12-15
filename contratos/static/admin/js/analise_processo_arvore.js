@@ -255,10 +255,8 @@
             return value.trim().toUpperCase();
         }
 
-        function updateGenerateButtonState() {
-            const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn'); // Buscar dinamicamente
-            if (!$gerarMonitoriaBtn.length) return; // Se o botão ainda não existe, sai
-
+        function getMonitoriaContractIds() {
+            if (!userResponses) return [];
             const nestedContratoIds = (userResponses.processos_vinculados || []).flatMap(processo => {
                 if (!processo || typeof processo !== 'object') return [];
                 const tipoRespostas = processo.tipo_de_acao_respostas || {};
@@ -272,7 +270,14 @@
                     : []),
                 ...nestedContratoIds
             ];
+            return Array.from(new Set(aggregatedContratoIds.map(id => String(id))));
+        }
 
+        function updateGenerateButtonState() {
+            const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn'); // Buscar dinamicamente
+            if (!$gerarMonitoriaBtn.length) return; // Se o botão ainda não existe, sai
+
+            const aggregatedContratoIds = getMonitoriaContractIds();
             const hasContratos = aggregatedContratoIds.length > 0;
 
             const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
@@ -1909,10 +1914,8 @@
                 alert('Erro: ID do processo não encontrado para gerar a petição.');
                 return;
             }
-            if (
-                !userResponses.contratos_para_monitoria ||
-                userResponses.contratos_para_monitoria.length === 0
-            ) {
+            const aggregatedContratoIds = getMonitoriaContractIds();
+            if (aggregatedContratoIds.length === 0) {
                 alert('Selecione pelo menos um contrato para a monitória antes de gerar a petição.');
                 return;
             }
