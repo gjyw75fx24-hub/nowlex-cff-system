@@ -3,9 +3,9 @@
     $(document).ready(function() {
         // --- Configuração Inicial ---
         const processoId = window.location.pathname.split('/').filter(Boolean)[3];
-        if (!processoId || isNaN(parseInt(processoId))) return;
+        const memoryHasProcess = processoId && !isNaN(parseInt(processoId));
 
-        const etiquetasUrl = `/admin/contratos/processojudicial/${processoId}/etiquetas/`;
+        const etiquetasUrl = memoryHasProcess ? `/admin/contratos/processojudicial/${processoId}/etiquetas/` : null;
         const criarEtiquetaUrl = `/admin/contratos/processojudicial/etiquetas/criar/`;
 
         // --- Seletores de Elementos ---
@@ -130,6 +130,7 @@
         }
 
         function fetchData() {
+            if (!etiquetasUrl) return;
             $.get(etiquetasUrl, function(data) {
                 todasEtiquetas = data.todas_etiquetas;
                 etiquetasProcesso = data.etiquetas_processo;
@@ -139,6 +140,7 @@
         }
 
         function handleEtiquetaChange(etiquetaId, action) {
+            if (!etiquetasUrl) return;
             $.ajax({
                 url: etiquetasUrl,
                 type: 'POST',
@@ -249,10 +251,12 @@
         }
 
         addNewEtiquetaBtn.on('click', showCreateEtiquetaModal);
-        openCreateEtiquetaBtn.on('click', function(e) {
-            e.preventDefault();
-            showCreateEtiquetaModal();
-        });
+        if (openCreateEtiquetaBtn.length) {
+            openCreateEtiquetaBtn.on('click', function(e) {
+                e.preventDefault();
+                showCreateEtiquetaModal();
+            });
+        }
 
         newEtiquetaNameInput.on('keyup', updatePreview);
 
@@ -284,6 +288,8 @@
             }
         });
 
-        fetchData();
+        if (etiquetasUrl) {
+            fetchData();
+        }
     });
 })(django.jQuery);
