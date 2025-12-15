@@ -727,9 +727,15 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
         for value, label in self.lookup_choices:
             selected = current == value
             if selected:
-                query_string = changelist.get_query_string(remove=[self.parameter_name])
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o', '_skip_saved_filters']
+                )
             else:
-                query_string = changelist.get_query_string({self.parameter_name: value})
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
             yield {
                 'selected': selected,
                 'query_string': query_string,
