@@ -92,21 +92,30 @@ window.addEventListener('load', function() {
             notebookTextarea.value = saved;
             const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
             notebookTextarea.addEventListener('input', save);
+            const insertAtCursor = (textarea, value) => {
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const before = textarea.value.slice(0, start);
+                const after = textarea.value.slice(end);
+                textarea.value = `${before}${value}${after}`;
+                const cursor = before.length + value.length;
+                textarea.selectionStart = textarea.selectionEnd = cursor;
+            };
+
             notebookMentionSaver = (text) => {
                 if (!text || !notebookTextarea) {
                     return;
                 }
-                const mention = text.trim();
-                if (!mention) {
+                const mention = `${text.trim()}\n\n`;
+                if (!mention.trim()) {
                     return;
                 }
-                let current = notebookTextarea.value;
-                const trimmed = current.trimEnd();
-                current = trimmed;
-                if (current && !current.endsWith('\n\n')) {
-                    current += '\n\n';
+                const atCursor = notebookTextarea.selectionStart !== null;
+                if (atCursor) {
+                    insertAtCursor(notebookTextarea, mention);
+                } else {
+                    notebookTextarea.value = `${notebookTextarea.value}${mention}`;
                 }
-                notebookTextarea.value = `${current}${mention}\n\n`;
                 save();
             };
 
