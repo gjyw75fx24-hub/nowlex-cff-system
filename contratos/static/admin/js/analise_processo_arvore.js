@@ -1805,14 +1805,13 @@
                 c => userResponses.contratos_status[c.id] && userResponses.contratos_status[c.id].selecionado
             );
             const selection = currentResponses.contratos_para_monitoria || [];
-
-            // Conjunto final: mantém os já marcados e os selecionados no info-card
-            const idsParaListar = Array.from(new Set([
+            const contractCandidates = Array.from(new Set([
+                ...(processo.contratos || []),
                 ...selection,
                 ...selectedInInfoCard.map(c => String(c.id)),
-            ]));
+            ].map(id => String(id))));
 
-            if (idsParaListar.length === 0) {
+            if (contractCandidates.length === 0) {
                 $selectorDiv.append(
                     '<p>Nenhum contrato selecionado para monitória.</p>'
                 );
@@ -1820,7 +1819,7 @@
                 return;
             }
 
-            idsParaListar.forEach(function(idStr) {
+            contractCandidates.forEach(function(idStr) {
                 const contratoInfo = allAvailableContratos.find(c => String(c.id) === idStr);
                 const isChecked = selection.includes(idStr);
                 const isDisabled = contratoInfo ? (contratoInfo.is_prescrito || contratoInfo.is_quitado) : false;
