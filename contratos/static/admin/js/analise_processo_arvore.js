@@ -453,7 +453,15 @@
             if (!sanitized) {
                 return null;
             }
-            const normalized = sanitized.replace(',', '.').replace(/[^\d.-]/g, '');
+            let normalized = sanitized.replace(/[^\d.,-]/g, '');
+            const hasComma = normalized.indexOf(',') >= 0;
+            const hasDot = normalized.indexOf('.') >= 0;
+            if (hasComma && hasDot) {
+                normalized = normalized.replace(/\./g, '');
+                normalized = normalized.replace(',', '.');
+            } else if (hasComma) {
+                normalized = normalized.replace(',', '.');
+            }
             const parsed = parseFloat(normalized);
             return Number.isFinite(parsed) ? parsed : null;
         }
@@ -591,6 +599,10 @@
                 const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
                 if (cInfo) {
                     return cInfo;
+                }
+                const fallback = fetchContractInfoFromDOM(cId);
+                if (fallback) {
+                    return fallback;
                 }
                 return {
                     id: cId,
@@ -1094,6 +1106,31 @@
             return Object.values(status).some(
                 st => st && st.selecionado && st.quitado
             );
+        }
+
+        function fetchContractInfoFromDOM(contractId) {
+            const idStr = String(contractId);
+            const $element = $(`.contrato-item-wrapper[data-contrato-id="${idStr}"]`).first();
+            if (!$element.length) {
+                return null;
+            }
+            const numeroContrato = $element
+                .find('.contrato-numero')
+                .first()
+                .text()
+                .trim()
+                .split('\n')[0]
+                .trim();
+            const valorTotalRaw = $element.attr('data-valor-total');
+            const valorCausaRaw = $element.attr('data-valor-causa');
+            return {
+                id: idStr,
+                numero_contrato: numeroContrato || `ID ${idStr}`,
+                is_prescrito: Boolean($element.data('is-prescrito')),
+                is_quitado: Boolean($element.data('is-quitado')),
+                valor_total_devido: parseDecimalValue(valorTotalRaw),
+                valor_causa: parseDecimalValue(valorCausaRaw)
+            };
         }
 
         function loadContratosFromDOM() {
