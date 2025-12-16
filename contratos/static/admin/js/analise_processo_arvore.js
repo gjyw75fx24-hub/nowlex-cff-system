@@ -1647,7 +1647,16 @@
                 mentionProcessoInNotas(cardData);
             });
             $titleWrapper.append($hashtagBtn);
+            const $toggleBtn = $(
+                `<button type="button" class="processo-card-toggle" aria-expanded="true" aria-label="Minimizar processo CNJ #${indexLabel}">−</button>`
+            );
+            $toggleBtn.on('click', function() {
+                const isCollapsed = $card.toggleClass('collapsed').hasClass('collapsed');
+                $toggleBtn.attr('aria-expanded', (!isCollapsed).toString());
+                $toggleBtn.text(isCollapsed ? '+' : '−');
+            });
             $header.append($titleWrapper);
+            $header.append($toggleBtn);
 
             $card.append($header);
 

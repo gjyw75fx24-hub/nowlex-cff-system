@@ -325,3 +325,28 @@ a.historylink {
     border-color: #a6b4c8;
     color: #2f3747;
 }
+.processo-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.processo-card-toggle {
+    border: none;
+    background: #e2e8f0;
+    color: #1f2937;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    font-size: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+.processo-card-toggle:hover {
+    background: #cbd5f5;
+}
+.processo-card.collapsed .processo-card-body {
+    display: none;
+}
