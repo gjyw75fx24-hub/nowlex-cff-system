@@ -334,10 +334,10 @@ a.historylink {
     border: none;
     background: #e2e8f0;
     color: #1f2937;
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 28px;
     border-radius: 999px;
-    font-size: 1rem;
+    font-size: 0.85rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
