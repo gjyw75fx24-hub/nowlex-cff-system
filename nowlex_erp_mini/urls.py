@@ -4,10 +4,13 @@ from django.urls import path, include
 from contratos import views as contratos_views
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic.base import RedirectView
+from django.templatetags.static import static as static_file
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     
     # URLs do app de contratos (incluindo a API)
+    path('favicon.ico', RedirectView.as_view(url=static_file('favicon/favicon-32x32.png'), permanent=False)),
     path('', include('contratos.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
