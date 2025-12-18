@@ -1121,23 +1121,23 @@
             }
         }
 
-        function buildSummaryStatusMetadata(processo) {
-            if (!processo || typeof processo !== 'object') {
-                return {
-                    label: SUPERVISION_STATUS_LABELS.pendente,
-                    classes: ['status-pendente'],
-                    tooltip: ''
-                };
-            }
-            ensureSupervisionFields(processo);
-            const statusKey = processo.supervisor_status || 'pendente';
-            const baseLabel = SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
-            const baseClass = SUPERVISION_STATUS_CLASSES[statusKey] || 'status-pendente';
-            const classes = [baseClass];
-            let label = baseLabel;
-            let tooltip = '';
-            if (processo.barrado && processo.barrado.ativo) {
-                classes.push('status-barrado');
+function buildSummaryStatusMetadata(processo, options = {}) {
+    if (!processo || typeof processo !== 'object') {
+        return {
+            label: SUPERVISION_STATUS_LABELS.pendente,
+            classes: ['status-pendente'],
+            tooltip: ''
+        };
+    }
+    ensureSupervisionFields(processo);
+    const statusKey = processo.supervisor_status || 'pendente';
+    const baseLabel = SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
+    const baseClass = SUPERVISION_STATUS_CLASSES[statusKey] || 'status-pendente';
+    const classes = [baseClass];
+    let label = baseLabel;
+    let tooltip = '';
+    if (processo.barrado && processo.barrado.ativo) {
+        classes.push('status-barrado');
                 const inicio = formatDateDisplay(processo.barrado.inicio) || processo.barrado.inicio || 'data não informada';
                 const retorno = formatDateDisplay(processo.barrado.retorno_em) || processo.barrado.retorno_em || 'sem data definida';
                 tooltip = `Ficou barrado de ${inicio} a ${retorno}`;
@@ -1149,8 +1149,9 @@
                     label = 'Barrado';
                 }
             }
-            return { label, classes, tooltip };
-        }
+    const shouldShow = options.showAlways || statusKey !== 'pendente' || (processo.barrado && processo.barrado.ativo);
+    return { label, classes, tooltip, show: shouldShow };
+}
 
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
@@ -1236,7 +1237,8 @@
                 $generalHeader.append($subtitle);
                 const summaryStatus = buildSummaryStatusMetadata({
                     supervisor_status: generalSnapshot.supervisor_status || 'pendente',
-                    barrado: generalSnapshot.barrado || {}
+                    barrado: generalSnapshot.barrado || {},
+                    showAlways: Boolean(generalSnapshot.supervisor_status && generalSnapshot.supervisor_status !== 'pendente')
                 });
                 const $statusBadge = $('<span class="supervisor-status-badge"></span>');
                 $statusBadge.text(summaryStatus.label);
@@ -1246,7 +1248,10 @@
                 }
                 const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
                 $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
-                $generalHeader.append($statusBadge).append($actionGroup);
+                if (summaryStatus.show) {
+                    $generalHeader.append($statusBadge);
+                }
+                $generalHeader.append($actionGroup);
                 const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
                 const generalProcesso = {
                     cnj: headerTitle,
@@ -1297,14 +1302,18 @@
                 $headerVinculado.append(
                     `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
                 );
-                const summaryStatus = buildSummaryStatusMetadata(processo);
+                const summaryStatus = buildSummaryStatusMetadata(processo, {
+                    showAlways: Boolean(processo.supervisionado)
+                });
                 const $statusBadge = $('<span class="supervisor-status-badge"></span>');
                 $statusBadge.text(summaryStatus.label);
                 summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
                 if (summaryStatus.tooltip) {
                     $statusBadge.attr('title', summaryStatus.tooltip);
                 }
-                $headerVinculado.append($statusBadge);
+                if (summaryStatus.show) {
+                    $headerVinculado.append($statusBadge);
+                }
                 const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
                 $headerVinculado.append($toggleBtnVinculado);
                 const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
@@ -2290,6 +2299,10 @@
             $supervisionInput.prop('checked', cardData.supervisionado);
             $supervisionInput.on('change', function() {
                 cardData.supervisionado = $(this).is(':checked');
+                if ($(this).is(':checked') && cardData.supervisor_status === 'pendente') {
+                    cardData.supervisor_status = 'pendente';
+                    cardData.awaiting_supervision_confirm = false;
+                }
                 saveResponses();
             });
 
@@ -2388,7 +2401,36 @@
                 saveResponses();
             });
 
+            if (cardIndex === null && normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO') {
+                ensureNaoJudicializadoSupervisionToggle($selectorDiv);
+            }
+
             $container.append($selectorDiv);
+        }
+
+        function ensureNaoJudicializadoSupervisionToggle($container) {
+            const existing = $container.find('.nao-judicializado-supervision-toggle');
+            if (existing.length) {
+                return;
+            }
+            const $wrapper = $('<div class="field-supervision nao-judicializado-supervisionize"></div>');
+            const $toggle = $(`
+                <label class="supervision-toggle nao-judicializado-supervision-toggle" title="Ao concluir esta análise, encaminhe para supervisão.">
+                    <input type="checkbox" class="supervision-toggle-input">
+                    <span class="supervision-switch" aria-hidden="true"></span>
+                    <span class="supervision-label-text">Supervisionar</span>
+                </label>
+            `);
+            const $input = $toggle.find('.supervision-toggle-input');
+            $input.on('change', function() {
+                const checked = $(this).is(':checked');
+                userResponses.supervisionado_nao_judicializado = checked;
+                userResponses.supervisor_status_nao_judicializado = checked ? 'pendente' : 'pendente';
+                saveResponses();
+                displayFormattedResponses();
+            });
+            $wrapper.append($toggle);
+            $container.append($wrapper);
         }
 
         /* =========================================================
