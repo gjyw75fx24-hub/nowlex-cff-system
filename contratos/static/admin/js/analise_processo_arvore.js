@@ -881,7 +881,7 @@
             return String(value);
         }
 
-        function getAnsweredFieldEntries(processo) {
+        function getAnsweredFieldEntries(processo, options = {}) {
             if (!processo || typeof processo !== 'object') {
                 return [];
             }
@@ -897,6 +897,7 @@
                 'contratos_para_monitoria',
                 'ativar_botao_monitoria'
             ];
+            const excludeFields = Array.isArray(options.excludeFields) ? options.excludeFields : [];
             const labels = {
                 judicializado_pela_massa: 'Judicializado pela massa',
                 tipo_de_acao: 'Tipo de ação',
@@ -921,6 +922,9 @@
                 if (value === undefined || value === null || value === '') {
                     return;
                 }
+                if (excludeFields.includes(key)) {
+                    return;
+                }
                 entries.push({
                     label: labels[key] || key,
                     value: formatAnsweredValue(key, value)
@@ -929,7 +933,7 @@
             return entries;
         }
 
-        function buildProcessoDetailsSnapshot(processo) {
+        function buildProcessoDetailsSnapshot(processo, options = {}) {
             const cnjVinculado = processo.cnj || 'Não informado';
             const $ulDetalhes = $('<ul></ul>');
             const contratoInfos = (processo.contratos || []).map(cId => {
@@ -977,7 +981,9 @@
                 `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
             );
 
-            const fieldEntries = getAnsweredFieldEntries(processo);
+            const fieldEntries = getAnsweredFieldEntries(processo, {
+                excludeFields: options.excludeFields || []
+            });
             if (fieldEntries.length) {
                 const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
                 const $ulAcao = $liAcao.find('ul');
@@ -1222,19 +1228,36 @@
                     .prop('checked', isGeneralMonitoriaSelected());
                 const headerTitle = getGeneralCardTitle(generalSnapshot);
                 const $label = $('<label>').attr('for', generalCheckboxId).text(headerTitle);
+                const $deleteButton = $('<button type="button" class="analise-summary-card-delete" data-card-index="general" title="Excluir este card">✕</button>');
                 const $editButton = $('<button type="button" class="analise-summary-card-edit" data-card-index="general">Editar</button>');
+                const $toggleBtnGeneral = $('<button type="button" class="analise-toggle-btn">−</button>');
                 $generalHeader.append($checkbox).append($label);
                 const $subtitle = $('<span class="analise-summary-card-subtitle"></span>').text('Monitória Jurídicamente Viável');
                 $generalHeader.append($subtitle);
-                $generalHeader.append($editButton);
-                const $generalBody = $('<div class="analise-summary-card-body"></div>');
+                const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
+                $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
+                $generalHeader.append($actionGroup);
+                const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
                 const generalProcesso = {
                     cnj: headerTitle,
                     contratos: generalSnapshot.contracts,
                     tipo_de_acao_respostas: generalSnapshot.responses || {}
                 };
-                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso);
+                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso, {
+                    excludeFields: ['ativar_botao_monitoria']
+                });
                 $generalBody.append(generalDetails.$detailsList);
+                const $supervisionBtn = $('<button type="button" class="analise-summary-card-supervision">Enviar para Supervisão</button>');
+                $supervisionBtn.on('click', function() {
+                    const snapshot = getGeneralCardSnapshot();
+                    if (!snapshot) return;
+                    snapshot.supervisionado = true;
+                    snapshot.awaiting_supervision_confirm = true;
+                    setGeneralCardSnapshot(snapshot);
+                    saveResponses();
+                    renderSupervisionPanel();
+                });
+                $generalBody.append($supervisionBtn);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 $checkbox.on('change', function() {
@@ -1244,8 +1267,22 @@
                     saveResponses();
                     updateGenerateButtonState();
                 });
+                $deleteButton.on('click', function() {
+                    syncGeneralMonitoriaSelection(false);
+                    setGeneralCardSnapshot(null);
+                    saveResponses();
+                    renderDecisionTree();
+                });
+
                 $editButton.on('click', function() {
                     scrollToProcessCard('general');
+                });
+                $toggleBtnGeneral.on('click', function() {
+                    $generalBody.slideToggle(160, function() {
+                        $toggleBtnGeneral.text(
+                            $generalBody.is(':visible') ? '−' : '+'
+                        );
+                    });
                 });
             }
             if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
@@ -1271,10 +1308,22 @@
                 $headerVinculado.append($statusBadge);
                 const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
                 $headerVinculado.append($toggleBtnVinculado);
+                const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
                 const $editBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
-                $headerVinculado.append($editBtn);
+                $headerVinculado.append($deleteBtn).append($editBtn);
                 $editBtn.on('click', function() {
                     scrollToProcessCard(cardIndex);
+                });
+                $deleteBtn.on('click', function() {
+                    if (Array.isArray(userResponses.processos_vinculados)) {
+                        userResponses.processos_vinculados.splice(cardIndex, 1);
+                    }
+                    const cardKey = `card-${cardIndex}`;
+                    if (Array.isArray(userResponses.selected_analysis_cards)) {
+                        userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
+                    }
+                    saveResponses();
+                    displayFormattedResponses();
                 });
 
                 const cardKey = `card-${cardIndex}`;
