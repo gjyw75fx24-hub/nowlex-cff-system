@@ -1236,6 +1236,7 @@
                 $generalHeader.append($subtitle);
                 const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
                 $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
+                $generalHeader.append($statusBadge);
                 $generalHeader.append($actionGroup);
                 const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
                 const generalProcesso = {
