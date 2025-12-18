@@ -1234,20 +1234,6 @@
                 $generalHeader.append($checkbox).append($label);
                 const $subtitle = $('<span class="analise-summary-card-subtitle"></span>').text('Monitória Jurídicamente Viável');
                 $generalHeader.append($subtitle);
-                const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
-                $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
-                $generalHeader.append($statusBadge);
-                $generalHeader.append($actionGroup);
-                const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
-                const generalProcesso = {
-                    cnj: headerTitle,
-                    contratos: generalSnapshot.contracts,
-                    tipo_de_acao_respostas: generalSnapshot.responses || {}
-                };
-                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso, {
-                    excludeFields: ['ativar_botao_monitoria']
-                });
-                $generalBody.append(generalDetails.$detailsList);
                 const summaryStatus = buildSummaryStatusMetadata({
                     supervisor_status: generalSnapshot.supervisor_status || 'pendente',
                     barrado: generalSnapshot.barrado || {}
@@ -1258,7 +1244,19 @@
                 if (summaryStatus.tooltip) {
                     $statusBadge.attr('title', summaryStatus.tooltip);
                 }
-                $generalHeader.append($statusBadge);
+                const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
+                $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
+                $generalHeader.append($statusBadge).append($actionGroup);
+                const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
+                const generalProcesso = {
+                    cnj: headerTitle,
+                    contratos: generalSnapshot.contracts,
+                    tipo_de_acao_respostas: generalSnapshot.responses || {}
+                };
+                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso, {
+                    excludeFields: ['ativar_botao_monitoria']
+                });
+                $generalBody.append(generalDetails.$detailsList);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 $checkbox.on('change', function() {
