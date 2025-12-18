@@ -717,7 +717,10 @@
                 'contratos_status',
                 'notebook'
             ]);
-            Object.keys(responses).forEach(key => {
+            const orderedKeys = (Array.isArray(treeResponseKeys) && treeResponseKeys.length
+                ? treeResponseKeys.filter(key => responses.hasOwnProperty(key))
+                : Object.keys(responses));
+            orderedKeys.forEach(key => {
                 if (excludedKeys.has(key)) {
                     return;
                 }
