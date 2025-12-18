@@ -1247,17 +1247,17 @@
                     excludeFields: ['ativar_botao_monitoria']
                 });
                 $generalBody.append(generalDetails.$detailsList);
-                const $supervisionBtn = $('<button type="button" class="analise-summary-card-supervision">Enviar para Supervisão</button>');
-                $supervisionBtn.on('click', function() {
-                    const snapshot = getGeneralCardSnapshot();
-                    if (!snapshot) return;
-                    snapshot.supervisionado = true;
-                    snapshot.awaiting_supervision_confirm = true;
-                    setGeneralCardSnapshot(snapshot);
-                    saveResponses();
-                    renderSupervisionPanel();
+                const summaryStatus = buildSummaryStatusMetadata({
+                    supervisor_status: generalSnapshot.supervisor_status || 'pendente',
+                    barrado: generalSnapshot.barrado || {}
                 });
-                $generalBody.append($supervisionBtn);
+                const $statusBadge = $('<span class="supervisor-status-badge"></span>');
+                $statusBadge.text(summaryStatus.label);
+                summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
+                if (summaryStatus.tooltip) {
+                    $statusBadge.attr('title', summaryStatus.tooltip);
+                }
+                $generalHeader.append($statusBadge);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 $checkbox.on('change', function() {
