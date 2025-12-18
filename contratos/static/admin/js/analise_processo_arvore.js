@@ -161,6 +161,91 @@
 
         let allAvailableContratos = [];
         const GENERAL_MONITORIA_CARD_KEY = 'general-monitoria';
+        const GENERAL_CARD_FIELD_KEYS = [
+            'judicializado_pela_massa',
+            'propor_monitoria',
+            'tipo_de_acao',
+            'julgamento',
+            'transitado',
+            'procedencia',
+            'data_de_transito',
+            'cumprimento_de_sentenca',
+            'repropor_monitoria',
+            'ativar_botao_monitoria'
+        ];
+
+        function getGeneralCardSnapshot() {
+            ensureUserResponsesShape();
+            return userResponses.general_card || null;
+        }
+
+        function setGeneralCardSnapshot(snapshot) {
+            ensureUserResponsesShape();
+            if (snapshot) {
+                userResponses.general_card = snapshot;
+            } else {
+                delete userResponses.general_card;
+            }
+        }
+
+        function buildGeneralCardSnapshotFromCurrentResponses() {
+            const contractIds = (userResponses.contratos_para_monitoria || [])
+                .map(id => String(id))
+                .filter(Boolean);
+            if (!contractIds.length) {
+                return null;
+            }
+            const keysToCapture = Array.from(
+                new Set([...(GENERAL_CARD_FIELD_KEYS || []), ...(treeResponseKeys || [])])
+            );
+            const capturedResponses = {};
+            keysToCapture.forEach(key => {
+                if (userResponses.hasOwnProperty(key)) {
+                    capturedResponses[key] = userResponses[key];
+                }
+            });
+            return {
+                contracts: contractIds,
+                responses: capturedResponses,
+                updatedAt: new Date().toISOString()
+            };
+        }
+
+        function getGeneralCardTitle(snapshot) {
+            if (!snapshot || !snapshot.responses) {
+                return 'Monitória Jurídica';
+            }
+            const value = String(snapshot.responses.judicializado_pela_massa || '').trim().toUpperCase();
+            if (value === 'NÃO') {
+                return 'Não Judicializado';
+            }
+            if (value) {
+                return value.charAt(0) + value.slice(1).toLowerCase();
+            }
+            return 'Monitória Jurídica';
+        }
+
+        function restoreTreeFromGeneralSnapshot() {
+            const snapshot = getGeneralCardSnapshot();
+            if (!snapshot || !snapshot.responses) {
+                return;
+            }
+            ensureUserResponsesShape();
+            const keysToRestore = Array.from(
+                new Set([...(GENERAL_CARD_FIELD_KEYS || []), ...(treeResponseKeys || [])])
+            );
+            keysToRestore.forEach(key => {
+                if (snapshot.responses.hasOwnProperty(key)) {
+                    userResponses[key] = snapshot.responses[key];
+                } else {
+                    delete userResponses[key];
+                }
+            });
+            userResponses.contratos_para_monitoria = (snapshot.contracts || []).map(id => String(id));
+            userResponses.ativar_botao_monitoria = userResponses.contratos_para_monitoria.length ? 'SIM' : '';
+            renderDecisionTree();
+            populateTreeFieldsFromResponses(userResponses);
+        }
 
         /* =========================================================
          * Helpers gerais
@@ -196,30 +281,20 @@
             );
         }
 
-        function getMonitoriaContractIds() {
-            return (userResponses.contratos_para_monitoria || [])
+        function getMonitoriaContractIds(includeGeneralSnapshot = false) {
+            let ids = (userResponses.contratos_para_monitoria || [])
                 .map(id => String(id))
                 .filter(Boolean);
+            if (includeGeneralSnapshot && isGeneralMonitoriaSelected()) {
+                const snapshot = getGeneralCardSnapshot();
+                if (snapshot && Array.isArray(snapshot.contracts)) {
+                    ids = ids.concat(snapshot.contracts.map(id => String(id)));
+                }
+            }
+            return Array.from(new Set(ids));
         }
 
-        function getMonitoriaContractDetails() {
-            return getMonitoriaContractIds().map(id => {
-                const contratoInfo = allAvailableContratos.find(c => String(c.id) === id);
-                return contratoInfo
-                    ? {
-                          numero: contratoInfo.numero_contrato,
-                          valor_total: contratoInfo.valor_total_devido,
-                          valor_causa: contratoInfo.valor_causa
-                      }
-                    : {
-                          numero: `Contrato ${id}`,
-                          valor_total: null,
-                          valor_causa: null
-                      };
-            });
-        }
-
-        function isGeneralMonitoriaEligible() {
+        function isCurrentGeneralMonitoriaEligible() {
             const contractIds = getMonitoriaContractIds();
             if (!contractIds.length) {
                 return false;
@@ -227,6 +302,11 @@
             const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
             const proporMonitoria = normalizeResponse(userResponses.propor_monitoria);
             return judicializado === 'NÃO' && proporMonitoria === 'SIM';
+        }
+
+        function isGeneralMonitoriaEligible() {
+            const snapshot = getGeneralCardSnapshot();
+            return snapshot && Array.isArray(snapshot.contracts) && snapshot.contracts.length > 0;
         }
 
         function isGeneralMonitoriaSelected() {
@@ -269,10 +349,13 @@
             });
             userResponses.contratos_para_monitoria = [];
             userResponses.ativar_botao_monitoria = '';
-            syncGeneralMonitoriaSelection(false);
             ['judicializado_pela_massa','propor_monitoria','tipo_de_acao','transitado','procedencia','data_de_transito','cumprimento_de_sentenca'].forEach(key => {
                 delete userResponses[key];
             });
+            const preservedSelections = (userResponses.selected_analysis_cards || []).filter(
+                sel => sel === GENERAL_MONITORIA_CARD_KEY
+            );
+            userResponses.selected_analysis_cards = preservedSelections;
         }
 
         function restoreTreeFromCard(cardIndex) {
@@ -284,25 +367,42 @@
                 return;
             }
             ensureUserResponsesShape();
-            const snapshot = cardData.tipo_de_acao_respostas || {};
-            Object.keys(snapshot).forEach(key => {
-                userResponses[key] = snapshot[key];
+            const savedResponses = cardData.tipo_de_acao_respostas || {};
+            treeResponseKeys.forEach(key => {
+                if (savedResponses.hasOwnProperty(key)) {
+                    userResponses[key] = savedResponses[key];
+                } else {
+                    delete userResponses[key];
+                }
             });
-            if (cardData.judicializado_pela_massa) {
-                userResponses.judicializado_pela_massa = cardData.judicializado_pela_massa;
-            }
-            userResponses.propor_monitoria = snapshot.propor_monitoria || userResponses.propor_monitoria;
-            userResponses.contratos_para_monitoria = Array.isArray(cardData.contratos)
-                ? cardData.contratos.map(id => String(id))
-                : userResponses.contratos_para_monitoria;
+            const baseFields = [
+                'judicializado_pela_massa',
+                'propor_monitoria',
+                'tipo_de_acao',
+                'transitado',
+                'procedencia',
+                'data_de_transito',
+                'cumprimento_de_sentenca'
+            ];
+            baseFields.forEach(field => {
+                if (cardData.hasOwnProperty(field) && cardData[field] !== undefined) {
+                    userResponses[field] = cardData[field];
+                } else {
+                    delete userResponses[field];
+                }
+            });
+            const contratoArray = parseContractsField(cardData.contratos);
+            userResponses.contratos_para_monitoria = contratoArray;
             userResponses.ativar_botao_monitoria =
-                userResponses.contratos_para_monitoria.length ? 'SIM' : '';
+                contratoArray.length ? 'SIM' : '';
             renderDecisionTree();
+            populateTreeFieldsFromResponses(userResponses);
         }
 
         function scrollToProcessCard(cardIndexValue) {
             activateInnerTab('analise');
             if (cardIndexValue === 'general') {
+                restoreTreeFromGeneralSnapshot();
                 if ($dynamicQuestionsContainer.length) {
                     $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
@@ -520,7 +620,14 @@
                 autoSaveTimer = null;
             }
             ensureUserResponsesShape();
-            userResponses.contratos_para_monitoria = getMonitoriaContractIds();
+            const treeSelectionIds = getMonitoriaContractIds();
+            userResponses.contratos_para_monitoria = treeSelectionIds;
+            if (isCurrentGeneralMonitoriaEligible()) {
+                const generalSnapshot = buildGeneralCardSnapshotFromCurrentResponses();
+                if (generalSnapshot) {
+                    setGeneralCardSnapshot(generalSnapshot);
+                }
+            }
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
                 JSON.stringify(userResponses)
@@ -587,6 +694,47 @@
         function formatCurrency(value) {
             const numeric = Number.isFinite(value) ? value : 0;
             return currencyFormatter.format(numeric);
+        }
+
+        function parseContractsField(value) {
+            if (!value) return [];
+            if (Array.isArray(value)) {
+                return value.map(item => String(item).trim()).filter(Boolean);
+            }
+            return String(value)
+                .split(',')
+                .map(part => part.trim())
+                .filter(Boolean);
+        }
+
+        function populateTreeFieldsFromResponses(responses) {
+            if (!responses || typeof responses !== 'object') {
+                return;
+            }
+            const excludedKeys = new Set([
+                'processos_vinculados',
+                'selected_analysis_cards',
+                'contratos_status',
+                'notebook'
+            ]);
+            Object.keys(responses).forEach(key => {
+                if (excludedKeys.has(key)) {
+                    return;
+                }
+                const $fields = $(`[name="${key}"]`);
+                if (!$fields.length) {
+                    return;
+                }
+                $fields.each(function() {
+                    const $field = $(this);
+                    if ($field.attr('type') === 'checkbox') {
+                        $field.prop('checked', String(responses[key]).toLowerCase() === 'sim');
+                    } else {
+                        $field.val(responses[key]);
+                    }
+                    $field.trigger('change');
+                });
+            });
         }
 
         function formatDateDisplay(value) {
@@ -710,6 +858,74 @@
             return $dateSpan;
         }
 
+        function getContractNumberDisplay(contractIds = []) {
+            return contractIds
+                .map(id => {
+                    const contratoInfo = allAvailableContratos.find(c => String(c.id) === String(id));
+                    return contratoInfo ? contratoInfo.numero_contrato : `ID ${id}`;
+                })
+                .filter(Boolean);
+        }
+
+        function formatAnsweredValue(key, value) {
+            if (Array.isArray(value)) {
+                if (key === 'contratos_para_monitoria') {
+                    const contractNumbers = getContractNumberDisplay(value);
+                    return contractNumbers.length ? contractNumbers.join(', ') : value.join(', ');
+                }
+                return value.join(', ');
+            }
+            return String(value);
+        }
+
+        function getAnsweredFieldEntries(processo) {
+            if (!processo || typeof processo !== 'object') {
+                return [];
+            }
+            const responseOrder = [
+                'judicializado_pela_massa',
+                'tipo_de_acao',
+                'julgamento',
+                'transitado',
+                'procedencia',
+                'data_de_transito',
+                'cumprimento_de_sentenca',
+                'repropor_monitoria',
+                'contratos_para_monitoria',
+                'ativar_botao_monitoria'
+            ];
+            const labels = {
+                judicializado_pela_massa: 'Judicializado pela massa',
+                tipo_de_acao: 'Tipo de ação',
+                julgamento: 'Julgamento',
+                transitado: 'Transitado',
+                procedencia: 'Procedência',
+                data_de_transito: 'Data de trânsito',
+                cumprimento_de_sentenca: 'Cumprimento de sentença',
+                repropor_monitoria: 'Repropor monitória',
+                contratos_para_monitoria: 'Contratos para monitória',
+                ativar_botao_monitoria: 'Ativar botão monitória'
+            };
+            const entries = [];
+            responseOrder.forEach(key => {
+                let value = undefined;
+                if (processo.hasOwnProperty(key)) {
+                    value = processo[key];
+                }
+                if ((value === undefined || value === null) && processo.tipo_de_acao_respostas) {
+                    value = processo.tipo_de_acao_respostas[key];
+                }
+                if (value === undefined || value === null || value === '') {
+                    return;
+                }
+                entries.push({
+                    label: labels[key] || key,
+                    value: formatAnsweredValue(key, value)
+                });
+            });
+            return entries;
+        }
+
         function buildProcessoDetailsSnapshot(processo) {
             const cnjVinculado = processo.cnj || 'Não informado';
             const $ulDetalhes = $('<ul></ul>');
@@ -758,16 +974,15 @@
                 `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
             );
 
-            if (processo.tipo_de_acao_respostas &&
-                Object.keys(processo.tipo_de_acao_respostas).length > 0) {
+            const fieldEntries = getAnsweredFieldEntries(processo);
+            if (fieldEntries.length) {
                 const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
                 const $ulAcao = $liAcao.find('ul');
-                for (const subKey in processo.tipo_de_acao_respostas) {
-                    if (!Object.prototype.hasOwnProperty.call(processo.tipo_de_acao_respostas, subKey)) continue;
+                fieldEntries.forEach(entry => {
                     $ulAcao.append(
-                        `<li>${subKey}: ${processo.tipo_de_acao_respostas[subKey]}</li>`
+                        `<li>${entry.label}: ${entry.value}</li>`
                     );
-                }
+                });
                 $ulDetalhes.append($liAcao);
             }
 
@@ -947,7 +1162,10 @@
 
             ensureUserResponsesShape();
 
+            const generalSnapshot = getGeneralCardSnapshot();
+            const generalEligible = generalSnapshot && Array.isArray(generalSnapshot.contracts) && generalSnapshot.contracts.length > 0;
             const temDadosRelevantes =
+                generalEligible ||
                 userResponses.judicializado_pela_massa ||
                 Object.keys(userResponses.contratos_status || {}).length > 0 ||
                 (userResponses.processos_vinculados || []).length > 0;
@@ -993,34 +1211,27 @@
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
             const processosVinculados = userResponses.processos_vinculados || [];
-            const generalEligible = isGeneralMonitoriaEligible();
             const generalCheckboxId = 'general-monitoria-checkbox';
             if (generalEligible) {
-                const monitoriaDetails = getMonitoriaContractDetails();
                 const $generalCard = $('<div class="analise-summary-card"></div>');
                 const $generalHeader = $('<div class="analise-summary-card-header"></div>');
                 const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`)
                     .prop('checked', isGeneralMonitoriaSelected());
-                const $label = $('<label>').attr('for', generalCheckboxId).text('Monitória Jurídicamente Viável');
+                const headerTitle = getGeneralCardTitle(generalSnapshot);
+                const $label = $('<label>').attr('for', generalCheckboxId).text(headerTitle);
                 const $editButton = $('<button type="button" class="analise-summary-card-edit" data-card-index="general">Editar</button>');
                 $generalHeader.append($checkbox).append($label);
+                const $subtitle = $('<span class="analise-summary-card-subtitle"></span>').text('Monitória Jurídicamente Viável');
+                $generalHeader.append($subtitle);
                 $generalHeader.append($editButton);
                 const $generalBody = $('<div class="analise-summary-card-body"></div>');
-                monitoriaDetails.forEach(detail => {
-                    const lines = [];
-                    if (detail.numero) {
-                        lines.push(detail.numero);
-                    }
-                    if (detail.valor_total != null) {
-                        lines.push(`Valor Total: ${formatCurrency(detail.valor_total)}`);
-                    }
-                    if (detail.valor_causa != null) {
-                        lines.push(`Causa: ${formatCurrency(detail.valor_causa)}`);
-                    }
-                    $generalBody.append(
-                        `<p class="analise-summary-card-subtitle">${lines.join(' • ')}</p>`
-                    );
-                });
+                const generalProcesso = {
+                    cnj: headerTitle,
+                    contratos: generalSnapshot.contracts,
+                    tipo_de_acao_respostas: generalSnapshot.responses || {}
+                };
+                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso);
+                $generalBody.append(generalDetails.$detailsList);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 $checkbox.on('change', function() {
@@ -1064,12 +1275,17 @@
                 });
 
                 const cardKey = `card-${cardIndex}`;
-                const canSelectForMonitoria =
+                const contractCandidates = parseContractsField(
                     processo &&
                     processo.tipo_de_acao_respostas &&
-                    Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria) &&
-                    processo.tipo_de_acao_respostas.contratos_para_monitoria.length > 0 &&
-                    normalizeResponse(processo.tipo_de_acao_respostas.repropor_monitoria) === 'SIM';
+                    processo.tipo_de_acao_respostas.contratos_para_monitoria
+                        ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                        : []
+                );
+                const canSelectForMonitoria =
+                    processo &&
+                    contractCandidates.length > 0 &&
+                    normalizeResponse(processo.tipo_de_acao_respostas && processo.tipo_de_acao_respostas.repropor_monitoria) === 'SIM';
                 if (canSelectForMonitoria) {
                     const $cardCheckbox = $(
                         `<input type="checkbox" id="${cardKey}-checkbox">`
@@ -2171,7 +2387,7 @@
                 alert('Erro: ID do processo não encontrado para gerar a petição.');
                 return;
             }
-            const aggregatedContratoIds = getMonitoriaContractIds();
+            const aggregatedContratoIds = getMonitoriaContractIds(true);
             if (aggregatedContratoIds.length === 0) {
                 alert('Selecione pelo menos um contrato para a monitória antes de gerar a petição.');
                 return;
@@ -2186,7 +2402,7 @@
                 headers: { 'X-CSRFToken': csrftoken },
                 data: {
                     processo_id: currentProcessoId,
-                    contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
+                    contratos_para_monitoria: JSON.stringify(aggregatedContratoIds)
                 },
                 dataType: 'json',
                 beforeSend: function() {
