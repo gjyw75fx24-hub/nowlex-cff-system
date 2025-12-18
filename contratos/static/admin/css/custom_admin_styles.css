@@ -350,3 +350,64 @@ a.historylink {
 .processo-card.collapsed .processo-card-body {
     display: none;
 }
+.processo-card {
+    margin-bottom: 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed #cbd5e1;
+}
+.processo-card:last-child {
+    border-bottom: none;
+}
+.supervisor-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.52rem;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.65;
+    background: #edf2ff;
+    color: #1d4ed8;
+}
+.supervisor-status-badge.status-pendente {
+    background: #f3f4f6;
+    color: #475569;
+}
+.supervisor-status-badge.status-aprovado {
+    background: #e0f2e9;
+    color: #165c4d;
+}
+.supervisor-status-badge.status-reprovado {
+    background: #ffe3e3;
+    color: #991b1b;
+}
+.supervisor-status-badge.status-barrado {
+    background: rgba(253, 232, 228, 0.8);
+    color: #7b1d1d;
+}
+.analise-supervisor-observation-display {
+    margin-top: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 0.85rem;
+    color: #1f2937;
+}
+.analise-supervisor-observation-display strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.88rem;
+}
+.analise-summary-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.analise-summary-card-header .supervisor-status-badge {
+    margin-left: auto;
+}

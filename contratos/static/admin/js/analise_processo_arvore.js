@@ -148,6 +148,7 @@
         // const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn');
 
         let allAvailableContratos = [];
+        const GENERAL_MONITORIA_CARD_KEY = 'general-monitoria';
 
         /* =========================================================
          * Helpers gerais
@@ -156,6 +157,9 @@
         function ensureUserResponsesShape() {
             if (!userResponses || typeof userResponses !== 'object') {
                 userResponses = {};
+            }
+            if (!Array.isArray(userResponses.selected_analysis_cards)) {
+                userResponses.selected_analysis_cards = [];
             }
             if (!userResponses.contratos_status || typeof userResponses.contratos_status !== 'object') {
                 userResponses.contratos_status = {};
@@ -178,6 +182,57 @@
                         .map(v => String(v))
                 )
             );
+        }
+
+        function getMonitoriaContractIds() {
+            return (userResponses.contratos_para_monitoria || [])
+                .map(id => String(id))
+                .filter(Boolean);
+        }
+
+        function getMonitoriaContractDetails() {
+            return getMonitoriaContractIds().map(id => {
+                const contratoInfo = allAvailableContratos.find(c => String(c.id) === id);
+                return contratoInfo
+                    ? {
+                          numero: contratoInfo.numero_contrato,
+                          valor_total: contratoInfo.valor_total_devido,
+                          valor_causa: contratoInfo.valor_causa
+                      }
+                    : {
+                          numero: `Contrato ${id}`,
+                          valor_total: null,
+                          valor_causa: null
+                      };
+            });
+        }
+
+        function isGeneralMonitoriaEligible() {
+            const contractIds = getMonitoriaContractIds();
+            if (!contractIds.length) {
+                return false;
+            }
+            const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
+            const proporMonitoria = normalizeResponse(userResponses.propor_monitoria);
+            return judicializado === 'NÃO' && proporMonitoria === 'SIM';
+        }
+
+        function isGeneralMonitoriaSelected() {
+            return Array.isArray(userResponses.selected_analysis_cards) &&
+                userResponses.selected_analysis_cards.includes(GENERAL_MONITORIA_CARD_KEY);
+        }
+
+        function syncGeneralMonitoriaSelection(checked) {
+            if (!Array.isArray(userResponses.selected_analysis_cards)) {
+                userResponses.selected_analysis_cards = [];
+            }
+            const selections = userResponses.selected_analysis_cards;
+            const idx = selections.indexOf(GENERAL_MONITORIA_CARD_KEY);
+            if (checked && idx === -1) {
+                selections.push(GENERAL_MONITORIA_CARD_KEY);
+            } else if (!checked && idx > -1) {
+                selections.splice(idx, 1);
+            }
         }
 
         function getServerUpdatedTimestamp() {
@@ -262,58 +317,14 @@
             return value.trim().toUpperCase();
         }
 
-        function getMonitoriaContractIds() {
-            if (!userResponses) return [];
-            const nestedContratoIds = (userResponses.processos_vinculados || []).flatMap(processo => {
-                if (!processo || typeof processo !== 'object') return [];
-                const tipoRespostas = processo.tipo_de_acao_respostas || {};
-                const contratos = tipoRespostas.contratos_para_monitoria || [];
-                return Array.isArray(contratos) ? contratos : [];
-            });
-
-            const aggregatedContratoIds = [
-                ...(Array.isArray(userResponses.contratos_para_monitoria)
-                    ? userResponses.contratos_para_monitoria
-                    : []),
-                ...nestedContratoIds
-            ];
-            return Array.from(new Set(aggregatedContratoIds.map(id => String(id))));
-        }
-
         function updateGenerateButtonState() {
             const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn'); // Buscar dinamicamente
             if (!$gerarMonitoriaBtn.length) return; // Se o botão ainda não existe, sai
 
-            const aggregatedContratoIds = getMonitoriaContractIds();
-            const hasContratos = aggregatedContratoIds.length > 0;
-
-            const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
-            const julgamento = normalizeResponse(userResponses.julgamento);
-            const proporMonitoria = normalizeResponse(userResponses.propor_monitoria);
-            const reproporMonitoria = normalizeResponse(userResponses.repropor_monitoria);
-
-            const isJudicializadoNao = judicializado === 'NÃO';
-            const wantsMonitoria = proporMonitoria === 'SIM';
-
-            const isExtintoSemMerito = judicializado.includes('EXTINTO');
-            const isSemMerito = julgamento.includes('SEM MÉRITO');
-            const wantsRepropor = reproporMonitoria === 'SIM';
-
-            const hasMonitoriaPath =
-                (isJudicializadoNao && wantsMonitoria) ||
-                (isExtintoSemMerito && isSemMerito && wantsRepropor);
-
-            const nestedManualOverride = (userResponses.processos_vinculados || []).some(processo => {
-                const tipoRespostas = processo && processo.tipo_de_acao_respostas;
-                if (!tipoRespostas) return false;
-                return normalizeResponse(tipoRespostas.ativar_botao_monitoria) === 'SIM';
-            });
-
-            const manualOverride =
-                normalizeResponse(userResponses.ativar_botao_monitoria) === 'SIM' ||
-                nestedManualOverride;
-
-            $gerarMonitoriaBtn.prop('disabled', !(hasContratos && (manualOverride || hasMonitoriaPath)));
+            const generalEnabled =
+                isGeneralMonitoriaEligible() &&
+                isGeneralMonitoriaSelected();
+            $gerarMonitoriaBtn.prop('disabled', !generalEnabled);
         }
 
         function updateContractStars() {
@@ -856,6 +867,41 @@
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
             const processosVinculados = userResponses.processos_vinculados || [];
+            const generalEligible = isGeneralMonitoriaEligible();
+            const generalCheckboxId = 'general-monitoria-checkbox';
+            if (generalEligible) {
+                const monitoriaDetails = getMonitoriaContractDetails();
+                const $generalCard = $('<div class="analise-summary-card"></div>');
+                const $generalHeader = $('<div class="analise-summary-card-header"></div>');
+                const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`)
+                    .prop('checked', isGeneralMonitoriaSelected());
+                const $label = $('<label>').attr('for', generalCheckboxId).text('Monitória Jurídicamente Viável');
+                $generalHeader.append($checkbox).append($label);
+                const $generalBody = $('<div class="analise-summary-card-body"></div>');
+                monitoriaDetails.forEach(detail => {
+                    const lines = [];
+                    if (detail.numero) {
+                        lines.push(detail.numero);
+                    }
+                    if (detail.valor_total != null) {
+                        lines.push(`Valor Total: ${formatCurrency(detail.valor_total)}`);
+                    }
+                    if (detail.valor_causa != null) {
+                        lines.push(`Causa: ${formatCurrency(detail.valor_causa)}`);
+                    }
+                    $generalBody.append(
+                        `<p class="analise-summary-card-subtitle">${lines.join(' • ')}</p>`
+                    );
+                });
+                $generalCard.append($generalHeader).append($generalBody);
+                $formattedResponsesContainer.append($generalCard);
+                $checkbox.on('change', function() {
+                    const checked = $(this).is(':checked');
+                    syncGeneralMonitoriaSelection(checked);
+                    userResponses.ativar_botao_monitoria = checked ? 'SIM' : '';
+                    saveResponses();
+                });
+            }
             if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
                 processosVinculados.forEach((processo) => {
                     const snapshot = buildProcessoDetailsSnapshot(processo);
@@ -1816,7 +1862,6 @@
             ensureUserResponsesShape();
 
             const $selectorDiv = $('<div class="form-row field-contratos-monitoria"></div>');
-            $selectorDiv.append(`<label>${question.texto_pergunta}</label>`);
 
             const selectedInInfoCard = allAvailableContratos.filter(
                 c => userResponses.contratos_status[c.id] && userResponses.contratos_status[c.id].selecionado
