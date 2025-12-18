@@ -388,6 +388,28 @@ a.historylink {
     background: rgba(253, 232, 228, 0.8);
     color: #7b1d1d;
 }
+.analise-inner-action-row {
+    margin: 12px 0;
+    display: flex;
+    justify-content: flex-start;
+}
+.analise-add-analysis-btn {
+    padding: 0.4rem 0.9rem;
+    font-weight: 600;
+}
+.analise-summary-card-edit {
+    border: none;
+    background: transparent;
+    font-size: 0.75rem;
+    color: #2563eb;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+.analise-summary-card-edit:hover {
+    background: rgba(37, 99, 235, 0.12);
+}
 .analise-supervisor-observation-display {
     margin-top: 8px;
     background: #f8fafc;

@@ -28,6 +28,7 @@
         const decisionTreeApiUrl = '/api/decision-tree/';
 
         let treeConfig = {};
+        let treeResponseKeys = [];
         let userResponses = {};
         let firstQuestionKey = null;
         const currentProcessoId =
@@ -92,6 +93,12 @@
             $tabNavigation.append($supervisionTabButton);
         }
 
+        const $analysisActionRow = $('<div class="analise-inner-action-row"></div>');
+        const $addAnalysisButton = $(
+            '<button type="button" class="button analise-add-analysis-btn" disabled>Adicionar Nova Análise</button>'
+        );
+        $analysisActionRow.append($addAnalysisButton);
+
         const $tabPanels = $('<div class="analise-inner-tab-panels"></div>');
         const $analysisPanel = $(
             '<div class="analise-inner-tab-panel active" data-panel="analise"></div>'
@@ -110,9 +117,14 @@
 
         const $tabWrapper = $('<div class="analise-inner-tab-wrapper"></div>').append(
             $tabNavigation,
+            $analysisActionRow,
             $tabPanels
         );
         $inlineGroup.append($tabWrapper);
+
+        $addAnalysisButton.on('click', () => {
+            startNewAnalysis();
+        });
 
         function activateInnerTab(tabName) {
             const $targetPanel = $tabPanels.find(
@@ -222,6 +234,11 @@
                 userResponses.selected_analysis_cards.includes(GENERAL_MONITORIA_CARD_KEY);
         }
 
+        function hasAnySummaryCardSelection() {
+            return Array.isArray(userResponses.selected_analysis_cards) &&
+                userResponses.selected_analysis_cards.some(sel => typeof sel === 'string');
+        }
+
         function syncGeneralMonitoriaSelection(checked) {
             if (!Array.isArray(userResponses.selected_analysis_cards)) {
                 userResponses.selected_analysis_cards = [];
@@ -233,6 +250,82 @@
             } else if (!checked && idx > -1) {
                 selections.splice(idx, 1);
             }
+        }
+
+        function updateAddAnalysisButtonState(hasCard) {
+            if (!$addAnalysisButton || !$addAnalysisButton.length) {
+                return;
+            }
+            $addAnalysisButton.prop('disabled', !hasCard);
+        }
+
+        function clearTreeResponsesForNewAnalysis() {
+            const preservedKeys = new Set(['processos_vinculados', 'selected_analysis_cards', 'contratos_status']);
+            treeResponseKeys.forEach(key => {
+                if (preservedKeys.has(key)) {
+                    return;
+                }
+                delete userResponses[key];
+            });
+            userResponses.contratos_para_monitoria = [];
+            userResponses.ativar_botao_monitoria = '';
+            syncGeneralMonitoriaSelection(false);
+            ['judicializado_pela_massa','propor_monitoria','tipo_de_acao','transitado','procedencia','data_de_transito','cumprimento_de_sentenca'].forEach(key => {
+                delete userResponses[key];
+            });
+        }
+
+        function restoreTreeFromCard(cardIndex) {
+            if (typeof cardIndex !== 'number' || !Array.isArray(userResponses.processos_vinculados)) {
+                return;
+            }
+            const cardData = userResponses.processos_vinculados[cardIndex];
+            if (!cardData) {
+                return;
+            }
+            ensureUserResponsesShape();
+            const snapshot = cardData.tipo_de_acao_respostas || {};
+            Object.keys(snapshot).forEach(key => {
+                userResponses[key] = snapshot[key];
+            });
+            if (cardData.judicializado_pela_massa) {
+                userResponses.judicializado_pela_massa = cardData.judicializado_pela_massa;
+            }
+            userResponses.propor_monitoria = snapshot.propor_monitoria || userResponses.propor_monitoria;
+            userResponses.contratos_para_monitoria = Array.isArray(cardData.contratos)
+                ? cardData.contratos.map(id => String(id))
+                : userResponses.contratos_para_monitoria;
+            userResponses.ativar_botao_monitoria =
+                userResponses.contratos_para_monitoria.length ? 'SIM' : '';
+            renderDecisionTree();
+        }
+
+        function scrollToProcessCard(cardIndexValue) {
+            activateInnerTab('analise');
+            if (cardIndexValue === 'general') {
+                if ($dynamicQuestionsContainer.length) {
+                    $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                return;
+            }
+            restoreTreeFromCard(cardIndexValue);
+            const selector = `.processo-card[data-card-index="${cardIndexValue}"]`;
+            const $targetCard = $dynamicQuestionsContainer.find(selector);
+            if ($targetCard.length) {
+                $targetCard.removeClass('collapsed');
+                $targetCard.find('.processo-card-toggle')
+                    .text('−')
+                    .attr('aria-expanded', 'true');
+                restoreTreeFromCard(cardIndexValue);
+                $targetCard.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function startNewAnalysis() {
+            ensureUserResponsesShape();
+            clearTreeResponsesForNewAnalysis();
+            renderDecisionTree();
+            saveResponses();
         }
 
         function getServerUpdatedTimestamp() {
@@ -319,12 +412,13 @@
 
         function updateGenerateButtonState() {
             const $gerarMonitoriaBtn = $('#id_gerar_monitoria_btn'); // Buscar dinamicamente
-            if (!$gerarMonitoriaBtn.length) return; // Se o botão ainda não existe, sai
+            if (!$gerarMonitoriaBtn.length) return;
 
             const generalEnabled =
                 isGeneralMonitoriaEligible() &&
                 isGeneralMonitoriaSelected();
-            $gerarMonitoriaBtn.prop('disabled', !generalEnabled);
+            const cardSelectionEnabled = hasAnySummaryCardSelection();
+            $gerarMonitoriaBtn.prop('disabled', !(generalEnabled || cardSelectionEnabled));
         }
 
         function updateContractStars() {
@@ -803,6 +897,37 @@
             }
         }
 
+        function buildSummaryStatusMetadata(processo) {
+            if (!processo || typeof processo !== 'object') {
+                return {
+                    label: SUPERVISION_STATUS_LABELS.pendente,
+                    classes: ['status-pendente'],
+                    tooltip: ''
+                };
+            }
+            ensureSupervisionFields(processo);
+            const statusKey = processo.supervisor_status || 'pendente';
+            const baseLabel = SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
+            const baseClass = SUPERVISION_STATUS_CLASSES[statusKey] || 'status-pendente';
+            const classes = [baseClass];
+            let label = baseLabel;
+            let tooltip = '';
+            if (processo.barrado && processo.barrado.ativo) {
+                classes.push('status-barrado');
+                const inicio = formatDateDisplay(processo.barrado.inicio) || processo.barrado.inicio || 'data não informada';
+                const retorno = formatDateDisplay(processo.barrado.retorno_em) || processo.barrado.retorno_em || 'sem data definida';
+                tooltip = `Ficou barrado de ${inicio} a ${retorno}`;
+                if (statusKey === 'aprovado') {
+                    label = 'Aprovado & Barrado';
+                } else if (statusKey === 'reprovado') {
+                    label = 'Reprovado & Barrado';
+                } else {
+                    label = 'Barrado';
+                }
+            }
+            return { label, classes, tooltip };
+        }
+
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
             
@@ -828,6 +953,7 @@
                 (userResponses.processos_vinculados || []).length > 0;
 
             if (!temDadosRelevantes) {
+                updateAddAnalysisButtonState(false);
                 $formattedResponsesContainer.append(
                     '<p>Nenhuma análise registrada ainda. Preencha a árvore acima para iniciar.</p>'
                 );
@@ -876,7 +1002,9 @@
                 const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`)
                     .prop('checked', isGeneralMonitoriaSelected());
                 const $label = $('<label>').attr('for', generalCheckboxId).text('Monitória Jurídicamente Viável');
+                const $editButton = $('<button type="button" class="analise-summary-card-edit" data-card-index="general">Editar</button>');
                 $generalHeader.append($checkbox).append($label);
+                $generalHeader.append($editButton);
                 const $generalBody = $('<div class="analise-summary-card-body"></div>');
                 monitoriaDetails.forEach(detail => {
                     const lines = [];
@@ -900,22 +1028,76 @@
                     syncGeneralMonitoriaSelection(checked);
                     userResponses.ativar_botao_monitoria = checked ? 'SIM' : '';
                     saveResponses();
+                    updateGenerateButtonState();
+                });
+                $editButton.on('click', function() {
+                    scrollToProcessCard('general');
                 });
             }
             if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
-                processosVinculados.forEach((processo) => {
+                processosVinculados.forEach((processo, idx) => {
+                    const cardIndex = idx;
                     const snapshot = buildProcessoDetailsSnapshot(processo);
                     const $cardVinculado = $('<div class="analise-summary-card"></div>');
-                    const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
-                    const $bodyVinculado = $(
-                        '<div class="analise-summary-card-body" style="display:none;"></div>'
-                    );
+            const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
+            const $bodyVinculado = $(
+                '<div class="analise-summary-card-body" style="display:none;"></div>'
+            );
 
-                    $headerVinculado.append(
-                        `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
+                $headerVinculado.append(
+                    `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
+                );
+                const summaryStatus = buildSummaryStatusMetadata(processo);
+                const $statusBadge = $('<span class="supervisor-status-badge"></span>');
+                $statusBadge.text(summaryStatus.label);
+                summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
+                if (summaryStatus.tooltip) {
+                    $statusBadge.attr('title', summaryStatus.tooltip);
+                }
+                $headerVinculado.append($statusBadge);
+                const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
+                $headerVinculado.append($toggleBtnVinculado);
+                const $editBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
+                $headerVinculado.append($editBtn);
+                $editBtn.on('click', function() {
+                    scrollToProcessCard(cardIndex);
+                });
+
+                const cardKey = `card-${cardIndex}`;
+                const canSelectForMonitoria =
+                    processo &&
+                    processo.tipo_de_acao_respostas &&
+                    Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria) &&
+                    processo.tipo_de_acao_respostas.contratos_para_monitoria.length > 0 &&
+                    normalizeResponse(processo.tipo_de_acao_respostas.repropor_monitoria) === 'SIM';
+                if (canSelectForMonitoria) {
+                    const $cardCheckbox = $(
+                        `<input type="checkbox" id="${cardKey}-checkbox">`
                     );
-                    const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
-                    $headerVinculado.append($toggleBtnVinculado);
+                    const isSelected = Array.isArray(userResponses.selected_analysis_cards) &&
+                        userResponses.selected_analysis_cards.includes(cardKey);
+                    if (isSelected) {
+                        $cardCheckbox.prop('checked', true);
+                    }
+                    const $checkboxLabel = $(
+                        `<label for="${cardKey}-checkbox"> </label>`
+                    );
+                    $headerVinculado.prepend($checkboxLabel.prepend($cardCheckbox));
+                    $cardCheckbox.on('change', function() {
+                        if (!Array.isArray(userResponses.selected_analysis_cards)) {
+                            userResponses.selected_analysis_cards = [];
+                        }
+                        const selections = userResponses.selected_analysis_cards;
+                        const isChecked = $(this).is(':checked');
+                        const idx = selections.indexOf(cardKey);
+                        if (isChecked && idx === -1) {
+                            selections.push(cardKey);
+                        } else if (!isChecked && idx > -1) {
+                            selections.splice(idx, 1);
+                        }
+                        updateGenerateButtonState();
+                    });
+                }
 
                     $cardVinculado.append($headerVinculado);
 
@@ -939,6 +1121,8 @@
                     });
                 });
             }
+            const hasSummaryCard = generalEligible || processosVinculados.length > 0;
+            updateAddAnalysisButtonState(hasSummaryCard);
             if (isSupervisorUser) {
                 renderSupervisionPanel();
             }
@@ -1250,6 +1434,13 @@
                 success: function(data) {
                     if (data.status === 'success') {
                         treeConfig = data.tree_data || {};
+                        treeResponseKeys = Array.from(
+                            new Set(
+                                Object.values(treeConfig || {})
+                                    .map(question => question && question.chave)
+                                    .filter(Boolean)
+                            )
+                        );
                         firstQuestionKey = data.primeira_questao_chave || null;
                         deferredConfig.resolve();
                     } else {
