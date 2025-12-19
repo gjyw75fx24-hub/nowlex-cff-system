@@ -622,11 +622,13 @@
             ensureUserResponsesShape();
             const treeSelectionIds = getMonitoriaContractIds();
             userResponses.contratos_para_monitoria = treeSelectionIds;
-            if (isCurrentGeneralMonitoriaEligible()) {
+            if (isCurrentGeneralMonitoriaEligible() && !shouldSkipGeneralCard()) {
                 const generalSnapshot = buildGeneralCardSnapshotFromCurrentResponses();
                 if (generalSnapshot) {
                     setGeneralCardSnapshot(generalSnapshot);
                 }
+            } else {
+                setGeneralCardSnapshot(null);
             }
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
@@ -1153,6 +1155,13 @@ function buildSummaryStatusMetadata(processo, options = {}) {
     return { label, classes, tooltip, show: shouldShow };
 }
 
+        function shouldSkipGeneralCard() {
+            if (Array.isArray(userResponses.processos_vinculados)) {
+                return userResponses.processos_vinculados.some(p => (p.cnj || '').trim() === 'Não Judicializado');
+            }
+            return Boolean(userResponses.supervisionado_nao_judicializado);
+        }
+
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
             
@@ -1173,7 +1182,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             ensureUserResponsesShape();
 
             const generalSnapshot = getGeneralCardSnapshot();
-            const generalEligible = generalSnapshot && Array.isArray(generalSnapshot.contracts) && generalSnapshot.contracts.length > 0;
+            const generalEligible = generalSnapshot && Array.isArray(generalSnapshot.contracts) && generalSnapshot.contracts.length > 0 && !shouldSkipGeneralCard();
             const temDadosRelevantes =
                 generalEligible ||
                 userResponses.judicializado_pela_massa ||
