@@ -2424,10 +2424,31 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             const $input = $toggle.find('.supervision-toggle-input');
             $input.on('change', function() {
                 const checked = $(this).is(':checked');
-                userResponses.supervisionado_nao_judicializado = checked;
-                userResponses.supervisor_status_nao_judicializado = checked ? 'pendente' : 'pendente';
+                if (!Array.isArray(userResponses.processos_vinculados)) {
+                    userResponses.processos_vinculados = [];
+                }
+                if (checked) {
+                    const card = {
+                        cnj: 'Não Judicializado',
+                        contratos: userResponses.contratos_para_monitoria.slice(),
+                        tipo_de_acao_respostas: {
+                            judicializado_pela_massa: 'NÃO',
+                            propor_monitoria: 'SIM',
+                            contratos_para_monitoria: userResponses.contratos_para_monitoria.slice()
+                        },
+                        supervisionado: true,
+                        supervisor_status: 'pendente',
+                        barrado: { ativo: false, inicio: null, retorno_em: null },
+                        awaiting_supervision_confirm: false
+                    };
+                    userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
+                    userResponses.processos_vinculados.push(card);
+                } else {
+                    userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
+                }
                 saveResponses();
                 displayFormattedResponses();
+                renderSupervisionPanel();
             });
             $wrapper.append($toggle);
             $container.append($wrapper);
