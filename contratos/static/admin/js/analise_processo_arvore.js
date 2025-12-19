@@ -2443,8 +2443,10 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     };
                     userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
                     userResponses.processos_vinculados.push(card);
+                    setGeneralCardSnapshot(null);
                 } else {
                     userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
+                    setGeneralCardSnapshot(null);
                 }
                 saveResponses();
                 displayFormattedResponses();
