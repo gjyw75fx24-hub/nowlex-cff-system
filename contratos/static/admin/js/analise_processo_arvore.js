@@ -474,13 +474,32 @@
             if (Array.isArray(userResponses.processos_vinculados) && userResponses.processos_vinculados.length) {
                 capturedResponses.processos_vinculados = userResponses.processos_vinculados.map(card => deepClone(card));
             }
-            const contractIds = Array.from(
-                new Set(
-                    (capturedResponses.contratos_para_monitoria || [])
-                        .map(id => String(id).trim())
-                        .filter(Boolean)
-                )
+            const contractIdsSet = new Set(
+                (capturedResponses.contratos_para_monitoria || [])
+                    .map(id => String(id).trim())
+                    .filter(Boolean)
             );
+            if (Array.isArray(capturedResponses.processos_vinculados)) {
+                capturedResponses.processos_vinculados.forEach(proc => {
+                    if (!proc || !Array.isArray(proc.contratos)) {
+                        return;
+                    }
+                    proc.contratos.forEach(ct => {
+                        const id = String(ct).trim();
+                        if (id) contractIdsSet.add(id);
+                    });
+                    const fallbackContracts =
+                        proc.tipo_de_acao_respostas &&
+                        Array.isArray(proc.tipo_de_acao_respostas.contratos_para_monitoria)
+                            ? proc.tipo_de_acao_respostas.contratos_para_monitoria
+                            : [];
+                    fallbackContracts.forEach(ct => {
+                        const id = String(ct).trim();
+                        if (id) contractIdsSet.add(id);
+                    });
+                });
+            }
+            const contractIds = Array.from(contractIdsSet);
             const rawCnj = capturedResponses.cnj || $('input[name="cnj"]').val() || '';
             const formattedCnj = rawCnj ? formatCnjDigits(rawCnj) : '';
             const snapshotResponses = deepClone(capturedResponses);
