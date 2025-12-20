@@ -513,9 +513,17 @@
                 return null;
             }
             const processo = userResponses.processos_vinculados[0];
-            const contractIds = (processo.contratos || [])
-                .map(id => String(id).trim())
-                .filter(Boolean);
+            const contratoArray = Array.isArray(processo.contratos) ? processo.contratos : [];
+            const respostaContratos = processo.tipo_de_acao_respostas && Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria)
+                ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                : [];
+            const contractIds = Array.from(
+                new Set(
+                    [...contratoArray, ...respostaContratos]
+                        .map(id => String(id).trim())
+                        .filter(Boolean)
+                )
+            );
             const responses = deepClone(processo.tipo_de_acao_respostas || {});
             const cnjFormatted = processo.cnj ? formatCnjDigits(processo.cnj) : '';
             const barrado = processo.barrado
