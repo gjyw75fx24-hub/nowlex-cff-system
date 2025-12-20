@@ -508,6 +508,31 @@
             };
         }
 
+        function buildSnapshotFromProcessosVinculados() {
+            if (!Array.isArray(userResponses.processos_vinculados) || userResponses.processos_vinculados.length === 0) {
+                return null;
+            }
+            const processo = userResponses.processos_vinculados[0];
+            const contractIds = (processo.contratos || [])
+                .map(id => String(id).trim())
+                .filter(Boolean);
+            const responses = deepClone(processo.tipo_de_acao_respostas || {});
+            const cnjFormatted = processo.cnj ? formatCnjDigits(processo.cnj) : '';
+            const barrado = processo.barrado
+                ? deepClone(processo.barrado)
+                : { ativo: false, inicio: null, retorno_em: null };
+            return {
+                cnj: cnjFormatted || 'Não informado',
+                contratos: contractIds,
+                tipo_de_acao_respostas: responses,
+                supervisionado: Boolean(processo.supervisionado),
+                supervisor_status: processo.supervisor_status || 'pendente',
+                awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
+                barrado,
+                general_card_snapshot: false
+            };
+        }
+
         function appendProcessCardToHistory(cardData) {
             if (!cardData) {
                 return;
@@ -520,7 +545,10 @@
         }
 
         function storeActiveAnalysisAsProcessCard() {
-            const snapshot = captureActiveAnalysisSnapshot();
+            let snapshot = captureActiveAnalysisSnapshot();
+            if (!snapshot) {
+                snapshot = buildSnapshotFromProcessosVinculados();
+            }
             if (!snapshot) {
                 return false;
             }
