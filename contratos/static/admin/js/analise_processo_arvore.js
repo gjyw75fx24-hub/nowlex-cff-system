@@ -45,7 +45,7 @@
         });
         const SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
         const SUPERVISION_STATUS_LABELS = {
-            pendente: 'Pendente de Supervisão',
+            pendente: 'Pendente de Análise',
             aprovado: 'Aprovado',
             reprovado: 'Reprovado'
         };
@@ -1645,10 +1645,17 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 if (contractCandidates.length === 0 && Array.isArray(processo.contratos)) {
                     contractCandidates = processo.contratos.map(String);
                 }
+                const reproporRaw =
+                    processo &&
+                    processo.tipo_de_acao_respostas &&
+                    processo.tipo_de_acao_respostas.repropor_monitoria;
+                const reproporNormalized = normalizeResponse(reproporRaw);
+                const reproporAllowed =
+                    reproporNormalized === '' ? true : reproporNormalized === 'SIM';
                 const canSelectForMonitoria =
                     processo &&
                     contractCandidates.length > 0 &&
-                    normalizeResponse(processo.tipo_de_acao_respostas && processo.tipo_de_acao_respostas.repropor_monitoria) === 'SIM';
+                    reproporAllowed;
                 if (canSelectForMonitoria) {
                     const $cardCheckbox = $(
                         `<input type="checkbox" id="${cardKey}-checkbox">`
