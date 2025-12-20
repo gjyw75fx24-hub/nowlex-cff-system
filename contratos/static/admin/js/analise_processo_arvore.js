@@ -175,6 +175,19 @@
         ];
         let hasUserActivatedCardSelection = false;
         const SAVED_PROCESSOS_KEY = 'saved_processos_vinculados';
+        const CARD_EXPANSION_STATE = {};
+
+        function getCardExpansionState(cardKey, defaultState = false) {
+            if (Object.prototype.hasOwnProperty.call(CARD_EXPANSION_STATE, cardKey)) {
+                return CARD_EXPANSION_STATE[cardKey];
+            }
+            CARD_EXPANSION_STATE[cardKey] = defaultState;
+            return defaultState;
+        }
+
+        function setCardExpansionState(cardKey, expanded) {
+            CARD_EXPANSION_STATE[cardKey] = Boolean(expanded);
+        }
 
         function getGeneralCardSnapshot() {
             ensureUserResponsesShape();
@@ -1521,7 +1534,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $generalHeader.append($statusBadge);
                 }
                 $generalHeader.append($actionGroup);
-                const $generalBody = $('<div class="analise-summary-card-body" style="display:none;"></div>');
+                const $generalBody = $('<div class="analise-summary-card-body"></div>');
                 const generalProcesso = {
                     cnj: headerTitle,
                     contratos: generalSource.contracts,
@@ -1533,6 +1546,15 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 $generalBody.append(generalDetails.$detailsList);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
+                const generalKey = 'general';
+                const generalExpanded = getCardExpansionState(generalKey, false);
+                if (generalExpanded) {
+                    $generalBody.show();
+                    $toggleBtnGeneral.text('−');
+                } else {
+                    $generalBody.hide();
+                    $toggleBtnGeneral.text('+');
+                }
                 $checkbox.on('change', function() {
                     const checked = $(this).is(':checked');
                     hasUserActivatedCardSelection = true;
@@ -1558,9 +1580,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 });
                 $toggleBtnGeneral.on('click', function() {
                     $generalBody.slideToggle(160, function() {
-                        $toggleBtnGeneral.text(
-                            $generalBody.is(':visible') ? '−' : '+'
-                        );
+                        const expanded = $generalBody.is(':visible');
+                        $toggleBtnGeneral.text(expanded ? '−' : '+');
+                        setCardExpansionState(generalKey, expanded);
                     });
                 });
             }
@@ -1575,11 +1597,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     }
                     const cardIndex = idx;
                     const snapshot = buildProcessoDetailsSnapshot(processo);
-                    const $cardVinculado = $('<div class="analise-summary-card"></div>');
+                const $cardVinculado = $('<div class="analise-summary-card"></div>');
             const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
-            const $bodyVinculado = $(
-                '<div class="analise-summary-card-body" style="display:none;"></div>'
-            );
+            const $bodyVinculado = $('<div class="analise-summary-card-body"></div>');
 
                 $headerVinculado.append(
                     `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
@@ -1676,11 +1696,20 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
 
+                    const cardExpanded = getCardExpansionState(cardKey, false);
+                    if (cardExpanded) {
+                        $bodyVinculado.show();
+                        $toggleBtnVinculado.text(' - ');
+                    } else {
+                        $bodyVinculado.hide();
+                        $toggleBtnVinculado.text(' + ');
+                    }
+
                     $toggleBtnVinculado.on('click', function() {
                         $bodyVinculado.slideToggle(200, function() {
-                            $toggleBtnVinculado.text(
-                                $bodyVinculado.is(':visible') ? ' - ' : ' + '
-                            );
+                            const expanded = $bodyVinculado.is(':visible');
+                            $toggleBtnVinculado.text(expanded ? ' - ' : ' + ');
+                            setCardExpansionState(cardKey, expanded);
                         });
                     });
                 });
