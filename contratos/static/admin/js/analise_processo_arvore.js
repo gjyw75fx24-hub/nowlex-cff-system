@@ -405,9 +405,31 @@
             }
             const relevantKeys = getTreeQuestionKeysForSnapshot();
             if (relevantKeys.length === 0) {
-                return false;
+                return fallbackHasResponses();
             }
-            return relevantKeys.some(key => {
+            const hasFromRelevant = relevantKeys.some(key => {
+                const value = userResponses[key];
+                if (value === undefined || value === null) {
+                    return false;
+                }
+                if (Array.isArray(value)) {
+                    return value.length > 0;
+                }
+                return String(value).trim() !== '';
+            });
+            return hasFromRelevant || fallbackHasResponses();
+        }
+
+        function fallbackHasResponses() {
+            const fallbackKeys = [
+                'judicializado_pela_massa',
+                'cnj',
+                'tipo_de_acao',
+                'julgamento',
+                'transitado',
+                'procedencia'
+            ];
+            return fallbackKeys.some(key => {
                 const value = userResponses[key];
                 if (value === undefined || value === null) {
                     return false;
