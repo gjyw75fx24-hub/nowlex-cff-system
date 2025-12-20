@@ -45,7 +45,7 @@
         });
         const SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
         const SUPERVISION_STATUS_LABELS = {
-            pendente: 'Pendente de Análise',
+            pendente: 'Pendente de Supervisão',
             aprovado: 'Aprovado',
             reprovado: 'Reprovado'
         };
@@ -462,14 +462,27 @@
             const rawCnj = capturedResponses.cnj || $('input[name="cnj"]').val() || '';
             const formattedCnj = rawCnj ? formatCnjDigits(rawCnj) : '';
             const snapshotResponses = deepClone(capturedResponses);
+            const supervisionado = Boolean(snapshotResponses.supervisionado);
+            const supervisor_status =
+                snapshotResponses.supervisor_status || 'pendente';
+            const awaiting_supervision_confirm = Boolean(
+                snapshotResponses.awaiting_supervision_confirm
+            );
+            const barrado = snapshotResponses.barrado
+                ? deepClone(snapshotResponses.barrado)
+                : { ativo: false, inicio: null, retorno_em: null };
+            delete snapshotResponses.supervisionado;
+            delete snapshotResponses.supervisor_status;
+            delete snapshotResponses.awaiting_supervision_confirm;
+            delete snapshotResponses.barrado;
             return {
                 cnj: formattedCnj || 'Não informado',
                 contratos: contractIds,
                 tipo_de_acao_respostas: snapshotResponses,
-                supervisionado: false,
-                supervisor_status: 'pendente',
-                awaiting_supervision_confirm: false,
-                barrado: { ativo: false, inicio: null, retorno_em: null }
+                supervisionado,
+                supervisor_status,
+                awaiting_supervision_confirm,
+                barrado
             };
         }
 
@@ -1645,17 +1658,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 if (contractCandidates.length === 0 && Array.isArray(processo.contratos)) {
                     contractCandidates = processo.contratos.map(String);
                 }
-                const reproporRaw =
-                    processo &&
-                    processo.tipo_de_acao_respostas &&
-                    processo.tipo_de_acao_respostas.repropor_monitoria;
-                const reproporNormalized = normalizeResponse(reproporRaw);
-                const reproporAllowed =
-                    reproporNormalized === '' ? true : reproporNormalized === 'SIM';
                 const canSelectForMonitoria =
                     processo &&
-                    contractCandidates.length > 0 &&
-                    reproporAllowed;
+                    contractCandidates.length > 0;
                 if (canSelectForMonitoria) {
                     const $cardCheckbox = $(
                         `<input type="checkbox" id="${cardKey}-checkbox">`
