@@ -572,9 +572,9 @@
         }
 
         function storeActiveAnalysisAsProcessCard() {
-            let snapshot = captureActiveAnalysisSnapshot();
+            let snapshot = buildSnapshotFromProcessosVinculados();
             if (!snapshot) {
-                snapshot = buildSnapshotFromProcessosVinculados();
+                snapshot = captureActiveAnalysisSnapshot();
             }
             if (!snapshot) {
                 return false;
