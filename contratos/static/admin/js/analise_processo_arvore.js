@@ -199,7 +199,7 @@
                 if (stored) {
                     saveResponses();
                     suppressGeneralSummaryUntilFirstAnswer = true;
-                    startNewAnalysis({ skipGeneralSnapshot: true });
+                startNewAnalysis({ skipGeneralSnapshot: true, suppressSummary: false });
                 }
         });
 
@@ -935,12 +935,15 @@
             }, 800); // Aumentado para aguardar todos os delays escalonados
         }
 
-        function startNewAnalysis() {
+        function startNewAnalysis(options = {}) {
             ensureUserResponsesShape();
 
             hasUserActivatedCardSelection = false;
 
-            suppressGeneralSummaryUntilFirstAnswer = true;
+            const suppressSummary = options.hasOwnProperty('suppressSummary')
+                ? options.suppressSummary
+                : true;
+            suppressGeneralSummaryUntilFirstAnswer = suppressSummary;
             if (hasActiveAnalysisResponses()) {
                 storeActiveAnalysisAsProcessCard();
             }
