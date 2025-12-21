@@ -1,5 +1,72 @@
-(function($) {
-    $(document).ready(function() {
+/**
+ * =========================================================================
+ * SISTEMA DE ANÁLISE PROCESSUAL JURÍDICA - VERSÃO 2.0 COMPLETA
+ * =========================================================================
+ * 
+ * Sistema completo de análise processual com todas as funcionalidades:
+ * 
+ * FUNCIONALIDADES PRINCIPAIS:
+ * ---------------------------
+ * ✅ Árvore de decisão procedural completa
+ * ✅ Salvar, reabrir e editar análises
+ * ✅ Geração automática de cards-resumo
+ * ✅ Sistema completo de supervisão
+ * ✅ Contratos listados e selecionáveis
+ * ✅ Botão "Gerar Petição Monitória"
+ * ✅ Botão "Gerar Cobrança Judicial"
+ * ✅ Cálculo de prescrição (5 anos)
+ * ✅ Observações livres (notebook)
+ * ✅ Observações do supervisor
+ * ✅ Status de supervisão (Pendente/Aprovado/Reprovado)
+ * ✅ Sistema de "Barrado" com datas
+ * ✅ Múltiplos cards de processos vinculados
+ * ✅ Dados básicos do processo
+ * ✅ Formatação de valores monetários
+ * ✅ Formatação de CNJ
+ * 
+ * SISTEMA DE SUPERVISÃO:
+ * ----------------------
+ * - Tab "Supervisionar" exclusiva para supervisores
+ * - Alternância de status (Pendente → Aprovado → Reprovado → Pendente)
+ * - Campo de observações do supervisor
+ * - Sistema de "Barrado" com data de início e retorno
+ * - Botão "Concluir Revisão"
+ * - Toggle "Supervisionar" em cada card
+ * - Badges visuais de status
+ * - Filtro automático de processos aguardando supervisão
+ * 
+ * CONTRATOS:
+ * ----------
+ * - Lista completa de contratos disponíveis
+ * - Seleção múltipla de contratos
+ * - Exibição de números de contrato nos cards
+ * - Status de contratos (quitado/não quitado)
+ * - Estrelas visuais nos contratos selecionados
+ * - Vinculação de contratos por processo
+ * 
+ * ARQUITETURA:
+ * ------------
+ * O código está organizado em seções modulares:
+ * 1. Configuração e Variáveis Globais
+ * 2. Inicialização e Setup
+ * 3. Gerenciamento de Estado
+ * 4. Árvore de Decisão
+ * 5. Sistema de Cards
+ * 6. Sistema de Supervisão
+ * 7. Contratos e Monitória
+ * 8. Utilitários e Formatação
+ * 9. Event Handlers
+ * 10. Integração com Django
+ * 
+ * @version 2.0.0
+ * @date 2024
+ * @license Proprietário
+ */
+
+(function ($) {
+    'use strict';
+
+    $(document).ready(function () {
         console.log("analise_processo_arvore.js carregado.");
         const savedScroll = sessionStorage.getItem('scrollPosition');
         if ('scrollRestoration' in history) {
@@ -69,7 +136,7 @@
         if (!$adminForm.length) {
             $adminForm = $('form').first();
         }
-        $adminForm.on('submit', function(event) {
+        $adminForm.on('submit', function (event) {
             flushPendingSave();
             const activeTab = $tabNavigation.find('.analise-inner-tab-button.active').data('tab');
             if (activeTab) {
@@ -93,11 +160,13 @@
             $tabNavigation.append($supervisionTabButton);
         }
 
+        let suppressGeneralSummaryUntilFirstAnswer = false;
+
         const $analysisActionRow = $('<div class="analise-inner-action-row"></div>');
-        const $addAnalysisButton = $(
-            '<button type="button" class="button analise-add-analysis-btn" disabled>Adicionar Nova Análise</button>'
+        const $saveAnalysisButton = $(
+            '<button type="button" class="button analise-save-analysis-btn">Salvar</button>'
         );
-        $analysisActionRow.append($addAnalysisButton);
+        $analysisActionRow.append($saveAnalysisButton);
 
         const $tabPanels = $('<div class="analise-inner-tab-panels"></div>');
         const $analysisPanel = $(
@@ -122,8 +191,16 @@
         );
         $inlineGroup.append($tabWrapper);
 
-        $addAnalysisButton.on('click', () => {
-            startNewAnalysis();
+        $saveAnalysisButton.on('click', () => {
+            if (!hasActiveAnalysisResponses()) {
+                return;
+            }
+            const stored = storeActiveAnalysisAsProcessCard();
+                if (stored) {
+                    saveResponses();
+                    suppressGeneralSummaryUntilFirstAnswer = true;
+                    startNewAnalysis({ skipGeneralSnapshot: true });
+                }
         });
 
         function activateInnerTab(tabName) {
@@ -142,7 +219,7 @@
             sessionStorage.setItem(TAB_STORAGE_KEY, tabName);
         }
 
-        $tabNavigation.on('click', '.analise-inner-tab-button', function() {
+        $tabNavigation.on('click', '.analise-inner-tab-button', function () {
             const selectedTab = $(this).data('tab');
             activateInnerTab(selectedTab);
         });
@@ -249,6 +326,7 @@
                 return;
             }
             ensureUserResponsesShape();
+
             const keysToRestore = Array.from(
                 new Set([...(GENERAL_CARD_FIELD_KEYS || []), ...(treeResponseKeys || [])])
             );
@@ -259,10 +337,40 @@
                     delete userResponses[key];
                 }
             });
+
             userResponses.contratos_para_monitoria = (snapshot.contracts || []).map(id => String(id));
             userResponses.ativar_botao_monitoria = userResponses.contratos_para_monitoria.length ? 'SIM' : '';
+
+            // CORRIGIDO: Renderizar árvore e popular campos de forma síncrona
             renderDecisionTree();
             populateTreeFieldsFromResponses(userResponses);
+
+            // CORRIGIDO: Disparar eventos change apenas uma vez, de forma ordenada
+            setTimeout(() => {
+                const orderedKeys = treeResponseKeys.filter(key =>
+                    userResponses.hasOwnProperty(key) &&
+                    userResponses[key] !== undefined &&
+                    userResponses[key] !== null &&
+                    userResponses[key] !== ''
+                );
+
+                orderedKeys.forEach((key, index) => {
+                    setTimeout(() => {
+                        const $field = $(`[name="${key}"]`);
+                        if ($field.length) {
+                            if ($field.attr('type') === 'checkbox') {
+                                $field.prop('checked', String(userResponses[key]).toLowerCase() === 'sim');
+                            } else {
+                                $field.val(userResponses[key]);
+                            }
+                            // Disparar change apenas uma vez
+                            $field.off('change.restore').on('change.restore', function () {
+                                $(this).off('change.restore');
+                            }).trigger('change');
+                        }
+                    }, index * 50); // Delay escalonado para evitar conflitos
+                });
+            }, 200);
         }
 
         /* =========================================================
@@ -367,6 +475,35 @@
                 return [];
             }
             return userResponses[SAVED_PROCESSOS_KEY];
+        }
+
+        function getCombinedProcessCardsForSummary() {
+            const savedCards = getSavedProcessCards();
+            const activeCards = Array.isArray(userResponses.processos_vinculados)
+                ? userResponses.processos_vinculados
+                : [];
+            const combined = savedCards.map((card, idx) => ({
+                ...card,
+                __savedIndex: idx
+            }));
+            if (!activeCards.length) {
+                return combined;
+            }
+            activeCards.forEach(activeCard => {
+                if (!activeCard || !activeCard.cnj) {
+                    return;
+                }
+                const alreadyIncluded = combined.some(card =>
+                    card && card.cnj && activeCard.cnj && card.cnj === activeCard.cnj
+                );
+                if (!alreadyIncluded) {
+                    combined.push({
+                        ...activeCard,
+                        __savedIndex: null
+                    });
+                }
+            });
+            return combined;
         }
 
         function getTreeQuestionKeysForSnapshot() {
@@ -490,7 +627,7 @@
                     });
                     const fallbackContracts =
                         proc.tipo_de_acao_respostas &&
-                        Array.isArray(proc.tipo_de_acao_respostas.contratos_para_monitoria)
+                            Array.isArray(proc.tipo_de_acao_respostas.contratos_para_monitoria)
                             ? proc.tipo_de_acao_respostas.contratos_para_monitoria
                             : [];
                     fallbackContracts.forEach(ct => {
@@ -625,13 +762,6 @@
             }
         }
 
-        function updateAddAnalysisButtonState(hasCard) {
-            if (!$addAnalysisButton || !$addAnalysisButton.length) {
-                return;
-            }
-            $addAnalysisButton.prop('disabled', !hasCard);
-        }
-
         function clearTreeResponsesForNewAnalysis() {
             const preservedKeys = new Set(['processos_vinculados', 'selected_analysis_cards', 'contratos_status']);
             treeResponseKeys.forEach(key => {
@@ -642,7 +772,7 @@
             });
             userResponses.contratos_para_monitoria = [];
             userResponses.ativar_botao_monitoria = '';
-            ['judicializado_pela_massa','propor_monitoria','tipo_de_acao','transitado','procedencia','data_de_transito','cumprimento_de_sentenca'].forEach(key => {
+            ['judicializado_pela_massa', 'propor_monitoria', 'tipo_de_acao', 'transitado', 'procedencia', 'data_de_transito', 'cumprimento_de_sentenca'].forEach(key => {
                 delete userResponses[key];
             });
             const preservedSelections = (userResponses.selected_analysis_cards || []).filter(
@@ -660,9 +790,11 @@
             if (!cardData) {
                 return;
             }
+
             userResponses.processos_vinculados = [deepClone(cardData)];
             ensureUserResponsesShape();
             const savedResponses = cardData.tipo_de_acao_respostas || {};
+
             treeResponseKeys.forEach(key => {
                 if (savedResponses.hasOwnProperty(key)) {
                     userResponses[key] = savedResponses[key];
@@ -670,50 +802,122 @@
                     delete userResponses[key];
                 }
             });
+
             const baseFields = [
                 'judicializado_pela_massa',
                 'propor_monitoria',
                 'tipo_de_acao',
+                'julgamento',
                 'transitado',
                 'procedencia',
                 'data_de_transito',
-                'cumprimento_de_sentenca'
+                'cumprimento_de_sentenca',
+                'repropor_monitoria'
             ];
+
             baseFields.forEach(field => {
-                if (cardData.hasOwnProperty(field) && cardData[field] !== undefined) {
-                    userResponses[field] = cardData[field];
+                let value = undefined;
+                if (savedResponses.hasOwnProperty(field)) {
+                    value = savedResponses[field];
+                } else if (cardData.hasOwnProperty(field)) {
+                    value = cardData[field];
+                }
+                if (value !== undefined) {
+                    userResponses[field] = value;
                 } else {
                     delete userResponses[field];
                 }
             });
+
             const contratoArray = parseContractsField(cardData.contratos);
             userResponses.contratos_para_monitoria = contratoArray;
-            userResponses.ativar_botao_monitoria =
-                contratoArray.length ? 'SIM' : '';
+            userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
+
+            // CORRIGIDO: Renderizar árvore e popular campos de forma síncrona
             renderDecisionTree();
             populateTreeFieldsFromResponses(userResponses);
+
+            // CORRIGIDO: Disparar eventos change de forma ordenada e escalonada
+            setTimeout(() => {
+                // Primeiro, processar campos gerais (nível raiz)
+                const orderedKeys = treeResponseKeys.filter(key =>
+                    userResponses.hasOwnProperty(key) &&
+                    userResponses[key] !== undefined &&
+                    userResponses[key] !== null &&
+                    userResponses[key] !== ''
+                );
+
+                orderedKeys.forEach((key, index) => {
+                    setTimeout(() => {
+                        const $field = $(`[name="${key}"]`);
+                        if ($field.length) {
+                            if ($field.attr('type') === 'checkbox') {
+                                $field.prop('checked', String(userResponses[key]).toLowerCase() === 'sim');
+                            } else {
+                                $field.val(userResponses[key]);
+                            }
+                            // Disparar change apenas uma vez
+                            $field.off('change.restore').on('change.restore', function () {
+                                $(this).off('change.restore');
+                            }).trigger('change');
+                        }
+                    }, index * 50);
+                });
+
+                // Depois, processar campos específicos do card
+                const cardKeys = Object.keys(savedResponses).filter(key => {
+                    const value = savedResponses[key];
+                    return value !== undefined && value !== null && value !== '';
+                });
+
+                const baseDelay = orderedKeys.length * 50 + 100;
+                cardKeys.forEach((key, index) => {
+                    setTimeout(() => {
+                        const value = savedResponses[key];
+                        const fieldName = `card_${cardIndex}_${key}`;
+                        const $field = $(`[name="${fieldName}"]`);
+                        if ($field.length) {
+                            if ($field.attr('type') === 'checkbox') {
+                                $field.prop('checked', String(value).toLowerCase() === 'sim');
+                            } else {
+                                $field.val(value);
+                            }
+                            // Disparar change apenas uma vez
+                            $field.off('change.restore').on('change.restore', function () {
+                                $(this).off('change.restore');
+                            }).trigger('change');
+                        }
+                    }, baseDelay + (index * 50));
+                });
+            }, 200);
         }
 
         function scrollToProcessCard(cardIndexValue) {
             activateInnerTab('analise');
             if (cardIndexValue === 'general') {
                 restoreTreeFromGeneralSnapshot();
-                if ($dynamicQuestionsContainer.length) {
-                    $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
+                // CORRIGIDO: Aguardar renderização completa antes de rolar
+                setTimeout(() => {
+                    if ($dynamicQuestionsContainer.length) {
+                        $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }, 800); // Aumentado para aguardar todos os delays escalonados
                 return;
             }
+
             restoreTreeFromCard(cardIndexValue);
-            const selector = `.processo-card[data-card-index="${cardIndexValue}"]`;
-            const $targetCard = $dynamicQuestionsContainer.find(selector);
-            if ($targetCard.length) {
-                $targetCard.removeClass('collapsed');
-                $targetCard.find('.processo-card-toggle')
-                    .text('−')
-                    .attr('aria-expanded', 'true');
-                restoreTreeFromCard(cardIndexValue);
-                $targetCard.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            // CORRIGIDO: Aguardar renderização completa antes de rolar
+            setTimeout(() => {
+                const selector = `.processo-card[data-card-index="${cardIndexValue}"]`;
+                const $targetCard = $dynamicQuestionsContainer.find(selector);
+                if ($targetCard.length) {
+                    $targetCard.removeClass('collapsed');
+                    $targetCard.find('.processo-card-toggle')
+                        .text('−')
+                        .attr('aria-expanded', 'true');
+                    $targetCard.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 800); // Aumentado para aguardar todos os delays escalonados
         }
 
         function startNewAnalysis() {
@@ -869,7 +1073,7 @@
 
             let contratosParaMonitoria = userResponses.contratos_para_monitoria || [];
 
-            contratosParaMonitoria = contratosParaMonitoria.filter(function(contratoId) {
+            contratosParaMonitoria = contratosParaMonitoria.filter(function (contratoId) {
                 const contratoInfo = allAvailableContratos.find(
                     c => String(c.id) === String(contratoId)
                 );
@@ -882,7 +1086,7 @@
 
             userResponses.contratos_para_monitoria = contratosParaMonitoria;
 
-            contratosParaMonitoria.forEach(function(contratoId) {
+            contratosParaMonitoria.forEach(function (contratoId) {
                 const $wrapper = $(`.contrato-item-wrapper[data-contrato-id="${contratoId}"]`);
                 if ($wrapper.length) {
                     $wrapper.prepend(
@@ -1074,7 +1278,7 @@
                 if (!$fields.length) {
                     return;
                 }
-                $fields.each(function() {
+                $fields.each(function () {
                     const $field = $(this);
                     if ($field.attr('type') === 'checkbox') {
                         $field.prop('checked', String(responses[key]).toLowerCase() === 'sim');
@@ -1463,27 +1667,27 @@
                 processo.awaiting_supervision_confirm = false;
             }
             if (typeof processo.supervisionado === 'undefined') {
-                processo.supervisionado = true;
+                processo.supervisionado = false;
             }
         }
 
-function buildSummaryStatusMetadata(processo, options = {}) {
-    if (!processo || typeof processo !== 'object') {
-        return {
-            label: SUPERVISION_STATUS_LABELS.pendente,
-            classes: ['status-pendente'],
-            tooltip: ''
-        };
-    }
-    ensureSupervisionFields(processo);
-    const statusKey = processo.supervisor_status || 'pendente';
-    const baseLabel = SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
-    const baseClass = SUPERVISION_STATUS_CLASSES[statusKey] || 'status-pendente';
-    const classes = [baseClass];
-    let label = baseLabel;
-    let tooltip = '';
-    if (processo.barrado && processo.barrado.ativo) {
-        classes.push('status-barrado');
+        function buildSummaryStatusMetadata(processo, options = {}) {
+            if (!processo || typeof processo !== 'object') {
+                return {
+                    label: SUPERVISION_STATUS_LABELS.pendente,
+                    classes: ['status-pendente'],
+                    tooltip: ''
+                };
+            }
+            ensureSupervisionFields(processo);
+            const statusKey = processo.supervisor_status || 'pendente';
+            const baseLabel = SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
+            const baseClass = SUPERVISION_STATUS_CLASSES[statusKey] || 'status-pendente';
+            const classes = [baseClass];
+            let label = baseLabel;
+            let tooltip = '';
+            if (processo.barrado && processo.barrado.ativo) {
+                classes.push('status-barrado');
                 const inicio = formatDateDisplay(processo.barrado.inicio) || processo.barrado.inicio || 'data não informada';
                 const retorno = formatDateDisplay(processo.barrado.retorno_em) || processo.barrado.retorno_em || 'sem data definida';
                 tooltip = `Ficou barrado de ${inicio} a ${retorno}`;
@@ -1495,9 +1699,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     label = 'Barrado';
                 }
             }
-    const shouldShow = options.showAlways || statusKey !== 'pendente' || (processo.barrado && processo.barrado.ativo);
-    return { label, classes, tooltip, show: shouldShow };
-}
+            const shouldShow = options.showAlways || statusKey !== 'pendente' || (processo.barrado && processo.barrado.ativo);
+            return { label, classes, tooltip, show: shouldShow };
+        }
 
         function shouldSkipGeneralCard() {
             return false;
@@ -1505,7 +1709,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
 
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
-            
+
             // Container flex para título e botão (posicionado discretamente alinhado à direita)
             const $headerContainer = $('<div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px;"></div>');
             $headerContainer.append('<h3>Respostas da Análise</h3>');
@@ -1524,16 +1728,20 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             ensureUserResponsesShape();
 
             const generalSnapshot = getGeneralCardSnapshot();
-            const generalEligible = generalSnapshot && Array.isArray(generalSnapshot.contracts) && generalSnapshot.contracts.length > 0 && !shouldSkipGeneralCard();
+            const generalSnapshotReady = generalSnapshot &&
+                Array.isArray(generalSnapshot.contracts) &&
+                generalSnapshot.contracts.length > 0 &&
+                !shouldSkipGeneralCard() &&
+                (!suppressGeneralSummaryUntilFirstAnswer || Boolean(userResponses.judicializado_pela_massa));
+            const generalEligible = generalSnapshotReady;
             const savedProcessCount = getSavedProcessCards().length;
             const temDadosRelevantes =
-                generalEligible ||
+                generalSnapshotReady ||
                 userResponses.judicializado_pela_massa ||
                 Object.keys(userResponses.contratos_status || {}).length > 0 ||
                 savedProcessCount > 0;
 
             if (!temDadosRelevantes) {
-                updateAddAnalysisButtonState(false);
                 $formattedResponsesContainer.append(
                     '<p>Nenhuma análise registrada ainda. Preencha a árvore acima para iniciar.</p>'
                 );
@@ -1572,7 +1780,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
 
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
-            const processosVinculados = getSavedProcessCards();
+            const processosVinculados = getCombinedProcessCardsForSummary();
             const generalCheckboxId = 'general-monitoria-checkbox';
             const supervisedNaoEntry = (processosVinculados || []).find(
                 processo =>
@@ -1580,7 +1788,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     typeof processo.cnj === 'string' &&
                     processo.cnj.toLowerCase().includes('não judicializado')
             );
-            const generalSource = generalSnapshot || supervisedNaoEntry;
+            const generalSource = generalSnapshotReady ? generalSnapshot : supervisedNaoEntry;
             const generalHasSource =
                 generalSource && Array.isArray(generalSource.contracts) && generalSource.contracts.length > 0;
             if (generalHasSource) {
@@ -1591,9 +1799,16 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     .prop('checked', hasUserActivatedCardSelection && generalSelected);
                 const headerTitle = getGeneralCardTitle(generalSource);
                 const $label = $('<label>').attr('for', generalCheckboxId).text(headerTitle);
-                const supervisionActive = Boolean(userResponses.supervisionado_nao_judicializado);
+                const naoJudicializadoEntry =
+                    Array.isArray(userResponses.processos_vinculados) &&
+                    userResponses.processos_vinculados.find(entry =>
+                        entry &&
+                        typeof entry.cnj === 'string' &&
+                        entry.cnj.toLowerCase().includes('não judicializado')
+                    );
+                const supervisionActive = Boolean(naoJudicializadoEntry && naoJudicializadoEntry.supervisionado);
                 const statusKeyInitial = supervisionActive
-                    ? (userResponses.supervisor_status_nao_judicializado || 'pendente')
+                    ? (naoJudicializadoEntry.supervisor_status || 'pendente')
                     : 'pendente';
                 const generalApproved = statusKeyInitial === 'aprovado';
                 if (!generalApproved) {
@@ -1602,17 +1817,22 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $label.removeAttr('title');
                 }
                 const $deleteButton = $('<button type="button" class="analise-summary-card-delete" data-card-index="general" title="Excluir este card">✕</button>');
-                const $editButton = $('<button type="button" class="analise-summary-card-edit" data-card-index="general">Editar</button>');
                 const $toggleBtnGeneral = $('<button type="button" class="analise-toggle-btn">−</button>');
                 $generalHeader.append($label.prepend($checkbox));
                 const $subtitle = $('<span class="analise-summary-card-subtitle"></span>').text('Monitória Jurídicamente Viável');
                 $generalHeader.append($subtitle);
+                const generalProcesso = {
+                    cnj: headerTitle,
+                    contratos: generalSource.contracts,
+                    tipo_de_acao_respostas: generalSource.responses || {},
+                    supervisionado: supervisionActive,
+                    supervisor_status: statusKeyInitial,
+                    barrado: (naoJudicializadoEntry && naoJudicializadoEntry.barrado) ||
+                        userResponses.barrado_nao_judicializado || { ativo: false, inicio: null, retorno_em: null }
+                };
                 const generalStatus = buildSummaryStatusMetadata(
-                    {
-                        supervisor_status: statusKeyInitial,
-                        barrado: userResponses.barrado_nao_judicializado || {}
-                    },
-                    { showAlways: supervisionActive }
+                    generalProcesso,
+                    { showAlways: Boolean(generalProcesso.supervisionado) }
                 );
                 const $statusBadge = $('<span class="supervisor-status-badge"></span>');
                 $statusBadge.text(generalStatus.label);
@@ -1621,20 +1841,22 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $statusBadge.attr('title', generalStatus.tooltip);
                 }
                 const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
-                $actionGroup.append($toggleBtnGeneral).append($deleteButton).append($editButton);
+                $actionGroup.append($toggleBtnGeneral).append($deleteButton);
                 if (generalStatus.show) {
                     $generalHeader.append($statusBadge);
                 }
                 $generalHeader.append($actionGroup);
                 const $generalBody = $('<div class="analise-summary-card-body"></div>');
-                const generalProcesso = {
-                    cnj: headerTitle,
-                    contratos: generalSource.contracts,
-                    tipo_de_acao_respostas: generalSource.responses || {}
-                };
-                const generalDetails = buildProcessoDetailsSnapshot(generalProcesso, {
-                    excludeFields: ['ativar_botao_monitoria']
-                });
+                const generalDetails = buildProcessoDetailsSnapshot(
+                    {
+                        cnj: generalProcesso.cnj,
+                        contratos: generalProcesso.contratos,
+                        tipo_de_acao_respostas: generalProcesso.tipo_de_acao_respostas
+                    },
+                    {
+                        excludeFields: ['ativar_botao_monitoria']
+                    }
+                );
                 $generalBody.append(generalDetails.$detailsList);
                 $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
@@ -1647,7 +1869,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $generalBody.hide();
                     $toggleBtnGeneral.text('+');
                 }
-                $checkbox.on('change', function() {
+                $checkbox.on('change', function () {
                     const checked = $(this).is(':checked');
                     hasUserActivatedCardSelection = true;
                     syncGeneralMonitoriaSelection(checked);
@@ -1655,7 +1877,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     saveResponses();
                     updateGenerateButtonState();
                 });
-                $deleteButton.on('click', function() {
+                $deleteButton.on('click', function () {
                     syncGeneralMonitoriaSelection(false);
                     setGeneralCardSnapshot(null);
                     const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
@@ -1667,11 +1889,8 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     renderDecisionTree();
                 });
 
-                $editButton.on('click', function() {
-                    scrollToProcessCard('general');
-                });
-                $toggleBtnGeneral.on('click', function() {
-                    $generalBody.slideToggle(160, function() {
+                $toggleBtnGeneral.on('click', function () {
+                    $generalBody.slideToggle(160, function () {
                         const expanded = $generalBody.is(':visible');
                         $toggleBtnGeneral.text(expanded ? '−' : '+');
                         setCardExpansionState(generalKey, expanded);
@@ -1689,89 +1908,90 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     }
                     const cardIndex = idx;
                     const snapshot = buildProcessoDetailsSnapshot(processo);
-                const $cardVinculado = $('<div class="analise-summary-card"></div>');
-            const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
-            const $bodyVinculado = $('<div class="analise-summary-card-body"></div>');
+                    const $cardVinculado = $('<div class="analise-summary-card"></div>');
+                    const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
+                    const $bodyVinculado = $('<div class="analise-summary-card-body"></div>');
 
-                $headerVinculado.append(
-                    `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
-                );
-                const summaryStatus = buildSummaryStatusMetadata(processo, {
-                    showAlways: true
-                });
-                const $statusBadge = $('<span class="supervisor-status-badge"></span>');
-                $statusBadge.text(summaryStatus.label);
-                summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
-                if (summaryStatus.tooltip) {
-                    $statusBadge.attr('title', summaryStatus.tooltip);
-                }
-                if (summaryStatus.show) {
-                    $headerVinculado.append($statusBadge);
-                }
-                const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
-                $headerVinculado.append($toggleBtnVinculado);
-                const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
-                const $editBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
-                $headerVinculado.append($deleteBtn).append($editBtn);
-                $editBtn.on('click', function() {
-                    scrollToProcessCard(cardIndex);
-                });
-                $deleteBtn.on('click', function() {
-                    const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
-                    savedCards.splice(cardIndex, 1);
-                    const cardKey = `card-${cardIndex}`;
-                    if (Array.isArray(userResponses.selected_analysis_cards)) {
-                        userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
-                    }
-                    saveResponses();
-                    displayFormattedResponses();
-                });
-
-                const cardKey = `card-${cardIndex}`;
-                const actionResponses = processo && processo.tipo_de_acao_respostas;
-                let contractCandidates = parseContractsField(
-                    actionResponses && actionResponses.contratos_para_monitoria
-                        ? actionResponses.contratos_para_monitoria
-                        : []
-                );
-                if (contractCandidates.length === 0 && Array.isArray(processo.contratos)) {
-                    contractCandidates = processo.contratos.map(String);
-                }
-                const canSelectForMonitoria =
-                    processo &&
-                    contractCandidates.length > 0;
-                if (canSelectForMonitoria) {
-                    const $cardCheckbox = $(
-                        `<input type="checkbox" id="${cardKey}-checkbox">`
+                    $headerVinculado.append(
+                        `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
                     );
-                    $cardCheckbox.prop('disabled', false);
-                    const isSelected = Array.isArray(userResponses.selected_analysis_cards) &&
-                        userResponses.selected_analysis_cards.includes(cardKey);
-                    if (isSelected) {
-                        $cardCheckbox.prop('checked', true);
-                    }
-                    const { show, tooltip } = buildSummaryStatusMetadata(processo);
-                    const $checkboxLabel = $(
-                        `<label for="${cardKey}-checkbox" ${!show ? `title="${tooltip || 'Aguardando aprovação'}"` : ''}> </label>`
-                    );
-                    $cardCheckbox.prop('disabled', false);
-                    $headerVinculado.prepend($checkboxLabel.prepend($cardCheckbox));
-                    $cardCheckbox.on('change', function() {
-                        hasUserActivatedCardSelection = true;
-                        if (!Array.isArray(userResponses.selected_analysis_cards)) {
-                            userResponses.selected_analysis_cards = [];
-                        }
-                        const selections = userResponses.selected_analysis_cards;
-                        const isChecked = $(this).is(':checked');
-                        const idx = selections.indexOf(cardKey);
-                        if (isChecked && idx === -1) {
-                            selections.push(cardKey);
-                        } else if (!isChecked && idx > -1) {
-                            selections.splice(idx, 1);
-                        }
-                        updateGenerateButtonState();
+                    const summaryStatus = buildSummaryStatusMetadata(processo, {
+                        showAlways: Boolean(processo.supervisionado)
                     });
-                }
+                    const $statusBadge = $('<span class="supervisor-status-badge"></span>');
+                    $statusBadge.text(summaryStatus.label);
+                    summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
+                    if (summaryStatus.tooltip) {
+                        $statusBadge.attr('title', summaryStatus.tooltip);
+                    }
+                    if (summaryStatus.show) {
+                        $headerVinculado.append($statusBadge);
+                    }
+                    const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
+                    $headerVinculado.append($toggleBtnVinculado);
+                    const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
+                    $headerVinculado.append($deleteBtn);
+                    $deleteBtn.on('click', function () {
+                    if (Array.isArray(userResponses.processos_vinculados)) {
+                        userResponses.processos_vinculados.splice(cardIndex, 1);
+                    }
+                    const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
+                    if (savedCards[cardIndex]) {
+                        savedCards.splice(cardIndex, 1);
+                    }
+                    const cardKey = `card-${cardIndex}`;
+                        if (Array.isArray(userResponses.selected_analysis_cards)) {
+                            userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
+                        }
+                        saveResponses();
+                        displayFormattedResponses();
+                    });
+
+                    const cardKey = `card-${cardIndex}`;
+                    const actionResponses = processo && processo.tipo_de_acao_respostas;
+                    let contractCandidates = parseContractsField(
+                        actionResponses && actionResponses.contratos_para_monitoria
+                            ? actionResponses.contratos_para_monitoria
+                            : []
+                    );
+                    if (contractCandidates.length === 0 && Array.isArray(processo.contratos)) {
+                        contractCandidates = processo.contratos.map(String);
+                    }
+                    const canSelectForMonitoria =
+                        processo &&
+                        contractCandidates.length > 0;
+                    if (canSelectForMonitoria) {
+                        const $cardCheckbox = $(
+                            `<input type="checkbox" id="${cardKey}-checkbox">`
+                        );
+                        $cardCheckbox.prop('disabled', false);
+                        const isSelected = Array.isArray(userResponses.selected_analysis_cards) &&
+                            userResponses.selected_analysis_cards.includes(cardKey);
+                        if (isSelected) {
+                            $cardCheckbox.prop('checked', true);
+                        }
+                        const { show, tooltip } = buildSummaryStatusMetadata(processo);
+                        const $checkboxLabel = $(
+                            `<label for="${cardKey}-checkbox" ${!show ? `title="${tooltip || 'Aguardando aprovação'}"` : ''}> </label>`
+                        );
+                        $cardCheckbox.prop('disabled', false);
+                        $headerVinculado.prepend($checkboxLabel.prepend($cardCheckbox));
+                        $cardCheckbox.on('change', function () {
+                            hasUserActivatedCardSelection = true;
+                            if (!Array.isArray(userResponses.selected_analysis_cards)) {
+                                userResponses.selected_analysis_cards = [];
+                            }
+                            const selections = userResponses.selected_analysis_cards;
+                            const isChecked = $(this).is(':checked');
+                            const idx = selections.indexOf(cardKey);
+                            if (isChecked && idx === -1) {
+                                selections.push(cardKey);
+                            } else if (!isChecked && idx > -1) {
+                                selections.splice(idx, 1);
+                            }
+                            updateGenerateButtonState();
+                        });
+                    }
 
                     $cardVinculado.append($headerVinculado);
 
@@ -1795,8 +2015,8 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                         $toggleBtnVinculado.text(' + ');
                     }
 
-                    $toggleBtnVinculado.on('click', function() {
-                        $bodyVinculado.slideToggle(200, function() {
+                    $toggleBtnVinculado.on('click', function () {
+                        $bodyVinculado.slideToggle(200, function () {
                             const expanded = $bodyVinculado.is(':visible');
                             $toggleBtnVinculado.text(expanded ? ' - ' : ' + ');
                             setCardExpansionState(cardKey, expanded);
@@ -1805,43 +2025,43 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 });
             }
             const hasSummaryCard = generalEligible || processosVinculados.length > 0;
-            updateAddAnalysisButtonState(hasSummaryCard);
             if (isSupervisorUser) {
                 renderSupervisionPanel();
             }
         }
 
+
         function getTodayIso() {
             return new Date().toISOString().slice(0, 10);
         }
 
-    function createSupervisionFooter(processo, onStatusChange) {
-        const $footer = $('<div class="analise-supervision-footer"></div>');
-        const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
-        const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
-        const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
-        const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
-        const $barradoInfoToggle = $('<button type="button" class="analise-supervision-barrado-info-toggle" aria-expanded="false">+</button>');
-        const $barradoNote = $('<div class="analise-supervision-barrado-note" style="display:none;"></div>');
-        const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
-        const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
-        const updateConcludeButton = () => {
-            const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
-            $concludeBtn.prop('disabled', !needsConfirm);
-        };
+        function createSupervisionFooter(processo, onStatusChange) {
+            const $footer = $('<div class="analise-supervision-footer"></div>');
+            const $statusBtn = $('<button type="button" class="analise-supervision-status-btn"></button>');
+            const $barrarGroup = $('<div class="analise-supervision-barrar-group"></div>');
+            const $barrarToggle = $('<button type="button" class="analise-supervision-barrar-toggle"></button>');
+            const $barrarDate = $('<input type="date" class="analise-supervision-barrar-date">');
+            const $barradoInfoToggle = $('<button type="button" class="analise-supervision-barrado-info-toggle" aria-expanded="false">+</button>');
+            const $barradoNote = $('<div class="analise-supervision-barrado-note" style="display:none;"></div>');
+            const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
+            const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
+            const updateConcludeButton = () => {
+                const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
+                $concludeBtn.prop('disabled', !needsConfirm);
+            };
 
             const updateStatusButton = () => {
                 const status = processo.supervisor_status || 'pendente';
                 $statusBtn.text(`Status: ${SUPERVISION_STATUS_LABELS[status] || status}`);
-            const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
-            $statusBtn.removeClass(allStatusClasses);
-            $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
-            processo.awaiting_supervision_confirm = status !== 'pendente';
-            if (typeof onStatusChange === 'function') {
-                onStatusChange(status);
-            }
-            updateConcludeButton();
-        };
+                const allStatusClasses = Object.values(SUPERVISION_STATUS_CLASSES).join(' ');
+                $statusBtn.removeClass(allStatusClasses);
+                $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
+                processo.awaiting_supervision_confirm = status !== 'pendente';
+                if (typeof onStatusChange === 'function') {
+                    onStatusChange(status);
+                }
+                updateConcludeButton();
+            };
 
             const updateBarradoControls = () => {
                 const { barrado } = processo;
@@ -1888,7 +2108,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 saveResponses();
             });
 
-            $barrarDate.on('change', function() {
+            $barrarDate.on('change', function () {
                 const value = $(this).val();
                 processo.barrado.retorno_em = value || null;
                 if (value) {
@@ -1978,7 +2198,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             if (!isSupervisorUser || !$supervisionPanelContent) {
                 return;
             }
-            const processos = getSavedProcessCards().filter(processo => {
+            const activeProcessos =
+                Array.isArray(userResponses.processos_vinculados) ? userResponses.processos_vinculados : [];
+            const processos = [...getSavedProcessCards(), ...activeProcessos].filter(processo => {
                 ensureSupervisionFields(processo);
                 return Boolean(processo.supervisionado);
             });
@@ -2001,7 +2223,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             if (event && typeof event.detail === 'string') {
                 localStorage.setItem(notebookStorageKey, event.detail);
             }
-            $('[data-analise-cnj]').each(function() {
+            $('[data-analise-cnj]').each(function () {
                 const $column = $(this);
                 const cnj = $column.attr('data-analise-cnj');
                 if (!cnj) {
@@ -2066,7 +2288,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
 
         function loadContratosFromDOM() {
             allAvailableContratos = [];
-            $('.contrato-item-wrapper').each(function() {
+            $('.contrato-item-wrapper').each(function () {
                 const $wrapper = $(this);
                 const rawId = $wrapper.data('contrato-id');
                 if (!rawId) return;
@@ -2119,7 +2341,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 url: decisionTreeApiUrl,
                 method: 'GET',
                 dataType: 'json',
-                success: function(data) {
+                success: function (data) {
                     if (data.status === 'success') {
                         treeConfig = data.tree_data || {};
                         treeResponseKeys = Array.from(
@@ -2139,7 +2361,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                         deferredConfig.reject();
                     }
                 },
-                error: function(xhr, status, error) {
+                error: function (xhr, status, error) {
                     console.error("Erro AJAX ao carregar configuração da árvore:", status, error);
                     $dynamicQuestionsContainer.html(
                         '<p class="errornote">Erro ao carregar a árvore de decisão.</p>'
@@ -2302,7 +2524,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     $inputElement = $(
                         `<select id="${fieldId}" name="${fieldName}"><option value="">---</option></select>`
                     );
-                    (question.opcoes || []).forEach(function(opcao) {
+                    (question.opcoes || []).forEach(function (opcao) {
                         const isSelected = currentResponses[question.chave] === opcao.texto_resposta;
                         let disabled = false;
 
@@ -2334,8 +2556,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     const tag =
                         question.tipo_campo === 'TEXTO_LONGO' ? 'textarea' : 'input';
                     $inputElement = $(
-                        `<${tag} type="${type}" id="${fieldId}" name="${fieldName}" ${ 
-                            tag === 'textarea' ? 'rows="4"' : '' 
+                        `<${tag} type="${type}" id="${fieldId}" name="${fieldName}" ${tag === 'textarea' ? 'rows="4"' : ''
                         }></${tag}>`
                     ).val(currentResponses[question.chave] || '');
                     break;
@@ -2347,8 +2568,11 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     );
             }
 
-            $inputElement.on('change', function() {
+            $inputElement.on('change', function () {
                 currentResponses[question.chave] = $(this).val();
+                if (question.chave === 'judicializado_pela_massa') {
+                    suppressGeneralSummaryUntilFirstAnswer = false;
+                }
                 saveResponses();
                 renderNextQuestion(
                     questionKey,
@@ -2394,7 +2618,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             const $targetContainer =
                 cardIndex !== null ? $parentContainer : $dynamicQuestionsContainer;
 
-            $targetContainer.find('.form-row').each(function() {
+            $targetContainer.find('.form-row').each(function () {
                 const qKey = $(this).data('question-key');
                 if (
                     qKey &&
@@ -2472,8 +2696,8 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 'tipo_de_acao' in treeConfig
                     ? 'tipo_de_acao'
                     : nodeConfig.primeira_questao_vinculada ||
-                      nodeConfig.proxima_questao_chave ||
-                      null;
+                    nodeConfig.proxima_questao_chave ||
+                    null;
 
             const $editorDiv = $(
                 `<div class="form-row field-${questionKey}" data-question-key="${questionKey}"></div>`
@@ -2510,19 +2734,19 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 );
             });
 
-            $addCardButton.on('click', function() {
-            const newCardData = {
-                cnj: '',
-                contratos: [],
-                tipo_de_acao_respostas: {},
-                supervisionado: false,
-                supervisor_status: 'pendente',
-                barrado: {
-                    ativo: false,
-                    inicio: null,
-                    retorno_em: null
-                }
-            };
+            $addCardButton.on('click', function () {
+                const newCardData = {
+                    cnj: '',
+                    contratos: [],
+                    tipo_de_acao_respostas: {},
+                    supervisionado: false,
+                    supervisor_status: 'pendente',
+                    barrado: {
+                        ativo: false,
+                        inicio: null,
+                        retorno_em: null
+                    }
+                };
                 userResponses[questionKey].push(newCardData);
                 renderProcessoVinculadoCard(
                     questionKey,
@@ -2568,14 +2792,14 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             const $hashtagBtn = $(
                 `<button type="button" class="processo-cnj-hashtag" aria-label="Mencionar processo CNJ #${indexLabel}">#${indexLabel}</button>`
             );
-            $hashtagBtn.on('click', function() {
+            $hashtagBtn.on('click', function () {
                 mentionProcessoInNotas(cardData);
             });
             $titleWrapper.append($hashtagBtn);
             const $toggleBtn = $(
                 `<button type="button" class="processo-card-toggle" aria-expanded="true" aria-label="Minimizar processo CNJ #${indexLabel}">−</button>`
             );
-            $toggleBtn.on('click', function() {
+            $toggleBtn.on('click', function () {
                 const isCollapsed = $card.toggleClass('collapsed').hasClass('collapsed');
                 $toggleBtn.attr('aria-expanded', (!isCollapsed).toString());
                 $toggleBtn.text(isCollapsed ? '+' : '−');
@@ -2596,12 +2820,12 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                        placeholder="0000000-00.0000.0.00.0000">
             `).val(formatCnjDigits(cardData.cnj || ''));
 
-            $cnjInput.on('input', function() {
+            $cnjInput.on('input', function () {
                 const formatted = formatCnjDigits($(this).val());
                 $(this).val(formatted);
             });
 
-            $cnjInput.on('blur', function() {
+            $cnjInput.on('blur', function () {
                 const formatted = formatCnjDigits($(this).val());
                 $(this).val(formatted);
                 cardData.cnj = formatted;
@@ -2617,7 +2841,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             );
             $cnjInputRow.append($removeBtnInline);
             $cnjWrapper.append($cnjInputRow);
-            $removeBtnInline.on('click', function() {
+            $removeBtnInline.on('click', function () {
                 if (!confirm('Remover este processo vinculado?')) return;
                 const arr = userResponses[parentQuestionKey] || [];
                 arr.splice(cardIndex, 1);
@@ -2662,7 +2886,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                         `<label for="proc_${cardIndex}_contrato_${idStr}">${contrato.numero_contrato}</label>`
                     );
 
-                    $chk.on('change', function() {
+                    $chk.on('change', function () {
                         const val = $(this).val(); // string
                         if ($(this).is(':checked')) {
                             if (!cardData.contratos.map(String).includes(val)) {
@@ -2709,13 +2933,16 @@ function buildSummaryStatusMetadata(processo, options = {}) {
 
             const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
             $supervisionInput.prop('checked', cardData.supervisionado);
-            $supervisionInput.on('change', function() {
+            $supervisionInput.on('change', function () {
                 cardData.supervisionado = $(this).is(':checked');
                 if ($(this).is(':checked') && cardData.supervisor_status === 'pendente') {
                     cardData.supervisor_status = 'pendente';
                     cardData.awaiting_supervision_confirm = false;
                 }
                 saveResponses();
+                if (isSupervisorUser) {
+                    renderSupervisionPanel();
+                }
             });
 
             $card.append($body);
@@ -2769,7 +2996,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 return;
             }
 
-            contractCandidates.forEach(function(idStr) {
+            contractCandidates.forEach(function (idStr) {
                 const contratoInfo = allAvailableContratos.find(c => String(c.id) === idStr);
                 const isChecked = selection.includes(idStr);
                 const isDisabled = contratoInfo ? (contratoInfo.is_prescrito || contratoInfo.is_quitado) : false;
@@ -2795,7 +3022,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 $selectorDiv.append($checkboxWrapper);
             });
 
-            $selectorDiv.on('change', 'input[type="checkbox"]', function() {
+            $selectorDiv.on('change', 'input[type="checkbox"]', function () {
                 const contratoId = $(this).val(); // string
                 const isChecked = $(this).is(':checked');
                 let selection = currentResponses.contratos_para_monitoria || [];
@@ -2834,7 +3061,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 </label>
             `);
             const $input = $toggle.find('.supervision-toggle-input');
-            $input.on('change', function() {
+            $input.on('change', function () {
                 const checked = $(this).is(':checked');
                 if (!Array.isArray(userResponses.processos_vinculados)) {
                     userResponses.processos_vinculados = [];
@@ -2866,7 +3093,9 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 }
                 saveResponses();
                 displayFormattedResponses();
-                renderSupervisionPanel();
+                if (isSupervisorUser) {
+                    renderSupervisionPanel();
+                }
             });
             $wrapper.append($toggle);
             $container.append($wrapper);
@@ -2877,7 +3106,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
          * ======================================================= */
 
         // RECARREGA JSON AO MUDAR STATUS DO CONTRATO (Q, seleção etc.)
-        $(document).on('contratoStatusChange', function() {
+        $(document).on('contratoStatusChange', function () {
             try {
                 const data = $responseField.val();
                 userResponses = data ? JSON.parse(data) : {};
@@ -2901,7 +3130,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
         loadExistingResponses();
         loadContratosFromDOM();
 
-        fetchDecisionTreeConfig().done(function() {
+        fetchDecisionTreeConfig().done(function () {
             renderDecisionTree();
         });
 
@@ -2912,7 +3141,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
          * ======================================================= */
 
         // Event listener para o botão, que agora é criado dinamicamente
-        $(document).on('click', '#id_gerar_monitoria_btn', function(e) {
+        $(document).on('click', '#id_gerar_monitoria_btn', function (e) {
             e.preventDefault();
 
             if (!currentProcessoId) {
@@ -2940,12 +3169,12 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     contratos_para_monitoria: JSON.stringify(aggregatedContratoIds)
                 },
                 dataType: 'json',
-                beforeSend: function() {
+                beforeSend: function () {
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', true)
                         .text('Gerando...');
                 },
-                success: function(data) {
+                success: function (data) {
                     const msg = data && data.message ? data.message : 'Petição gerada com sucesso.';
                     let extra = '';
                     if (data && data.pdf_url) {
@@ -2961,7 +3190,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     // Recarrega a página para que a aba Arquivos reflita os novos anexos
                     window.location.reload();
                 },
-                error: function(xhr, status, error) {
+                error: function (xhr, status, error) {
                     let errorMessage =
                         'Erro ao gerar petição. Tente novamente.';
                     if (xhr.responseJSON && xhr.responseJSON.message) {
@@ -2972,7 +3201,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     alert(errorMessage);
                     console.error('Erro na geração da petição:', status, error, xhr);
                 },
-                complete: function() {
+                complete: function () {
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição Monitória');
@@ -2980,7 +3209,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
             });
         });
 
-        $(document).on('click', '#id_gerar_cobranca_btn', function(e) {
+        $(document).on('click', '#id_gerar_cobranca_btn', function (e) {
             e.preventDefault();
 
             if (!currentProcessoId) {
@@ -3007,12 +3236,12 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
                 },
                 dataType: 'json',
-                beforeSend: function() {
+                beforeSend: function () {
                     $('#id_gerar_cobranca_btn')
                         .prop('disabled', true)
                         .text('Gerando cobrança...');
                 },
-                success: function(data) {
+                success: function (data) {
                     const msg = data && data.message ? data.message : 'Petição de cobrança gerada com sucesso.';
                     let extra = '';
                     if (data && data.pdf_url) {
@@ -3028,7 +3257,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
                     window.location.reload();
                 },
-                error: function(xhr, status, error) {
+                error: function (xhr, status, error) {
                     let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
                     if (xhr.responseJSON && xhr.responseJSON.message) {
                         errorMessage = xhr.responseJSON.message;
@@ -3038,7 +3267,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     alert(errorMessage);
                     console.error('Erro na geração da cobrança judicial:', status, error, xhr);
                 },
-                complete: function() {
+                complete: function () {
                     $('#id_gerar_cobranca_btn')
                         .prop('disabled', false)
                         .text('Petição Cobrança Judicial (PDF)');
@@ -3047,7 +3276,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
         });
 
         // Botão para baixar DOC editável (gera DOCX on-demand; não salva em Arquivos)
-        $(document).on('click', '#id_baixar_doc_monitoria_btn', function(e) {
+        $(document).on('click', '#id_baixar_doc_monitoria_btn', function (e) {
             e.preventDefault();
 
             if (!currentProcessoId) {
@@ -3071,10 +3300,10 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
                 },
                 xhrFields: { responseType: 'blob' },
-                beforeSend: function() {
+                beforeSend: function () {
                     $('#id_baixar_doc_monitoria_btn').prop('disabled', true).text('Baixando...');
                 },
-                success: function(blob, status, xhr) {
+                success: function (blob, status, xhr) {
                     try {
                         const disposition = xhr.getResponseHeader('Content-Disposition') || '';
                         let filename = 'monitoria.docx';
@@ -3095,19 +3324,19 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                         alert('Documento gerado, mas houve problema ao iniciar o download.');
                     }
                 },
-                error: function(xhr, status, error) {
+                error: function (xhr, status, error) {
                     let errorMessage = 'Erro ao gerar DOC editável.';
                     if (xhr.responseText) errorMessage = xhr.responseText;
                     alert(errorMessage);
                 },
-                complete: function() {
+                complete: function () {
                     $('#id_baixar_doc_monitoria_btn').prop('disabled', false).text('DOC');
                 }
             });
         });
 
         // Botão para baixar PDF com nome amigável (via endpoint dedicado)
-        $(document).on('click', '#id_baixar_pdf_monitoria_btn', function(e) {
+        $(document).on('click', '#id_baixar_pdf_monitoria_btn', function (e) {
             e.preventDefault();
             if (!currentProcessoId) {
                 alert('Erro: ID do processo não encontrado.');
@@ -3120,10 +3349,10 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                 method: 'GET',
                 headers: { 'X-CSRFToken': csrftoken },
                 xhrFields: { responseType: 'blob' },
-                beforeSend: function() {
+                beforeSend: function () {
                     $('#id_baixar_pdf_monitoria_btn').prop('disabled', true).text('Baixando...');
                 },
-                success: function(blob, status, xhr) {
+                success: function (blob, status, xhr) {
                     try {
                         const disposition = xhr.getResponseHeader('Content-Disposition') || '';
                         let filename = 'monitoria.pdf';
@@ -3144,12 +3373,12 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                         alert('PDF disponível, mas houve problema ao iniciar o download.');
                     }
                 },
-                error: function(xhr) {
+                error: function (xhr) {
                     let msg = 'PDF da monitória não encontrado. Gere o PDF e tente novamente.';
                     if (xhr.responseText) msg = xhr.responseText;
                     alert(msg);
                 },
-                complete: function() {
+                complete: function () {
                     $('#id_baixar_pdf_monitoria_btn').prop('disabled', false).text('Baixar PDF');
                 }
             });
