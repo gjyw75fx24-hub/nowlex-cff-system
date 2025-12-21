@@ -516,6 +516,7 @@
             delete snapshotResponses.supervisor_status;
             delete snapshotResponses.awaiting_supervision_confirm;
             delete snapshotResponses.barrado;
+            delete snapshotResponses.processos_vinculados;
             return {
                 cnj: formattedCnj || 'Não informado',
                 contratos: contractIds,
@@ -548,6 +549,7 @@
             const barrado = processo.barrado
                 ? deepClone(processo.barrado)
                 : { ativo: false, inicio: null, retorno_em: null };
+            delete responses.processos_vinculados;
             return {
                 cnj: cnjFormatted || 'Não informado',
                 contratos: contractIds,
