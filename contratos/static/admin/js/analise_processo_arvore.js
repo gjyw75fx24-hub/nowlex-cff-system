@@ -1697,7 +1697,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
                 );
                 const summaryStatus = buildSummaryStatusMetadata(processo, {
-                    showAlways: Boolean(processo.supervisionado)
+                    showAlways: true
                 });
                 const $statusBadge = $('<span class="supervisor-status-badge"></span>');
                 $statusBadge.text(summaryStatus.label);
@@ -1744,6 +1744,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     const $cardCheckbox = $(
                         `<input type="checkbox" id="${cardKey}-checkbox">`
                     );
+                    $cardCheckbox.prop('disabled', false);
                     const isSelected = Array.isArray(userResponses.selected_analysis_cards) &&
                         userResponses.selected_analysis_cards.includes(cardKey);
                     if (isSelected) {
