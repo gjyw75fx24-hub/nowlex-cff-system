@@ -1846,19 +1846,27 @@
                     $generalHeader.append($statusBadge);
                 }
                 $generalHeader.append($actionGroup);
-                const $generalBody = $('<div class="analise-summary-card-body"></div>');
-                const generalDetails = buildProcessoDetailsSnapshot(
-                    {
-                        cnj: generalProcesso.cnj,
+            const $generalBody = $('<div class="analise-summary-card-body"></div>');
+            const generalDetails = buildProcessoDetailsSnapshot(
+                {
+                    cnj: generalProcesso.cnj,
                         contratos: generalProcesso.contratos,
                         tipo_de_acao_respostas: generalProcesso.tipo_de_acao_respostas
                     },
                     {
                         excludeFields: ['ativar_botao_monitoria']
                     }
-                );
-                $generalBody.append(generalDetails.$detailsList);
-                $generalCard.append($generalHeader).append($generalBody);
+            );
+                const $generalDetailsRow = $('<div class="analise-card-details-row"></div>');
+                $generalDetailsRow.append(generalDetails.$detailsList);
+                const $generalObservationNote = createObservationNoteElement(generalDetails.observationEntries);
+                const $generalSupervisorNote = createSupervisorNoteElement(generalProcesso);
+                appendNotesColumn($generalDetailsRow, [$generalObservationNote, $generalSupervisorNote], {
+                    cnj: generalDetails.cnj,
+                    contracts: generalDetails.contractIds
+                });
+                $generalBody.append($generalDetailsRow);
+            $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 const generalKey = 'general';
                 const generalExpanded = getCardExpansionState(generalKey, false);
@@ -1998,7 +2006,8 @@
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append(snapshot.$detailsList);
                     const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-                    appendNotesColumn($detailsRow, [$noteElement], {
+                    const $supervisorNoteElement = createSupervisorNoteElement(processo);
+                    appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
                         cnj: snapshot.cnj,
                         contracts: snapshot.contractIds
                     });
