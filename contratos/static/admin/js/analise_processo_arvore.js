@@ -1754,9 +1754,7 @@ function buildSummaryStatusMetadata(processo, options = {}) {
                     const $checkboxLabel = $(
                         `<label for="${cardKey}-checkbox" ${!show ? `title="${tooltip || 'Aguardando aprovação'}"` : ''}> </label>`
                     );
-                    if (!show) {
-                        $cardCheckbox.prop('disabled', true);
-                    }
+                    $cardCheckbox.prop('disabled', false);
                     $headerVinculado.prepend($checkboxLabel.prepend($cardCheckbox));
                     $cardCheckbox.on('change', function() {
                         hasUserActivatedCardSelection = true;
