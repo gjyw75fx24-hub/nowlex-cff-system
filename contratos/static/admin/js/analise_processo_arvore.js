@@ -944,9 +944,6 @@
                 ? options.suppressSummary
                 : true;
             suppressGeneralSummaryUntilFirstAnswer = suppressSummary;
-            if (hasActiveAnalysisResponses()) {
-                storeActiveAnalysisAsProcessCard();
-            }
 
             preserveGeneralCardBeforeReset();
             clearTreeResponsesForNewAnalysis();
