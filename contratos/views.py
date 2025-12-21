@@ -8,7 +8,7 @@ from .models import (
     OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo
 )
 from .integracoes_escavador.api import buscar_processo_por_cnj
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.db.models import Max
 from django.db import transaction
 from django.contrib.admin.views.decorators import staff_member_required
@@ -249,7 +249,7 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     if total_valor_causa == Decimal('0'):
         total_valor_causa = _to_decimal(processo.valor_causa)
 
-    dados['VALOR DA CAUSA'] = f'{total_valor_causa:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+    dados['VALOR DA CAUSA'] = _format_currency_brl(total_valor_causa)
     dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
 
     dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
@@ -764,58 +764,58 @@ def parse_endereco(endereco_str):
 # Helper para converter número para extenso (simplificado)
 # Para uma solução robusta, usar uma biblioteca ou implementar mais completo.
 def number_to_words_pt_br(num):
-    if not isinstance(num, (int, float, Decimal)):
-        return str(num) # Retorna como string se não for número
-
-    num_str = str(int(num)) # Lida apenas com a parte inteira para simplificar
+    try:
+        num_decimal = num if isinstance(num, Decimal) else Decimal(str(num))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(num)
 
     unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
     dezena = ['', 'dez', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
     dez_a_dezenove = ['dez', 'onze', 'doze', 'treze', 'catorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove']
     centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos']
 
-    if num == 0: return 'zero'
-
     def _num_to_words_chunk(n):
         s = ''
         n = int(n)
-        
+
         if n >= 100:
             if n == 100:
                 s += 'cem'
             else:
                 s += centenas[n // 100]
             n %= 100
-            if n > 0: s += ' e '
-        
-        if n >= 20 or n < 10:
+            if n > 0:
+                s += ' e '
+
+        if 10 <= n < 20:
+            s += dez_a_dezenove[n - 10]
+            return s
+
+        if n >= 20:
             s += dezena[n // 10]
             n %= 10
-            if n > 0 and (s != '' or (n // 10) > 0): s += ' e '
-        
+            if n > 0:
+                s += ' e '
+
         if n > 0:
             s += unidades[n]
-        
+
         return s
 
     def _process_triplet(triplet, scale):
         triplet = int(triplet)
-        if triplet == 0: return ''
+        if triplet == 0:
+            return ''
         words = _num_to_words_chunk(triplet)
-        
-        if scale == 1: # Mil
-            if words == 'um': return 'mil'
-            return words + ' mil'
-        elif scale == 2: # Milhão
-            if words == 'um': return 'um milhão'
-            return words + ' milhões'
-        # Adicione mais escalas conforme necessário (bilhões, trilhões)
+
+        if scale == 1:  # Mil
+            return 'mil' if words == 'um' else f"{words} mil"
+        if scale == 2:  # Milhão
+            return 'um milhão' if words == 'um' else f"{words} milhões"
         return words
 
+    inteiro = int(num_decimal)
     words_list = []
-    
-    # Processar parte inteira
-    inteiro = int(num)
     if inteiro == 0:
         words_list.append('zero')
     else:
@@ -824,22 +824,21 @@ def number_to_words_pt_br(num):
         while temp_int > 0:
             chunks.append(temp_int % 1000)
             temp_int //= 1000
-        
-        for i, chunk in enumerate(chunks):
+
+        for idx, chunk in enumerate(chunks):
             if chunk > 0:
-                words_list.insert(0, _process_triplet(chunk, i))
-    
-    result = ' '.join(filter(None, words_list)) # Remove strings vazias e junta
-    
-    # Processar parte decimal (centavos)
-    decimal_part = round((num - inteiro) * 100)
+                words_list.insert(0, _process_triplet(chunk, idx))
+
+    inteiro_words = ' '.join(filter(None, words_list)) or 'zero'
+    inteiro_phrase = f"{inteiro_words} reais"
+
+    decimal_part = int(((num_decimal - inteiro) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
     if decimal_part > 0:
-        if inteiro == 0:
-            result = _num_to_words_chunk(decimal_part) + ' centavos'
-        else:
-            result += ' e ' + _num_to_words_chunk(decimal_part) + ' centavos'
-    
-    return result.capitalize()
+        centavos_text = _num_to_words_chunk(decimal_part).strip()
+        centavos_phrase = f"{centavos_text} centavos" if centavos_text else 'centavos'
+        inteiro_phrase = f"{inteiro_phrase} e {centavos_phrase}"
+
+    return inteiro_phrase.capitalize()
 
 @require_POST
 def generate_monitoria_petition(request, processo_id=None):
