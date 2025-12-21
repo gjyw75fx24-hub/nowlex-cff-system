@@ -1626,7 +1626,7 @@
                 return null;
             }
             const editable = options.editable !== false;
-            const placeholderText = editable ? 'Anote sua observação...' : '';
+            const placeholderText = 'Anote sua observação...';
             const $note = $('<div class="analise-supervisor-note"></div>');
             $note.append('<strong>Observações do Supervisor</strong>');
             const $textArea = $(
@@ -1635,7 +1635,6 @@
             if (!editable) {
                 $textArea.prop('readonly', true);
                 $textArea.attr('tabindex', -1);
-                $textArea.css('background-color', '#f8f9fa');
             }
 
             $note.append($textArea);
