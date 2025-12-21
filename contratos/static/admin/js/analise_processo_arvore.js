@@ -1741,7 +1741,14 @@
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
 
-            if (suppressGeneralSummaryUntilFirstAnswer && !userResponses.judicializado_pela_massa) {
+            const hasSavedCards = getSavedProcessCards().length > 0;
+            const hasGeneralSnapshot = Boolean(getGeneralCardSnapshot());
+            if (
+                suppressGeneralSummaryUntilFirstAnswer &&
+                !userResponses.judicializado_pela_massa &&
+                !hasSavedCards &&
+                !hasGeneralSnapshot
+            ) {
                 return;
             }
 
