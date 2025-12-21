@@ -940,6 +940,7 @@
 
             hasUserActivatedCardSelection = false;
 
+            suppressGeneralSummaryUntilFirstAnswer = true;
             if (hasActiveAnalysisResponses()) {
                 storeActiveAnalysisAsProcessCard();
             }
