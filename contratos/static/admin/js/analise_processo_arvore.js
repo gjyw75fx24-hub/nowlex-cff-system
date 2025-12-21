@@ -373,6 +373,21 @@
             }, 200);
         }
 
+        function editGeneralSummaryCard() {
+            const snapshot = getGeneralCardSnapshot();
+            if (!snapshot || !snapshot.responses) {
+                alert('Não há uma análise salva para editar.');
+                return;
+            }
+            ensureUserResponsesShape();
+            suppressGeneralSummaryUntilFirstAnswer = false;
+            clearTreeResponsesForNewAnalysis();
+            restoreTreeFromGeneralSnapshot();
+            if ($dynamicQuestionsContainer.length) {
+                $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
         /* =========================================================
          * Helpers gerais
          * ======================================================= */
@@ -1807,8 +1822,7 @@
                 const $generalCard = $('<div class="analise-summary-card"></div>');
                 const $generalHeader = $('<div class="analise-summary-card-header"></div>');
                 const generalSelected = isGeneralMonitoriaSelected();
-                const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`)
-                    .prop('checked', hasUserActivatedCardSelection && generalSelected);
+                const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`).prop('checked', hasUserActivatedCardSelection && generalSelected);
                 const headerTitle = getGeneralCardTitle(generalSource);
                 const $label = $('<label>').attr('for', generalCheckboxId).text(headerTitle);
                 const naoJudicializadoEntry =
@@ -1853,22 +1867,26 @@
                     $statusBadge.attr('title', generalStatus.tooltip);
                 }
                 const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
-                $actionGroup.append($toggleBtnGeneral).append($deleteButton);
+                const $editGeneralBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
+                $editGeneralBtn.on('click', () => {
+                    editGeneralSummaryCard();
+                });
+                $actionGroup.append($toggleBtnGeneral).append($editGeneralBtn).append($deleteButton);
                 if (generalStatus.show) {
                     $generalHeader.append($statusBadge);
                 }
                 $generalHeader.append($actionGroup);
-            const $generalBody = $('<div class="analise-summary-card-body"></div>');
-            const generalDetails = buildProcessoDetailsSnapshot(
-                {
-                    cnj: generalProcesso.cnj,
+                const $generalBody = $('<div class="analise-summary-card-body"></div>');
+                const generalDetails = buildProcessoDetailsSnapshot(
+                    {
+                        cnj: generalProcesso.cnj,
                         contratos: generalProcesso.contratos,
                         tipo_de_acao_respostas: generalProcesso.tipo_de_acao_respostas
                     },
                     {
                         excludeFields: ['ativar_botao_monitoria']
                     }
-            );
+                );
                 const $generalDetailsRow = $('<div class="analise-card-details-row"></div>');
                 $generalDetailsRow.append(generalDetails.$detailsList);
                 const $generalObservationNote = createObservationNoteElement(generalDetails.observationEntries);
@@ -1878,7 +1896,7 @@
                     contracts: generalDetails.contractIds
                 });
                 $generalBody.append($generalDetailsRow);
-            $generalCard.append($generalHeader).append($generalBody);
+                $generalCard.append($generalHeader).append($generalBody);
                 $formattedResponsesContainer.append($generalCard);
                 const generalKey = 'general';
                 const generalExpanded = getCardExpansionState(generalKey, false);
