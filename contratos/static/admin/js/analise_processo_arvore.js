@@ -160,7 +160,7 @@
             $tabNavigation.append($supervisionTabButton);
         }
 
-        let suppressGeneralSummaryUntilFirstAnswer = false;
+        let suppressGeneralSummaryUntilFirstAnswer = true;
 
         const $analysisActionRow = $('<div class="analise-inner-action-row"></div>');
         const $saveAnalysisButton = $(
@@ -1737,6 +1737,10 @@
 
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
+
+            if (suppressGeneralSummaryUntilFirstAnswer && !userResponses.judicializado_pela_massa) {
+                return;
+            }
 
             // Container flex para título e botão (posicionado discretamente alinhado à direita)
             const $headerContainer = $('<div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px;"></div>');
