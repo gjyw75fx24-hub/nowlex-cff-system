@@ -1621,18 +1621,31 @@
             $detailsRow.append($notesColumn);
         }
 
-        function createSupervisorNoteElement(processo) {
+        function createSupervisorNoteElement(processo, options = {}) {
             if (!processo) {
                 return null;
             }
+            const editable = options.editable !== false;
+            const placeholderText = editable ? 'Anote sua observação...' : '';
             const $note = $('<div class="analise-supervisor-note"></div>');
             $note.append('<strong>Observações do Supervisor</strong>');
-            const $textArea = $('<textarea class="analise-supervisor-note-text" rows="4" placeholder="Anote sua observação..."></textarea>');
+            const $textArea = $(
+                `<textarea class="analise-supervisor-note-text" rows="4" placeholder="${placeholderText}"></textarea>`
+            );
+            if (!editable) {
+                $textArea.prop('readonly', true);
+                $textArea.attr('tabindex', -1);
+                $textArea.css('background-color', '#f8f9fa');
+            }
 
             $note.append($textArea);
 
             const currentText = processo.supervisor_observacoes || '';
             $textArea.val(currentText);
+            if (!editable) {
+                return $note;
+            }
+
             let saveTimeout = null;
             const persistObservation = () => {
                 const value = $textArea.val().trim();
@@ -1860,7 +1873,7 @@
                 const $generalDetailsRow = $('<div class="analise-card-details-row"></div>');
                 $generalDetailsRow.append(generalDetails.$detailsList);
                 const $generalObservationNote = createObservationNoteElement(generalDetails.observationEntries);
-                const $generalSupervisorNote = createSupervisorNoteElement(generalProcesso);
+                const $generalSupervisorNote = createSupervisorNoteElement(generalProcesso, { editable: false });
                 appendNotesColumn($generalDetailsRow, [$generalObservationNote, $generalSupervisorNote], {
                     cnj: generalDetails.cnj,
                     contracts: generalDetails.contractIds
@@ -2006,7 +2019,7 @@
                     const $detailsRow = $('<div class="analise-card-details-row"></div>');
                     $detailsRow.append(snapshot.$detailsList);
                     const $noteElement = createObservationNoteElement(snapshot.observationEntries);
-                    const $supervisorNoteElement = createSupervisorNoteElement(processo);
+                    const $supervisorNoteElement = createSupervisorNoteElement(processo, { editable: false });
                     appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
                         cnj: snapshot.cnj,
                         contracts: snapshot.contractIds
