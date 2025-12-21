@@ -497,27 +497,33 @@
             const activeCards = Array.isArray(userResponses.processos_vinculados)
                 ? userResponses.processos_vinculados
                 : [];
+
             const combined = savedCards.map((card, idx) => ({
                 ...card,
-                __savedIndex: idx
+                __savedIndex: idx,
+                __source: 'saved'
             }));
+
             if (!activeCards.length) {
                 return combined;
             }
+
             activeCards.forEach(activeCard => {
-                if (!activeCard || !activeCard.cnj) {
-                    return;
-                }
+                if (!activeCard || !activeCard.cnj) return;
+
                 const alreadyIncluded = combined.some(card =>
-                    card && card.cnj && activeCard.cnj && card.cnj === activeCard.cnj
+                    card && card.cnj && activeCard.cnj && String(card.cnj).trim() === String(activeCard.cnj).trim()
                 );
+
                 if (!alreadyIncluded) {
                     combined.push({
                         ...activeCard,
-                        __savedIndex: null
+                        __savedIndex: null,
+                        __source: 'active'
                     });
                 }
             });
+
             return combined;
         }
 
@@ -608,9 +614,6 @@
         }
 
         function captureActiveAnalysisSnapshot() {
-            if (!hasActiveAnalysisResponses()) {
-                return null;
-            }
             const keysToCapture = new Set([
                 ...getTreeQuestionKeysForSnapshot(),
                 'contratos_para_monitoria',
@@ -726,6 +729,14 @@
         }
 
         function storeActiveAnalysisAsProcessCard() {
+            ensureUserResponsesShape();
+            const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
+            const editingIndex =
+                Number.isFinite(userResponses._editing_card_index) &&
+                userResponses._editing_card_index >= 0
+                    ? Number(userResponses._editing_card_index)
+                    : null;
+
             let snapshot = buildSnapshotFromProcessosVinculados();
             if (!snapshot) {
                 snapshot = captureActiveAnalysisSnapshot();
@@ -734,8 +745,21 @@
                 return false;
             }
             snapshot.saved_at = new Date().toISOString();
-            appendProcessCardToHistory(snapshot);
+            snapshot.updated_at = snapshot.saved_at;
+
+            if (editingIndex !== null && savedCards[editingIndex]) {
+                snapshot.general_card_snapshot =
+                    savedCards[editingIndex].general_card_snapshot || false;
+                savedCards[editingIndex] = snapshot;
+            } else {
+                appendProcessCardToHistory(snapshot);
+            }
+
             userResponses.processos_vinculados = [];
+            if (editingIndex !== null) {
+                delete userResponses._editing_card_index;
+                $('.edit-mode-indicator').remove();
+            }
             return true;
         }
 
@@ -796,117 +820,335 @@
             userResponses.selected_analysis_cards = preservedSelections;
         }
 
-        function restoreTreeFromCard(cardIndex) {
-            if (typeof cardIndex !== 'number') {
-                return;
-            }
-            const savedCards = getSavedProcessCards();
-            const cardData = savedCards[cardIndex];
-            if (!cardData) {
-                return;
-            }
-
-            userResponses.processos_vinculados = [deepClone(cardData)];
-            ensureUserResponsesShape();
-            const savedResponses = cardData.tipo_de_acao_respostas || {};
-
-            treeResponseKeys.forEach(key => {
-                if (savedResponses.hasOwnProperty(key)) {
-                    userResponses[key] = savedResponses[key];
-                } else {
-                    delete userResponses[key];
+        function showEditModeIndicator(cnj, cardIndex) {
+            // Remover indicador anterior se existir
+            $('.edit-mode-indicator').remove();
+    
+            const isNaoJudicializado = !cnj || String(cnj).toLowerCase().includes('não') || String(cnj).trim() === '';
+            const displayText = isNaoJudicializado ? 'Não Judicializado' : cnj;
+    
+            const $indicator = $(`
+                <div class="edit-mode-indicator" style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border-radius: 8px;
+                    padding: 12px 20px;
+                    margin-bottom: 15px;
+                    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                ">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 20px;">✏️</span>
+                        <div>
+                            <strong style="display: block; font-size: 14px;">Modo de Edição</strong>
+                            <span style="font-size: 12px; opacity: 0.9;">Editando: ${displayText}</span>
+                        </div>
+                    </div>
+                    <button type="button" class="cancel-edit-btn" style="
+                        background: rgba(255, 255, 255, 0.2);
+                        color: white;
+                        border: 1px solid rgba(255, 255, 255, 0.3);
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        transition: all 0.2s;
+                    ">Cancelar Edição</button>
+                </div>
+            `);
+    
+            $dynamicQuestionsContainer.before($indicator);
+    
+            $indicator.find('.cancel-edit-btn').on('click', function() {
+                const confirmar = confirm(
+                    'Deseja cancelar a edição?\n\n' +
+                    'As alterações não salvas serão perdidas.'
+                );
+        
+                if (confirmar) {
+                    $('.edit-mode-indicator').remove();
+                    delete userResponses._editing_card_index;
+                    clearTreeResponsesForNewAnalysis();
+                    renderDecisionTree();
+                    saveResponses();
+                    console.log('Edição cancelada');
                 }
             });
+    
+            $indicator.find('.cancel-edit-btn').hover(
+                function() { $(this).css('background', 'rgba(255, 255, 255, 0.3)'); },
+                function() { $(this).css('background', 'rgba(255, 255, 255, 0.2)'); }
+            );
+        }
 
-            const baseFields = [
-                'judicializado_pela_massa',
-                'propor_monitoria',
-                'tipo_de_acao',
-                'julgamento',
-                'transitado',
-                'procedencia',
-                'data_de_transito',
-                'cumprimento_de_sentenca',
-                'repropor_monitoria'
-            ];
+        function restoreTreeFromCard(cardIndex) {
+            const parsedIndex = Number(cardIndex);
+            if (!Number.isFinite(parsedIndex)) {
+                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
+                return;
+            }
+            cardIndex = parsedIndex;
+    
+            console.log('=== INICIANDO EDIÇÃO DO CARD ===', cardIndex);
+    
+            userResponses._editing_card_index = cardIndex;
+            const savedCards = getSavedProcessCards();
+            const cardData = savedCards[cardIndex];
+    
+            if (!cardData) {
+                console.warn('restoreTreeFromCard: card não encontrado no índice:', cardIndex);
+                return;
+            }
 
-            baseFields.forEach(field => {
-                let value = undefined;
-                if (savedResponses.hasOwnProperty(field)) {
-                    value = savedResponses[field];
-                } else if (cardData.hasOwnProperty(field)) {
-                    value = cardData[field];
-                }
-                if (value !== undefined) {
-                    userResponses[field] = value;
+            console.log('Card encontrado:', cardData);
+
+            clearTreeResponsesForNewAnalysis();
+            userResponses.processos_vinculados = [deepClone(cardData)];
+            ensureUserResponsesShape();
+    
+            const savedResponses = cardData.tipo_de_acao_respostas || {};
+
+            console.log('🔍 Verificando primeira pergunta...');
+            if (!savedResponses.hasOwnProperty('judicializado_pela_massa') || !savedResponses.judicializado_pela_massa) {
+                console.log('⚠️ Primeira pergunta faltando!');
+                if (savedResponses.tipo_de_acao && savedResponses.tipo_de_acao.trim() !== '') {
+                    console.log('→ Tem tipo_de_acao =', savedResponses.tipo_de_acao);
+                    console.log('→ Inferindo: judicializado_pela_massa = "SIM"');
+                    savedResponses.judicializado_pela_massa = 'SIM';
+                    userResponses.judicializado_pela_massa = 'SIM';
+                } else if (savedResponses.propor_monitoria) {
+                    console.log('→ Tem propor_monitoria =', savedResponses.propor_monitoria);
+                    console.log('→ Inferindo: judicializado_pela_massa = "NÃO"');
+                    savedResponses.judicializado_pela_massa = 'NÃO';
+                    userResponses.judicializado_pela_massa = 'NÃO';
                 } else {
-                    delete userResponses[field];
+                    console.log('→ Nenhuma pista, usando padrão = "NÃO"');
+                    savedResponses.judicializado_pela_massa = 'NÃO';
+                    userResponses.judicializado_pela_massa = 'NÃO';
                 }
+                console.log('✅ Primeira pergunta inferida:', savedResponses.judicializado_pela_massa);
+            } else {
+                console.log('✅ Primeira pergunta já existe:', savedResponses.judicializado_pela_massa);
+            }
+    
+            console.log('Respostas salvas:', savedResponses);
+    
+            Object.keys(savedResponses).forEach(key => {
+                userResponses[key] = deepClone(savedResponses[key]);
+                console.log(`Carregando: ${key} =`, savedResponses[key]);
             });
 
             const contratoArray = parseContractsField(cardData.contratos);
             userResponses.contratos_para_monitoria = contratoArray;
             userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
 
-            // CORRIGIDO: Renderizar árvore e popular campos de forma síncrona
+            console.log('UserResponses completo:', userResponses);
+
+            console.log('Renderizando árvore...');
             renderDecisionTree();
-            populateTreeFieldsFromResponses(userResponses);
 
-            // CORRIGIDO: Disparar eventos change de forma ordenada e escalonada
             setTimeout(() => {
-                // Primeiro, processar campos gerais (nível raiz)
-                const orderedKeys = treeResponseKeys.filter(key =>
-                    userResponses.hasOwnProperty(key) &&
-                    userResponses[key] !== undefined &&
-                    userResponses[key] !== null &&
-                    userResponses[key] !== ''
-                );
+                console.log('=== INICIANDO POPULAÇÃO EM CASCATA ===');
+    
+                function populateFieldsCascade(attempt = 1, maxAttempts = 10) {
+                    console.log(`--- Tentativa ${attempt} de ${maxAttempts} ---`);
+    
+                    const savedResponses = cardData.tipo_de_acao_respostas || {};
+                    console.log('savedResponses disponível:', savedResponses);
 
-                orderedKeys.forEach((key, index) => {
-                    setTimeout(() => {
-                        const $field = $(`[name="${key}"]`);
-                        if ($field.length) {
-                            if ($field.attr('type') === 'checkbox') {
-                                $field.prop('checked', String(userResponses[key]).toLowerCase() === 'sim');
-                            } else {
-                                $field.val(userResponses[key]);
-                            }
-                            // Disparar change apenas uma vez
-                            $field.off('change.restore').on('change.restore', function () {
-                                $(this).off('change.restore');
-                            }).trigger('change');
+                    const $allFields = $dynamicQuestionsContainer.find('[name]');
+                    const totalFields = $allFields.length;
+    
+                    console.log(`Campos no DOM: ${totalFields}`);
+    
+                    let fieldsPopulated = 0;
+    
+                    $allFields.each(function() {
+                        const $field = $(this);
+                        const fieldName = $field.attr('name');
+                        const currentValue = $field.val();
+
+                        let savedValue = userResponses[fieldName];
+                        if (savedValue === undefined && savedResponses && savedResponses[fieldName]) {
+                            savedValue = savedResponses[fieldName];
                         }
-                    }, index * 50);
-                });
 
-                // Depois, processar campos específicos do card
-                const cardKeys = Object.keys(savedResponses).filter(key => {
-                    const value = savedResponses[key];
-                    return value !== undefined && value !== null && value !== '';
-                });
+                        console.log(`  Verificando campo: ${fieldName}, valor atual: "${currentValue}", valor salvo:`, savedValue);
 
-                const baseDelay = orderedKeys.length * 50 + 100;
-                cardKeys.forEach((key, index) => {
-                    setTimeout(() => {
-                        const value = savedResponses[key];
-                        const fieldName = `card_${cardIndex}_${key}`;
-                        const $field = $(`[name="${fieldName}"]`);
-                        if ($field.length) {
-                            if ($field.attr('type') === 'checkbox') {
-                                $field.prop('checked', String(value).toLowerCase() === 'sim');
+                        if (savedValue !== undefined && savedValue !== null) {
+                            const needsPopulation = !currentValue ||
+                                                  currentValue === '---' ||
+                                                  currentValue === '' ||
+                                                  (Array.isArray(savedValue) && currentValue !== savedValue.join(','));
+
+                            if (needsPopulation) {
+                                console.log(`  → Populando: ${fieldName} = ${savedValue}`);
+
+                                if ($field.attr('type') === 'checkbox') {
+                                    const isChecked = String(savedValue).toUpperCase() === 'SIM' ||
+                                                    String(savedValue).toLowerCase() === 'true' ||
+                                                    savedValue === true;
+                                    $field.prop('checked', isChecked);
+                                    console.log(`    ✓ Checkbox setado para: ${isChecked}`);
+
+                                } else if ($field.is('select')) {
+                                    console.log(`    📋 Select detectado, valor desejado: "${savedValue}"`);
+                                    const options = [];
+                                    $field.find('option').each(function() {
+                                        const optValue = $(this).val();
+                                        const optText = $(this).text().trim();
+                                        options.push({ value: optValue, text: optText });
+                                        console.log(`      - Option: value="${optValue}", text="${optText}"`);
+                                    });
+
+                                    let matchedValue = null;
+                                    if ($field.find(`option[value="${savedValue}"]`).length > 0) {
+                                        matchedValue = savedValue;
+                                        console.log(`    ✓ Match exato encontrado: "${matchedValue}"`);
+                                    } else {
+                                        $field.find('option').each(function() {
+                                            const optValue = $(this).val();
+                                            const optText = $(this).text().trim();
+
+                                            if (optValue && optValue.toUpperCase().includes(String(savedValue).toUpperCase())) {
+                                                matchedValue = optValue;
+                                                console.log(`    ✓ Match parcial por value encontrado: "${matchedValue}"`);
+                                                return false;
+                                            }
+                                            if (optText && optText.toUpperCase().includes(String(savedValue).toUpperCase())) {
+                                                matchedValue = optValue;
+                                                console.log(`    ✓ Match parcial por text encontrado: "${matchedValue}"`);
+                                                return false;
+                                            }
+                                        });
+                                    }
+
+                                    if (!matchedValue && String(savedValue).toUpperCase() === 'SIM') {
+                                        $field.find('option').each(function() {
+                                            const optValue = $(this).val();
+                                            if (optValue && optValue.toUpperCase().startsWith('SIM')) {
+                                                matchedValue = optValue;
+                                                console.log(`    ✓ Primeira option "SIM*" encontrada: "${matchedValue}"`);
+                                                return false;
+                                            }
+                                        });
+                                    }
+                                    if (!matchedValue && String(savedValue).toUpperCase() === 'NÃO') {
+                                        $field.find('option').each(function() {
+                                            const optValue = $(this).val();
+                                            if (optValue && (optValue.toUpperCase().startsWith('NÃO') || optValue.toUpperCase().startsWith('NAO'))) {
+                                                matchedValue = optValue;
+                                                console.log(`    ✓ Primeira option "NÃO*" encontrada: "${matchedValue}"`);
+                                                return false;
+                                            }
+                                        });
+                                    }
+
+                                    if (matchedValue) {
+                                        $field.val(matchedValue);
+                                        console.log(`    ✅ Select populado com: "${matchedValue}"`);
+                                    } else {
+                                        console.warn(`    ⚠️ Nenhuma option correspondente encontrada para: "${savedValue}"`);
+                                        console.warn(`    ⚠️ Options disponíveis:`, options);
+                                        $field.val(savedValue);
+                                    }
+
+                                } else if ($field.attr('type') === 'date') {
+                                    $field.val(savedValue);
+                                    console.log(`    ✓ Date setado para: ${savedValue}`);
+
+                                } else if ($field.attr('type') === 'radio') {
+                                    $field.filter(`[value="${savedValue}"]`).prop('checked', true);
+                                    console.log(`    ✓ Radio setado para: ${savedValue}`);
+
+                                } else {
+                                    $field.val(savedValue);
+                                    console.log(`    ✓ Campo setado para: ${savedValue}`);
+                                }
+
+                                console.log(`    🔄 Disparando change event...`);
+                                $field.trigger('change');
+
+                                setTimeout(() => {
+                                    const camposAposChange = $dynamicQuestionsContainer.find('[name]').length;
+                                    console.log(`    📊 Campos após change: ${camposAposChange} (antes: ${totalFields})`);
+                                    if (camposAposChange > totalFields) {
+                                        console.log(`    ✅ Novos campos criados! (+${camposAposChange - totalFields})`);
+                                    } else {
+                                        console.log(`    ⚠️ Nenhum campo novo criado`);
+                                    }
+                                }, 200);
+
+                                fieldsPopulated++;
                             } else {
-                                $field.val(value);
+                                console.log(`  ⏭️ Campo já populado, pulando`);
                             }
-                            // Disparar change apenas uma vez
-                            $field.off('change.restore').on('change.restore', function () {
-                                $(this).off('change.restore');
-                            }).trigger('change');
+                        } else {
+                            console.log(`  ⚠️ Sem valor salvo para: ${fieldName}`);
                         }
-                    }, baseDelay + (index * 50));
-                });
-            }, 200);
+                    });
+    
+                    console.log(`  Campos populados: ${fieldsPopulated}`);
+    
+                    if (fieldsPopulated > 0 && attempt < maxAttempts) {
+                        setTimeout(() => {
+                            const $newFields = $dynamicQuestionsContainer.find('[name]');
+                            const newTotalFields = $newFields.length;
+    
+                            console.log(`  Campos após change: ${newTotalFields}`);
+    
+                            if (newTotalFields > totalFields) {
+                                console.log(`  ✅ Novos campos criados! Continuando...`);
+                                populateFieldsCascade(attempt + 1, maxAttempts);
+                            } else {
+                                if (attempt < maxAttempts) {
+                                    console.log(`  ⚠️ Nenhum campo novo, mas tentando novamente...`);
+                                    populateFieldsCascade(attempt + 1, maxAttempts);
+                                } else {
+                                    console.log(`  ✅ Cascata finalizada`);
+                                    finalizarEdicao();
+                                }
+                            }
+                        }, 800);
+                    } else {
+                        console.log(`  ✅ Cascata finalizada (sem mais campos para popular)`);
+                        finalizarEdicao();
+                    }
+                }
+    
+                function finalizarEdicao() {
+                    console.log('=== FINALIZANDO EDIÇÃO ===');
+    
+                    if (typeof updateContractStars === 'function') {
+                        updateContractStars();
+                    }
+    
+                    if (typeof updateGenerateButtonState === 'function') {
+                        updateGenerateButtonState();
+                    }
+    
+                    saveResponses();
+    
+                    const $finalFields = $dynamicQuestionsContainer.find('[name]');
+                    console.log(`=== TOTAL FINAL DE CAMPOS: ${$finalFields.length} ===`);
+    
+                    $finalFields.each(function() {
+                        const fieldName = $(this).attr('name');
+                        const fieldValue = $(this).val();
+                        console.log(`  ${fieldName}: ${fieldValue}`);
+                    });
+    
+                    console.log('=== EDIÇÃO CARREGADA COM SUCESSO ===');
+    
+                    showEditModeIndicator(cardData.cnj, cardIndex);
+                }
+    
+                populateFieldsCascade();
+    
+            }, 500);
         }
-
         function scrollToProcessCard(cardIndexValue) {
             activateInnerTab('analise');
             if (cardIndexValue === 'general') {
@@ -945,7 +1187,10 @@
                 : true;
             suppressGeneralSummaryUntilFirstAnswer = suppressSummary;
 
-            preserveGeneralCardBeforeReset();
+            const skipGeneralSnapshot = Boolean(options.skipGeneralSnapshot);
+            if (!skipGeneralSnapshot) {
+                preserveGeneralCardBeforeReset();
+            }
             clearTreeResponsesForNewAnalysis();
             renderDecisionTree();
             saveResponses();
@@ -1770,8 +2015,7 @@
             const generalSnapshotReady = generalSnapshot &&
                 Array.isArray(generalSnapshot.contracts) &&
                 generalSnapshot.contracts.length > 0 &&
-                !shouldSkipGeneralCard() &&
-                (!suppressGeneralSummaryUntilFirstAnswer || Boolean(userResponses.judicializado_pela_massa));
+                !shouldSkipGeneralCard();
             const generalEligible = generalSnapshotReady;
             const savedProcessCount = getSavedProcessCards().length;
             const temDadosRelevantes =
@@ -1820,133 +2064,6 @@
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
             const processosVinculados = getCombinedProcessCardsForSummary();
-            const generalCheckboxId = 'general-monitoria-checkbox';
-            const supervisedNaoEntry = (processosVinculados || []).find(
-                processo =>
-                    processo &&
-                    typeof processo.cnj === 'string' &&
-                    processo.cnj.toLowerCase().includes('não judicializado')
-            );
-            const generalSource = generalSnapshotReady ? generalSnapshot : supervisedNaoEntry;
-            const generalHasSource =
-                generalSource && Array.isArray(generalSource.contracts) && generalSource.contracts.length > 0;
-            if (generalHasSource) {
-                const $generalCard = $('<div class="analise-summary-card"></div>');
-                const $generalHeader = $('<div class="analise-summary-card-header"></div>');
-                const generalSelected = isGeneralMonitoriaSelected();
-                const $checkbox = $(`<input type="checkbox" id="${generalCheckboxId}">`).prop('checked', hasUserActivatedCardSelection && generalSelected);
-                const headerTitle = getGeneralCardTitle(generalSource);
-                const $label = $('<label>').attr('for', generalCheckboxId).text(headerTitle);
-                const naoJudicializadoEntry =
-                    Array.isArray(userResponses.processos_vinculados) &&
-                    userResponses.processos_vinculados.find(entry =>
-                        entry &&
-                        typeof entry.cnj === 'string' &&
-                        entry.cnj.toLowerCase().includes('não judicializado')
-                    );
-                const supervisionActive = Boolean(naoJudicializadoEntry && naoJudicializadoEntry.supervisionado);
-                const statusKeyInitial = supervisionActive
-                    ? (naoJudicializadoEntry.supervisor_status || 'pendente')
-                    : 'pendente';
-                const generalApproved = statusKeyInitial === 'aprovado';
-                if (!generalApproved) {
-                    $label.attr('title', 'Aguardando aprovação');
-                } else {
-                    $label.removeAttr('title');
-                }
-                const $deleteButton = $('<button type="button" class="analise-summary-card-delete" data-card-index="general" title="Excluir este card">✕</button>');
-                const $toggleBtnGeneral = $('<button type="button" class="analise-toggle-btn">−</button>');
-                $generalHeader.append($label.prepend($checkbox));
-                const $subtitle = $('<span class="analise-summary-card-subtitle"></span>').text('Monitória Jurídicamente Viável');
-                $generalHeader.append($subtitle);
-                const generalProcesso = {
-                    cnj: headerTitle,
-                    contratos: generalSource.contracts,
-                    tipo_de_acao_respostas: generalSource.responses || {},
-                    supervisionado: supervisionActive,
-                    supervisor_status: statusKeyInitial,
-                    barrado: (naoJudicializadoEntry && naoJudicializadoEntry.barrado) ||
-                        userResponses.barrado_nao_judicializado || { ativo: false, inicio: null, retorno_em: null }
-                };
-                const generalStatus = buildSummaryStatusMetadata(
-                    generalProcesso,
-                    { showAlways: Boolean(generalProcesso.supervisionado) }
-                );
-                const $statusBadge = $('<span class="supervisor-status-badge"></span>');
-                $statusBadge.text(generalStatus.label);
-                generalStatus.classes.forEach(cls => $statusBadge.addClass(cls));
-                if (generalStatus.tooltip) {
-                    $statusBadge.attr('title', generalStatus.tooltip);
-                }
-                const $actionGroup = $('<div class="analise-summary-card-actions"></div>');
-                const $editGeneralBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
-                $editGeneralBtn.on('click', () => {
-                    editGeneralSummaryCard();
-                });
-                $actionGroup.append($toggleBtnGeneral).append($editGeneralBtn).append($deleteButton);
-                if (generalStatus.show) {
-                    $generalHeader.append($statusBadge);
-                }
-                $generalHeader.append($actionGroup);
-                const $generalBody = $('<div class="analise-summary-card-body"></div>');
-                const generalDetails = buildProcessoDetailsSnapshot(
-                    {
-                        cnj: generalProcesso.cnj,
-                        contratos: generalProcesso.contratos,
-                        tipo_de_acao_respostas: generalProcesso.tipo_de_acao_respostas
-                    },
-                    {
-                        excludeFields: ['ativar_botao_monitoria']
-                    }
-                );
-                const $generalDetailsRow = $('<div class="analise-card-details-row"></div>');
-                $generalDetailsRow.append(generalDetails.$detailsList);
-                const $generalObservationNote = createObservationNoteElement(generalDetails.observationEntries);
-                const $generalSupervisorNote = createSupervisorNoteElement(generalProcesso, { editable: false });
-                appendNotesColumn($generalDetailsRow, [$generalObservationNote, $generalSupervisorNote], {
-                    cnj: generalDetails.cnj,
-                    contracts: generalDetails.contractIds
-                });
-                $generalBody.append($generalDetailsRow);
-                $generalCard.append($generalHeader).append($generalBody);
-                $formattedResponsesContainer.append($generalCard);
-                const generalKey = 'general';
-                const generalExpanded = getCardExpansionState(generalKey, false);
-                if (generalExpanded) {
-                    $generalBody.show();
-                    $toggleBtnGeneral.text('−');
-                } else {
-                    $generalBody.hide();
-                    $toggleBtnGeneral.text('+');
-                }
-                $checkbox.on('change', function () {
-                    const checked = $(this).is(':checked');
-                    hasUserActivatedCardSelection = true;
-                    syncGeneralMonitoriaSelection(checked);
-                    userResponses.ativar_botao_monitoria = checked ? 'SIM' : '';
-                    saveResponses();
-                    updateGenerateButtonState();
-                });
-                $deleteButton.on('click', function () {
-                    syncGeneralMonitoriaSelection(false);
-                    setGeneralCardSnapshot(null);
-                    const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
-                    const existingIndex = savedCards.findIndex(entry => entry && entry.general_card_snapshot);
-                    if (existingIndex > -1) {
-                        savedCards.splice(existingIndex, 1);
-                    }
-                    saveResponses();
-                    renderDecisionTree();
-                });
-
-                $toggleBtnGeneral.on('click', function () {
-                    $generalBody.slideToggle(160, function () {
-                        const expanded = $generalBody.is(':visible');
-                        $toggleBtnGeneral.text(expanded ? '−' : '+');
-                        setCardExpansionState(generalKey, expanded);
-                    });
-                });
-            }
             if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
                 processosVinculados.forEach((processo, idx) => {
                     if (
@@ -1956,7 +2073,10 @@
                     ) {
                         return;
                     }
-                    const cardIndex = idx;
+                const cardIndex = idx;
+                const savedCardIndex = Number.isFinite(processo.__savedIndex)
+                    ? processo.__savedIndex
+                    : cardIndex;
                     const snapshot = buildProcessoDetailsSnapshot(processo);
                     const $cardVinculado = $('<div class="analise-summary-card"></div>');
                     const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
@@ -1981,23 +2101,77 @@
                     $headerVinculado.append($toggleBtnVinculado);
                     const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
                     $headerVinculado.append($deleteBtn);
-                    $deleteBtn.on('click', function () {
-                    if (Array.isArray(userResponses.processos_vinculados)) {
-                        userResponses.processos_vinculados.splice(cardIndex, 1);
-                    }
-                    const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
-                    if (savedCards[cardIndex]) {
-                        savedCards.splice(cardIndex, 1);
-                    }
+                    const $editBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
+                    $headerVinculado.append($editBtn);
                     const cardKey = `card-${cardIndex}`;
+                    const savedIndexAttr = Number.isFinite(savedCardIndex) ? String(savedCardIndex) : '';
+                    $deleteBtn.attr('data-card-index', savedIndexAttr);
+                    $editBtn.attr('data-saved-index', savedIndexAttr);
+                    $editBtn.attr('data-cnj', snapshot.cnj || '');
+                    $editBtn.attr('data-visual-index', String(cardIndex));
+                    $deleteBtn.on('click', function () {
+                        if (Array.isArray(userResponses.processos_vinculados)) {
+                            userResponses.processos_vinculados.splice(cardIndex, 1);
+                        }
+                        const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
+                        const attrIndex = $(this).attr('data-card-index');
+                        const targetIndex = attrIndex ? Number(attrIndex) : null;
+                        if (Number.isFinite(targetIndex) && savedCards[targetIndex]) {
+                            savedCards.splice(targetIndex, 1);
+                        } else if (savedCards[cardIndex]) {
+                            savedCards.splice(cardIndex, 1);
+                        }
                         if (Array.isArray(userResponses.selected_analysis_cards)) {
                             userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
                         }
                         saveResponses();
                         displayFormattedResponses();
                     });
+                    $editBtn.on('click', function () {
+                        suppressGeneralSummaryUntilFirstAnswer = false;
+                        activateInnerTab('analise');
 
-                    const cardKey = `card-${cardIndex}`;
+                        const savedIndexRaw = $(this).attr('data-saved-index');
+                        const savedIndex = savedIndexRaw !== null && savedIndexRaw !== '' ? Number(savedIndexRaw) : NaN;
+                        if (Number.isFinite(savedIndex)) {
+                            restoreTreeFromCard(savedIndex);
+                            setTimeout(() => {
+                                if ($dynamicQuestionsContainer.length) {
+                                    $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }
+                            }, 300);
+                            return;
+                        }
+
+                        const cnj = String($(this).attr('data-cnj') || '').trim();
+                        if (cnj) {
+                            const savedCards = getSavedProcessCards();
+                            const foundIndex = savedCards.findIndex(card => card && String(card.cnj || '').trim() === cnj);
+                            if (foundIndex > -1) {
+                                restoreTreeFromCard(foundIndex);
+                                setTimeout(() => {
+                                    if ($dynamicQuestionsContainer.length) {
+                                        $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    }
+                                }, 300);
+                                return;
+                            }
+                        }
+
+                        const visualIndexRaw = $(this).attr('data-visual-index');
+                        const visualIndex = visualIndexRaw ? Number(visualIndexRaw) : NaN;
+                        if (Number.isFinite(visualIndex)) {
+                            restoreTreeFromCard(visualIndex);
+                            setTimeout(() => {
+                                if ($dynamicQuestionsContainer.length) {
+                                    $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }
+                            }, 300);
+                            return;
+                        }
+
+                        console.warn('Editar: não foi possível resolver o card para edição.', { savedIndexRaw, cnj, visualIndexRaw });
+                    });
                     const actionResponses = processo && processo.tipo_de_acao_respostas;
                     let contractCandidates = parseContractsField(
                         actionResponses && actionResponses.contratos_para_monitoria
