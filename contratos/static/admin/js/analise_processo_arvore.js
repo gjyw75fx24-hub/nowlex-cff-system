@@ -3183,6 +3183,18 @@
                 console.log('1️⃣ Sincronizando card com saved...');
                 syncEditingCardWithSaved(cardData);
 
+                if (!Array.isArray(userResponses.processos_vinculados)) {
+                    userResponses.processos_vinculados = [];
+                }
+                const editIndex =
+                    Number.isFinite(userResponses._editing_card_index) &&
+                    userResponses._editing_card_index >= 0
+                        ? Number(userResponses._editing_card_index)
+                        : null;
+                if (editIndex !== null) {
+                    userResponses.processos_vinculados[editIndex] = cardData;
+                }
+
                 console.log('───────────────────────────────────────────────────');
                 console.log('2️⃣ Salvando respostas...');
                 saveResponses();
