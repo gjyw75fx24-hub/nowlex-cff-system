@@ -1720,16 +1720,25 @@
         function getContractNumberDisplay(contractIds = []) {
             return contractIds
                 .map(id => {
-                    const contratoInfo = allAvailableContratos.find(c => String(c.id) === String(id));
+                    const contratoInfo = allAvailableContratos.find(
+                        c =>
+                            String(c.id) === String(id) ||
+                            String(c.numero_contrato) === String(id)
+                    );
                     return contratoInfo ? contratoInfo.numero_contrato : `ID ${id}`;
                 })
                 .filter(Boolean);
         }
 
-        function formatAnsweredValue(key, value) {
+        function formatAnsweredValue(key, value, options = {}) {
             if (Array.isArray(value)) {
                 if (key === 'contratos_para_monitoria') {
-                    const contractNumbers = getContractNumberDisplay(value);
+                    const contractNumbers =
+                        options.contractInfos && options.contractInfos.length
+                            ? options.contractInfos
+                                  .map(ci => ci.numero_contrato || `ID ${ci.id}`)
+                                  .filter(Boolean)
+                            : getContractNumberDisplay(value);
                     return contractNumbers.length ? contractNumbers.join(', ') : value.join(', ');
                 }
                 return value.join(', ');
@@ -1783,7 +1792,9 @@
                 }
                 entries.push({
                     label: labels[key] || key,
-                    value: formatAnsweredValue(key, value)
+                    value: formatAnsweredValue(key, value, {
+                        contractInfos: options.contractInfos
+                    })
                 });
             });
             return entries;
@@ -1792,7 +1803,8 @@
         function buildProcessoDetailsSnapshot(processo, options = {}) {
             const cnjVinculado = processo.cnj || 'Não informado';
             const $ulDetalhes = $('<ul></ul>');
-            const contratoInfos = (processo.contratos || []).map(cId => {
+            const contratoIds = parseContractsField(processo.contratos);
+            const contratoInfos = contratoIds.map(cId => {
                 const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
                 if (cInfo) {
                     return cInfo;
@@ -1800,6 +1812,40 @@
                 const fallback = fetchContractInfoFromDOM(cId);
                 if (fallback) {
                     return fallback;
+                }
+                return {
+                    id: cId,
+                    numero_contrato: `ID ${cId}`,
+                    valor_total_devido: 0,
+                    valor_causa: 0
+                };
+            });
+            const monitoriaIds = parseContractsField(
+                processo.tipo_de_acao_respostas &&
+                processo.tipo_de_acao_respostas.contratos_para_monitoria
+                    ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                    : []
+            );
+            const monitoriaInfos = monitoriaIds.map(cId => {
+                const prioritized = contratoInfos.find(
+                    c =>
+                        String(c.id) === String(cId) ||
+                        String(c.numero_contrato) === String(cId)
+                );
+                if (prioritized) {
+                    return prioritized;
+                }
+                const fallback = allAvailableContratos.find(
+                    c =>
+                        String(c.id) === String(cId) ||
+                        String(c.numero_contrato) === String(cId)
+                );
+                if (fallback) {
+                    return fallback;
+                }
+                const domFallback = fetchContractInfoFromDOM(cId);
+                if (domFallback) {
+                    return domFallback;
                 }
                 return {
                     id: cId,
@@ -1838,7 +1884,8 @@
             );
 
             const fieldEntries = getAnsweredFieldEntries(processo, {
-                excludeFields: options.excludeFields || []
+                excludeFields: options.excludeFields || [],
+                contractInfos: monitoriaInfos
             });
             if (fieldEntries.length) {
                 const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
