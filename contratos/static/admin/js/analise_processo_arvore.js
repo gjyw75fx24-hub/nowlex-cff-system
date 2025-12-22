@@ -163,7 +163,7 @@
 
         const $analysisActionRow = $('<div class="analise-inner-action-row"></div>');
         const $saveAnalysisButton = $(
-            '<button type="button" class="button analise-save-analysis-btn">Salvar</button>'
+            '<button type="button" class="button analise-save-analysis-btn">Concluir Análise</button>'
         );
         $analysisActionRow.append($saveAnalysisButton);
 
@@ -190,6 +190,15 @@
         );
         $inlineGroup.append($tabWrapper);
 
+        const clickSaveAndContinueEditor = () => {
+            const $continueBtn = $adminForm.find('button[name="_continue"], input[name="_continue"]');
+            if ($continueBtn.length) {
+                $continueBtn.first().trigger('click');
+                return true;
+            }
+            return false;
+        };
+
         $saveAnalysisButton.on('click', () => {
             if (!hasActiveAnalysisResponses()) {
                 return;
@@ -199,6 +208,17 @@
                 saveResponses();
                 suppressGeneralSummaryUntilFirstAnswer = true;
                 startNewAnalysis({ skipGeneralSnapshot: true, suppressSummary: false });
+                setTimeout(() => {
+                    if (!clickSaveAndContinueEditor()) {
+                        const $continueInput = $('<input>', { type: 'hidden', name: '_continue', value: '1' });
+                        if (!$adminForm.find('input[name="_continue"]').length) {
+                            $adminForm.append($continueInput);
+                        } else {
+                            $adminForm.find('input[name="_continue"]').val('1');
+                        }
+                        $adminForm.first().submit();
+                    }
+                }, 150);
             }
         });
 
