@@ -285,7 +285,15 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             except Exception:
                 logger.exception("Falha ao carregar tipos de petição")
                 tipos = []
-            return JsonResponse({'tipos': tipos})
+            seen_names = set()
+            unique_tipos = []
+            for tipo in tipos:
+                nome = tipo.get('nome')
+                if nome in seen_names:
+                    continue
+                seen_names.add(nome)
+                unique_tipos.append(tipo)
+            return JsonResponse({'tipos': unique_tipos})
 
         if request.method == 'POST':
             try:

@@ -194,6 +194,9 @@
 
 .documento-peticoes-search-actions {
     width: 100%;
+    align-self: flex-end;
+    display: flex;
+    justify-content: flex-end;
 }
 
 .documento-peticoes-search-actions .object-tools.object-tools--after-search {
@@ -202,8 +205,9 @@
     display: inline-flex;
     flex-wrap: wrap;
     gap: 0.35rem;
-    justify-content: flex-start;
-    align-items: center;
+    justify-content: flex-end;
+    align-items: flex-end;
+    margin-top: 12px;
 }
 
 .object-tools.object-tools--after-search .addlink {
