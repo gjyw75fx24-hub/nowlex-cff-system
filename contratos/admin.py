@@ -1,10 +1,12 @@
+import logging
+
 from django.contrib import admin, messages
-from django.db import models
+from django.db import models, transaction
 from django.db.models import FloatField, Q, Sum
 from django.db.models.functions import Now, Abs, Cast, Coalesce
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
-from django.http import HttpResponseRedirect, JsonResponse, QueryDict
+from django.http import HttpResponseRedirect, JsonResponse, QueryDict, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, render
 from django.utils.html import format_html
 from django.urls import reverse, path
@@ -19,12 +21,15 @@ from django.contrib.auth.models import User, Group # Importar os modelos User e 
 from django.utils.translation import gettext_lazy as _
 from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.contenttypes.models import ContentType
+from django.middleware.csrf import get_token
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     ProcessoJudicial, Parte, Contrato, StatusProcessual,
     AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
     OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo, ProcessoArquivo, DocumentoModelo,
+    AdvogadoPassivo, ProcessoArquivo, DocumentoModelo, TipoPeticao,
 )
 from .widgets import EnderecoWidget
 
@@ -235,6 +240,7 @@ class EtiquetaAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentoModelo)
 class DocumentoModeloAdmin(admin.ModelAdmin):
+    change_list_template = "admin/contratos/documentomodelo/change_list.html"
     list_display = ('nome', 'slug', 'arquivo', 'atualizado_em')
     readonly_fields = ('atualizado_em',)
     search_fields = ('nome', 'slug')
@@ -247,6 +253,74 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             'fields': ('atualizado_em',),
         }),
     )
+
+    class Media:
+        css = {'all': ('admin/css/documento_modelo_peticoes.css',)}
+        js = ('admin/js/documento_modelo_peticoes.js',)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'tipos-peticao/',
+                self.admin_site.admin_view(self.tipos_peticao_view),
+                name='contratos_documentomodelo_tipos_peticao'
+            ),
+        ]
+        return custom_urls + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context.setdefault(
+            'tipos_peticao_api_url',
+            reverse('admin:contratos_documentomodelo_tipos_peticao')
+        )
+        extra_context.setdefault('csrf_token', get_token(request))
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def tipos_peticao_view(self, request):
+        if request.method == 'GET':
+            try:
+                tipos = list(TipoPeticao.objects.order_by('ordem').values('id', 'nome', 'ordem'))
+            except Exception:
+                logger.exception("Falha ao carregar tipos de petição")
+                tipos = []
+            return JsonResponse({'tipos': tipos})
+
+        if request.method == 'POST':
+            try:
+                payload = json.loads(request.body.decode('utf-8'))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return JsonResponse({'error': 'Payload inválido.'}, status=400)
+
+            names = payload.get('tipos')
+            if not isinstance(names, list):
+                return JsonResponse({'error': 'Formato inválido.'}, status=400)
+
+            trimmed = [str(name).strip() for name in names if str(name).strip()]
+            cleaned = []
+            seen = set()
+            for value in trimmed:
+                if value in seen:
+                    continue
+                seen.add(value)
+                cleaned.append(value)
+
+            try:
+                with transaction.atomic():
+                    TipoPeticao.objects.all().delete()
+                    objects = [
+                        TipoPeticao(nome=nome, ordem=index)
+                        for index, nome in enumerate(cleaned)
+                    ]
+                    TipoPeticao.objects.bulk_create(objects)
+            except Exception:
+                logger.exception("Falha ao salvar tipos de petição")
+                return JsonResponse({'error': 'Não foi possível salvar os tipos.'}, status=500)
+
+            return JsonResponse({'status': 'ok'})
+
+        return HttpResponseNotAllowed(['GET', 'POST'])
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
@@ -1438,6 +1512,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         extra_context['next_obj_url'] = base_url.format(f'{next_obj_id}/change/{filter_params}') if next_obj_id else None
         extra_context['delegar_users'] = User.objects.order_by('username')
         extra_context['is_supervisor'] = is_user_supervisor(request.user)
+        extra_context['tipos_peticao_api_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao')
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
@@ -1520,6 +1595,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css', # <--- Adicionado
                 'admin/css/analise_processo.css', # <--- Adicionado
+                'admin/css/arquivos_peticoes_tab.css',
             )
         }
         js = (
@@ -1531,6 +1607,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/mapa_interativo.js',
+            'admin/js/arquivos_peticoes_tab.js',
             'admin/js/tarefas_prazos_interface.js',
             'admin/js/soma_contratos.js',
             'admin/js/cia_button.js',
