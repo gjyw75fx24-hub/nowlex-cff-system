@@ -819,6 +819,32 @@
             userResponses.selected_analysis_cards = preservedSelections;
         }
 
+        function syncEditingCardWithSaved(cardData) {
+            if (!cardData) {
+                return;
+            }
+            ensureUserResponsesShape();
+            const editIndex =
+                Number.isFinite(userResponses._editing_card_index) &&
+                userResponses._editing_card_index >= 0
+                    ? Number(userResponses._editing_card_index)
+                    : null;
+            if (editIndex === null) {
+                return;
+            }
+            if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
+                userResponses[SAVED_PROCESSOS_KEY] = [];
+            }
+            const savedCards = userResponses[SAVED_PROCESSOS_KEY];
+            const updatedCard = deepClone(cardData);
+            ensureSupervisionFields(updatedCard);
+            savedCards[editIndex] = updatedCard;
+            if (!Array.isArray(userResponses.processos_vinculados)) {
+                userResponses.processos_vinculados = [];
+            }
+            userResponses.processos_vinculados[editIndex] = updatedCard;
+        }
+
         function showEditModeIndicator(cnj, cardIndex) {
             // Remover indicador anterior se existir
             $('.edit-mode-indicator').remove();
