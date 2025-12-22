@@ -330,6 +330,20 @@ class DocumentoModelo(models.Model):
         return self.nome
 
 
+class TipoPeticao(models.Model):
+    nome = models.CharField(max_length=150, verbose_name="Nome da Petição")
+    ordem = models.PositiveIntegerField(default=0, verbose_name="Ordem")
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+
+    class Meta:
+        verbose_name = "Tipo de Petição"
+        verbose_name_plural = "Tipos de Petição"
+        ordering = ['ordem', 'id']
+
+    def __str__(self):
+        return self.nome
+
+
 class ParteProcessoAdvogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE)
     advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)
