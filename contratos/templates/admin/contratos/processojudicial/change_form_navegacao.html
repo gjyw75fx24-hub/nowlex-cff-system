@@ -5,6 +5,7 @@
 {{ block.super }}
 <script>
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
+window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 </script>
 {% endblock %}
 
