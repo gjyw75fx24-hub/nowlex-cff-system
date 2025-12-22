@@ -1,0 +1,229 @@
+.documento-peticoes-widget {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+    background: #fff;
+    font-size: 14px;
+    line-height: 1.4;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.documento-peticoes-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.documento-peticoes-title {
+    display: block;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.documento-peticoes-description {
+    margin: 4px 0 0;
+    color: #6a6f77;
+    font-size: 0.85rem;
+}
+
+.documento-peticoes-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.documento-peticoes-add,
+.documento-peticoes-save {
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    font-size: 20px;
+    line-height: 1;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.documento-peticoes-add {
+    background: #1c7ed6;
+    color: #fff;
+    box-shadow: 0 4px 10px rgba(28, 126, 214, 0.35);
+}
+
+.documento-peticoes-save {
+    background: #0d6efd;
+    color: #fff;
+    width: auto;
+    min-width: 70px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.documento-peticoes-add:hover,
+.documento-peticoes-save:hover {
+    transform: translateY(-1px);
+}
+
+.documento-peticoes-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 140px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.documento-peticoes-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.documento-peticoes-input {
+    flex: 1;
+    border: 1px solid #cbd3df;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.9rem;
+}
+
+.documento-peticoes-remove {
+    border: none;
+    background: transparent;
+    color: #6c757d;
+    font-size: 0.85rem;
+    padding: 4px 6px;
+    cursor: pointer;
+}
+
+.documento-peticoes-placeholder {
+    margin: 0;
+    color: #7d868f;
+    font-size: 0.85rem;
+}
+
+.documento-peticoes-status-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #4a4a4a;
+}
+
+.documento-peticoes-message {
+    color: #375a7f;
+    min-height: 1rem;
+}
+
+.documento-peticoes-message[data-status="error"] {
+    color: #c82333;
+}
+
+.documento-peticoes-message[data-status="success"] {
+    color: #28a745;
+}
+
+.documento-peticoes-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.documento-peticoes-tab-label {
+    font-weight: 600;
+    color: #4a4a4a;
+}
+
+.documento-peticoes-tab-actions {
+    position: relative;
+}
+
+.documento-peticoes-tab-button {
+    border: none;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #f7f8fb;
+    color: #1c7ed6;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.documento-peticoes-tab-button:hover {
+    background: #eef2fb;
+}
+
+.documento-peticoes-dropdown {
+    position: absolute;
+    right: 0;
+    margin-top: 4px;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid #d3dae5;
+    background: #fff;
+    box-shadow: 0 8px 16px rgba(18, 24, 33, 0.12);
+    z-index: 10;
+}
+
+.documento-peticoes-select {
+    width: 180px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #d3dae5;
+}
+
+.documento-peticoes-search-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+}
+
+.documento-peticoes-search-field {
+    width: 100%;
+}
+
+.documento-peticoes-search-actions {
+    width: 100%;
+}
+
+.documento-peticoes-search-actions .object-tools.object-tools--after-search {
+    margin: 0;
+    padding: 0;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+.object-tools.object-tools--after-search .addlink {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding-right: 34px;
+    min-height: 28px;
+    transform: none;
+    transform-origin: left center;
+}
+
+.object-tools.object-tools--after-search .addlink::after {
+    content: '';
+    margin-left: 8px;
+}

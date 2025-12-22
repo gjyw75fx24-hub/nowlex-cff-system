@@ -1,0 +1,67 @@
+.inline-group-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+.inline-group-tabs button {
+    white-space: nowrap;
+    font-size: 0.82rem;
+    padding: 6px 10px;
+}
+
+.inline-group-subtabs {
+    display: inline-flex;
+    align-items: center;
+    padding-bottom: 4px;
+    order: 999;
+    position: relative;
+}
+
+.inline-group-subtab-button {
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: #1c7ed6;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.inline-group-subtab-button:hover {
+    background-color: #eef2fb;
+}
+
+.inline-group-subtab-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 200px;
+    border-radius: 8px;
+    border: 1px solid #d3dae5;
+    background: #fff;
+    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
+    padding: 8px;
+    display: none;
+    z-index: 10;
+}
+
+.inline-group-subtab-dropdown.open {
+    display: block;
+}
+
+.inline-group-subtab-dropdown select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid #d3dae5;
+}
+
+.inline-group-subtab-dropdown-status {
+    margin: 0 0 6px;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
