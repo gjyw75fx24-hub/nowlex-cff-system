@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from django.db import models
 from django.db.models import FloatField, Q, Sum
-from django.db.models.functions import Now, Abs, Cast
+from django.db.models.functions import Now, Abs, Cast, Coalesce
 from django.utils import timezone
 from django.db.models import Count, Max, Subquery, OuterRef
 from django.http import HttpResponseRedirect, JsonResponse, QueryDict
@@ -601,22 +601,41 @@ class AprovacaoFilter(admin.SimpleListFilter):
         ("barrado", "Barrados"),
     ]
 
-    PATHS = {
-        "aprovado": '$.processos_vinculados[*] ? (@.supervisor_status == "aprovado")',
-        "reprovado": '$.processos_vinculados[*] ? (@.supervisor_status == "reprovado")',
-        "barrado": '$.processos_vinculados[*] ? (@.barrado.ativo == true)',
+    PATH_KEYS = ("processos_vinculados", "saved_processos_vinculados")
+    MATCH_CONDITIONS = {
+        "aprovado": '@.supervisor_status == "aprovado" && @.barrado.ativo != true',
+        "reprovado": '@.supervisor_status == "reprovado" && @.barrado.ativo != true',
+        "barrado": '@.barrado.ativo == true',
     }
+
+    def _json_path_expr_for_key(self, key, condition):
+        path = f'$.{key}[*] ? ({condition})'
+        return models.Func(
+            models.F('analise_processo__respostas'),
+            models.Value(path),
+            function='jsonb_path_exists',
+            output_field=models.BooleanField()
+        )
+
+    def _filter_queryset_by_condition(self, queryset, condition):
+        match_q = None
+        for key in self.PATH_KEYS:
+            alias = f'_aprovacao_match_{key}'
+            expr = self._json_path_expr_for_key(key, condition)
+            queryset = queryset.annotate(**{alias: expr})
+            current = models.Q(**{alias: True})
+            match_q = current if match_q is None else match_q | current
+        if match_q is None:
+            return queryset.none()
+        return queryset.filter(match_q)
 
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
         items = []
         for value, label in self.OPTIONS:
-            path = self.PATHS.get(value)
-            if path:
-                expr = self._json_path_expr(path)
-                # Clona o queryset para evitar que a anotação vaze
-                count_qs = qs.annotate(_aprovacao_match=expr).filter(_aprovacao_match=True)
-                count = count_qs.count()
+            condition = self.MATCH_CONDITIONS.get(value)
+            if condition:
+                count = self._filter_queryset_by_condition(qs, condition).count()
                 label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
                 items.append((value, label_html))
             else:
@@ -644,33 +663,29 @@ class AprovacaoFilter(admin.SimpleListFilter):
                 'display': label,
             }
 
-    def _json_path_expr(self, path):
-        return models.Func(
-            models.F('analise_processo__respostas'),
-            models.Value(path),
-            function='jsonb_path_exists',
-            output_field=models.BooleanField()
-        )
-
     def queryset(self, request, queryset):
         value = self.value()
-        path = self.PATHS.get(value)
-        if not path:
+        condition = self.MATCH_CONDITIONS.get(value)
+        if not condition:
             return queryset
-        expr = self._json_path_expr(path)
-        queryset = queryset.annotate(
-            _aprovacao_match=expr
-        ).filter(_aprovacao_match=True)
+        queryset = self._filter_queryset_by_condition(queryset, condition)
         if value == "barrado":
-            barrado_path = '$.processos_vinculados[*] ? (@.barrado.ativo == true).barrado.inicio'
-            date_expr = JsonbPathQueryFirstText(
-                models.F('analise_processo__respostas'),
-                models.Value(barrado_path),
+            def _cast_data_para(key):
+                path = f'$.{key}[*] ? (@.barrado.ativo == true).barrado.retorno_em'
+                expr = JsonbPathQueryFirstText(
+                    models.F('analise_processo__respostas'),
+                    models.Value(path),
+                )
+                return Cast(expr, models.DateField())
+
+            retorno_expr = Coalesce(
+                _cast_data_para('processos_vinculados'),
+                _cast_data_para('saved_processos_vinculados'),
             )
             queryset = queryset.annotate(
-                _barrado_inicio=Cast(date_expr, models.DateField())
+                _barrado_retorno=retorno_expr
             ).order_by(
-                models.F('_barrado_inicio').desc(nulls_last=True),
+                models.F('_barrado_retorno').asc(nulls_last=True),
                 '-pk'
             )
         return queryset
