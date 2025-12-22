@@ -586,6 +586,12 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
         return queryset
 
 
+class JsonbPathQueryFirstText(models.Func):
+    function = 'jsonb_path_query_first'
+    template = "%(function)s(%(expressions)s) #>> '{}'"
+    output_field = models.TextField()
+
+
 class AprovacaoFilter(admin.SimpleListFilter):
     title = "Por Aprovação"
     parameter_name = "aprovacao"
@@ -652,9 +658,22 @@ class AprovacaoFilter(admin.SimpleListFilter):
         if not path:
             return queryset
         expr = self._json_path_expr(path)
-        return queryset.annotate(
+        queryset = queryset.annotate(
             _aprovacao_match=expr
         ).filter(_aprovacao_match=True)
+        if value == "barrado":
+            barrado_path = '$.processos_vinculados[*] ? (@.barrado.ativo == true).barrado.inicio'
+            date_expr = JsonbPathQueryFirstText(
+                models.F('analise_processo__respostas'),
+                models.Value(barrado_path),
+            )
+            queryset = queryset.annotate(
+                _barrado_inicio=Cast(date_expr, models.DateField())
+            ).order_by(
+                models.F('_barrado_inicio').desc(nulls_last=True),
+                '-pk'
+            )
+        return queryset
 
 
 class PrescricaoOrderFilter(admin.SimpleListFilter):
@@ -1054,7 +1073,36 @@ class AnaliseProcessoAdminForm(forms.ModelForm):
         # Garante que retornamos um dict mesmo quando vazio ou não enviado,
         # evitando erros de validação e permitindo que o default seja usado.
         data = self.cleaned_data.get('respostas')
-        return data or {}
+        return sanitize_supervision_respostas(data or {})
+
+
+def sanitize_supervision_respostas(respostas):
+    if not isinstance(respostas, dict):
+        return {}
+
+    def normalize_barrado(card):
+        if not isinstance(card, dict):
+            return
+        status = card.get('supervisor_status')
+        barrado = card.get('barrado')
+        if not isinstance(barrado, dict):
+            barrado = {}
+            card['barrado'] = barrado
+        barrado.setdefault('ativo', False)
+        barrado.setdefault('inicio', None)
+        barrado.setdefault('retorno_em', None)
+        if status != 'aprovado':
+            barrado['ativo'] = False
+            barrado['inicio'] = None
+            barrado['retorno_em'] = None
+
+    for key in ('processos_vinculados', 'saved_processos_vinculados'):
+        cards = respostas.get(key)
+        if isinstance(cards, list):
+            for card in cards:
+                normalize_barrado(card)
+
+    return respostas
 
 class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
     form = AnaliseProcessoAdminForm # Usar o formulário customizado

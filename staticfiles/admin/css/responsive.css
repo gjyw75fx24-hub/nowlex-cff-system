@@ -9,7 +9,7 @@ input[type="submit"], button {
     /* Basic */
 
     html {
-        -webkit-text-size-adjust: 100%;
+        -webkit-text-size-adjust: auto;
     }
 
     td, th {

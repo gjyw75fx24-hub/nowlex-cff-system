@@ -126,7 +126,6 @@
 
         const $inlineGroup = $('.analise-procedural-group');
         if (!$inlineGroup.length) {
-            console.error("O elemento '.analise-procedural-group' não foi encontrado no DOM.");
             return;
         }
 
@@ -3158,16 +3157,43 @@
 
             const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
             $supervisionInput.prop('checked', cardData.supervisionado);
-            $supervisionInput.on('change', function () {
-                cardData.supervisionado = $(this).is(':checked');
-                if ($(this).is(':checked') && cardData.supervisor_status === 'pendente') {
+            $supervisionInput.on('change', function (e) {
+                console.log('═══════════════════════════════════════════════════');
+                console.log('🔄 TOGGLE SUPERVISIONAR MUDOU');
+                console.log('═══════════════════════════════════════════════════');
+
+                const checked = $(this).is(':checked');
+                console.log('   Checked:', checked ? 'ATIVADO ✅' : 'DESATIVADO ❌');
+                console.log('   cardData ANTES:', JSON.parse(JSON.stringify(cardData)));
+
+                cardData.supervisionado = checked;
+
+                if (checked) {
                     cardData.supervisor_status = 'pendente';
                     cardData.awaiting_supervision_confirm = false;
+                    console.log('   ✅ ATIVADO → Status mudou para: pendente');
+                } else {
+                    cardData.awaiting_supervision_confirm = false;
+                    console.log('   ⬇️ DESATIVADO → Mantém status:', cardData.supervisor_status);
                 }
+
+                console.log('   cardData DEPOIS:', JSON.parse(JSON.stringify(cardData)));
+
+                console.log('───────────────────────────────────────────────────');
+                console.log('1️⃣ Sincronizando card com saved...');
+                syncEditingCardWithSaved(cardData);
+
+                console.log('───────────────────────────────────────────────────');
+                console.log('2️⃣ Salvando respostas...');
                 saveResponses();
-                if (isSupervisorUser) {
-                    renderSupervisionPanel();
-                }
+
+                console.log('───────────────────────────────────────────────────');
+                console.log('3️⃣ Renderizando painel de supervisão (atualiza badge)...');
+                renderSupervisionPanel();
+
+                console.log('═══════════════════════════════════════════════════');
+                console.log('✅ TOGGLE PROCESSADO COM SUCESSO!');
+                console.log('═══════════════════════════════════════════════════');
             });
 
             $card.append($body);
