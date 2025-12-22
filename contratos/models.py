@@ -528,10 +528,11 @@ class AnaliseProcesso(models.Model):
 
     def _respostas_requerem_supervisao(self):
         respostas = getattr(self, 'respostas', {}) or {}
-        processos_vinculados = respostas.get('processos_vinculados')
-        if not processos_vinculados or not isinstance(processos_vinculados, list):
-            return False
-        for item in processos_vinculados:
-            if isinstance(item, dict) and item.get('supervisionado'):
-                return True
+        for key in ('processos_vinculados', 'saved_processos_vinculados'):
+            entries = respostas.get(key)
+            if not entries or not isinstance(entries, list):
+                continue
+            for item in entries:
+                if isinstance(item, dict) and item.get('supervisionado'):
+                    return True
         return False

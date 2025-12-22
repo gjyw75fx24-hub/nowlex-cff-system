@@ -195,11 +195,11 @@
                 return;
             }
             const stored = storeActiveAnalysisAsProcessCard();
-                if (stored) {
-                    saveResponses();
-                    suppressGeneralSummaryUntilFirstAnswer = true;
+            if (stored) {
+                saveResponses();
+                suppressGeneralSummaryUntilFirstAnswer = true;
                 startNewAnalysis({ skipGeneralSnapshot: true, suppressSummary: false });
-                }
+            }
         });
 
         function activateInnerTab(tabName) {
