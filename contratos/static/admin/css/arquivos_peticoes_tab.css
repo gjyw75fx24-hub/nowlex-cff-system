@@ -35,6 +35,25 @@
     background-color: #eef2fb;
 }
 
+.arquivos-peticoes-base-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.arquivos-peticoes-base-radio {
+    width: 16px;
+    height: 16px;
+    accent-color: #dc3545;
+    cursor: pointer;
+}
+
+.arquivos-peticoes-base-row {
+    box-shadow: inset 0 0 0 1px rgba(220, 37, 46, 0.7);
+    border-radius: 6px;
+}
+
 .inline-group-subtab-dropdown {
     position: absolute;
     top: calc(100% + 4px);

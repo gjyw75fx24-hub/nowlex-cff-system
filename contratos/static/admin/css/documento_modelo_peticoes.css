@@ -84,6 +84,13 @@
 }
 
 .documento-peticoes-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.documento-peticoes-row-main {
     display: flex;
     gap: 8px;
     align-items: center;
@@ -95,6 +102,7 @@
     border-radius: 6px;
     padding: 6px 10px;
     font-size: 0.9rem;
+    min-width: 0;
 }
 
 .documento-peticoes-remove {
@@ -138,7 +146,119 @@
     align-items: center;
     gap: 8px;
 }
+.documento-peticoes-execute {
+    background: #0d6efd;
+    color: #fff;
+    border-radius: 6px;
+    padding: 6px 14px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    box-shadow: 0 6px 12px rgba(13, 110, 253, 0.35);
+}
 
+.documento-peticoes-execute:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.documento-peticoes-upload {
+    border: 1px dashed #cbd3df;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 0.75rem;
+    color: #6c757d;
+    text-align: center;
+}
+
+.documento-peticoes-upload input[type="file"] {
+    display: none;
+}
+
+.documento-peticoes-upload button {
+    margin-top: 6px;
+    background: #f8f9fa;
+    border: 1px solid #cbd3df;
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+}
+
+.documento-peticoes-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 22, 45, 0.5);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.documento-peticoes-modal-overlay.open {
+    display: flex;
+}
+
+.documento-peticoes-modal {
+    background: #fff;
+    border-radius: 14px;
+    padding: 24px;
+    width: min(620px, 90vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+    position: relative;
+}
+
+.documento-peticoes-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    border: none;
+    background: none;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.documento-peticoes-modal h3 {
+    margin-top: 0;
+    font-size: 17px;
+}
+
+.documento-peticoes-modal ul {
+    margin: 6px 0 12px;
+    padding-left: 20px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.documento-peticoes-modal .preview-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.documento-peticoes-modal .preview-actions .button {
+    padding: 8px 14px;
+    border-radius: 6px;
+}
+
+.documento-peticoes-custom-alert {
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #fff4f4;
+    border: 1px solid #f5c2c7;
+    color: #b91c1c;
+    font-size: 0.85rem;
+}
+
+.button-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+    color: #fff;
+}
 .documento-peticoes-tab-label {
     font-weight: 600;
     color: #4a4a4a;

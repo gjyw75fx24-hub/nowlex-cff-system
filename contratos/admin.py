@@ -286,6 +286,14 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             'tipos_peticao_api_url',
             reverse('admin:contratos_documentomodelo_tipos_peticao')
         )
+        extra_context.setdefault(
+            'tipos_peticao_preview_url',
+            reverse('admin:contratos_documentomodelo_tipos_peticao_preview')
+        )
+        extra_context.setdefault(
+            'tipos_peticao_generate_url',
+            reverse('admin:contratos_documentomodelo_tipos_peticao_generate')
+        )
         extra_context.setdefault('csrf_token', get_token(request))
         return super().changelist_view(request, extra_context=extra_context)
 
