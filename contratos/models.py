@@ -344,6 +344,100 @@ class TipoPeticao(models.Model):
         return self.nome
 
 
+class ComboDocumentoPattern(models.Model):
+    CATEGORIA_FIXO = 'FIXO'
+    CATEGORIA_CONTRATO = 'CONTRATO'
+    CATEGORIA_ANEXO = 'ANEXO'
+    CATEGORIA_CHOICES = (
+        (CATEGORIA_FIXO, 'Fixo/Obrigatório'),
+        (CATEGORIA_CONTRATO, 'Por contrato'),
+        (CATEGORIA_ANEXO, 'Anexo opcional'),
+    )
+
+    tipo_peticao = models.ForeignKey(
+        TipoPeticao,
+        on_delete=models.CASCADE,
+        related_name='combo_patterns'
+    )
+    categoria = models.CharField(
+        max_length=10,
+        choices=CATEGORIA_CHOICES,
+        default=CATEGORIA_FIXO,
+        verbose_name="Categoria"
+    )
+    ordem = models.PositiveIntegerField(default=0, verbose_name="Ordem")
+    label_template = models.CharField(
+        max_length=255,
+        verbose_name="Rótulo esperado",
+        help_text="Use 'xxxxxxxxx' para o placeholder de contrato."
+    )
+    keywords = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Palavras-chave",
+        help_text="Palavras que devem estar no nome do arquivo (case-insensitive)."
+    )
+    placeholder = models.CharField(
+        max_length=32,
+        default='xxxxxxxxx',
+        blank=True,
+        verbose_name="Placeholder de contrato"
+    )
+    obrigatorio = models.BooleanField(
+        default=True,
+        verbose_name="Obrigatório",
+        help_text="Define se a ausência gera item em 'faltantes'."
+    )
+
+    class Meta:
+        verbose_name = "Configuração de documento para o combo"
+        verbose_name_plural = "Configurações de combo"
+        ordering = ['tipo_peticao', 'categoria', 'ordem']
+
+    def __str__(self):
+        return f"{self.tipo_peticao.nome} › {self.get_categoria_display()} ({self.label_template})"
+
+
+def peticao_zip_upload_path(instance, filename):
+    processo_id = instance.processo_id or 'novo'
+    return f'processos/{processo_id}/peticoes/{filename}'
+
+
+class ZipGerado(models.Model):
+    tipo_peticao = models.ForeignKey(
+        TipoPeticao,
+        on_delete=models.PROTECT,
+        related_name='zips_gerados'
+    )
+    processo = models.ForeignKey(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='zips_peticao'
+    )
+    arquivo_base = models.ForeignKey(
+        ProcessoArquivo,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='zips_gerados'
+    )
+    zip_file = models.FileField(
+        upload_to=peticao_zip_upload_path,
+        verbose_name="Arquivo ZIP"
+    )
+    missing = models.JSONField(default=list, blank=True)
+    contratos = models.JSONField(default=list, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "ZIP gerado para petição"
+        verbose_name_plural = "ZIPs gerados para petições"
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return self.zip_file.name.split('/')[-1]
+
+
 class ParteProcessoAdvogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE)
     advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)

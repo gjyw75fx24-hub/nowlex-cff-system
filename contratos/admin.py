@@ -32,6 +32,7 @@ from .models import (
     AdvogadoPassivo, ProcessoArquivo, DocumentoModelo, TipoPeticao,
 )
 from .widgets import EnderecoWidget
+from .services.peticao_combo import build_preview, generate_zip, PreviewError
 
 
 # Form para seleção de usuário na ação de delegar
@@ -266,6 +267,16 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.tipos_peticao_view),
                 name='contratos_documentomodelo_tipos_peticao'
             ),
+            path(
+                'tipos-peticao/preview/',
+                self.admin_site.admin_view(self.tipos_peticao_preview_view),
+                name='contratos_documentomodelo_tipos_peticao_preview'
+            ),
+            path(
+                'tipos-peticao/generate-zip/',
+                self.admin_site.admin_view(self.tipos_peticao_generate_view),
+                name='contratos_documentomodelo_tipos_peticao_generate'
+            ),
         ]
         return custom_urls + urls
 
@@ -326,9 +337,50 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
                 logger.exception("Falha ao salvar tipos de petição")
                 return JsonResponse({'error': 'Não foi possível salvar os tipos.'}, status=500)
 
-            return JsonResponse({'status': 'ok'})
+        return JsonResponse({'status': 'ok'})
 
         return HttpResponseNotAllowed(['GET', 'POST'])
+
+    def tipos_peticao_preview_view(self, request):
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({'ok': False, 'error': 'Payload inválido.'}, status=400)
+        tipo_id = data.get('tipo_id')
+        arquivo_base_id = data.get('arquivo_base_id')
+        if not tipo_id or not arquivo_base_id:
+            return JsonResponse({'ok': False, 'error': 'Tipo e arquivo-base são obrigatórios.'}, status=400)
+        try:
+            preview = build_preview(tipo_id, arquivo_base_id)
+        except PreviewError as exc:
+            return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+        except Exception:
+            logger.exception("Erro ao gerar preview de combo de petição")
+            return JsonResponse({'ok': False, 'error': 'Não foi possível gerar o preview.'}, status=500)
+        return JsonResponse({'ok': True, 'preview': preview})
+
+    def tipos_peticao_generate_view(self, request):
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        try:
+            data = json.loads(request.body.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({'ok': False, 'error': 'Payload inválido.'}, status=400)
+        tipo_id = data.get('tipo_id')
+        arquivo_base_id = data.get('arquivo_base_id')
+        optional_ids = data.get('optional_ids', [])
+        if not tipo_id or not arquivo_base_id:
+            return JsonResponse({'ok': False, 'error': 'Tipo e arquivo-base são obrigatórios.'}, status=400)
+        try:
+            result = generate_zip(tipo_id, arquivo_base_id, optional_ids)
+        except PreviewError as exc:
+            return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+        except Exception:
+            logger.exception("Erro ao gerar ZIP para petição")
+            return JsonResponse({'ok': False, 'error': 'Não foi possível gerar o ZIP.'}, status=500)
+        return JsonResponse({'ok': True, 'result': result})
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
