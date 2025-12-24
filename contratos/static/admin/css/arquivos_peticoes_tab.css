@@ -17,7 +17,6 @@
     padding-bottom: 4px;
     order: 999;
     position: relative;
-    gap: 8px;
 }
 
 .inline-group-subtab-button {
@@ -50,20 +49,6 @@
     cursor: pointer;
 }
 
-.arquivos-peticoes-base-checkbox {
-    width: 18px;
-    height: 18px;
-    margin-right: 6px;
-    accent-color: #dc3545;
-    cursor: pointer;
-}
-
-.arquivos-peticoes-base-wrapper::after {
-    content: '';
-    display: inline-block;
-    width: 6px;
-}
-
 .arquivos-peticoes-base-row {
     box-shadow: inset 0 0 0 1px rgba(220, 37, 46, 0.7);
     border-radius: 6px;
@@ -72,9 +57,8 @@
 .inline-group-subtab-dropdown {
     position: absolute;
     top: calc(100% + 4px);
-    right: auto;
-    left: -180px;
-    min-width: 220px;
+    right: 0;
+    min-width: 200px;
     border-radius: 8px;
     border: 1px solid #d3dae5;
     background: #fff;
@@ -82,38 +66,6 @@
     padding: 8px;
     display: none;
     z-index: 10;
-}
-
-.inline-group-subtab-dropdown::before {
-    content: '';
-    position: absolute;
-    top: -6px;
-    right: 20px;
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 6px solid #fff;
-}
-
-.inline-group-subtab-dropdown-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-    font-weight: 600;
-    font-size: 0.8rem;
-    color: #1f2937;
-}
-
-.inline-group-subtab-dropdown-close {
-    background: transparent;
-    border: none;
-    font-size: 1.1rem;
-    line-height: 1;
-    padding: 0;
-    cursor: pointer;
-    color: #6b7280;
 }
 
 .inline-group-subtab-dropdown.open {
@@ -127,42 +79,8 @@
     border: 1px solid #d3dae5;
 }
 
-.inline-group-subtab-execute {
-    width: 100%;
-    border-radius: 6px;
-    padding: 6px 12px;
-    background: #0d6efd;
-    color: #fff;
-    font-weight: 600;
-    font-size: 0.9rem;
-    border: none;
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    gap: 6px;
-    box-shadow: 0 6px 12px rgba(13, 110, 253, 0.35);
-    cursor: pointer;
-}
-
-.inline-group-subtab-execute:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
 .inline-group-subtab-dropdown-status {
     margin: 0 0 6px;
     font-size: 0.8rem;
     color: #6b7280;
-}
-
-#processoarquivo_set-group td.field-nome {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    position: relative;
-    white-space: nowrap;
-}
-
-#processoarquivo_set-group td.field-nome .arquivos-peticoes-base-wrapper {
-    order: 0;
 }
