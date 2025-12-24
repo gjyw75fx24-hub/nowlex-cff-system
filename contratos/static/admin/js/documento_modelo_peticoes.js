@@ -39,11 +39,21 @@
             messageEl.dataset.status = '';
         };
 
+        const getTipoDisplayName = (tipo) => {
+            if (!tipo) {
+                return '';
+            }
+            if (typeof tipo === 'object') {
+                return String(tipo.nome || '').trim();
+            }
+            return String(tipo).trim();
+        };
+
         const renderDropdownOptions = () => {
             if (!dropdownSelect) return;
             dropdownSelect.innerHTML = '<option value="">Selecione um tipo</option>';
             tipos.forEach(function (tipo) {
-                const trimmed = tipo.trim();
+                const trimmed = getTipoDisplayName(tipo);
                 if (!trimmed) {
                     return;
                 }
@@ -53,19 +63,6 @@
                 dropdownSelect.appendChild(option);
             });
             dropdownSelect.disabled = dropdownSelect.options.length <= 1;
-        };
-
-        const createExecuteButton = (tipo) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'documento-peticoes-execute';
-            button.textContent = 'Executar';
-            button.disabled = true;
-            button.dataset.tipoId = tipo.id || '';
-            button.addEventListener('click', () => {
-                runPreview(tipo);
-            });
-            return button;
         };
 
         const createUploadArea = () => {
@@ -139,7 +136,6 @@
                 actions.style.gap = '6px';
 
                 actions.appendChild(createUploadArea());
-                actions.appendChild(createExecuteButton(tipo));
 
                 row.appendChild(rowMain);
                 row.appendChild(actions);
@@ -175,7 +171,9 @@
             isSaving = true;
             saveButton.disabled = true;
             const payload = {
-                tipos: tipos.map(name => (name || '').trim()).filter(Boolean)
+                tipos: tipos
+                    .map(tipo => getTipoDisplayName(tipo))
+                    .filter(name => name)
             };
             try {
                 const response = await fetch(apiUrl, {
@@ -202,7 +200,7 @@
         };
 
         addButton.addEventListener('click', function () {
-            tipos.push('');
+            tipos.push({ id: '', nome: '' });
             renderRows();
             renderDropdownOptions();
             clearMessage();
