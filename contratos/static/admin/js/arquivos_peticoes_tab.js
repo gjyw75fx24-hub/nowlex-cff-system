@@ -6,27 +6,31 @@
         dropdown.className = 'inline-group-subtab-dropdown';
         dropdown.innerHTML = `
             <div class="inline-group-subtab-dropdown-header">
-                <span>Tipos de Petição</span>
+                <span>Petições</span>
                 <button type="button" class="inline-group-subtab-dropdown-close" aria-label="Fechar lista">×</button>
             </div>
-            <p class="inline-group-subtab-dropdown-status">Carregando...</p>
             <div class="inline-group-subtab-dropdown-body">
-                <button type="button" class="inline-group-subtab-execute documento-peticoes-execute"
-                        data-arquivos-peticoes-execute disabled>
-                    <span class="documento-peticoes-execute-icon" aria-hidden="true">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                             xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/>
-                            <path d="M10 8l6 4-6 4V8z" fill="currentColor"/>
-                        </svg>
-                    </span>
-                    <span>Executar</span>
-                </button>
-                <button type="button" class="inline-group-subtab-select-button">
-                    <span class="inline-group-subtab-select-label">Selecione um tipo</span>
-                    <span class="inline-group-subtab-select-caret">▾</span>
-                </button>
-                <div class="inline-group-subtab-options" hidden>
+                <div class="inline-group-subtab-card">
+                    <button type="button" class="inline-group-subtab-select-button">
+                        <span class="inline-group-subtab-select-label">Selecione um tipo</span>
+                        <span class="inline-group-subtab-select-caret">▾</span>
+                    </button>
+                    <div class="inline-group-subtab-execute-area">
+                        <button type="button" class="inline-group-subtab-execute documento-peticoes-execute"
+                                data-arquivos-peticoes-execute disabled>
+                        <span class="documento-peticoes-execute-icon" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M9 7l6 5-6 5V7z" fill="currentColor"/>
+                            </svg>
+                        </span>
+                        </button>
+                        <span class="inline-group-subtab-execute-text">executar</span>
+                    </div>
+                </div>
+                <div class="inline-group-subtab-options-shell" hidden>
+                    <div class="inline-group-subtab-options" hidden>
+                    </div>
                 </div>
             </div>
         `;
@@ -165,24 +169,27 @@
             if (label) {
                 label.textContent = tipoName || 'Selecione um tipo';
             }
+            selectButtonRef.classList.toggle('inline-group-subtab-select-active', Boolean(tipoName));
         }
     };
 
     const populateDropdown = (dropdown, apiUrl) => {
-        const status = dropdown.querySelector('.inline-group-subtab-dropdown-status');
+        const optionsShell = dropdown.querySelector('.inline-group-subtab-options-shell');
         const optionsContainer = dropdown.querySelector('.inline-group-subtab-options');
         const selectButton = dropdown.querySelector('.inline-group-subtab-select-button');
         if (!optionsContainer || !selectButton) {
             return;
         }
-        if (!apiUrl) {
-            status.textContent = 'API indisponível.';
+        if (!optionsShell) {
             return;
         }
-        fetch(apiUrl, {
-            method: 'GET',
-            credentials: 'same-origin'
-        })
+        if (!apiUrl) {
+            return;
+        }
+                fetch(apiUrl, {
+                    method: 'GET',
+                    credentials: 'same-origin'
+                })
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Erro ao carregar');
@@ -192,13 +199,20 @@
             .then(data => {
                 const types = Array.isArray(data.tipos) ? data.tipos : [];
                 if (types.length === 0) {
-                    status.textContent = 'Nenhum tipo disponível.';
+                    optionsContainer.innerHTML = '';
                     return;
                 }
-                status.style.display = 'none';
                 optionsContainer.innerHTML = '';
+                const placeholder = document.createElement('div');
+                placeholder.className = 'inline-group-subtab-option placeholder';
+                placeholder.textContent = 'Selecione um tipo';
+                placeholder.setAttribute('aria-hidden', 'true');
+                optionsContainer.appendChild(placeholder);
                 const markActive = (button) => {
                     optionsContainer.querySelectorAll('.inline-group-subtab-option').forEach(opt => {
+                        if (opt.classList.contains('placeholder')) {
+                            return;
+                        }
                         opt.classList.toggle('active', opt === button);
                     });
                 };
@@ -216,19 +230,11 @@
                         markActive(optionBtn);
                         setActiveTipo(id, name);
                         selectButton.querySelector('.inline-group-subtab-select-label').textContent = name;
-                        optionsContainer.hidden = true;
+                        setHidden(true);
                     });
                     optionsContainer.appendChild(optionBtn);
                 });
-                if (!selectedTipoId && types.length) {
-                    const first = types[0];
-                    selectButton.querySelector('.inline-group-subtab-select-label').textContent = String(first.nome || '').trim();
-                    setActiveTipo(first.id || '', first.nome || '');
-                    const firstBtn = optionsContainer.querySelector(`[data-tipo-id="${first.id || ''}"]`);
-                    if (firstBtn) {
-                        markActive(firstBtn);
-                    }
-                } else if (selectedTipoId) {
+                if (selectedTipoId) {
                     const match = types.find(item => String(item.id) === String(selectedTipoId));
                     if (match) {
                         selectButton.querySelector('.inline-group-subtab-select-label').textContent = match.nome || '';
@@ -238,19 +244,45 @@
                         }
                     }
                 }
-                selectButton.addEventListener('click', () => {
-                    const isHidden = optionsContainer.hasAttribute('hidden');
+                const caret = selectButton.querySelector('.inline-group-subtab-select-caret');
+                const updateCaret = (isOpen) => {
+                    if (!caret) {
+                        return;
+                    }
+                    caret.textContent = isOpen ? '▴' : '▾';
+                };
+
+                const setHidden = (hidden) => {
+                    if (hidden) {
+                        optionsContainer.setAttribute('hidden', '');
+                        optionsShell.setAttribute('hidden', '');
+                    } else {
+                        optionsContainer.removeAttribute('hidden');
+                        optionsShell.removeAttribute('hidden');
+                    }
+                    updateCaret(!hidden);
+                };
+                setHidden(true);
+
+                const closeOptions = () => setHidden(true);
+                const toggleOptions = () => {
+                    const isHidden = optionsShell.hasAttribute('hidden');
                     setHidden(!isHidden);
-                    updateCaret(!isHidden);
+                };
+
+                updateCaret(!optionsShell.hasAttribute('hidden'));
+                selectButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    toggleOptions();
                 });
                 document.addEventListener('click', () => {
-                    if (!optionsContainer.hasAttribute('hidden')) {
+                    if (!optionsShell.hasAttribute('hidden')) {
                         closeOptions();
                     }
                 });
             })
             .catch(() => {
-                status.textContent = 'Não foi possível carregar os tipos.';
+                console.error('Não foi possível carregar os tipos.');
             });
     };
 
