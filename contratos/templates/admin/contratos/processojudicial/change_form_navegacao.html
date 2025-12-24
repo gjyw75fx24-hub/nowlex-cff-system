@@ -39,6 +39,20 @@ window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 #processoarquivo_set-group tbody td:last-child {
   display: none !important;
 }
+
+.monitoria-checkbox-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  font-size: 0.9rem;
+  color: #1c3f5a;
+}
+
+.monitoria-checkbox-wrapper input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
 </style>
 
 <script>
@@ -315,6 +329,45 @@ document.addEventListener('DOMContentLoaded', function() {
       const wrap = cb.closest('td, th, label');
       if (wrap) wrap.style.display = 'none';
     });
+  })();
+
+  (function addMonitoriaCheckboxes() {
+    const matchesMonitoria = (text) => /monit[ií]ria/i.test(text);
+
+    const insertCheckbox = (row) => {
+      if (!row || row.dataset.monitoriaCheckboxAdded) return;
+      const nomeCell = row.querySelector('td.field-nome');
+      if (!nomeCell) return;
+      const nameInput = nomeCell.querySelector('input[name$="-nome"]');
+      const labelText = nameInput ? nameInput.value : nomeCell.textContent;
+      if (!labelText || !matchesMonitoria(labelText)) {
+        return;
+      }
+      const wrapper = document.createElement('label');
+      wrapper.className = 'monitoria-checkbox-wrapper';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.monitoriaFile = '1';
+      wrapper.appendChild(checkbox);
+      const text = document.createElement('span');
+      text.textContent = 'Base';
+      wrapper.appendChild(text);
+      if (nameInput) {
+        nameInput.parentNode.insertBefore(wrapper, nameInput);
+      } else {
+        nomeCell.insertBefore(wrapper, nomeCell.firstChild);
+      }
+      row.dataset.monitoriaCheckboxAdded = '1';
+    };
+
+    const sync = () => {
+      const rows = document.querySelectorAll('#processoarquivo_set-group tr.dynamic-processoarquivo');
+      rows.forEach(insertCheckbox);
+    };
+
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.querySelector('#processoarquivo_set-group') || document.body, { childList: true, subtree: true });
   })();
 });
 </script>
