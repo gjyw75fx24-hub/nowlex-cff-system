@@ -137,13 +137,10 @@ document.addEventListener('DOMContentLoaded', function() {
       label.textContent = 'Base';
       wrapper.appendChild(checkbox);
       wrapper.appendChild(label);
-      const arquivoCell = row.querySelector('td.field-arquivo');
-      if (arquivoCell) {
-        const buttonContainer = arquivoCell.querySelector('div[style*="display:flex"]');
-        if (buttonContainer) {
-          buttonContainer.appendChild(wrapper);
-          return;
-        }
+      const nomeButtonsContainer = nomeCell.querySelector('div[style*="display:flex"], div[style*="display: flex"]');
+      if (nomeButtonsContainer) {
+        nomeButtonsContainer.appendChild(wrapper);
+        return;
       }
       if (nameInput && nameInput.parentNode) {
         nameInput.parentNode.insertBefore(wrapper, nameInput);
