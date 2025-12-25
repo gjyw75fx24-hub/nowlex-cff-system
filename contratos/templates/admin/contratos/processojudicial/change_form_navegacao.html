@@ -69,6 +69,11 @@ window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
   color: #fff;
   box-shadow: none;
 }
+.monitoria-checkbox-wrapper.checked span {
+  background: #324a6c;
+  color: #fff;
+  box-shadow: none;
+}
 </style>
 
 <script>
@@ -137,6 +142,18 @@ document.addEventListener('DOMContentLoaded', function() {
       label.textContent = 'Base';
       wrapper.appendChild(checkbox);
       wrapper.appendChild(label);
+      const baseCheckbox = row.querySelector('.arquivos-peticoes-base-checkbox');
+      if (baseCheckbox) {
+        const syncWrapper = () => {
+          wrapper.classList.toggle('checked', baseCheckbox.checked);
+        };
+        baseCheckbox.addEventListener('change', syncWrapper);
+        wrapper.addEventListener('click', (event) => {
+          event.preventDefault();
+          baseCheckbox.click();
+        });
+        syncWrapper();
+      }
       const nomeButtonsContainer = nomeCell.querySelector('div[style*="display:flex"], div[style*="display: flex"]');
       if (nomeButtonsContainer) {
         nomeButtonsContainer.appendChild(wrapper);
