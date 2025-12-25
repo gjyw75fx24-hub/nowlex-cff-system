@@ -96,6 +96,53 @@ document.addEventListener('DOMContentLoaded', function() {
     observer.observe(document.body, { childList: true, subtree: true });
   })();
 
+  (function addMonitoriaCheckboxes() {
+    const normalizeText = (text) => {
+      if (!text) {
+        return '';
+      }
+      return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    };
+
+    const matchesMonitoria = (text) => /monitoria/i.test(normalizeText(text));
+
+    const ensureWrapper = (row) => {
+      if (!row) return;
+      const nomeCell = row.querySelector('td.field-nome') || row.querySelector('td.original');
+      if (!nomeCell || nomeCell.querySelector('.monitoria-checkbox-wrapper')) return;
+      const nameInput = nomeCell.querySelector('input[name$="-nome"]');
+      const value = (nameInput && nameInput.value) ? nameInput.value : nomeCell.textContent;
+      if (!matchesMonitoria(value)) return;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'monitoria-checkbox-wrapper';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      const label = document.createElement('span');
+      label.textContent = 'Base';
+      wrapper.appendChild(checkbox);
+      wrapper.appendChild(label);
+      if (nameInput && nameInput.parentNode) {
+        nameInput.parentNode.insertBefore(wrapper, nameInput);
+      } else {
+        const targetNode = nomeCell.querySelector('p') || nomeCell;
+        targetNode.insertAdjacentElement('beforebegin', wrapper);
+      }
+    };
+
+    const sync = () => {
+      const inlineRows = document.querySelectorAll('#processoarquivo_set-group tr.dynamic-processoarquivo');
+      const arquivoRows = document.querySelectorAll('#arquivos-group tr.dynamic-arquivos');
+      inlineRows.forEach(ensureWrapper);
+      arquivoRows.forEach(ensureWrapper);
+    };
+
+    const observer = new MutationObserver(sync);
+    const target = document.querySelector('#processoarquivo_set-group') || document.body;
+    observer.observe(target, { childList: true, subtree: true });
+    sync();
+    setTimeout(sync, 200);
+  })();
+
   function closeModal() {
     modal.style.display = 'none';
     content.innerHTML = '';
