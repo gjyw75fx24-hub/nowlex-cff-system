@@ -39,12 +39,17 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
   #processoarquivo_set-group td.delete,
   #processoarquivo_set-group th.column-delete,
   #processoarquivo_set-group td.column-delete,
-  #processoarquivo_set-group thead th:last-child,
-  #processoarquivo_set-group tbody td:last-child,
+  #processoarquivo_set-group th.column-arquivo,
   #arquivos-group th.delete,
   #arquivos-group td.delete,
   #arquivos-group th.column-delete,
-  #arquivos-group td.column-delete {
+  #arquivos-group td.column-delete,
+  #arquivos-group th.column-arquivo,
+  #arquivos-group td.field-arquivo,
+  #arquivos-group table thead th:nth-child(3),
+  #arquivos-group table tbody td:nth-child(3),
+  #arquivos-group table thead th:nth-child(4),
+  #arquivos-group table tbody td:nth-child(4) {
     display: none !important;
   }
 
@@ -447,34 +452,142 @@ document.addEventListener('DOMContentLoaded', function() {
       row.dataset.modifyControlAdded = '1';
     };
 
+    const createConfirmOverlay = (message) => {
+      let overlay = document.getElementById('arquivo-delete-confirm-overlay');
+      if (overlay) {
+        overlay.remove();
+      }
+      overlay = document.createElement('div');
+      overlay.id = 'arquivo-delete-confirm-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.backgroundColor = 'rgba(0,0,0,0.4)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '10001';
+      const card = document.createElement('div');
+      card.style.background = '#fff';
+      card.style.padding = '20px';
+      card.style.borderRadius = '10px';
+      card.style.maxWidth = '320px';
+      card.style.textAlign = 'center';
+      card.style.boxShadow = '0 12px 30px rgba(0,0,0,0.3)';
+      const label = document.createElement('p');
+      label.textContent = message;
+      label.style.marginBottom = '20px';
+      card.appendChild(label);
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.justifyContent = 'center';
+      actions.style.gap = '12px';
+      const btnSim = document.createElement('button');
+      btnSim.type = 'button';
+      btnSim.textContent = 'Sim';
+      btnSim.className = 'button button-primary';
+      const btnCancelar = document.createElement('button');
+      btnCancelar.type = 'button';
+      btnCancelar.textContent = 'Cancelar';
+      btnCancelar.className = 'button button-secondary';
+      actions.appendChild(btnCancelar);
+      actions.appendChild(btnSim);
+      card.appendChild(actions);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      return { overlay, btnSim, btnCancelar };
+    };
+
+    const appendRemoveButton = (row, btnRow) => {
+      if (!row || !btnRow || row.dataset.removeBtnAdded === '1') {
+        return;
+      }
+      const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+      if (!deleteCheckbox) {
+        return;
+      }
+      deleteCheckbox.style.display = 'none';
+      const removeWrapper = document.createElement('div');
+      removeWrapper.style.display = 'flex';
+      removeWrapper.style.alignItems = 'center';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'button';
+      btn.textContent = '×';
+      btn.title = 'Remover arquivo';
+      btn.style.backgroundColor = '#d63636';
+      btn.style.color = '#fff';
+      btn.style.borderRadius = '999px';
+      btn.style.width = '28px';
+      btn.style.height = '28px';
+      btn.style.border = 'none';
+      btn.style.fontSize = '1.2rem';
+      btn.style.cursor = 'pointer';
+      const nomeCell = row.querySelector('td.field-nome');
+      const fileName = (row.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'arquivo').trim();
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        const { overlay, btnSim, btnCancelar } = createConfirmOverlay(`Confirmar deletar o arquivo "${fileName}"?`);
+        const cleanUp = () => {
+          overlay.remove();
+          btnSim.removeEventListener('click', simHandler);
+          btnCancelar.removeEventListener('click', cancelHandler);
+        };
+        const simHandler = () => {
+          deleteCheckbox.checked = true;
+          row.style.display = 'none';
+          cleanUp();
+        };
+        const cancelHandler = () => {
+          cleanUp();
+        };
+        btnSim.addEventListener('click', simHandler);
+        btnCancelar.addEventListener('click', cancelHandler);
+      });
+      removeWrapper.appendChild(btn);
+      btnRow.appendChild(removeWrapper);
+      row.dataset.removeBtnAdded = '1';
+    };
+
     const processRow = (row) => {
       if (row.dataset.downloadButtonsInjected === '1') {
         return;
       }
       const arquivoCell = row.querySelector('td.field-arquivo');
       const link = arquivoCell?.querySelector('a[href*="/media/"], a[href*="processos/"]');
-      if (!link) {
-        return;
-      }
-      link.style.display = 'none';
+        if (!link) {
+          return;
+        }
+        link.style.display = 'none';
 
       const btnRow = document.createElement('div');
       btnRow.className = 'documento-peticoes-download-row';
       btnRow.style.display = 'flex';
-      btnRow.style.flexWrap = 'wrap';
+      btnRow.style.flexWrap = 'nowrap';
       btnRow.style.gap = '6px';
       btnRow.style.margin = '6px 0 4px 0';
       btnRow.style.alignItems = 'center';
-      btnRow.style.justifyContent = 'flex-start';
+      btnRow.style.width = '100%';
+      btnRow.style.justifyContent = 'space-between';
 
-      btnRow.appendChild(createButton('Visualizar', link.href));
+      const leftGroup = document.createElement('div');
+      leftGroup.style.display = 'flex';
+      leftGroup.style.flexWrap = 'wrap';
+      leftGroup.style.gap = '6px';
+      leftGroup.appendChild(createButton('Visualizar', link.href));
       if (isMonitoriaRow(row)) {
-        btnRow.appendChild(createButton('PDF', link.href, { download: true }));
-        btnRow.appendChild(createButton('DOC', link.href, { download: true }));
-        attachBaseBadge(row, btnRow);
+        leftGroup.appendChild(createButton('PDF', link.href, { download: true }));
+        leftGroup.appendChild(createButton('DOC', link.href, { download: true }));
+        attachBaseBadge(row, leftGroup);
       } else {
-        btnRow.appendChild(createButton('Baixar', link.href, { download: true }));
+        leftGroup.appendChild(createButton('Baixar', link.href, { download: true }));
       }
+
+      const rightGroup = document.createElement('div');
+      rightGroup.style.display = 'flex';
+      rightGroup.style.alignItems = 'center';
+
+      btnRow.appendChild(leftGroup);
+      btnRow.appendChild(rightGroup);
 
       const nomeCell = row.querySelector('td.field-nome');
       if (nomeCell) {
@@ -485,6 +598,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
       setupModifyControl(row, arquivoCell);
       renderUploaderLine(row, nomeCell);
+      appendRemoveButton(row, rightGroup);
 
       row.dataset.downloadButtonsInjected = '1';
     };
