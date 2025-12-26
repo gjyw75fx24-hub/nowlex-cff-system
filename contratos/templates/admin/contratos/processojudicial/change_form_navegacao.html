@@ -93,6 +93,31 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
   padding: 3px 10px;
   font-size: 0.85em;
 }
+ .documento-peticoes-modify-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.documento-peticoes-modify-row .button {
+  padding: 3px 10px;
+  font-size: 0.85em;
+}
+
+.documento-peticoes-uploader-line {
+  font-size: 0.8rem;
+  color: #5f6b7a;
+  margin-top: 4px;
+  text-transform: capitalize;
+}
+
+#arquivos-group th.column-enviado_por,
+#processoarquivo_set-group th.column-enviado_por,
+#arquivos-group td.field-enviado_por,
+#processoarquivo_set-group td.field-enviado_por {
+  display: none;
+}
 </style>
 
 <script>
@@ -308,6 +333,45 @@ document.addEventListener('DOMContentLoaded', function() {
       row.dataset.monitoriaBadgeAdded = '1';
     };
 
+    const getUploaderName = (row) => {
+      const cell = row.querySelector('td.field-enviado_por');
+      if (!cell) {
+        return '';
+      }
+      const input = cell.querySelector('input[type="text"]');
+      if (input && input.value.trim()) {
+        return input.value.trim();
+      }
+      const select = cell.querySelector('select');
+      if (select) {
+        const selected = select.selectedOptions[0];
+        if (selected && selected.textContent.trim()) {
+          return selected.textContent.trim();
+        }
+      }
+      const linkText = cell.querySelector('a');
+      if (linkText && linkText.textContent.trim()) {
+        return linkText.textContent.trim();
+      }
+      const raw = cell.textContent || '';
+      return raw.trim();
+    };
+
+    const renderUploaderLine = (row, nomeCell) => {
+      if (!row || !nomeCell) {
+        return;
+      }
+      let uploaderLine = row.querySelector('.documento-peticoes-uploader-line');
+      if (!uploaderLine) {
+        uploaderLine = document.createElement('div');
+        uploaderLine.className = 'documento-peticoes-uploader-line';
+        nomeCell.appendChild(uploaderLine);
+      }
+      const name = getUploaderName(row);
+      uploaderLine.textContent = name ? `Enviado por ${name}` : '';
+      uploaderLine.style.display = name ? 'block' : 'none';
+    };
+
     const setupModifyControl = (row, arquivoCell) => {
       if (!row || row.dataset.modifyControlAdded === '1' || !arquivoCell) {
         return;
@@ -344,6 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
       modifyRow.appendChild(label);
       modifyRow.appendChild(button);
       nomeCell.appendChild(modifyRow);
+      renderUploaderLine(row, nomeCell);
       fileUpload.style.display = 'none';
       row.dataset.modifyControlAdded = '1';
     };
