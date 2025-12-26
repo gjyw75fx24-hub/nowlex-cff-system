@@ -511,40 +511,29 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
 
-    // Cria contêiner de remoção abaixo do bloco de andamentos
-    const deleteBlockParent = Array.from(document.querySelectorAll('.submit-row')).find(el => el.textContent.includes('Excluir Andamentos Selecionados')) || document.querySelector('#content-main') || document.body;
-    let removeContainer = document.getElementById('arquivo-delete-actions');
-    if (!removeContainer) {
-      removeContainer = document.createElement('div');
-      removeContainer.id = 'arquivo-delete-actions';
-      removeContainer.style.marginTop = '10px';
-      removeContainer.style.display = 'flex';
-      removeContainer.style.flexDirection = 'column';
-      removeContainer.style.gap = '6px';
-      removeContainer.innerHTML = '<strong>Remover arquivos:</strong>';
-      deleteBlockParent.appendChild(removeContainer);
-    }
-
-    const rows = inlineGroup.querySelectorAll('.dynamic-processoarquivo');
-    rows.forEach(row => {
+    const attachRemoveButton = (row) => {
       const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
-      if (!deleteCheckbox) return;
-      if (row.dataset.deleteBtnAdded) return;
-      const td = deleteCheckbox.closest('td, th, label');
-      if (td) td.style.display = 'none';
+      if (!deleteCheckbox || row.dataset.removeBtnAdded) return;
       deleteCheckbox.style.display = 'none';
-
-      // pega nome do arquivo
-      const nomeInput = row.querySelector('input[name$="-nome"]');
-      const fileName = (nomeInput && nomeInput.value) ? nomeInput.value : 'Arquivo';
-
+      const nomeCell = row.querySelector('td.field-nome');
+      const fileName = (nomeCell?.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'Arquivo').trim();
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = `Remover "${fileName}"`;
+      btn.textContent = '×';
+      btn.title = `Remover "${fileName}"`;
       btn.className = 'button';
       btn.style.backgroundColor = '#ba2121';
       btn.style.color = '#fff';
-      btn.style.alignSelf = 'flex-start';
+      btn.style.width = '32px';
+      btn.style.height = '32px';
+      btn.style.padding = '0';
+      btn.style.borderRadius = '999px';
+      btn.style.display = 'inline-flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+      btn.style.marginLeft = '8px';
+      btn.style.fontSize = '1.1em';
+      btn.style.lineHeight = '1';
       btn.addEventListener('click', () => {
         const ok = confirm(`Remover o arquivo "${fileName}"?`);
         if (!ok) return;
@@ -552,15 +541,26 @@ document.addEventListener('DOMContentLoaded', function() {
         row.style.opacity = '0.5';
         row.style.pointerEvents = 'none';
       });
-      removeContainer.appendChild(btn);
-      row.dataset.deleteBtnAdded = '1';
-    });
-    // última garantia: remove checkboxes remanescentes
+      if (nomeCell) {
+        nomeCell.appendChild(btn);
+      } else {
+        row.appendChild(btn);
+      }
+      row.dataset.removeBtnAdded = '1';
+    };
+
+    const rows = inlineGroup.querySelectorAll('.dynamic-processoarquivo');
+    rows.forEach(attachRemoveButton);
     inlineGroup.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(cb => {
       cb.style.display = 'none';
       const wrap = cb.closest('td, th, label');
       if (wrap) wrap.style.display = 'none';
     });
+
+    const observer = new MutationObserver(() => {
+      inlineGroup.querySelectorAll('.dynamic-processoarquivo').forEach(attachRemoveButton);
+    });
+    observer.observe(inlineGroup, { childList: true, subtree: true });
   })();
 
 });
