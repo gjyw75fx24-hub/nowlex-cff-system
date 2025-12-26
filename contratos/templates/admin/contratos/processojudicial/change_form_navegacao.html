@@ -81,6 +81,18 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
   box-shadow: 0 6px 12px rgba(66, 116, 143, 0.2);
   transform: translateY(-1px);
 }
+
+.documento-peticoes-modify-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.documento-peticoes-modify-row .button {
+  padding: 3px 10px;
+  font-size: 0.85em;
+}
 </style>
 
 <script>
@@ -296,11 +308,52 @@ document.addEventListener('DOMContentLoaded', function() {
       row.dataset.monitoriaBadgeAdded = '1';
     };
 
+    const setupModifyControl = (row, arquivoCell) => {
+      if (!row || row.dataset.modifyControlAdded === '1' || !arquivoCell) {
+        return;
+      }
+      const fileUpload = arquivoCell.querySelector('p.file-upload');
+      if (!fileUpload) {
+        return;
+      }
+      const fileInput = fileUpload.querySelector('input[type="file"]');
+      const nomeCell = row.querySelector('td.field-nome');
+      if (!nomeCell) {
+        return;
+      }
+      Array.from(fileUpload.childNodes).forEach(node => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          node.textContent = '';
+        }
+      });
+      const modifyRow = document.createElement('div');
+      modifyRow.className = 'documento-peticoes-modify-row';
+      const label = document.createElement('span');
+      label.textContent = 'Modificar:';
+      label.style.fontWeight = '600';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'button button-secondary';
+      button.textContent = 'Procurar...';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (fileInput) {
+          fileInput.click();
+        }
+      });
+      modifyRow.appendChild(label);
+      modifyRow.appendChild(button);
+      nomeCell.appendChild(modifyRow);
+      fileUpload.style.display = 'none';
+      row.dataset.modifyControlAdded = '1';
+    };
+
     const processRow = (row) => {
       if (row.dataset.downloadButtonsInjected === '1') {
         return;
       }
-      const link = row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]');
+      const arquivoCell = row.querySelector('td.field-arquivo');
+      const link = arquivoCell?.querySelector('a[href*="/media/"], a[href*="processos/"]');
       if (!link) {
         return;
       }
@@ -330,6 +383,8 @@ document.addEventListener('DOMContentLoaded', function() {
       } else {
         row.appendChild(btnRow);
       }
+
+      setupModifyControl(row, arquivoCell);
 
       row.dataset.downloadButtonsInjected = '1';
     };
