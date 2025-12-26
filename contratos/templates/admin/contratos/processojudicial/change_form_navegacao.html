@@ -270,63 +270,50 @@ document.addEventListener('DOMContentLoaded', function() {
     renderFile(href);
   }, true);
 
-  // Insere botões de Baixar DOC e Baixar PDF dentro do inline de Arquivos
-  (function injectDownloadButtons() {
-    const tryInsert = () => {
-      const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
-      if (!arquivosGroup) return;
+  // Insere botões de Visualizar / PDF / DOC nos arquivos do tipo Monitória/Cobrança e Visualizar/Baixar nos demais
+  ;(function injectDownloadButtons() {
+    const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
+    if (!arquivosGroup) return;
 
-      if (arquivosGroup.querySelector('#id_baixar_doc_monitoria_btn') || arquivosGroup.querySelector('#id_baixar_pdf_monitoria_btn')) {
+    const createButton = (text, href, opts = {}) => {
+      const btn = document.createElement('a');
+      btn.href = href;
+      btn.textContent = text;
+      btn.className = 'button';
+      btn.style.padding = '4px 7px';
+      btn.style.background = '#555';
+      btn.style.color = '#fff';
+      btn.style.border = '1px solid #444';
+      btn.style.boxShadow = 'none';
+      btn.style.fontWeight = '400';
+      btn.style.fontSize = '0.85em';
+      if (opts.download) {
+        btn.setAttribute('download', '');
+      }
+      btn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        window.open(href, '_blank');
+      });
+      return btn;
+    };
+
+    const isMonitoriaRow = (row) => {
+      const text = row.querySelector('td.field-nome')?.textContent || '';
+      return /monitoria/i.test(text);
+    };
+
+    const processRow = (row) => {
+      if (row.dataset.downloadButtonsInjected === '1') {
         return;
       }
-
-      const baseRow = arquivosGroup.querySelector('tr.arquivos-peticoes-base-row');
-      let targetLink = null;
-      let row = null;
-
-      const selectors = [
-        'td.field-arquivo a[href*="Monitoria"]',
-        'td.field-arquivo a[href*="monitoria"]',
-        'td.field-arquivo a[href*="Cobranca"]',
-        'td.field-arquivo a[href*="cobranca"]',
-        'td.field-arquivo a[href$=".pdf"]',
-        'td.field-arquivo a[href$=".docx"]'
-      ];
-
-      const findLink = (context) => {
-        for (const selector of selectors) {
-          const candidate = context?.querySelector(selector);
-          if (candidate) {
-            return candidate;
-          }
-        }
-        return null;
-      };
-
-      if (baseRow) {
-        targetLink = findLink(baseRow);
-        row = baseRow;
-      }
-      if (!targetLink) {
-        targetLink = findLink(arquivosGroup);
-        if (targetLink) {
-          row = targetLink.closest('tr.dynamic-processoarquivo') || targetLink.closest('tr');
-        }
-      }
-
-      if (!targetLink || !row) {
+      const link = row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]');
+      if (!link) {
         return;
       }
-
-      const nomeCell = row.querySelector('td.field-nome');
-      const arquivoCell = row.querySelector('td.field-arquivo');
-      if (!nomeCell || !arquivoCell) {
-        return;
-      }
-
-      targetLink.style.display = 'none';
+      link.style.display = 'none';
 
       const btnRow = document.createElement('div');
+      btnRow.className = 'documento-peticoes-download-row';
       btnRow.style.display = 'flex';
       btnRow.style.flexWrap = 'wrap';
       btnRow.style.gap = '6px';
@@ -334,56 +321,32 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRow.style.alignItems = 'center';
       btnRow.style.justifyContent = 'flex-start';
 
-      const makeBtn = (text, id) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.textContent = text;
-        if (id) b.id = id;
-        b.className = 'button';
-        b.style.padding = '4px 7px';
-        b.style.background = '#555';
-        b.style.color = '#fff';
-        b.style.border = '1px solid #444';
-        b.style.boxShadow = 'none';
-        b.style.fontWeight = '400';
-        b.style.fontSize = '0.85em';
-        return b;
-      };
-
-      const btnVisual = document.createElement('a');
-      btnVisual.href = targetLink.href;
-      btnVisual.textContent = 'Visualizar';
-      btnVisual.className = 'button';
-      btnVisual.style.padding = '4px 7px';
-      btnVisual.style.background = '#555';
-      btnVisual.style.color = '#fff';
-      btnVisual.style.border = '1px solid #444';
-      btnVisual.style.boxShadow = 'none';
-      btnVisual.style.fontWeight = '400';
-      btnVisual.style.fontSize = '0.85em';
-      btnVisual.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        targetLink.click();
-      });
-
-      const btnPdf = makeBtn('PDF', 'id_baixar_pdf_monitoria_btn');
-      const btnDoc = makeBtn('DOC', 'id_baixar_doc_monitoria_btn');
-
-      btnRow.appendChild(btnVisual);
-      btnRow.appendChild(btnPdf);
-      btnRow.appendChild(btnDoc);
-
-      const nomeInput = nomeCell.querySelector('input, textarea');
-      if (nomeInput && nomeInput.parentNode) {
-        nomeInput.parentNode.appendChild(btnRow);
+      btnRow.appendChild(createButton('Visualizar', link.href));
+      if (isMonitoriaRow(row)) {
+        btnRow.appendChild(createButton('PDF', link.href, { download: true }));
+        btnRow.appendChild(createButton('DOC', link.href, { download: true }));
       } else {
-        nomeCell.appendChild(btnRow);
+        btnRow.appendChild(createButton('Baixar', link.href, { download: true }));
       }
+
+      const nomeCell = row.querySelector('td.field-nome');
+      if (nomeCell) {
+        nomeCell.appendChild(btnRow);
+      } else {
+        row.appendChild(btnRow);
+      }
+
+      row.dataset.downloadButtonsInjected = '1';
+    };
+
+    const tryInsert = () => {
+      const rows = arquivosGroup.querySelectorAll('tr.dynamic-processoarquivo, tr.dynamic-arquivos');
+      rows.forEach(processRow);
     };
 
     tryInsert();
     const observer = new MutationObserver(tryInsert);
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(arquivosGroup, { childList: true, subtree: true });
   })();
 
 
