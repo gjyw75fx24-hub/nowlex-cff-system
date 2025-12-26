@@ -1,11 +1,15 @@
 {% extends "admin/contratos/processojudicial/change_form_etiquetas.html" %}
-{% load i18n %}
+{% load i18n static %}
 
 {% block extrahead %}
 {{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/css/documento_modelo_peticoes.css' %}">
 <script>
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
+window.__tipos_peticao_preview_url = "{{ tipos_peticao_preview_url|default:'' }}";
+window.__tipos_peticao_generate_url = "{{ tipos_peticao_generate_url|default:'' }}";
+window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 </script>
 {% endblock %}
 
@@ -43,7 +47,7 @@ window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 .monitoria-checkbox-wrapper {
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
+  margin-left: 10px;
 }
 
 .monitoria-checkbox-wrapper input[type="checkbox"] {
@@ -52,27 +56,30 @@ window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 
 .monitoria-checkbox-wrapper span {
   font-size: 0.85rem;
-  letter-spacing: 0.08em;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid #32435b;
+  letter-spacing: 0.04em;
+  padding: 6px 18px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e0;
   background: #ffffff;
-  color: #2a4a6c;
+  color: #42748fff;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.2);
-  transition: background 0.15s ease, color 0.15s ease;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+  transition: background 0.2s ease, color 0.2s ease, border 0.2s ease, transform 0.15s ease;
 }
 
-.monitoria-checkbox-wrapper input[type="checkbox"]:checked + span {
-  background: #324a6c;
-  color: #fff;
-  box-shadow: none;
+.monitoria-checkbox-wrapper span:focus-visible {
+  outline: 2px solid rgba(66, 116, 143, 0.6);
+  outline-offset: 2px;
 }
+
+.monitoria-checkbox-wrapper input[type="checkbox"]:checked + span,
 .monitoria-checkbox-wrapper.checked span {
-  background: #324a6c;
-  color: #fff;
-  box-shadow: none;
+  border-color: #42748fff;
+  background: #42748fff;
+  color: #ffffff;
+  box-shadow: 0 6px 12px rgba(66, 116, 143, 0.2);
+  transform: translateY(-1px);
 }
 </style>
 
@@ -154,7 +161,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         syncWrapper();
       }
-      const nomeButtonsContainer = nomeCell.querySelector('div[style*="display:flex"], div[style*="display: flex"]');
+      const nomeButtonsContainer = Array.from(nomeCell.querySelectorAll('div')).find(div => div.querySelector('a.button, button.button'));
       if (nomeButtonsContainer) {
         nomeButtonsContainer.appendChild(wrapper);
         return;
