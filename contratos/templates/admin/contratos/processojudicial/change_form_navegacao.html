@@ -115,7 +115,11 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 #arquivos-group th.column-enviado_por,
 #processoarquivo_set-group th.column-enviado_por,
 #arquivos-group td.field-enviado_por,
-#processoarquivo_set-group td.field-enviado_por {
+#processoarquivo_set-group td.field-enviado_por,
+#arquivos-group th.column-criado_em,
+#processoarquivo_set-group th.column-criado_em,
+#arquivos-group td.field-criado_em,
+#processoarquivo_set-group td.field-criado_em {
   display: none;
 }
 </style>
@@ -357,6 +361,15 @@ document.addEventListener('DOMContentLoaded', function() {
       return raw.trim();
     };
 
+    const getCreationDate = (row) => {
+      const cell = row.querySelector('td.field-criado_em');
+      if (!cell) {
+        return '';
+      }
+      const raw = cell.textContent || '';
+      return raw.trim().replace(/\s+/g, ' ');
+    };
+
     const renderUploaderLine = (row, nomeCell) => {
       if (!row || !nomeCell) {
         return;
@@ -368,8 +381,20 @@ document.addEventListener('DOMContentLoaded', function() {
         nomeCell.appendChild(uploaderLine);
       }
       const name = getUploaderName(row);
-      uploaderLine.textContent = name ? `Enviado por ${name}` : '';
-      uploaderLine.style.display = name ? 'block' : 'none';
+      const dateText = getCreationDate(row);
+      if (!name && !dateText) {
+        uploaderLine.style.display = 'none';
+        return;
+      }
+      let text = 'Enviado';
+      if (name) {
+        text += ` por ${name}`;
+      }
+      if (dateText) {
+        text += name ? ` em ${dateText}` : ` em ${dateText}`;
+      }
+      uploaderLine.textContent = text;
+      uploaderLine.style.display = 'block';
     };
 
     const setupModifyControl = (row, arquivoCell) => {
