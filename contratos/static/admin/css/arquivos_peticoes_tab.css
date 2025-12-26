@@ -201,6 +201,38 @@
     pointer-events: none;
 }
 
+.inline-group-subtab-execute-label {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: #20304b;
+    text-align: center;
+    max-width: 140px;
+    display: block;
+}
+
+.inline-group-subtab-status {
+    margin: 4px 16px 0;
+    min-height: 1.1rem;
+    font-size: 0.78rem;
+    color: #4a5568;
+}
+
+.inline-group-subtab-status[data-status="error"] {
+    color: #c82333;
+}
+
+.inline-group-subtab-status[data-status="success"] {
+    color: #0f9d58;
+}
+
+.inline-group-subtab-status[data-status="info"] {
+    color: #2563eb;
+}
+
+.inline-group-subtab-execute-ready {
+    box-shadow: 0 8px 18px rgba(66, 116, 143, 0.25);
+}
+
 .inline-group-subtab-options-shell {
     border-radius: 16px;
     border: 1px solid #d6ddf1;
