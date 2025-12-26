@@ -279,10 +279,13 @@ document.addEventListener('DOMContentLoaded', function() {
       // só insere uma vez por inline de monitoria; usa a primeira linha que tenha arquivo pdf/docx de monitoria
       if (arquivosGroup.querySelector('#id_baixar_doc_monitoria_btn') || arquivosGroup.querySelector('#id_baixar_pdf_monitoria_btn')) return;
 
+      const baseRow = arquivosGroup.querySelector('tr.arquivos-peticoes-base-row');
       const targetLink = arquivosGroup.querySelector('td.field-arquivo a[href*="Monitoria"], td.field-arquivo a[href*="monitoria"], td.field-arquivo a[href$=".pdf"], td.field-arquivo a[href$=".docx"]');
-      if (!targetLink) return;
+      if (!targetLink && !baseRow) {
+        return;
+      }
 
-      const row = targetLink.closest('tr.dynamic-processoarquivo') || targetLink.closest('tr');
+      const row = (baseRow || targetLink)?.closest('tr.dynamic-processoarquivo') || (baseRow || targetLink)?.closest('tr');
       const nomeCell = row ? row.querySelector('td.field-nome') : null;
       const arquivoCell = targetLink.closest('td.field-arquivo');
       if (!row || !nomeCell || !arquivoCell) return;
