@@ -1,6 +1,9 @@
 (function () {
     'use strict';
 
+    const previewApiUrl = window.__tipos_peticao_preview_url || '';
+    const generateApiUrl = window.__tipos_peticao_generate_url || '';
+    const csrfApiToken = window.__tipos_peticao_csrf_token || '';
     const createDropdown = () => {
         const dropdown = document.createElement('div');
         dropdown.className = 'inline-group-subtab-dropdown';
@@ -26,6 +29,7 @@
                         </span>
                         </button>
                         <span class="inline-group-subtab-execute-text">executar</span>
+                        <span class="inline-group-subtab-execute-label" aria-live="polite" hidden></span>
                     </div>
                 </div>
                 <div class="inline-group-subtab-options-shell" hidden>
@@ -33,9 +37,15 @@
                     </div>
                 </div>
             </div>
+            <div class="inline-group-subtab-status" role="status" aria-live="polite"></div>
         `;
         return dropdown;
     };
+
+    let tiposCache = [];
+    let statusElement = null;
+    let executeButtonRef = null;
+    let executeLabelRef = null;
 
     const normalizeText = (value) => {
         if (!value) {
@@ -45,17 +55,103 @@
     };
 
     const getArquivoRows = () => {
-        const tableBody = document.querySelector('#processoarquivo_set-group tbody');
-        if (!tableBody) {
-            return [];
-        }
-        return Array.from(tableBody.querySelectorAll('tr')).filter(row => row.querySelector('td.field-nome'));
+        const selectors = [
+            '#processoarquivo_set-group tbody tr',
+            '#arquivos-group tbody tr'
+        ];
+        const rows = selectors
+            .map(selector => Array.from(document.querySelectorAll(selector)))
+            .flat();
+        return rows.filter(row => row.querySelector('td.field-nome'));
     };
 
-    const emitBaseChange = () => {
+    const getRowFileName = (row) => {
+        if (!row) {
+            return '';
+        }
+        const input = row.querySelector('input[name$="-nome"]');
+        if (input && input.value) {
+            return input.value.trim();
+        }
+        const text = row.querySelector('td.field-nome')?.textContent || row.textContent || '';
+        return text.trim();
+    };
+
+    const emitBaseChange = (baseName = selectedBaseName) => {
         document.dispatchEvent(new CustomEvent('arquivosPeticao:baseChanged', {
-            detail: { baseId: selectedBaseId }
+            detail: { baseId: selectedBaseId, baseName }
         }));
+    };
+
+    const setStatus = (text = '', severity = '') => {
+        if (!statusElement) {
+            return;
+        }
+        if (!text) {
+            statusElement.textContent = '';
+            statusElement.dataset.status = '';
+            statusElement.hidden = true;
+            return;
+        }
+        statusElement.textContent = text;
+        statusElement.dataset.status = severity;
+        statusElement.hidden = false;
+    };
+
+    const isReadyToExecute = () => Boolean(selectedTipoId && selectedBaseId);
+
+    const updateExecuteButtonState = () => {
+        if (!executeButtonRef) {
+            return;
+        }
+        const canExecute = isReadyToExecute();
+        executeButtonRef.disabled = !canExecute;
+        executeButtonRef.classList.toggle('inline-group-subtab-execute-ready', canExecute);
+        const baseLabel = selectedBaseName ? ` ${selectedBaseName}` : '';
+        const title = `Executar${baseLabel}`;
+        executeButtonRef.setAttribute('title', title);
+        executeButtonRef.setAttribute('aria-label', title);
+        if (executeLabelRef) {
+            if (selectedBaseName) {
+                executeLabelRef.textContent = selectedBaseName;
+                executeLabelRef.hidden = false;
+            } else {
+                executeLabelRef.textContent = '';
+                executeLabelRef.hidden = true;
+            }
+        }
+    };
+
+    const setupBaseCheckbox = (checkbox, row) => {
+        if (!checkbox || checkbox.dataset.peticoesEnhanced === '1') {
+            return;
+        }
+        checkbox.removeAttribute('disabled');
+        const handleChange = () => {
+            const id = checkbox.dataset.fileId || '';
+            if (checkbox.checked) {
+                const fileName = getRowFileName(row);
+                selectedBaseId = id;
+                selectedBaseName = fileName;
+                window.__arquivos_peticao_selected_base_id = id;
+                window.__arquivos_peticao_selected_base_name = selectedBaseName;
+                getArquivoRows().forEach((otherRow) => {
+                    const otherCheckbox = otherRow.querySelector('.arquivos-peticoes-base-checkbox');
+                    if (otherCheckbox && otherCheckbox !== checkbox) {
+                        otherCheckbox.checked = false;
+                    }
+                });
+            } else if (selectedBaseId === id) {
+                selectedBaseId = '';
+                selectedBaseName = '';
+                window.__arquivos_peticao_selected_base_id = '';
+                window.__arquivos_peticao_selected_base_name = '';
+            }
+            highlightSelectedRow();
+            emitBaseChange();
+        };
+        checkbox.addEventListener('change', handleChange);
+        checkbox.dataset.peticoesEnhanced = '1';
     };
 
     const ensureBaseWrapper = (row) => {
@@ -70,27 +166,12 @@
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.className = 'arquivos-peticoes-base-checkbox';
-            checkbox.addEventListener('change', () => {
-                const id = checkbox.dataset.fileId || '';
-                if (checkbox.checked) {
-                    selectedBaseId = id;
-                    window.__arquivos_peticao_selected_base_id = id;
-                    getArquivoRows().forEach((otherRow) => {
-                        const otherCheckbox = otherRow.querySelector('.arquivos-peticoes-base-checkbox');
-                        if (otherCheckbox && otherCheckbox !== checkbox) {
-                            otherCheckbox.checked = false;
-                        }
-                    });
-                } else if (selectedBaseId === id) {
-                    selectedBaseId = '';
-                    window.__arquivos_peticao_selected_base_id = '';
-                }
-                highlightSelectedRow();
-                emitBaseChange();
-            });
+            setupBaseCheckbox(checkbox, row);
             wrapper.appendChild(checkbox);
             nameCell.insertBefore(wrapper, nameCell.firstChild);
         }
+        const checkbox = wrapper.querySelector('.arquivos-peticoes-base-checkbox');
+        setupBaseCheckbox(checkbox, row);
         return wrapper;
     };
 
@@ -108,62 +189,102 @@
     const refreshBaseCheckboxes = () => {
         const normalizedType = normalizeText(selectedTipoName);
         const candidates = getArquivoRows();
-        candidates.forEach(row => {
-            const wrapper = ensureBaseWrapper(row);
-            if (!wrapper) {
-                return;
-            }
-            const checkbox = wrapper.querySelector('.arquivos-peticoes-base-checkbox');
-            const idInput = row.querySelector('input[id$="-id"]');
-            const fileId = idInput ? idInput.value : null;
-            if (checkbox && fileId) {
-                checkbox.dataset.fileId = fileId;
-            }
-            const nameText = normalizeText(row.querySelector('td.field-nome')?.textContent || '');
-            const is01Row = /01\s*-/i.test(nameText);
-            const isCandidate = is01Row && normalizedType && nameText.includes(normalizedType);
-            wrapper.style.display = is01Row ? 'inline-flex' : 'none';
-            if (checkbox) {
-                checkbox.disabled = !isCandidate;
-                checkbox.checked = isCandidate && selectedBaseId && fileId && selectedBaseId === fileId;
-            }
+        let baseStillValid = false;
+            candidates.forEach(row => {
+                const wrapper = ensureBaseWrapper(row);
+                if (!wrapper) {
+                    return;
+                }
+                const checkbox = wrapper.querySelector('.arquivos-peticoes-base-checkbox');
+                const idInput = row.querySelector('input[id$="-id"]');
+                const fileId = idInput ? idInput.value : null;
+                if (checkbox && fileId) {
+                    checkbox.dataset.fileId = fileId;
+                }
+                const nameText = normalizeText(row.querySelector('td.field-nome')?.textContent || '');
+                const is01Row = /01\s*-/i.test(nameText);
+                const hasTipo = Boolean(normalizedType);
+                const isCandidate = is01Row && hasTipo;
+                wrapper.style.display = is01Row ? 'inline-flex' : 'none';
+                if (checkbox) {
+                    const rowSelected = Boolean(selectedBaseId) && fileId && selectedBaseId === fileId;
+                    checkbox.checked = rowSelected;
+                    if (rowSelected) {
+                        baseStillValid = true;
+                    }
+                }
             if (!isCandidate && checkbox) {
                 checkbox.checked = false;
                 row.classList.remove('arquivos-peticoes-base-row');
             }
         });
-        if (selectedBaseId) {
-            highlightSelectedRow();
+        if (!baseStillValid && selectedBaseId) {
+            selectedBaseId = '';
+            selectedBaseName = '';
+            window.__arquivos_peticao_selected_base_id = '';
+            window.__arquivos_peticao_selected_base_name = '';
+            emitBaseChange();
         }
+        highlightSelectedRow();
+        bindBaseButtons();
+    };
+
+    const bindBaseButtons = () => {
+        const searchRoot = document.querySelector('#arquivos-group') || document;
+        const buttons = Array.from(searchRoot.querySelectorAll('button, a')).filter(btn => btn.textContent.trim().toLowerCase() === 'base');
+        buttons.forEach(btn => {
+            if (btn.dataset.baseBound === '1') {
+                return;
+            }
+            btn.dataset.baseBound = '1';
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                const row = btn.closest('tr');
+                if (!row) {
+                    return;
+                }
+                const checkbox = row.querySelector('.arquivos-peticoes-base-checkbox');
+                if (!checkbox) {
+                    return;
+                }
+                checkbox.removeAttribute('disabled');
+                checkbox.click();
+            });
+        });
     };
 
     const initBaseSelectionObserver = () => {
-        const tableBody = document.querySelector('#processoarquivo_set-group tbody');
-        if (!tableBody) {
+        const targets = [
+            document.querySelector('#processoarquivo_set-group tbody'),
+            document.querySelector('#arquivos-group tbody')
+        ].filter(Boolean);
+        if (!targets.length) {
             return;
         }
         const observer = new MutationObserver(refreshBaseCheckboxes);
-        observer.observe(tableBody, { childList: true, subtree: true });
+        targets.forEach(target => observer.observe(target, { childList: true, subtree: true }));
         refreshBaseCheckboxes();
     };
 
-    let selectedTipoId = '';
-    let selectedTipoName = '';
+    let selectedTipoId = window.__arquivos_peticao_selected_tipo_id || '';
+    let selectedTipoName = window.__arquivos_peticao_selected_tipo_name || '';
     let selectButtonRef = null;
-    let selectedBaseId = '';
+    let selectedBaseId = window.__arquivos_peticao_selected_base_id || '';
+    let selectedBaseName = window.__arquivos_peticao_selected_base_name || '';
+    let selectedTipoItem = null;
+    let previewModalInstance = null;
+    let currentPreview = null;
 
-    const setActiveTipo = (tipoId, tipoName) => {
+    const setActiveTipo = (tipoId, tipoName, tipoObj = null) => {
         selectedTipoId = tipoId;
         selectedTipoName = tipoName;
-        selectedBaseId = '';
         window.__arquivos_peticao_selected_tipo_id = tipoId;
         window.__arquivos_peticao_selected_tipo_name = tipoName;
-        window.__arquivos_peticao_selected_base_id = '';
+        window.__arquivos_peticao_selected_base_name = selectedBaseName;
         refreshBaseCheckboxes();
         document.dispatchEvent(new CustomEvent('arquivosPeticao:tipoChanged', {
             detail: { tipoId: selectedTipoId, tipoName: selectedTipoName }
         }));
-        emitBaseChange();
         if (selectButtonRef) {
             const label = selectButtonRef.querySelector('.inline-group-subtab-select-label');
             if (label) {
@@ -171,6 +292,9 @@
             }
             selectButtonRef.classList.toggle('inline-group-subtab-select-active', Boolean(tipoName));
         }
+        selectedTipoItem = tipoObj || tiposCache.find(item => String(item.id) === String(tipoId)) || null;
+        setStatus('');
+        updateExecuteButtonState();
     };
 
     const populateDropdown = (dropdown, apiUrl) => {
@@ -198,6 +322,7 @@
             })
             .then(data => {
                 const types = Array.isArray(data.tipos) ? data.tipos : [];
+                tiposCache = types;
                 if (types.length === 0) {
                     optionsContainer.innerHTML = '';
                     return;
@@ -228,7 +353,7 @@
                     optionBtn.dataset.tipoId = id;
                     optionBtn.addEventListener('click', () => {
                         markActive(optionBtn);
-                        setActiveTipo(id, name);
+                        setActiveTipo(id, name, item);
                         selectButton.querySelector('.inline-group-subtab-select-label').textContent = name;
                         setHidden(true);
                     });
@@ -237,6 +362,8 @@
                 if (selectedTipoId) {
                     const match = types.find(item => String(item.id) === String(selectedTipoId));
                     if (match) {
+                        selectedTipoItem = match;
+                        selectedTipoName = match.nome || selectedTipoName;
                         selectButton.querySelector('.inline-group-subtab-select-label').textContent = match.nome || '';
                         const matchedBtn = optionsContainer.querySelector(`[data-tipo-id="${match.id || ''}"]`);
                         if (matchedBtn) {
@@ -286,6 +413,231 @@
             });
     };
 
+    const createPreviewModal = () => {
+        if (previewModalInstance) {
+            return previewModalInstance;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'documento-peticoes-modal-overlay';
+        overlay.innerHTML = `
+            <div class="documento-peticoes-modal">
+                <button type="button" class="documento-peticoes-modal-close" aria-label="Fechar">×</button>
+                <h3>Pré-visualização do combo</h3>
+                <p>Nome sugerido: <strong id="documento-peticoes-modal-zipname">...</strong></p>
+                <div>
+                    <strong>Itens encontrados:</strong>
+                    <ul id="documento-peticoes-modal-found"></ul>
+                </div>
+                <div class="documento-peticoes-custom-alert" id="documento-peticoes-modal-missing" style="display:none">
+                    <strong>Faltantes:</strong>
+                    <ul id="documento-peticoes-modal-missing-list"></ul>
+                </div>
+                <div class="documento-peticoes-upload" id="documento-peticoes-modal-optional" style="display:none">
+                    <strong>Anexos opcionais</strong>
+                    <div id="documento-peticoes-modal-optional-list"></div>
+                </div>
+                <div class="preview-actions">
+                    <button type="button" class="button" id="documento-peticoes-modal-voltar">Voltar</button>
+                    <button type="button" class="button" id="documento-peticoes-modal-prosseguir">Prosseguir mesmo assim</button>
+                    <button type="button" class="button button-primary" id="documento-peticoes-modal-gerar">Gerar ZIP</button>
+                </div>
+                <p class="documento-peticoes-custom-alert" id="documento-peticoes-modal-result" style="display:none"></p>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const closeBtn = overlay.querySelector('.documento-peticoes-modal-close');
+        const voltarBtn = overlay.querySelector('#documento-peticoes-modal-voltar');
+        const prosseguirBtn = overlay.querySelector('#documento-peticoes-modal-prosseguir');
+        const gerarBtn = overlay.querySelector('#documento-peticoes-modal-gerar');
+        const modal = {
+            overlayEl: overlay,
+            zipNameEl: overlay.querySelector('#documento-peticoes-modal-zipname'),
+            foundList: overlay.querySelector('#documento-peticoes-modal-found'),
+            missingPanel: overlay.querySelector('#documento-peticoes-modal-missing'),
+            missingList: overlay.querySelector('#documento-peticoes-modal-missing-list'),
+            optionalPanel: overlay.querySelector('#documento-peticoes-modal-optional'),
+            optionalList: overlay.querySelector('#documento-peticoes-modal-optional-list'),
+            resultEl: overlay.querySelector('#documento-peticoes-modal-result'),
+            gerarBtn
+        };
+        const closeOverlay = () => overlay.classList.remove('open');
+        closeBtn.addEventListener('click', closeOverlay);
+        voltarBtn.addEventListener('click', closeOverlay);
+        prosseguirBtn.addEventListener('click', () => {
+            gerarBtn.dataset.allowed = '1';
+            modal.resultEl.style.display = 'none';
+        });
+        gerarBtn.addEventListener('click', () => {
+            if (!currentPreview) {
+                return;
+            }
+            runGenerate();
+        });
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                closeOverlay();
+            }
+        });
+        previewModalInstance = modal;
+        return modal;
+    };
+
+    const openPreviewModal = (preview, tipoName) => {
+        const modal = createPreviewModal();
+        modal.zipNameEl.textContent = preview.zip_name || '(sem nome)';
+        modal.foundList.innerHTML = '';
+        (preview.found || []).forEach(item => {
+            const li = document.createElement('li');
+            li.textContent = `${item.label} (${item.name})`;
+            modal.foundList.appendChild(li);
+        });
+        if (preview.missing && preview.missing.length) {
+            modal.missingPanel.style.display = 'block';
+            modal.missingList.innerHTML = '';
+            preview.missing.forEach(entry => {
+                const li = document.createElement('li');
+                li.textContent = entry;
+                modal.missingList.appendChild(li);
+            });
+        } else {
+            modal.missingPanel.style.display = 'none';
+            modal.missingList.innerHTML = '';
+        }
+        if (preview.optional && preview.optional.length) {
+            modal.optionalPanel.style.display = 'block';
+            modal.optionalList.innerHTML = '';
+            preview.optional.forEach(opt => {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = true;
+                checkbox.dataset.id = opt.id;
+                label.appendChild(checkbox);
+                label.append(` ${opt.name}`);
+                modal.optionalList.appendChild(label);
+            });
+        } else {
+            modal.optionalPanel.style.display = 'none';
+            modal.optionalList.innerHTML = '';
+        }
+        modal.resultEl.style.display = 'none';
+        modal.resultEl.textContent = '';
+        modal.gerarBtn.dataset.allowed = '1';
+        modal.overlayEl.classList.add('open');
+        currentPreview = {
+            ...preview,
+            tipoId: preview.tipo_id || selectedTipoId,
+            tipoName: tipoName || selectedTipoName || (selectedTipoItem?.nome || '')
+        };
+    };
+
+    const collectOptionalIds = () => {
+        const modal = createPreviewModal();
+        return Array.from(modal.optionalList.querySelectorAll('input[type="checkbox"]'))
+            .filter(cb => cb.checked)
+            .map(cb => cb.dataset.id)
+            .filter(Boolean);
+    };
+
+    async function runPreview() {
+        if (!selectedTipoId) {
+            setStatus('Selecione um tipo de petição antes de executar.', 'error');
+            return;
+        }
+        if (!selectedBaseId) {
+            setStatus('Marque a base do arquivo antes de executar.', 'error');
+            return;
+        }
+        if (!previewApiUrl) {
+            setStatus('URL de preview não está configurada.', 'error');
+            return;
+        }
+        setStatus('Gerando preview...', 'info');
+        try {
+            const response = await fetch(previewApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfApiToken || ''
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    tipo_id: selectedTipoId,
+                    arquivo_base_id: selectedBaseId
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Falha ao gerar o preview.');
+            }
+            const preview = data.preview || {};
+            openPreviewModal(preview, selectedTipoName || (selectedTipoItem?.nome || ''));
+            setStatus('Preview pronto! Revise os itens e gere o ZIP.', 'success');
+        } catch (err) {
+            setStatus(err.message || 'Erro ao gerar o preview.', 'error');
+        }
+    }
+
+    async function runGenerate() {
+        if (!generateApiUrl) {
+            setStatus('URL de geração não está configurada.', 'error');
+            return;
+        }
+        if (!currentPreview || !currentPreview.tipoId) {
+            setStatus('Gere um preview antes de tentar gerar o ZIP.', 'error');
+            return;
+        }
+        if (!selectedBaseId) {
+            setStatus('A base não está selecionada.', 'error');
+            return;
+        }
+        const modal = createPreviewModal();
+        modal.resultEl.style.display = 'none';
+        modal.resultEl.textContent = '';
+        modal.gerarBtn.disabled = true;
+        try {
+            const response = await fetch(generateApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfApiToken || ''
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    tipo_id: currentPreview.tipoId,
+                    arquivo_base_id: selectedBaseId,
+                    optional_ids: collectOptionalIds()
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Falha ao gerar o ZIP.');
+            }
+            modal.resultEl.innerHTML = '';
+            const titleText = document.createTextNode(`ZIP criado: ${data.result?.zip_name || 'arquivo'} — `);
+            modal.resultEl.appendChild(titleText);
+            if (data.result?.url) {
+                const link = document.createElement('a');
+                link.href = data.result.url;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'Baixar';
+                modal.resultEl.appendChild(link);
+            }
+            modal.resultEl.style.display = 'block';
+            setStatus('ZIP criado com sucesso.', 'success');
+        } catch (err) {
+            modal.resultEl.textContent = err.message || 'Erro ao gerar o ZIP.';
+            modal.resultEl.style.display = 'block';
+            setStatus(err.message || 'Erro ao gerar o ZIP.', 'error');
+        } finally {
+            modal.gerarBtn.disabled = false;
+        }
+    }
+
+    document.addEventListener('arquivosPeticao:tipoChanged', updateExecuteButtonState);
+    document.addEventListener('arquivosPeticao:baseChanged', updateExecuteButtonState);
+
     const tryAttachSubtab = () => {
         const tabs = document.querySelector('.inline-group-tabs');
         if (!tabs) {
@@ -316,8 +668,25 @@
         }
 
         selectButtonRef = dropdown.querySelector('.inline-group-subtab-select-button');
+        executeButtonRef = dropdown.querySelector('[data-arquivos-peticoes-execute]');
+        executeLabelRef = dropdown.querySelector('.inline-group-subtab-execute-label');
+        statusElement = dropdown.querySelector('.inline-group-subtab-status');
+        if (statusElement) {
+            statusElement.hidden = true;
+        }
         const apiUrl = window.__tipos_peticao_api_url || null;
         populateDropdown(dropdown, apiUrl);
+
+        if (executeButtonRef) {
+            executeButtonRef.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (executeButtonRef.disabled) {
+                    return;
+                }
+                runPreview();
+            });
+        }
+        updateExecuteButtonState();
 
         const openDropdown = () => {
             dropdown.classList.add('open');
