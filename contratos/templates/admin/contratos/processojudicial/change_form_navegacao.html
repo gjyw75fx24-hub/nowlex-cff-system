@@ -272,28 +272,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Insere botões de Baixar DOC e Baixar PDF dentro do inline de Arquivos
   (function injectDownloadButtons() {
-    const tryInsert = () => {
-      const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
-      if (!arquivosGroup) return;
+    const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
+    if (!arquivosGroup) return;
 
-      // só insere uma vez por inline de monitoria; usa a primeira linha que tenha arquivo pdf/docx de monitoria
-      if (arquivosGroup.querySelector('#id_baixar_doc_monitoria_btn') || arquivosGroup.querySelector('#id_baixar_pdf_monitoria_btn')) return;
+    const makeBtn = (text, id) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = text;
+      if (id) b.id = id;
+      b.className = 'button';
+      b.style.padding = '4px 7px';
+      b.style.background = '#555';
+      b.style.color = '#fff';
+      b.style.border = '1px solid #444';
+      b.style.boxShadow = 'none';
+      b.style.fontWeight = '400';
+      b.style.fontSize = '0.85em';
+      return b;
+    };
 
+    const ensureButtonsOnBaseRow = () => {
+      arquivosGroup.querySelectorAll('.documento-peticoes-download-row').forEach(el => el.remove());
       const baseRow = arquivosGroup.querySelector('tr.arquivos-peticoes-base-row');
-      const targetLink = arquivosGroup.querySelector('td.field-arquivo a[href*="Monitoria"], td.field-arquivo a[href*="monitoria"], td.field-arquivo a[href$=".pdf"], td.field-arquivo a[href$=".docx"]');
-      if (!targetLink && !baseRow) {
-        return;
-      }
-
-      const row = (baseRow || targetLink)?.closest('tr.dynamic-processoarquivo') || (baseRow || targetLink)?.closest('tr');
-      const nomeCell = row ? row.querySelector('td.field-nome') : null;
-      const arquivoCell = targetLink.closest('td.field-arquivo');
-      if (!row || !nomeCell || !arquivoCell) return;
-
-      // esconde o link original (evita duplicar)
-      targetLink.style.display = 'none';
-
+      if (!baseRow) return;
+      const arquivoCell = baseRow.querySelector('td.field-arquivo');
+      if (!arquivoCell) return;
+      const link = arquivoCell.querySelector('a[href*="/media/"], a[href*="processos/"]');
+      if (!link) return;
+      link.style.display = 'none';
       const btnRow = document.createElement('div');
+      btnRow.className = 'documento-peticoes-download-row';
       btnRow.style.display = 'flex';
       btnRow.style.flexWrap = 'wrap';
       btnRow.style.gap = '6px';
@@ -301,25 +309,9 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRow.style.alignItems = 'center';
       btnRow.style.justifyContent = 'flex-start';
 
-      const makeBtn = (text, id) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.textContent = text;
-        if (id) b.id = id;
-        b.className = 'button';
-        b.style.padding = '4px 7px';
-        b.style.background = '#555';
-        b.style.color = '#fff';
-        b.style.border = '1px solid #444';
-        b.style.boxShadow = 'none';
-        b.style.fontWeight = '400';
-        b.style.fontSize = '0.85em';
-        return b;
-      };
-
       const btnVisual = document.createElement('a');
-      btnVisual.href = targetLink.href;
-      btnVisual.textContent = 'VISUALIZAR';
+      btnVisual.href = link.href;
+      btnVisual.textContent = 'Visualizar';
       btnVisual.className = 'button';
       btnVisual.style.padding = '4px 7px';
       btnVisual.style.background = '#555';
@@ -330,7 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
       btnVisual.style.fontSize = '0.85em';
       btnVisual.addEventListener('click', function(ev) {
         ev.preventDefault();
-        targetLink.click();
+        link.click();
       });
 
       const btnPdf = makeBtn('PDF', 'id_baixar_pdf_monitoria_btn');
@@ -340,19 +332,19 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRow.appendChild(btnPdf);
       btnRow.appendChild(btnDoc);
 
-      // insere abaixo do campo de nome, alinhado à direita
-      const nomeInput = nomeCell.querySelector('input, textarea');
-      if (nomeInput && nomeInput.parentNode) {
-        nomeInput.parentNode.appendChild(btnRow);
-      } else {
+      const nomeCell = baseRow.querySelector('td.field-nome');
+      if (nomeCell) {
         nomeCell.appendChild(btnRow);
+      } else {
+        arquivoCell.appendChild(btnRow);
       }
     };
 
-    tryInsert();
-    const observer = new MutationObserver(tryInsert);
-    observer.observe(document.body, { childList: true, subtree: true });
+    ensureButtonsOnBaseRow();
+    const observer = new MutationObserver(ensureButtonsOnBaseRow);
+    observer.observe(arquivosGroup, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   })();
+
 
   // Troca o checkbox de remover por botão com confirmação no inline de Arquivos
   (function enhanceArquivoInlineDeletes() {
