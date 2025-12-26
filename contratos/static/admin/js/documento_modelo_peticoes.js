@@ -26,6 +26,12 @@
         let isSaving = false;
         let previewModal = null;
         let currentPreview = null;
+        const generateTipoKey = () => {
+            if (window.crypto?.randomUUID) {
+                return window.crypto.randomUUID();
+            }
+            return `tipo-${Math.random().toString(36).slice(2)}`;
+        };
 
         const showMessage = (text, type = '') => {
             if (!messageEl) return;
@@ -79,6 +85,7 @@
                 const row = document.createElement('div');
                 row.className = 'documento-peticoes-row';
                 row.dataset.tipoId = tipo.id || '';
+                row.dataset.tipoKey = tipo.key || '';
 
                 const rowMain = document.createElement('div');
                 rowMain.className = 'documento-peticoes-row-main';
@@ -165,7 +172,8 @@
                 const data = await response.json();
                 tipos = (data.tipos || []).map(item => ({
                     id: item.id || '',
-                    nome: item.nome || ''
+                    nome: item.nome || '',
+                    key: item.key || generateTipoKey()
                 }));
                 renderRows();
                 renderDropdownOptions();
@@ -182,8 +190,11 @@
             saveButton.disabled = true;
             const payload = {
                 tipos: tipos
-                    .map(tipo => getTipoDisplayName(tipo))
-                    .filter(name => name)
+                    .map(tipo => ({
+                        nome: getTipoDisplayName(tipo),
+                        key: tipo.key || ''
+                    }))
+                    .filter(entry => entry.nome)
             };
             try {
                 const response = await fetch(apiUrl, {

@@ -1,4 +1,10 @@
+import uuid
+
 from django.db import models
+
+
+def _generate_tipo_peticao_key():
+    return str(uuid.uuid4())
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 import datetime
@@ -331,6 +337,13 @@ class DocumentoModelo(models.Model):
 
 
 class TipoPeticao(models.Model):
+    key = models.CharField(
+        max_length=36,
+        editable=False,
+        default=_generate_tipo_peticao_key,
+        db_index=True,
+        verbose_name="Chave única"
+    )
     nome = models.CharField(max_length=150, verbose_name="Nome da Petição")
     ordem = models.PositiveIntegerField(default=0, verbose_name="Ordem")
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")

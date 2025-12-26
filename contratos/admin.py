@@ -29,6 +29,7 @@ from .models import (
     Carteira, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     Parte, ProcessoArquivo, ProcessoJudicial, Prazo, QuestaoAnalise,
     StatusProcessual, Tarefa, TipoPeticao, TipoPeticaoAnexoContinua,
+    _generate_tipo_peticao_key,
 )
 from .widgets import EnderecoWidget
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
@@ -308,7 +309,7 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
     def tipos_peticao_view(self, request):
         if request.method == 'GET':
             try:
-                tipos = list(TipoPeticao.objects.order_by('ordem').values('id', 'nome', 'ordem'))
+                tipos = list(TipoPeticao.objects.order_by('ordem').values('id', 'nome', 'ordem', 'key'))
             except Exception:
                 logger.exception("Falha ao carregar tipos de petição")
                 tipos = []
@@ -328,27 +329,49 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             except (json.JSONDecodeError, UnicodeDecodeError):
                 return JsonResponse({'error': 'Payload inválido.'}, status=400)
 
-            names = payload.get('tipos')
-            if not isinstance(names, list):
+            raw_tipos = payload.get('tipos')
+            if not isinstance(raw_tipos, list):
                 return JsonResponse({'error': 'Formato inválido.'}, status=400)
 
-            trimmed = [str(name).strip() for name in names if str(name).strip()]
-            cleaned = []
+            normalized = []
             seen = set()
-            for value in trimmed:
-                if value in seen:
+            for entry in raw_tipos:
+                if isinstance(entry, str):
+                    nome = entry.strip()
+                    key = ''
+                elif isinstance(entry, dict):
+                    nome = str(entry.get('nome', '')).strip()
+                    key = str(entry.get('key', '') or '').strip()
+                else:
                     continue
-                seen.add(value)
-                cleaned.append(value)
+                if not nome or nome in seen:
+                    continue
+                seen.add(nome)
+                normalized.append({'nome': nome, 'key': key})
 
             try:
                 with transaction.atomic():
-                    TipoPeticao.objects.all().delete()
-                    objects = [
-                        TipoPeticao(nome=nome, ordem=index)
-                        for index, nome in enumerate(cleaned)
-                    ]
-                    TipoPeticao.objects.bulk_create(objects)
+                    existing = {tipo.key: tipo for tipo in TipoPeticao.objects.all()}
+                    new_keys = set()
+                    ordem = 0
+                    for entry in normalized:
+                        nome = entry['nome']
+                        key = entry['key']
+                        tipo = None
+                        if key and key in existing:
+                            tipo = existing.pop(key)
+                            tipo.nome = nome
+                            tipo.ordem = ordem
+                            tipo.save(update_fields=['nome', 'ordem'])
+                        else:
+                            tipo = TipoPeticao.objects.create(
+                                nome=nome,
+                                ordem=ordem,
+                                key=key or _generate_tipo_peticao_key()
+                            )
+                        ordem += 1
+                        new_keys.add(tipo.key)
+                    TipoPeticao.objects.exclude(key__in=new_keys).delete()
             except Exception:
                 logger.exception("Falha ao salvar tipos de petição")
                 return JsonResponse({'error': 'Não foi possível salvar os tipos.'}, status=500)
