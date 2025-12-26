@@ -29,8 +29,8 @@
                         </span>
                         </button>
                         <span class="inline-group-subtab-execute-text">executar</span>
-                        <span class="inline-group-subtab-execute-label" aria-live="polite" hidden></span>
                     </div>
+                    <span class="inline-group-subtab-execute-label" aria-live="polite" hidden></span>
                 </div>
                 <div class="inline-group-subtab-options-shell" hidden>
                     <div class="inline-group-subtab-options" hidden>
