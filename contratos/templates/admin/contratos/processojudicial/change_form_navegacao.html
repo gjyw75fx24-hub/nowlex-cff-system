@@ -272,36 +272,61 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Insere botões de Baixar DOC e Baixar PDF dentro do inline de Arquivos
   (function injectDownloadButtons() {
-    const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
-    if (!arquivosGroup) return;
+    const tryInsert = () => {
+      const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
+      if (!arquivosGroup) return;
 
-    const makeBtn = (text, id) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = text;
-      if (id) b.id = id;
-      b.className = 'button';
-      b.style.padding = '4px 7px';
-      b.style.background = '#555';
-      b.style.color = '#fff';
-      b.style.border = '1px solid #444';
-      b.style.boxShadow = 'none';
-      b.style.fontWeight = '400';
-      b.style.fontSize = '0.85em';
-      return b;
-    };
+      if (arquivosGroup.querySelector('#id_baixar_doc_monitoria_btn') || arquivosGroup.querySelector('#id_baixar_pdf_monitoria_btn')) {
+        return;
+      }
 
-    const ensureButtonsOnBaseRow = () => {
-      arquivosGroup.querySelectorAll('.documento-peticoes-download-row').forEach(el => el.remove());
       const baseRow = arquivosGroup.querySelector('tr.arquivos-peticoes-base-row');
-      if (!baseRow) return;
-      const arquivoCell = baseRow.querySelector('td.field-arquivo');
-      if (!arquivoCell) return;
-      const link = arquivoCell.querySelector('a[href*="/media/"], a[href*="processos/"]');
-      if (!link) return;
-      link.style.display = 'none';
+      let targetLink = null;
+      let row = null;
+
+      const selectors = [
+        'td.field-arquivo a[href*="Monitoria"]',
+        'td.field-arquivo a[href*="monitoria"]',
+        'td.field-arquivo a[href*="Cobranca"]',
+        'td.field-arquivo a[href*="cobranca"]',
+        'td.field-arquivo a[href$=".pdf"]',
+        'td.field-arquivo a[href$=".docx"]'
+      ];
+
+      const findLink = (context) => {
+        for (const selector of selectors) {
+          const candidate = context?.querySelector(selector);
+          if (candidate) {
+            return candidate;
+          }
+        }
+        return null;
+      };
+
+      if (baseRow) {
+        targetLink = findLink(baseRow);
+        row = baseRow;
+      }
+      if (!targetLink) {
+        targetLink = findLink(arquivosGroup);
+        if (targetLink) {
+          row = targetLink.closest('tr.dynamic-processoarquivo') || targetLink.closest('tr');
+        }
+      }
+
+      if (!targetLink || !row) {
+        return;
+      }
+
+      const nomeCell = row.querySelector('td.field-nome');
+      const arquivoCell = row.querySelector('td.field-arquivo');
+      if (!nomeCell || !arquivoCell) {
+        return;
+      }
+
+      targetLink.style.display = 'none';
+
       const btnRow = document.createElement('div');
-      btnRow.className = 'documento-peticoes-download-row';
       btnRow.style.display = 'flex';
       btnRow.style.flexWrap = 'wrap';
       btnRow.style.gap = '6px';
@@ -309,8 +334,24 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRow.style.alignItems = 'center';
       btnRow.style.justifyContent = 'flex-start';
 
+      const makeBtn = (text, id) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        if (id) b.id = id;
+        b.className = 'button';
+        b.style.padding = '4px 7px';
+        b.style.background = '#555';
+        b.style.color = '#fff';
+        b.style.border = '1px solid #444';
+        b.style.boxShadow = 'none';
+        b.style.fontWeight = '400';
+        b.style.fontSize = '0.85em';
+        return b;
+      };
+
       const btnVisual = document.createElement('a');
-      btnVisual.href = link.href;
+      btnVisual.href = targetLink.href;
       btnVisual.textContent = 'Visualizar';
       btnVisual.className = 'button';
       btnVisual.style.padding = '4px 7px';
@@ -322,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
       btnVisual.style.fontSize = '0.85em';
       btnVisual.addEventListener('click', function(ev) {
         ev.preventDefault();
-        link.click();
+        targetLink.click();
       });
 
       const btnPdf = makeBtn('PDF', 'id_baixar_pdf_monitoria_btn');
@@ -332,17 +373,17 @@ document.addEventListener('DOMContentLoaded', function() {
       btnRow.appendChild(btnPdf);
       btnRow.appendChild(btnDoc);
 
-      const nomeCell = baseRow.querySelector('td.field-nome');
-      if (nomeCell) {
-        nomeCell.appendChild(btnRow);
+      const nomeInput = nomeCell.querySelector('input, textarea');
+      if (nomeInput && nomeInput.parentNode) {
+        nomeInput.parentNode.appendChild(btnRow);
       } else {
-        arquivoCell.appendChild(btnRow);
+        nomeCell.appendChild(btnRow);
       }
     };
 
-    ensureButtonsOnBaseRow();
-    const observer = new MutationObserver(ensureButtonsOnBaseRow);
-    observer.observe(arquivosGroup, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    tryInsert();
+    const observer = new MutationObserver(tryInsert);
+    observer.observe(document.body, { childList: true, subtree: true });
   })();
 
 
