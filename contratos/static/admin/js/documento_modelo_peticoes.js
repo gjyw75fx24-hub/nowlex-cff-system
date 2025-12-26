@@ -281,6 +281,17 @@
             });
         };
 
+        const parseJsonResponse = async (response) => {
+            const text = await response.text();
+            try {
+                return JSON.parse(text);
+            } catch (err) {
+                throw new Error(
+                    `Resposta inválida da API${text ? ` (${text.slice(0, 200)})` : ''}.`
+                );
+            }
+        };
+
         const loadAnexos = async () => {
             if (!anexosUrl) {
                 return;
@@ -290,7 +301,7 @@
                     method: 'GET',
                     credentials: 'same-origin'
                 });
-                const data = await response.json();
+                const data = await parseJsonResponse(response);
                 if (!response.ok || !data.ok) {
                     throw new Error(data.error || 'Falha ao carregar anexos contínuos.');
                 }
@@ -338,7 +349,7 @@
                     credentials: 'same-origin',
                     body: formData
                 });
-                const data = await response.json();
+                const data = await parseJsonResponse(response);
                 if (!response.ok || !data.ok) {
                     throw new Error(data.error || 'Não foi possível salvar os anexos.');
                 }
