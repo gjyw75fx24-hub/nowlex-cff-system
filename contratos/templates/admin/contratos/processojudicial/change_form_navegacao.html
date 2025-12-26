@@ -35,6 +35,19 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 </div>
 
 <style>
+  #processoarquivo_set-group th.delete,
+  #processoarquivo_set-group td.delete,
+  #processoarquivo_set-group th.column-delete,
+  #processoarquivo_set-group td.column-delete,
+  #processoarquivo_set-group thead th:last-child,
+  #processoarquivo_set-group tbody td:last-child,
+  #arquivos-group th.delete,
+  #arquivos-group td.delete,
+  #arquivos-group th.column-delete,
+  #arquivos-group td.column-delete {
+    display: none !important;
+  }
+
 .monitoria-checkbox-wrapper {
   display: inline-flex;
   align-items: center;
@@ -71,6 +84,11 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
   color: #ffffff;
   box-shadow: 0 6px 12px rgba(66, 116, 143, 0.2);
   transform: translateY(-1px);
+}
+.documento-peticoes-remove-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
 }
 
 .documento-peticoes-modify-row {
@@ -535,9 +553,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const attachRemoveButton = (row) => {
       if (row.dataset.removeBtnAdded) return;
       const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
-      const deleteCell = row.querySelector('td.delete');
-      if (!deleteCheckbox || !deleteCell) return;
+      if (!deleteCheckbox) return;
       deleteCheckbox.style.display = 'none';
+      const nomeCell = row.querySelector('td.field-nome');
+      if (!nomeCell) return;
+      let wrapper = row.querySelector('.documento-peticoes-remove-wrapper');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'documento-peticoes-remove-wrapper';
+        nomeCell.appendChild(wrapper);
+      }
+      wrapper.innerHTML = '';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'button';
@@ -546,12 +572,12 @@ document.addEventListener('DOMContentLoaded', function() {
       btn.style.backgroundColor = '#d63636';
       btn.style.color = '#fff';
       btn.style.borderRadius = '999px';
-      btn.style.width = '36px';
-      btn.style.height = '36px';
+      btn.style.width = '28px';
+      btn.style.height = '28px';
       btn.style.border = 'none';
       btn.style.fontSize = '1.2rem';
       btn.style.cursor = 'pointer';
-      const fileName = (row.querySelector('input[name$="-nome"]')?.value || row.querySelector('td.field-nome')?.textContent || 'arquivo').trim();
+      const fileName = (row.querySelector('input[name$="-nome"]')?.value || nomeCell.textContent || 'arquivo').trim();
       btn.addEventListener('click', (event) => {
         event.preventDefault();
         const { overlay, btnSim, btnCancelar } = createConfirmOverlay(`Confirmar deletar o arquivo "${fileName}"?`);
@@ -571,7 +597,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btnSim.addEventListener('click', simHandler);
         btnCancelar.addEventListener('click', cancelHandler);
       });
-      deleteCell.appendChild(btn);
+      wrapper.appendChild(btn);
       row.dataset.removeBtnAdded = '1';
     };
 
