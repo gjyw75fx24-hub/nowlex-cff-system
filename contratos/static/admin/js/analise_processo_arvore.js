@@ -3531,14 +3531,24 @@
                         .text('Gerando...');
                 },
                 success: function (data) {
-                    const msg = data && data.message ? data.message : 'Petição gerada com sucesso.';
-                    let extra = '';
-                    if (data && data.pdf_url) {
-                        extra += `\nPDF salvo em Arquivos.`;
-                    } else {
-                        extra += `\nPDF não foi gerado; verifique o conversor.`;
+                    const msg = data && data.message ? data.message : 'Operação concluída.';
+                    let details = [];
+                    if (data && data.monitoria) {
+                        if (data.monitoria.ok) {
+                            details.push('Monitória: OK');
+                        } else {
+                            details.push(`Monitória: Erro${data.monitoria.error ? ` - ${data.monitoria.error}` : ''}`);
+                        }
                     }
-                    alert(`${msg}${extra}`);
+                    if (data && data.extrato) {
+                        if (data.extrato.ok) {
+                            details.push('Extrato Titularidade: OK');
+                        } else {
+                            details.push(`Extrato Titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
+                        }
+                    }
+                    const detailText = details.length ? `\n${details.join('\n')}` : '';
+                    alert(`${msg}${detailText}`);
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
                     }

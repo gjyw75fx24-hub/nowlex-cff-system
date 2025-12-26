@@ -102,6 +102,77 @@ def _formatar_lista_contratos(contratos):
     return f"{', '.join(valores)} e {ultimo}"
 
 
+def _normalize_digits(value):
+    return re.sub(r'\D', '', str(value or ''))
+
+
+def _sanitize_contract_numbers(contracts):
+    seen = []
+    for contract in contracts:
+        number = getattr(contract, 'numero_contrato', None)
+        digits = _normalize_digits(number)
+        if digits and digits not in seen:
+            seen.append(digits)
+    return seen
+
+
+def _format_contracts_label(numbers):
+    if not numbers:
+        return ''
+    if len(numbers) == 1:
+        return numbers[0]
+    last = numbers[-1]
+    return f"{', '.join(numbers[:-1])} e {last}"
+
+
+def _build_extrato_filename(contracts_label, parte_name, cpf_digits):
+    label_part = contracts_label or 'contratos'
+    nomes = _extrair_primeiros_nomes(parte_name)
+    if not nomes:
+        nomes = cpf_digits or 'perfil'
+    filename = f"05 - Extrato de Titularidade - {label_part} - {nomes}.pdf"
+    return _sanitize_filename(filename)
+
+
+def _call_nowlex_extrato(cpf_digits, contract_numbers):
+    api_key = getattr(settings, 'NOWLEX_JUDICIAL_API_KEY', '') or os.environ.get('NOWLEX_JUDICIAL_API_KEY', '')
+    if not api_key:
+        raise RuntimeError('Chave NOWLEX_JUDICIAL_API_KEY não configurada.')
+    included = ','.join(contract_numbers)
+    params = quote(included, safe=',')
+    url = f"https://erp-api.nowlex.com/api/judicial/cpf/{cpf_digits}/pdf?include_contracts={params}"
+    response = requests.get(url, headers={'X-API-Key': api_key}, timeout=60)
+    if not response.ok:
+        raise RuntimeError(f"Status {response.status_code}: {response.text}")
+    if not response.content:
+        raise RuntimeError("Resposta da API sem conteúdo.")
+    return response.content
+
+
+def generate_extrato_titularidade(processo, cpf_value, contratos, parte_name, usuario):
+    cpf_digits = _normalize_digits(cpf_value)
+    if len(cpf_digits) != 11:
+        return {'ok': False, 'error': 'CPF inválido para o extrato.'}
+    contract_numbers = _sanitize_contract_numbers(contratos)
+    if not contract_numbers:
+        return {'ok': False, 'error': 'Nenhum contrato válido para o extrato.'}
+    contratos_label = _format_contracts_label(contract_numbers)
+    try:
+        pdf_bytes = _call_nowlex_extrato(cpf_digits, contract_numbers)
+    except Exception as exc:
+        logger.error("Falha ao gerar extrato de titularidade: %s", exc, exc_info=True)
+        return {'ok': False, 'error': str(exc)}
+    filename = _build_extrato_filename(contratos_label, parte_name, cpf_digits)
+    pdf_file = ContentFile(pdf_bytes)
+    arquivo = ProcessoArquivo(
+        processo=processo,
+        nome=filename,
+        enviado_por=usuario if usuario and usuario.is_authenticated else None,
+    )
+    arquivo.arquivo.save(filename, pdf_file, save=True)
+    return {'ok': True, 'pdf_url': arquivo.arquivo.url}
+
+
 def _iter_container_paragraphs(container):
     for paragraph in container.paragraphs:
         yield paragraph
@@ -902,14 +973,29 @@ def generate_monitoria_petition(request, processo_id=None):
             logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
             return HttpResponse("Falha ao salvar o PDF gerado nos Arquivos.", status=500)
 
-        response_payload = {
-            "status": "success",
-            "message": "Petição gerada (PDF salvo em Arquivos).",
+        monitoria_info = {
+            "ok": True,
             "pdf_url": pdf_url,
             "pdf_pending": False,
             "docx_download_url": request.build_absolute_uri(
                 reverse('contratos:generate_monitoria_docx', kwargs={'processo_id': processo_id_int})
             ),
+        }
+        extrato_result = generate_extrato_titularidade(
+            processo=processo,
+            cpf_value=polo_passivo.documento,
+            contratos=contratos_monitoria,
+            parte_name=polo_passivo.nome,
+            usuario=request.user if request.user.is_authenticated else None
+        )
+        dest_path = os.path.dirname(arquivo_pdf.arquivo.name or '')
+
+        response_payload = {
+            "status": "success",
+            "message": "Petição gerada (PDF salvo em Arquivos).",
+            "monitoria": monitoria_info,
+            "extrato": extrato_result,
+            "dest_path": dest_path,
         }
         return JsonResponse(response_payload)
 
