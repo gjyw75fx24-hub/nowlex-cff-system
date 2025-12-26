@@ -720,8 +720,22 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     init();
-    const observer = new MutationObserver(init);
-    observer.observe(inlineGroup, { childList: true, subtree: true });
+  })();
+
+  (function hideArquivoHeaders() {
+    const selectors = [
+      '#arquivos-group thead th',
+      '#processoarquivo_set-group thead th'
+    ];
+    selectors.forEach(selector => {
+      document.querySelectorAll(selector).forEach(th => {
+        const text = (th.textContent || '').trim().toLowerCase();
+        if (!text) return;
+        if (text.includes('arquivo') || text.includes('remover')) {
+          th.style.display = 'none';
+        }
+      });
+    });
   })();
 
 });
