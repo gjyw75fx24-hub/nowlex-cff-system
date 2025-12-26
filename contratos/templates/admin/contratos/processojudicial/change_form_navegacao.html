@@ -35,15 +35,6 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 </div>
 
 <style>
-#processoarquivo_set-group th.delete,
-#processoarquivo_set-group td.delete,
-#processoarquivo_set-group th.column-delete,
-#processoarquivo_set-group td.column-delete,
-#processoarquivo_set-group thead th:last-child,
-#processoarquivo_set-group tbody td:last-child {
-  display: none !important;
-}
-
 .monitoria-checkbox-wrapper {
   display: inline-flex;
   align-items: center;
@@ -491,76 +482,106 @@ document.addEventListener('DOMContentLoaded', function() {
   })();
 
 
-  // Troca o checkbox de remover por botão com confirmação no inline de Arquivos
+  // Substitui o checkbox de remoção por botão “×” vermelho com confirmação customizada
   (function enhanceArquivoInlineDeletes() {
     const inlineGroup = document.querySelector('#processoarquivo_set-group');
     if (!inlineGroup) return;
-    // esconde coluna Remover? (admin default)
-    const headers = inlineGroup.querySelectorAll('th.delete, th.column-delete, thead th:last-child');
-    headers.forEach(h => { h.style.display = 'none'; });
-    // esconde células de delete via CSS direto
-    inlineGroup.querySelectorAll('td.delete, td.column-delete').forEach(td => td.style.display = 'none');
-    // fallback: esconde última coluna do thead/tbody
-    const headCells = inlineGroup.querySelectorAll('table thead tr th');
-    const lastIdx = headCells.length ? headCells.length - 1 : -1;
-    if (lastIdx >= 0) {
-      headCells[lastIdx].style.display = 'none';
-      inlineGroup.querySelectorAll('table tbody tr').forEach(tr => {
-        const cells = tr.querySelectorAll('td, th');
-        if (cells[lastIdx]) cells[lastIdx].style.display = 'none';
-      });
-    }
+
+    const createConfirmOverlay = (message) => {
+      let overlay = document.getElementById('arquivo-delete-confirm-overlay');
+      if (overlay) {
+        overlay.remove();
+      }
+      overlay = document.createElement('div');
+      overlay.id = 'arquivo-delete-confirm-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.backgroundColor = 'rgba(0,0,0,0.4)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '10001';
+      const card = document.createElement('div');
+      card.style.background = '#fff';
+      card.style.padding = '20px';
+      card.style.borderRadius = '10px';
+      card.style.maxWidth = '320px';
+      card.style.textAlign = 'center';
+      card.style.boxShadow = '0 12px 30px rgba(0,0,0,0.3)';
+      const label = document.createElement('p');
+      label.textContent = message;
+      label.style.marginBottom = '20px';
+      card.appendChild(label);
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.justifyContent = 'center';
+      actions.style.gap = '12px';
+      const btnSim = document.createElement('button');
+      btnSim.type = 'button';
+      btnSim.textContent = 'Sim';
+      btnSim.className = 'button button-primary';
+      const btnCancelar = document.createElement('button');
+      btnCancelar.type = 'button';
+      btnCancelar.textContent = 'Cancelar';
+      btnCancelar.className = 'button button-secondary';
+      actions.appendChild(btnCancelar);
+      actions.appendChild(btnSim);
+      card.appendChild(actions);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      return { overlay, btnSim, btnCancelar };
+    };
 
     const attachRemoveButton = (row) => {
+      if (row.dataset.removeBtnAdded) return;
       const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
-      if (!deleteCheckbox || row.dataset.removeBtnAdded) return;
+      const deleteCell = row.querySelector('td.delete');
+      if (!deleteCheckbox || !deleteCell) return;
       deleteCheckbox.style.display = 'none';
-      const nomeCell = row.querySelector('td.field-nome');
-      const fileName = (nomeCell?.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'Arquivo').trim();
+      deleteCell.innerHTML = '';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = '×';
-      btn.title = `Remover "${fileName}"`;
       btn.className = 'button';
-      btn.style.backgroundColor = '#ba2121';
+      btn.textContent = '×';
+      btn.title = 'Remover arquivo';
+      btn.style.backgroundColor = '#d63636';
       btn.style.color = '#fff';
-      btn.style.width = '32px';
-      btn.style.height = '32px';
-      btn.style.padding = '0';
       btn.style.borderRadius = '999px';
-      btn.style.display = 'inline-flex';
-      btn.style.alignItems = 'center';
-      btn.style.justifyContent = 'center';
-      btn.style.marginLeft = '8px';
-      btn.style.fontSize = '1.1em';
-      btn.style.lineHeight = '1';
-      btn.addEventListener('click', () => {
-        const ok = confirm(`Remover o arquivo "${fileName}"?`);
-        if (!ok) return;
-        deleteCheckbox.checked = true;
-        row.style.opacity = '0.5';
-        row.style.pointerEvents = 'none';
-        row.style.display = 'none';
+      btn.style.width = '36px';
+      btn.style.height = '36px';
+      btn.style.border = 'none';
+      btn.style.fontSize = '1.2rem';
+      btn.style.cursor = 'pointer';
+      const fileName = (row.querySelector('input[name$="-nome"]')?.value || row.querySelector('td.field-nome')?.textContent || 'arquivo').trim();
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        const { overlay, btnSim, btnCancelar } = createConfirmOverlay(`Confirmar deletar o arquivo "${fileName}"?`);
+        const cleanUp = () => {
+          overlay.remove();
+          btnSim.removeEventListener('click', simHandler);
+          btnCancelar.removeEventListener('click', cancelHandler);
+        };
+        const simHandler = () => {
+          deleteCheckbox.checked = true;
+          row.style.display = 'none';
+          cleanUp();
+        };
+        const cancelHandler = () => {
+          cleanUp();
+        };
+        btnSim.addEventListener('click', simHandler);
+        btnCancelar.addEventListener('click', cancelHandler);
       });
-      if (nomeCell) {
-        nomeCell.appendChild(btn);
-      } else {
-        row.appendChild(btn);
-      }
+      deleteCell.appendChild(btn);
       row.dataset.removeBtnAdded = '1';
     };
 
-    const rows = inlineGroup.querySelectorAll('.dynamic-processoarquivo');
-    rows.forEach(attachRemoveButton);
-    inlineGroup.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(cb => {
-      cb.style.display = 'none';
-      const wrap = cb.closest('td, th, label');
-      if (wrap) wrap.style.display = 'none';
-    });
-
-    const observer = new MutationObserver(() => {
+    const init = () => {
       inlineGroup.querySelectorAll('.dynamic-processoarquivo').forEach(attachRemoveButton);
-    });
+    };
+
+    init();
+    const observer = new MutationObserver(init);
     observer.observe(inlineGroup, { childList: true, subtree: true });
   })();
 
