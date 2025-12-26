@@ -538,7 +538,6 @@ document.addEventListener('DOMContentLoaded', function() {
       const deleteCell = row.querySelector('td.delete');
       if (!deleteCheckbox || !deleteCell) return;
       deleteCheckbox.style.display = 'none';
-      deleteCell.innerHTML = '';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'button';
