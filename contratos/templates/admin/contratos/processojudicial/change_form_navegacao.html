@@ -91,6 +91,32 @@ document.addEventListener('DOMContentLoaded', function() {
   let currentObjectUrl = null;
   if (!modal || !content || !closeBtn) return;
 
+  const normalizeFileText = (text) => {
+    if (text == null) {
+      return '';
+    }
+    return String(text)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
+  const isMonitoriaBaseName = (text) => {
+    return normalizeFileText(text).includes('01 - monitoria inicial');
+  };
+
+  const getRowFileNameText = (row) => {
+    if (!row) return '';
+    const nameInput = row.querySelector('input[name$="-nome"]');
+    if (nameInput && nameInput.value) {
+      return nameInput.value;
+    }
+    const nomeCell = row.querySelector('td.field-nome');
+    return nomeCell ? nomeCell.textContent : '';
+  };
+
   // Botões "Baixar Doc Editável" e "Baixar PDF" na aba Arquivos + transformar links em "Visualizar"
   // Converte links de arquivo em botão "Visualizar" (apenas no campo de arquivo)
   (function applyVisualizarButtons() {
@@ -122,70 +148,6 @@ document.addEventListener('DOMContentLoaded', function() {
     apply();
     const observer = new MutationObserver(apply);
     observer.observe(document.body, { childList: true, subtree: true });
-  })();
-
-  (function addMonitoriaCheckboxes() {
-    const normalizeText = (text) => {
-      if (!text) {
-        return '';
-      }
-      return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    };
-
-    const matchesMonitoria = (text) => /monitoria/i.test(normalizeText(text));
-
-    const ensureWrapper = (row) => {
-      if (!row) return;
-      const nomeCell = row.querySelector('td.field-nome') || row.querySelector('td.original');
-      if (!nomeCell || nomeCell.querySelector('.monitoria-checkbox-wrapper')) return;
-      const nameInput = nomeCell.querySelector('input[name$="-nome"]');
-      const value = (nameInput && nameInput.value) ? nameInput.value : nomeCell.textContent;
-      if (!matchesMonitoria(value)) return;
-      const wrapper = document.createElement('label');
-      wrapper.className = 'monitoria-checkbox-wrapper';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      const label = document.createElement('span');
-      label.textContent = 'Base';
-      wrapper.appendChild(checkbox);
-      wrapper.appendChild(label);
-      const baseCheckbox = row.querySelector('.arquivos-peticoes-base-checkbox');
-      if (baseCheckbox) {
-        const syncWrapper = () => {
-          wrapper.classList.toggle('checked', baseCheckbox.checked);
-        };
-        baseCheckbox.addEventListener('change', syncWrapper);
-        wrapper.addEventListener('click', (event) => {
-          event.preventDefault();
-          baseCheckbox.click();
-        });
-        syncWrapper();
-      }
-      const nomeButtonsContainer = Array.from(nomeCell.querySelectorAll('div')).find(div => div.querySelector('a.button, button.button'));
-      if (nomeButtonsContainer) {
-        nomeButtonsContainer.appendChild(wrapper);
-        return;
-      }
-      if (nameInput && nameInput.parentNode) {
-        nameInput.parentNode.insertBefore(wrapper, nameInput);
-      } else {
-        const targetNode = nomeCell.querySelector('p') || nomeCell;
-        targetNode.insertAdjacentElement('beforebegin', wrapper);
-      }
-    };
-
-    const sync = () => {
-      const inlineRows = document.querySelectorAll('#processoarquivo_set-group tr.dynamic-processoarquivo');
-      const arquivoRows = document.querySelectorAll('#arquivos-group tr.dynamic-arquivos');
-      inlineRows.forEach(ensureWrapper);
-      arquivoRows.forEach(ensureWrapper);
-    };
-
-    const observer = new MutationObserver(sync);
-    const target = document.querySelector('#processoarquivo_set-group') || document.body;
-    observer.observe(target, { childList: true, subtree: true });
-    sync();
-    setTimeout(sync, 200);
   })();
 
   function closeModal() {
@@ -298,8 +260,40 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const isMonitoriaRow = (row) => {
-      const text = row.querySelector('td.field-nome')?.textContent || '';
-      return /monitoria/i.test(text);
+      const text = getRowFileNameText(row);
+      return isMonitoriaBaseName(text);
+    };
+
+    const createBaseBadge = (baseCheckbox) => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'monitoria-checkbox-wrapper';
+      const label = document.createElement('span');
+      label.textContent = 'Base';
+      wrapper.appendChild(label);
+      const syncWrapper = () => {
+        const checked = Boolean(baseCheckbox.checked);
+        wrapper.classList.toggle('checked', checked);
+        label.classList.toggle('base-active', checked);
+      };
+      baseCheckbox.addEventListener('change', syncWrapper);
+      syncWrapper();
+      return wrapper;
+    };
+
+    const attachBaseBadge = (row, btnRow, attempt = 0) => {
+      if (!row || row.dataset.monitoriaBadgeAdded === '1' || attempt > 10) {
+        return;
+      }
+      const baseCheckbox = row.querySelector('.arquivos-peticoes-base-checkbox');
+      if (!baseCheckbox) {
+        setTimeout(() => {
+          attachBaseBadge(row, btnRow, attempt + 1);
+        }, 80);
+        return;
+      }
+      const badge = createBaseBadge(baseCheckbox);
+      btnRow.appendChild(badge);
+      row.dataset.monitoriaBadgeAdded = '1';
     };
 
     const processRow = (row) => {
@@ -325,6 +319,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (isMonitoriaRow(row)) {
         btnRow.appendChild(createButton('PDF', link.href, { download: true }));
         btnRow.appendChild(createButton('DOC', link.href, { download: true }));
+        attachBaseBadge(row, btnRow);
       } else {
         btnRow.appendChild(createButton('Baixar', link.href, { download: true }));
       }
@@ -422,44 +417,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   })();
 
-  (function addMonitoriaCheckboxes() {
-    const matchesMonitoria = (text) => /monit[ií]ria/i.test(text);
-
-    const insertCheckbox = (row) => {
-      if (!row || row.dataset.monitoriaCheckboxAdded) return;
-      const nomeCell = row.querySelector('td.field-nome');
-      if (!nomeCell) return;
-      const nameInput = nomeCell.querySelector('input[name$="-nome"]');
-      const labelText = nameInput ? nameInput.value : nomeCell.textContent;
-      if (!labelText || !matchesMonitoria(labelText)) {
-        return;
-      }
-      const wrapper = document.createElement('label');
-      wrapper.className = 'monitoria-checkbox-wrapper';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.dataset.monitoriaFile = '1';
-      wrapper.appendChild(checkbox);
-      const text = document.createElement('span');
-      text.textContent = 'Base';
-      wrapper.appendChild(text);
-      if (nameInput) {
-        nameInput.parentNode.insertBefore(wrapper, nameInput);
-      } else {
-        nomeCell.insertBefore(wrapper, nomeCell.firstChild);
-      }
-      row.dataset.monitoriaCheckboxAdded = '1';
-    };
-
-    const sync = () => {
-      const rows = document.querySelectorAll('#processoarquivo_set-group tr.dynamic-processoarquivo');
-      rows.forEach(insertCheckbox);
-    };
-
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(document.querySelector('#processoarquivo_set-group') || document.body, { childList: true, subtree: true });
-  })();
 });
 </script>
 {% endblock %}
