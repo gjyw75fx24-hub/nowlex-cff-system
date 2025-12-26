@@ -120,6 +120,90 @@
     font-size: 0.85rem;
 }
 
+.documento-peticoes-anexos-box {
+    border: 1px solid #d2d9e4;
+    border-radius: 10px;
+    padding: 10px;
+    background: #fdfdfd;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    grid-column: 1 / -1;
+}
+
+.documento-peticoes-anexos-header {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #334155;
+}
+
+.documento-peticoes-anexos-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 140px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.documento-peticoes-anexo-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 0.8rem;
+    color: #0f172a;
+}
+
+.documento-peticoes-anexo-item a {
+    flex: 1;
+    font-weight: 600;
+    color: #1d4ed8;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.documento-peticoes-anexo-meta {
+    font-size: 0.7rem;
+    color: #64748b;
+}
+
+.documento-peticoes-anexos-empty {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #52606d;
+}
+
+.documento-peticoes-anexos-upload {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.documento-peticoes-anexos-upload input[type="file"] {
+    display: none;
+}
+
+.documento-peticoes-anexos-button {
+    font-size: 0.75rem;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #1c7ed6;
+    text-transform: none;
+}
+
+.documento-peticoes-anexos-button:hover {
+    background: #f0f4ff;
+}
+
 .documento-peticoes-status-line {
     display: flex;
     justify-content: space-between;

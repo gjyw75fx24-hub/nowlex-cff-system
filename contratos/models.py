@@ -438,6 +438,33 @@ class ZipGerado(models.Model):
         return self.zip_file.name.split('/')[-1]
 
 
+class TipoPeticaoAnexoContinua(models.Model):
+    tipo_peticao = models.ForeignKey(
+        TipoPeticao,
+        on_delete=models.CASCADE,
+        related_name='anexos_continuos'
+    )
+    arquivo = models.FileField(
+        upload_to='peticoes/anexos_continuos/',
+        verbose_name='Arquivo do combo'
+    )
+    nome = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='Nome exibido'
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
+
+    class Meta:
+        verbose_name = 'Anexo contínuo'
+        verbose_name_plural = 'Anexos contínuos'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        label = self.nome or self.arquivo.name
+        return f"{self.tipo_peticao.nome} › {label}"
+
+
 class ParteProcessoAdvogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE)
     advogado = models.ForeignKey(Advogado, on_delete=models.CASCADE)

@@ -1,35 +1,34 @@
 import logging
-
-from django.contrib import admin, messages
-from django.db import models, transaction
-from django.db.models import FloatField, Q, Sum
-from django.db.models.functions import Now, Abs, Cast, Coalesce
-from django.utils import timezone
-from django.db.models import Count, Max, Subquery, OuterRef
-from django.http import HttpResponseRedirect, JsonResponse, QueryDict, HttpResponseNotAllowed
-from django.shortcuts import get_object_or_404, render
-from django.utils.html import format_html
-from django.urls import reverse, path
-from django.contrib.humanize.templatetags.humanize import intcomma
 import json
+import os
+
 from django import forms
-from django.utils.safestring import mark_safe
-from decimal import Decimal, InvalidOperation
+from django.contrib import admin, messages
+from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
-from django.contrib.auth.models import User, Group # Importar os modelos User e Group
-from django.utils.translation import gettext_lazy as _
-from django.contrib.admin.models import LogEntry, CHANGE
+from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
+from django.db import models, transaction
+from django.db.models import Count, FloatField, Max, Q, Sum
+from django.db.models.functions import Abs, Cast, Coalesce, Now
+from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
+from django.shortcuts import get_object_or_404, render
+from django.urls import path, reverse
+from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+from django.utils.translation import gettext_lazy as _
+from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
 
 from .models import (
-    ProcessoJudicial, Parte, Contrato, StatusProcessual,
-    AndamentoProcessual, Carteira, Etiqueta, ListaDeTarefas, Tarefa, Prazo,
-    OpcaoResposta, QuestaoAnalise, AnaliseProcesso, BuscaAtivaConfig,
-    AdvogadoPassivo, ProcessoArquivo, DocumentoModelo, TipoPeticao,
+    AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
+    Carteira, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
+    Parte, ProcessoArquivo, ProcessoJudicial, Prazo, QuestaoAnalise,
+    StatusProcessual, Tarefa, TipoPeticao, TipoPeticaoAnexoContinua,
 )
 from .widgets import EnderecoWidget
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
@@ -277,6 +276,11 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.tipos_peticao_generate_view),
                 name='contratos_documentomodelo_tipos_peticao_generate'
             ),
+            path(
+                'tipos-peticao/anexos/',
+                self.admin_site.admin_view(self.tipos_peticao_anexos_view),
+                name='contratos_documentomodelo_tipos_peticao_anexos'
+            ),
         ]
         return custom_urls + urls
 
@@ -295,6 +299,10 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             reverse('admin:contratos_documentomodelo_tipos_peticao_generate')
         )
         extra_context.setdefault('csrf_token', get_token(request))
+        extra_context.setdefault(
+            'tipos_peticao_anexos_url',
+            reverse('admin:contratos_documentomodelo_tipos_peticao_anexos')
+        )
         return super().changelist_view(request, extra_context=extra_context)
 
     def tipos_peticao_view(self, request):
@@ -389,6 +397,50 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             logger.exception("Erro ao gerar ZIP para petição")
             return JsonResponse({'ok': False, 'error': 'Não foi possível gerar o ZIP.'}, status=500)
         return JsonResponse({'ok': True, 'result': result})
+
+    def tipos_peticao_anexos_view(self, request):
+        if request.method == 'GET':
+            anexos = TipoPeticaoAnexoContinua.objects.select_related('tipo_peticao').order_by(
+                'tipo_peticao__nome', '-criado_em'
+            )
+            return JsonResponse({
+                'ok': True,
+                'anexos': [self._serialize_anexo(anexo) for anexo in anexos]
+            })
+        if request.method == 'POST':
+            tipo_id = request.POST.get('tipo_id')
+            if not tipo_id:
+                return JsonResponse({'ok': False, 'error': 'Tipo de petição é obrigatório.'}, status=400)
+            try:
+                tipo = TipoPeticao.objects.get(pk=tipo_id)
+            except TipoPeticao.DoesNotExist:
+                return JsonResponse({'ok': False, 'error': 'Tipo de petição inválido.'}, status=400)
+            arquivos = request.FILES.getlist('arquivo')
+            if not arquivos:
+                return JsonResponse({'ok': False, 'error': 'Nenhum arquivo enviado.'}, status=400)
+            anexos = []
+            for arquivo in arquivos:
+                anexos.append(TipoPeticaoAnexoContinua.objects.create(
+                    tipo_peticao=tipo,
+                    arquivo=arquivo,
+                    nome=str(arquivo.name)
+                ))
+            return JsonResponse({
+                'ok': True,
+                'anexos': [self._serialize_anexo(anexo) for anexo in anexos]
+            })
+        return HttpResponseNotAllowed(['GET', 'POST'])
+
+    @staticmethod
+    def _serialize_anexo(anexo):
+        return {
+            'id': anexo.id,
+            'tipo_id': anexo.tipo_peticao_id,
+            'name': anexo.nome or os.path.basename(anexo.arquivo.name),
+            'file_name': os.path.basename(anexo.arquivo.name),
+            'url': anexo.arquivo.url,
+            'created_at': anexo.criado_em.isoformat()
+        }
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
@@ -1581,6 +1633,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         extra_context['delegar_users'] = User.objects.order_by('username')
         extra_context['is_supervisor'] = is_user_supervisor(request.user)
         extra_context['tipos_peticao_api_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao')
+        extra_context['tipos_peticao_preview_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_preview')
+        extra_context['tipos_peticao_generate_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_generate')
+        extra_context['csrf_token'] = get_token(request)
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 

@@ -65,28 +65,6 @@
             dropdownSelect.disabled = dropdownSelect.options.length <= 1;
         };
 
-        const createUploadArea = () => {
-            const uploadArea = document.createElement('div');
-            uploadArea.className = 'documento-peticoes-upload';
-            uploadArea.innerHTML = `
-                Arraste arquivos aqui ou <button type="button">Selecionar</button>
-            `;
-            const button = uploadArea.querySelector('button');
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.multiple = true;
-            input.accept = '.pdf,.doc,.docx';
-            input.style.display = 'none';
-            uploadArea.appendChild(input);
-            button.addEventListener('click', () => input.click());
-            input.addEventListener('change', () => {
-                if (input.files.length) {
-                    showMessage('Upload adicionado à fila (pendente de implementação).', 'success');
-                }
-            });
-            return uploadArea;
-        };
-
         const renderRows = () => {
             fieldsContainer.innerHTML = '';
             if (tipos.length === 0) {
@@ -130,16 +108,48 @@
                 rowMain.appendChild(input);
                 rowMain.appendChild(removeBtn);
 
-                const actions = document.createElement('div');
-                actions.style.display = 'flex';
-                actions.style.flexDirection = 'column';
-                actions.style.gap = '6px';
+                const attachmentsBox = document.createElement('div');
+                attachmentsBox.className = 'documento-peticoes-anexos-box';
 
-                actions.appendChild(createUploadArea());
+                const attachmentsHeader = document.createElement('div');
+                attachmentsHeader.className = 'documento-peticoes-anexos-header';
+                attachmentsHeader.textContent = 'Anexos contínuos';
+
+                const attachmentsList = document.createElement('div');
+                attachmentsList.className = 'documento-peticoes-anexos-list';
+
+                const uploadControls = document.createElement('div');
+                uploadControls.className = 'documento-peticoes-anexos-upload';
+
+                const uploadButton = document.createElement('button');
+                uploadButton.type = 'button';
+                uploadButton.className = 'button button-secondary documento-peticoes-anexos-button';
+                uploadButton.textContent = 'Enviar arquivos';
+
+                const uploadInput = document.createElement('input');
+                uploadInput.type = 'file';
+                uploadInput.multiple = true;
+                uploadInput.accept = '.pdf,.doc,.docx';
+                uploadInput.style.display = 'none';
+
+                uploadButton.addEventListener('click', () => uploadInput.click());
+                uploadInput.addEventListener('change', () => {
+                    if (uploadInput.files.length) {
+                        uploadAnexos(tipo, uploadInput.files, attachmentsList, uploadInput);
+                    }
+                });
+
+                uploadControls.appendChild(uploadButton);
+                uploadControls.appendChild(uploadInput);
+
+                attachmentsBox.appendChild(attachmentsHeader);
+                attachmentsBox.appendChild(attachmentsList);
+                attachmentsBox.appendChild(uploadControls);
 
                 row.appendChild(rowMain);
-                row.appendChild(actions);
+                row.appendChild(attachmentsBox);
                 fieldsContainer.appendChild(row);
+                renderAttachmentsForTipo(tipo.id || '', attachmentsList);
             });
         };
 
@@ -216,6 +226,145 @@
 
         const previewUrl = widget.dataset.previewUrl;
         const generateUrl = widget.dataset.generateUrl;
+        const anexosUrl = widget.dataset.anexosUrl;
+        let anexosByTipo = new Map();
+
+        const renderAttachmentsForTipo = (tipoId, listEl) => {
+            if (!listEl) {
+                return;
+            }
+            listEl.innerHTML = '';
+            const key = String(tipoId || '');
+            const items = anexosByTipo.get(key) || [];
+            if (!items.length) {
+                const placeholder = document.createElement('p');
+                placeholder.className = 'documento-peticoes-anexos-empty';
+                placeholder.textContent = 'Nenhum anexo contínuo cadastrado.';
+                listEl.appendChild(placeholder);
+                return;
+            }
+            items.forEach(item => {
+                const entry = document.createElement('div');
+                entry.className = 'documento-peticoes-anexo-item';
+                const link = document.createElement('a');
+                link.href = item.url;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = item.name || item.file_name || 'Arquivo';
+                entry.appendChild(link);
+                if (item.created_at) {
+                    const meta = document.createElement('span');
+                    meta.className = 'documento-peticoes-anexo-meta';
+                    const date = new Date(item.created_at);
+                    if (!Number.isNaN(date.getTime())) {
+                        meta.textContent = date.toLocaleDateString('pt-BR', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: '2-digit'
+                        });
+                        entry.appendChild(meta);
+                    }
+                }
+                listEl.appendChild(entry);
+            });
+        };
+
+        const refreshAttachmentLists = () => {
+            if (!fieldsContainer) {
+                return;
+            }
+            fieldsContainer.querySelectorAll('.documento-peticoes-row').forEach(row => {
+                const listEl = row.querySelector('.documento-peticoes-anexos-list');
+                if (listEl) {
+                    renderAttachmentsForTipo(row.dataset.tipoId, listEl);
+                }
+            });
+        };
+
+        const loadAnexos = async () => {
+            if (!anexosUrl) {
+                return;
+            }
+            try {
+                const response = await fetch(anexosUrl, {
+                    method: 'GET',
+                    credentials: 'same-origin'
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Falha ao carregar anexos contínuos.');
+                }
+                const grouped = new Map();
+                (data.anexos || []).forEach(item => {
+                    const key = String(item.tipo_id || '');
+                    if (!grouped.has(key)) {
+                        grouped.set(key, []);
+                    }
+                    grouped.get(key).push(item);
+                });
+                anexosByTipo = grouped;
+                refreshAttachmentLists();
+            } catch (error) {
+                showMessage(error.message || 'Erro ao buscar anexos contínuos.', 'error');
+            }
+        };
+
+        const uploadAnexos = async (tipo, files, listEl, inputEl) => {
+            if (!tipo || !tipo.id) {
+                showMessage('Salve o tipo antes de anexar arquivos.', 'error');
+                if (inputEl) inputEl.value = '';
+                return;
+            }
+            if (!files || files.length === 0) {
+                return;
+            }
+            if (!anexosUrl) {
+                showMessage('URL de anexos-contínuos não configurada.', 'error');
+                if (inputEl) inputEl.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('tipo_id', tipo.id);
+            Array.from(files).forEach(file => {
+                formData.append('arquivo', file);
+            });
+            showMessage('Enviando anexos...', 'info');
+            try {
+                const response = await fetch(anexosUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken || ''
+                    },
+                    credentials: 'same-origin',
+                    body: formData
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Não foi possível salvar os anexos.');
+                }
+                const key = String(tipo.id);
+                const existing = anexosByTipo.get(key) || [];
+                const merged = [...existing, ...(data.anexos || [])];
+                const unique = [];
+                const seenIds = new Set();
+                merged.forEach(item => {
+                    if (!item || seenIds.has(String(item.id))) {
+                        return;
+                    }
+                    seenIds.add(String(item.id));
+                    unique.push(item);
+                });
+                anexosByTipo.set(key, unique);
+                renderAttachmentsForTipo(key, listEl);
+                showMessage('Anexos contínuos adicionados.', 'success');
+            } catch (error) {
+                showMessage(error.message || 'Erro ao salvar anexos contínuos.', 'error');
+            } finally {
+                if (inputEl) {
+                    inputEl.value = '';
+                }
+            }
+        };
 
         const createPreviewModal = () => {
             if (previewModal) {
@@ -427,5 +576,6 @@
         });
 
         loadTipos();
+        loadAnexos();
     });
 })();
