@@ -10,7 +10,7 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
 from django.db import models, transaction
-from django.db.models import Count, FloatField, Max, Q, Sum, OuterRef
+from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery
 from django.db.models.functions import Abs, Cast, Coalesce, Now
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
