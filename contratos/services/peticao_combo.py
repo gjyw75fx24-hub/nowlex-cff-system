@@ -395,6 +395,12 @@ def _build_preview_found(base_file, continuous_entries, extrato, per_contract):
             'arquivo_id': base_file.id,
             'name': _get_file_display_name(base_file)
         })
+    for annex_entry in continuous_entries:
+        entries.append({
+            'label': annex_entry['label'],
+            'arquivo_id': _entry_id(annex_entry['arquivo']),
+            'name': _get_file_display_name(annex_entry['arquivo'])
+        })
     if extrato:
         entries.append({
             'label': "05 - Extrato de Titularidade",
