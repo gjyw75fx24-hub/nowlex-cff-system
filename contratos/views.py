@@ -349,16 +349,12 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
         'July', 'julho').replace('August', 'agosto').replace('September', 'setembro').replace(
         'October', 'outubro').replace('November', 'novembro').replace('December', 'dezembro')
 
-    template_path = os.path.join(
+    fallback_path = os.path.join(
         settings.BASE_DIR,
         'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
         '1 - Base - Inicial Monitoria - B6.docx'
     )
-
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
-
-    document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, template_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, fallback_path)
 
     # Ajusta posição do rodapé para evitar cortes no PDF (mantém margens do template)
     for section in document.sections:
@@ -482,16 +478,12 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     dados['VALOR DA CAUSA POR EXTENSO'] = valor_extenso
     dados['DATA DE HOJE'] = datetime.now().strftime("%d/%m/%Y")
 
-    template_path = os.path.join(
+    fallback_path = os.path.join(
         settings.BASE_DIR,
         'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
         '4 - Modelo da Ação de Cobrança.docx'
     )
-
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Arquivo de template não encontrado em: {template_path}")
-
-    document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, template_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, fallback_path)
     for section in document.sections:
         try:
             section.footer_distance = Cm(1.5)
