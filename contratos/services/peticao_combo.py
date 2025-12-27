@@ -146,7 +146,7 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
         used_ids.add(extrato.id)
     else:
         missing.append("05 - Extrato de Titularidade")
-    per_contract = _collect_contract_files(contracts, files, used_ids, missing)
+    per_contract = _collect_contract_files(contratos, files, used_ids, missing)
     zip_entries = _build_zip_entries(
         base_file,
         continuous_annexes,
@@ -154,12 +154,12 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
         per_contract
     )
     preview_found = _build_preview_found(base_file, extrato, per_contract)
-    zip_name = _build_zip_name(tipo, processo, contracts, _primeiros_nomes_passivo(processo))
+    zip_name = _build_zip_name(tipo, processo, contratos, _primeiros_nomes_passivo(processo))
     return {
         'tipo': tipo,
         'processo': processo,
         'base_file': base_file,
-        'contracts': contracts,
+        'contracts': contratos,
         'zip_name': zip_name,
         'missing': missing,
         'optional_files': optional_files,
