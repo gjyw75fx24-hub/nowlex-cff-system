@@ -141,6 +141,7 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
     missing = []
     optional_files = _find_optional_annexes(files, used_ids)
     continuous_annexes = _get_continuous_annexes(tipo)
+    continuous_entries = _build_continuous_entries(continuous_annexes)
     extrato = _find_extrato(files, used_ids)
     if extrato:
         used_ids.add(extrato.id)
@@ -149,11 +150,11 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
     per_contract = _collect_contract_files(contratos, files, used_ids, missing)
     zip_entries = _build_zip_entries(
         base_file,
-        continuous_annexes,
+        continuous_entries,
         extrato,
         per_contract
     )
-    preview_found = _build_preview_found(base_file, extrato, per_contract)
+    preview_found = _build_preview_found(base_file, continuous_entries, extrato, per_contract)
     zip_name = _build_zip_name(tipo, processo, contratos, _primeiros_nomes_passivo(processo))
     return {
         'tipo': tipo,
@@ -164,6 +165,7 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
         'missing': missing,
         'optional_files': optional_files,
         'continuous_annexes': continuous_annexes,
+        'continuous_entries': continuous_entries,
         'per_contract': per_contract,
         'zip_entries': zip_entries,
         'preview_found': preview_found,
@@ -173,9 +175,9 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
             {
                 'id': annex.id,
                 'name': annex.nome or os.path.basename(annex.arquivo.name),
-                'label': annex.nome or os.path.basename(annex.arquivo.name)
+                'label': annex['label']
             }
-            for annex in continuous_annexes
+            for annex in continuous_entries
         ]
     }
 
@@ -230,6 +232,18 @@ def _find_optional_annexes(files, used_ids):
 
 def _get_continuous_annexes(tipo):
     return list(tipo.anexos_continuos.order_by('criado_em'))
+
+
+def _build_continuous_entries(continuous_annexes):
+    entries = []
+    for index, annex in enumerate(continuous_annexes, start=2):
+        index_label = f"{index:02d}"
+        name = annex.nome or os.path.basename(annex.arquivo.name)
+        entries.append({
+            'arquivo': annex,
+            'label': f"{index_label} - {name}"
+        })
+    return entries
 
 
 def _find_extrato(files, used_ids):
@@ -355,12 +369,12 @@ def _find_by_contract_and_keywords(files, contract, keywords_any=None, keywords_
     return candidates[0][0]
 
 
-def _build_zip_entries(base_file, continuous_annexes, extrato, per_contract):
+def _build_zip_entries(base_file, continuous_entries, extrato, per_contract):
     entries = [{'arquivo': base_file, 'label': None}]
-    for annex in continuous_annexes:
+    for annex_entry in continuous_entries:
         entries.append({
-            'arquivo': annex,
-            'label': annex.nome or os.path.basename(annex.arquivo.name)
+            'arquivo': annex_entry['arquivo'],
+            'label': annex_entry['label']
         })
     if extrato:
         entries.append({'arquivo': extrato, 'label': "05 - Extrato de Titularidade"})
@@ -373,7 +387,7 @@ def _build_zip_entries(base_file, continuous_annexes, extrato, per_contract):
     return entries
 
 
-def _build_preview_found(base_file, extrato, per_contract):
+def _build_preview_found(base_file, continuous_entries, extrato, per_contract):
     entries = []
     if base_file:
         entries.append({
@@ -467,3 +481,9 @@ def _determine_zip_entry_name(entry):
     if not base.lower().endswith(ext.lower()):
         base = f"{base}{ext}"
     return base
+    for annex_entry in continuous_entries:
+        entries.append({
+            'label': annex_entry['label'],
+            'arquivo_id': _entry_id(annex_entry['arquivo']),
+            'name': _get_file_display_name(annex_entry['arquivo'])
+        })
