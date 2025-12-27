@@ -173,11 +173,11 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
         'file05': _build_file_preview(extrato),
         'continuous_annexes_preview': [
             {
-                'id': annex.id,
-                'name': annex.nome or os.path.basename(annex.arquivo.name),
-                'label': annex['label']
+                'id': _entry_id(annex_entry['arquivo']),
+                'name': _get_file_display_name(annex_entry['arquivo']),
+                'label': annex_entry['label']
             }
-            for annex in continuous_entries
+            for annex_entry in continuous_entries
         ]
     }
 
