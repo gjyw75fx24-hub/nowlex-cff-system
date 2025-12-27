@@ -190,6 +190,14 @@
     background: #14528a;
 }
 
+.cff-dialog-box.success .cff-dialog-body {
+    color: #134d21;
+}
+
+.cff-dialog-box.success .cff-dialog-ok {
+    background: #0f9d58;
+}
+
 .analise-observation-note {
     width: 260px;
     min-width: 160px;

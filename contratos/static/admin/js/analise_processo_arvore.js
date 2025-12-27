@@ -636,15 +636,15 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function showCffSystemWarning(message) {
-            const existing = $('#cff-system-warning-dialog');
+        function showCffSystemDialog(message, type = 'warning') {
+            const existing = $('#cff-system-dialog');
             if (existing.length) {
                 existing.remove();
             }
-            const safeMessage = escapeHtml(message);
+            const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
             const $dialog = $(
-                `<div id="cff-system-warning-dialog" class="cff-dialog-overlay">
-                    <div class="cff-dialog-box">
+                `<div id="cff-system-dialog" class="cff-dialog-overlay">
+                    <div class="cff-dialog-box ${type}">
                         <div class="cff-dialog-title">CFF System</div>
                         <div class="cff-dialog-body">${safeMessage}</div>
                         <div class="cff-dialog-actions">
@@ -3703,7 +3703,7 @@
                         }
                     }
                     const detailText = details.length ? `\n${details.join('\n')}` : '';
-                    alert(`${msg}${detailText}`);
+                    showCffSystemDialog(`${msg}${detailText}`, 'success');
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
                     }
@@ -3749,7 +3749,7 @@
             const contractsWithArquivos = findContractsWithContratoArquivos(contractNumbers);
             if (contractsWithArquivos.length > 0) {
                 const lista = contractsWithArquivos.join(', ');
-                showCffSystemWarning(
+                showCffSystemDialog(
                     `Já existem arquivos de "Contrato" para o(s) contrato(s) ${lista}. Recomendamos gerar a Petição Monitória antes de partir para a Cobrança Judicial.`
                 );
                 return;
@@ -3781,7 +3781,7 @@
                     if (data && data.extrato_url) {
                         extra += `\nExtrato de titularidade disponível.`;
                     }
-                    alert(`${msg}${extra}`);
+                    showCffSystemDialog(`${msg}${extra}`, 'success');
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
                     }
