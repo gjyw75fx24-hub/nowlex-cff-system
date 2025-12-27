@@ -1071,6 +1071,7 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
     if not polo_passivo.endereco:
         return HttpResponse("Endereço da parte passiva não informado.", status=400)
 
+    extrato_result = None
     try:
         docx_bytes = _build_cobranca_docx_bytes(processo, polo_passivo, contratos_lista)
         base_filename = _build_cobranca_base_filename(polo_passivo, contratos_lista)
@@ -1094,15 +1095,24 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         logger.error(f"Erro ao gerar petição de cobrança para o processo {processo_id}: {exc}", exc_info=True)
         return HttpResponse(f"Erro ao gerar a petição de cobrança: {exc}", status=500)
 
-    extrato_url = _fetch_extrato_titularidade(processo, polo_passivo, contratos_lista, request.user)
+    extrato_result = generate_extrato_titularidade(
+        processo=processo,
+        cpf_value=polo_passivo.documento,
+        contratos=contratos_lista,
+        parte_name=polo_passivo.nome,
+        usuario=request.user if request.user.is_authenticated else None
+    )
 
     response_payload = {
         "status": "success",
         "message": "Petição de cobrança gerada (PDF salvo em Arquivos).",
         "pdf_url": pdf_url,
+        "extrato": extrato_result
     }
-    if extrato_url:
-        response_payload["extrato_url"] = extrato_url
+    if extrato_result and isinstance(extrato_result, dict):
+        pdf_url_extrato = extrato_result.get("pdf_url")
+        if pdf_url_extrato:
+            response_payload["extrato_url"] = pdf_url_extrato
         response_payload["message"] += " Extrato de titularidade salvo."
 
     return JsonResponse(response_payload)
