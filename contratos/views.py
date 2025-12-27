@@ -106,6 +106,26 @@ def _normalize_digits(value):
     return re.sub(r'\D', '', str(value or ''))
 
 
+def _parse_contract_ids(values):
+    parsed = []
+    seen = set()
+    for item in values or []:
+        if isinstance(item, int):
+            contract_id = item
+        else:
+            digits = _normalize_digits(item)
+            if not digits:
+                continue
+            try:
+                contract_id = int(digits)
+            except ValueError:
+                continue
+        if contract_id not in seen:
+            seen.add(contract_id)
+            parsed.append(contract_id)
+    return parsed
+
+
 def _sanitize_contract_numbers(contracts):
     seen = []
     for contract in contracts:
@@ -946,6 +966,8 @@ def generate_monitoria_petition(request, processo_id=None):
 
     if not contratos_para_monitoria_ids:
         contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
+
+    contratos_para_monitoria_ids = _parse_contract_ids(contratos_para_monitoria_ids)
 
     contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
 
