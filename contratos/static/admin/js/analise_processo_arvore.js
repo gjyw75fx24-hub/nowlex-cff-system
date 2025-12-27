@@ -504,6 +504,161 @@
             return contractIds;
         }
 
+        function getContractLabelForId(contractIdOrNumber) {
+            if (contractIdOrNumber === undefined || contractIdOrNumber === null) {
+                return '';
+            }
+            const candidateId = String(contractIdOrNumber).trim();
+            if (!candidateId) {
+                return '';
+            }
+            const matchById = allAvailableContratos.find(c => String(c.id) === candidateId);
+            if (matchById && matchById.numero_contrato) {
+                return matchById.numero_contrato;
+            }
+            const matchByNumber = allAvailableContratos.find(c => String(c.numero_contrato) === candidateId);
+            if (matchByNumber && matchByNumber.numero_contrato) {
+                return matchByNumber.numero_contrato;
+            }
+            return candidateId;
+        }
+
+        function getContractNumbersFromIds(contractIds) {
+            if (!Array.isArray(contractIds)) {
+                return [];
+            }
+            const seen = new Set();
+            const numbers = [];
+            contractIds.forEach(id => {
+                const label = getContractLabelForId(id);
+                if (!label) {
+                    return;
+                }
+                const normalized = label.trim();
+                if (!normalized || seen.has(normalized)) {
+                    return;
+                }
+                seen.add(normalized);
+                numbers.push(normalized);
+            });
+            return numbers;
+        }
+
+        function normalizeTextForComparison(value) {
+            if (value === undefined || value === null) {
+                return '';
+            }
+            const str = String(value)
+                .replace(/[\u2013\u2014]/g, '-')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+            return str;
+        }
+
+        function getProcessoArquivoRowName(row) {
+            if (!row) {
+                return '';
+            }
+            if (row.classList.contains('empty-form') || row.classList.contains('empty-form-row')) {
+                return '';
+            }
+            const rowId = row.getAttribute('id') || '';
+            if (rowId && rowId.includes('__prefix__')) {
+                return '';
+            }
+            const input = row.querySelector('input[name$="-nome"]');
+            if (input && input.value.trim()) {
+                return input.value.trim();
+            }
+            const cell = row.querySelector('td.field-nome');
+            if (cell) {
+                const text = cell.textContent.trim();
+                if (text) {
+                    return text;
+                }
+            }
+            return row.textContent.trim();
+        }
+
+        function getProcessoArquivoNames() {
+            const selectors = [
+                '#processoarquivo_set-group tbody tr',
+                '#arquivos-group tbody tr'
+            ];
+            const names = [];
+            selectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(row => {
+                    const name = getProcessoArquivoRowName(row);
+                    if (name) {
+                        names.push(name);
+                    }
+                });
+            });
+            return names;
+        }
+
+        function findContractsWithContratoArquivos(contractNumbers) {
+            if (!Array.isArray(contractNumbers) || contractNumbers.length === 0) {
+                return [];
+            }
+            const arquivoNames = getProcessoArquivoNames();
+            if (!arquivoNames.length) {
+                return [];
+            }
+            const normalizedArquivoNames = arquivoNames.map(name => normalizeTextForComparison(name));
+            const matches = [];
+            contractNumbers.forEach(number => {
+                const digits = String(number).replace(/\D/g, '');
+                if (!digits) {
+                    return;
+                }
+                const pattern = new RegExp(`${digits}\\s*-\\s*contrato`);
+                const hasMatch = normalizedArquivoNames.some(normalizedName => pattern.test(normalizedName));
+                if (hasMatch) {
+                    matches.push(number);
+                }
+            });
+            return Array.from(new Set(matches));
+        }
+
+        function escapeHtml(value) {
+            if (typeof value !== 'string') {
+                return '';
+            }
+            return value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function showCffSystemWarning(message) {
+            const existing = $('#cff-system-warning-dialog');
+            if (existing.length) {
+                existing.remove();
+            }
+            const safeMessage = escapeHtml(message);
+            const $dialog = $(
+                `<div id="cff-system-warning-dialog" class="cff-dialog-overlay">
+                    <div class="cff-dialog-box">
+                        <div class="cff-dialog-title">CFF System</div>
+                        <div class="cff-dialog-body">${safeMessage}</div>
+                        <div class="cff-dialog-actions">
+                            <button type="button" class="cff-dialog-ok">OK</button>
+                        </div>
+                    </div>
+                </div>`
+            );
+            $('body').append($dialog);
+            $dialog.find('.cff-dialog-ok').on('click', function () {
+                $dialog.remove();
+            });
+        }
+
         function getSavedProcessCards() {
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
                 return [];
@@ -3582,11 +3737,21 @@
                 alert('Erro: ID do processo não encontrado para gerar a cobrança.');
                 return;
             }
-            if (
-                !userResponses.contratos_para_monitoria ||
-                userResponses.contratos_para_monitoria.length === 0
-            ) {
+            const aggregatedContratoIds = getMonitoriaContractIds({
+                includeGeneralSnapshot: true,
+                includeSummaryCardContracts: true
+            });
+            if (aggregatedContratoIds.length === 0) {
                 alert('Selecione pelo menos um contrato antes de gerar a petição de cobrança.');
+                return;
+            }
+            const contractNumbers = getContractNumbersFromIds(aggregatedContratoIds);
+            const contractsWithArquivos = findContractsWithContratoArquivos(contractNumbers);
+            if (contractsWithArquivos.length > 0) {
+                const lista = contractsWithArquivos.join(', ');
+                showCffSystemWarning(
+                    `Já existem arquivos de "Contrato" para o(s) contrato(s) ${lista}. Recomendamos gerar a Petição Monitória antes de partir para a Cobrança Judicial.`
+                );
                 return;
             }
 
@@ -3599,7 +3764,7 @@
                 headers: { 'X-CSRFToken': csrftoken },
                 data: {
                     processo_id: currentProcessoId,
-                    contratos_para_monitoria: JSON.stringify(userResponses.contratos_para_monitoria)
+                    contratos_para_monitoria: JSON.stringify(aggregatedContratoIds)
                 },
                 dataType: 'json',
                 beforeSend: function () {
