@@ -313,9 +313,11 @@ class DocumentoModelo(models.Model):
     slug = models.CharField(
         max_length=50,
         unique=True,
-        choices=SlugChoices.choices,
         verbose_name="Chave",
-        help_text="Identificador usado no backend para localizar o modelo."
+        help_text=(
+            "Identificador usado no backend para localizar o modelo. "
+            "Valores padrão: monitoria_inicial, cobranca_judicial (adicione outros conforme necessário)."
+        )
     )
     nome = models.CharField(max_length=150, verbose_name="Nome exibido")
     arquivo = models.FileField(
