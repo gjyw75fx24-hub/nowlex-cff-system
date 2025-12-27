@@ -212,6 +212,25 @@ def _bold_keywords_in_document(document, keywords):
                 run.font.name = 'Times New Roman'
 
 
+def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
+    if not replacement:
+        return
+    for paragraph in _iter_container_paragraphs(document):
+        match = paragraph.findText(pattern)
+        while match:
+            el = match.getElement()
+            if el and hasattr(el, 'asText'):
+                text_el = el.asText()
+                start = match.getStartOffset()
+                end = match.getEndOffsetInclusive()
+                text_el.deleteText(start, end)
+                text_el.insertText(start, replacement)
+                if replacement:
+                    new_end = start + len(replacement) - 1
+                    text_el.setBold(start, new_end, bold)
+            match = paragraph.findText(pattern, match)
+
+
 def _set_run_shading(run, fill_color):
     if not fill_color:
         return
