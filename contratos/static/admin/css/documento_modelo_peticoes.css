@@ -273,6 +273,10 @@
     overflow-y: auto;
     box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
     position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-bottom: 60px;
 }
 
 .documento-peticoes-modal-close {
@@ -293,14 +297,19 @@
 .documento-peticoes-modal ul {
     margin: 6px 0 12px;
     padding-left: 20px;
-    max-height: 120px;
+    max-height: 40vh;
     overflow-y: auto;
 }
 
 .documento-peticoes-modal .preview-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 10px;
+    margin-top: auto;
+    position: sticky;
+    bottom: 16px;
+    background: #fff;
+    padding-top: 12px;
 }
 
 .documento-peticoes-modal .preview-actions .button {
