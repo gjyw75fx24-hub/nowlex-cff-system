@@ -3859,11 +3859,15 @@
                         .text('Gerando habilitação...');
                 },
                 success: function (data) {
-                    const lines = ['Habilitação OK'];
-                    if (data && data.pdf_url) {
-                        lines.push('Salvos em Arquivos');
-                    }
-                    showCffSystemDialog(lines.join('\n'), 'success');
+                    const lines = ['Habilitação OK', 'Salvos em Arquivos'];
+                    const handleReload = () => {
+                        if ('scrollRestoration' in history) {
+                            history.scrollRestoration = 'manual';
+                        }
+                        sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                        window.location.reload();
+                    };
+                    showCffSystemDialog(lines.join('\n'), 'success', handleReload);
                 },
                 error: function (xhr, status, error) {
                     let errorMessage = 'Erro ao gerar petição de habilitação. Tente novamente.';
