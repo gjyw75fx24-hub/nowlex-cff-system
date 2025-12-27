@@ -1,8 +1,15 @@
 (function () {
     'use strict';
 
-    const previewApiUrl = window.__tipos_peticao_preview_url || '';
-    const generateApiUrl = window.__tipos_peticao_generate_url || '';
+    const getPreviewApiUrl = () => window.__tipos_peticao_preview_url || '';
+    const getGenerateApiUrl = () => window.__tipos_peticao_generate_url || '';
+    const getCsrfToken = () => {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        if (match) {
+            return match[1];
+        }
+        return window.__tipos_peticao_csrf_token || '';
+    };
     const csrfApiToken = window.__tipos_peticao_csrf_token || '';
     const createDropdown = () => {
         const dropdown = document.createElement('div');
@@ -279,6 +286,8 @@
     let selectedBaseId = window.__arquivos_peticao_selected_base_id || '';
     let selectedBaseName = window.__arquivos_peticao_selected_base_name || '';
     let selectedTipoItem = null;
+    let summaryCardInstance = null;
+    let currentSummaryData = null;
     let previewModalInstance = null;
     let currentPreview = null;
 
@@ -538,6 +547,81 @@
         };
     };
 
+    const createSummaryCard = () => {
+        if (summaryCardInstance) {
+            return summaryCardInstance;
+        }
+        const container = document.createElement('div');
+        container.className = 'documento-peticoes-summary-card';
+        container.innerHTML = `
+            <div class="documento-peticoes-summary-header">
+                <strong class="documento-peticoes-summary-title">Resumo do ZIP</strong>
+                <button type="button" class="documento-peticoes-summary-close" aria-label="Fechar resumo">×</button>
+            </div>
+            <p class="documento-peticoes-summary-name"></p>
+            <ul class="documento-peticoes-summary-list"></ul>
+            <div class="documento-peticoes-summary-missing" style="display:none">
+                <strong>Faltantes:</strong>
+                <ul class="documento-peticoes-summary-missing-list"></ul>
+            </div>
+            <div class="documento-peticoes-summary-actions">
+                <button type="button" class="documento-peticoes-summary-download button button-primary" disabled>Baixar ZIP</button>
+            </div>
+        `;
+        document.body.appendChild(container);
+        const closeBtn = container.querySelector('.documento-peticoes-summary-close');
+        closeBtn.addEventListener('click', () => container.classList.remove('open'));
+        summaryCardInstance = {
+            container,
+            titleEl: container.querySelector('.documento-peticoes-summary-title'),
+            nameEl: container.querySelector('.documento-peticoes-summary-name'),
+            listEl: container.querySelector('.documento-peticoes-summary-list'),
+            missingPanel: container.querySelector('.documento-peticoes-summary-missing'),
+            missingList: container.querySelector('.documento-peticoes-summary-missing-list'),
+            downloadBtn: container.querySelector('.documento-peticoes-summary-download')
+        };
+        return summaryCardInstance;
+    };
+
+    const showSummaryCard = (payload) => {
+        const summary = createSummaryCard();
+        if (!summary) {
+            return;
+        }
+        const entries = Array.isArray(payload.entries) ? payload.entries : [];
+        summary.listEl.innerHTML = '';
+        entries.forEach(entry => {
+            const li = document.createElement('li');
+            li.className = 'documento-peticoes-summary-item';
+            const labelText = entry.label ? `${entry.label}: ` : '';
+            li.textContent = `${labelText}${entry.name || 'Arquivo'}`;
+            summary.listEl.appendChild(li);
+        });
+        if (Array.isArray(payload.missing) && payload.missing.length) {
+            summary.missingPanel.style.display = 'block';
+            summary.missingList.innerHTML = '';
+            payload.missing.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                summary.missingList.appendChild(li);
+            });
+        } else {
+            summary.missingPanel.style.display = 'none';
+            summary.missingList.innerHTML = '';
+        }
+        summary.titleEl.textContent = payload.zip_name || 'Resumo do ZIP';
+        summary.nameEl.textContent = payload.description || '';
+        if (payload.url) {
+            summary.downloadBtn.removeAttribute('disabled');
+            summary.downloadBtn.onclick = () => window.open(payload.url, '_blank');
+        } else {
+            summary.downloadBtn.setAttribute('disabled', 'disabled');
+            summary.downloadBtn.onclick = null;
+        }
+        summary.container.classList.add('open');
+        currentSummaryData = payload;
+    };
+
     const collectOptionalIds = () => {
         const modal = createPreviewModal();
         return Array.from(modal.optionalList.querySelectorAll('input[type="checkbox"]'))
@@ -555,6 +639,7 @@
             setStatus('Marque a base do arquivo antes de executar.', 'error');
             return;
         }
+        const previewApiUrl = getPreviewApiUrl();
         if (!previewApiUrl) {
             setStatus('URL de preview não está configurada.', 'error');
             return;
@@ -565,7 +650,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfApiToken || ''
+                    'X-CSRFToken': getCsrfToken()
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify({
@@ -586,6 +671,7 @@
     }
 
     async function runGenerate() {
+        const generateApiUrl = getGenerateApiUrl();
         if (!generateApiUrl) {
             setStatus('URL de geração não está configurada.', 'error');
             return;
@@ -607,7 +693,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfApiToken || ''
+                    'X-CSRFToken': getCsrfToken()
                 },
                 credentials: 'same-origin',
                 body: JSON.stringify({
@@ -633,6 +719,14 @@
             }
             modal.resultEl.style.display = 'block';
             setStatus('ZIP criado com sucesso.', 'success');
+            const summaryEntries = data.result?.entries || currentPreview?.found || [];
+            showSummaryCard({
+                zip_name: data.result?.zip_name,
+                url: data.result?.url,
+                entries: summaryEntries,
+                missing: data.result?.missing || currentPreview?.missing || [],
+                description: `${summaryEntries.length || 0} itens`
+            });
         } catch (err) {
             modal.resultEl.textContent = err.message || 'Erro ao gerar o ZIP.';
             modal.resultEl.style.display = 'block';

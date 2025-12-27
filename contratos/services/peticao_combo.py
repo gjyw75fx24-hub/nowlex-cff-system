@@ -95,7 +95,14 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
         'arquivo_id': zip_proc_file.id,
         'missing': assets['missing'],
         'ok': True,
-        'zip_name': zip_name
+        'zip_name': zip_name,
+        'entries': [
+            {
+                'label': entry['label'],
+                'name': entry['arquivo'].nome or entry['arquivo'].arquivo.name
+            }
+            for entry in files_to_zip
+        ]
     }
 
 
