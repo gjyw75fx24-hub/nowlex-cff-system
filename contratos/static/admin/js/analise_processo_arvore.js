@@ -2256,8 +2256,10 @@
             const $btnGroup = $('<div style="display:flex; gap:8px; margin-left:auto;"></div>');
             const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
             const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
+            const $gerarHabilitacaoBtnDynamic = $('<button type="button" id="id_gerar_habilitacao_btn" class="button" style="background-color: #805ad5; color: white;">Gerar Petição de Habilitação (PDF)</button>');
             $btnGroup.append($gerarMonitoriaBtnDynamic);
             $btnGroup.append($gerarCobrancaBtnDynamic);
+            $btnGroup.append($gerarHabilitacaoBtnDynamic);
             $headerContainer.append($btnGroup);
             $formattedResponsesContainer.append($headerContainer);
             $gerarMonitoriaBtnDynamic.prop('disabled', true);
@@ -3828,6 +3830,55 @@
                     $('#id_gerar_cobranca_btn')
                         .prop('disabled', false)
                         .text('Petição Cobrança Judicial (PDF)');
+                }
+            });
+        });
+
+        $(document).on('click', '#id_gerar_habilitacao_btn', function (e) {
+            e.preventDefault();
+
+            if (!currentProcessoId) {
+                alert('Erro: ID do processo não encontrado para gerar a habilitação.');
+                return;
+            }
+
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            const url = `/processo/${currentProcessoId}/gerar-habilitacao/`;
+
+            $.ajax({
+                url: url,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: {
+                    processo_id: currentProcessoId
+                },
+                dataType: 'json',
+                beforeSend: function () {
+                    $('#id_gerar_habilitacao_btn')
+                        .prop('disabled', true)
+                        .text('Gerando habilitação...');
+                },
+                success: function (data) {
+                    const lines = ['Habilitação OK'];
+                    if (data && data.pdf_url) {
+                        lines.push('Salvos em Arquivos');
+                    }
+                    showCffSystemDialog(lines.join('\n'), 'success');
+                },
+                error: function (xhr, status, error) {
+                    let errorMessage = 'Erro ao gerar petição de habilitação. Tente novamente.';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMessage = xhr.responseJSON.message;
+                    } else if (xhr.responseText) {
+                        errorMessage = xhr.responseText;
+                    }
+                    alert(errorMessage);
+                    console.error('Erro na geração da habilitação:', status, error, xhr);
+                },
+                complete: function () {
+                    $('#id_gerar_habilitacao_btn')
+                        .prop('disabled', false)
+                        .text('Gerar Petição de Habilitação (PDF)');
                 }
             });
         });

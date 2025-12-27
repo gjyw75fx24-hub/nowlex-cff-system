@@ -424,6 +424,13 @@ def _build_cobranca_base_filename(polo_passivo, contratos):
     return _sanitize_filename(base)
 
 
+def _build_habilitacao_base_filename(polo_passivo, processo):
+    nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
+    reference = processo.cnj or f'processo-{processo.pk}'
+    base = f"Habilitação - {nome_parte} - {reference}"
+    return _sanitize_filename(base)
+
+
 def _convert_docx_to_pdf_bytes(docx_bytes):
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -513,6 +520,50 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
 
     _apply_placeholder_styles(document)
     _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
+
+    stream = BytesIO()
+    document.save(stream)
+    stream.seek(0)
+    return stream.getvalue()
+
+
+def _parse_habilitacao_data(polo_passivo):
+    endereco = polo_passivo.endereco or ''
+    parts = parse_endereco(endereco)
+    cidade = parts.get('F') or parts.get('E') or ''
+    uf = parts.get('H') or ''
+    return {
+        'ENDERECO': endereco,
+        'CIDADE': cidade,
+        'UF': uf
+    }
+
+
+def _replace_placeholders_in_document(document, replacements):
+    for paragraph in _iter_container_paragraphs(document):
+        for placeholder, value in replacements.items():
+            if placeholder in paragraph.text:
+                paragraph.text = paragraph.text.replace(placeholder, value)
+
+
+def _build_habilitacao_docx_bytes(processo, polo_passivo):
+    replacements = {
+        '[Processo]': processo.cnj or '',
+        '[Polo Passivo]': polo_passivo.nome or '',
+        '[Parte Contrária]': polo_passivo.nome or '',
+        '[VARA]': processo.vara or '',
+        '[DATA DE HOJE]': datetime.now().strftime('%d/%m/%Y')
+    }
+    replacements.update(_parse_habilitacao_data(polo_passivo))
+    replacements = {k: str(v or '') for k, v in replacements.items()}
+
+    fallback_path = os.path.join(
+        settings.BASE_DIR,
+        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
+        '3 - Base Modelo de Substituição de Polo e Habilitação.docx'
+    )
+    document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, fallback_path)
+    _replace_placeholders_in_document(document, replacements)
 
     stream = BytesIO()
     document.save(stream)
@@ -1114,6 +1165,56 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         response_payload["message"] += " Extrato de titularidade salvo."
 
     return JsonResponse(response_payload)
+
+
+@require_POST
+def generate_habilitacao_petition(request, processo_id=None):
+    processo_id = processo_id or request.POST.get('processo_id')
+
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return HttpResponse("ID do processo inválido.", status=400)
+
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+    except ProcessoJudicial.DoesNotExist:
+        return HttpResponse("Processo Judicial não encontrado.", status=404)
+    except Exception as exc:
+        logger.error(f"Erro ao buscar o processo {processo_id_int}: {exc}", exc_info=True)
+        return HttpResponse(f"Erro ao buscar o processo: {exc}", status=500)
+
+    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+    if not polo_passivo:
+        return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
+
+    try:
+        docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo)
+        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+        if not pdf_bytes:
+            return HttpResponse("Não foi possível converter o DOCX para PDF.", status=500)
+
+        pdf_name = f"{_build_habilitacao_base_filename(polo_passivo, processo)}.pdf"
+        pdf_file = ContentFile(pdf_bytes)
+        arquivo_pdf = ProcessoArquivo(
+            processo=processo,
+            nome=pdf_name,
+            enviado_por=request.user if request.user.is_authenticated else None,
+        )
+        arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+        pdf_url = arquivo_pdf.arquivo.url
+    except FileNotFoundError as fe:
+        logger.error("Template de habilitação não encontrado: %s", fe)
+        return HttpResponse(str(fe), status=500)
+    except Exception as exc:
+        logger.error(f"Erro ao gerar petição de habilitação para o processo {processo_id}: {exc}", exc_info=True)
+        return HttpResponse(f"Erro ao gerar a petição de habilitação: {exc}", status=500)
+
+    return JsonResponse({
+        "status": "success",
+        "message": "Petição de habilitação gerada (PDF salvo em Arquivos).",
+        "pdf_url": pdf_url
+    })
 
 
 @require_POST

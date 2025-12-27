@@ -309,6 +309,7 @@ class DocumentoModelo(models.Model):
     class SlugChoices(models.TextChoices):
         MONITORIA_INICIAL = 'monitoria_inicial', 'Monitoria Inicial'
         COBRANCA_JUDICIAL = 'cobranca_judicial', 'Cobrança Judicial'
+        HABILITACAO = 'habilitacao', 'Habilitação'
 
     slug = models.CharField(
         max_length=50,
@@ -316,7 +317,7 @@ class DocumentoModelo(models.Model):
         verbose_name="Chave",
         help_text=(
             "Identificador usado no backend para localizar o modelo. "
-            "Valores padrão: monitoria_inicial, cobranca_judicial (adicione outros conforme necessário)."
+            "Valores padrão: monitoria_inicial, cobranca_judicial, habilitacao (adicione outros conforme necessário)."
         )
     )
     nome = models.CharField(max_length=150, verbose_name="Nome exibido")
