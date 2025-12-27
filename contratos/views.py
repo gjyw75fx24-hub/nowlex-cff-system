@@ -539,31 +539,54 @@ def _parse_habilitacao_data(polo_passivo):
     }
 
 
-def _replace_placeholders_in_document(document, replacements):
-    for paragraph in _iter_container_paragraphs(document):
-        for placeholder, value in replacements.items():
-            if placeholder in paragraph.text:
-                paragraph.text = paragraph.text.replace(placeholder, value)
+def _format_vara_text(vara_raw):
+    if not vara_raw:
+        return ''
+    cleaned = re.sub(r'\s+', ' ', vara_raw).strip()
+    digits = re.search(r'(\d+)', cleaned)
+    if digits:
+        num = digits.group(1)
+        return f"{num}ª VARA"
+    upper = cleaned.upper()
+    return upper if 'VARA' in upper else f"{upper} VARA"
+
+
+def _replace_with_style(document, pattern, replacement, uppercase=False, bold=False):
+    if not replacement:
+        return
+    value = replacement.upper() if uppercase else replacement
+    _replacePlaceholderStyled_(document, pattern, value, bold)
 
 
 def _build_habilitacao_docx_bytes(processo, polo_passivo):
-    replacements = {
-        '[Processo]': processo.cnj or '',
-        '[Polo Passivo]': polo_passivo.nome or '',
-        '[Parte Contrária]': polo_passivo.nome or '',
-        '[VARA]': processo.vara or '',
-        '[DATA DE HOJE]': datetime.now().strftime('%d/%m/%Y')
-    }
-    replacements.update(_parse_habilitacao_data(polo_passivo))
-    replacements = {k: str(v or '') for k, v in replacements.items()}
-
+    replacements = _parse_habilitacao_data(polo_passivo)
+    endereco = replacements.get('ENDERECO', '')
+    cidade = replacements.get('CIDADE', '')
+    uf = replacements.get('UF', '')
     fallback_path = os.path.join(
         settings.BASE_DIR,
         'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
         '3 - Base Modelo de Substituição de Polo e Habilitação.docx'
     )
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, fallback_path)
-    _replace_placeholders_in_document(document, replacements)
+
+    _replace_with_style(document, r'\[VARA\]', _format_vara_text(processo.vara), uppercase=True)
+    _replace_with_style(document, r'\[CIDADE\]', cidade, uppercase=True)
+    _replace_with_style(document, r'\[UF\]', uf.upper(), uppercase=True)
+    _replace_with_style(document, r'\[Processo\]', processo.cnj or '', uppercase=False)
+    _replace_with_style(document, r'\[Polo Passivo\]', polo_passivo.nome, uppercase=False)
+    _replace_with_style(document, r'\[Polo Passivo MAIÚSCULAS\]', polo_passivo.nome, uppercase=True)
+    _replace_with_style(document, r'\[Polo Passivo TODAS MAIÚSCULAS E NEGRITO\]', polo_passivo.nome, uppercase=True, bold=True)
+    _replace_with_style(document, r'\[DATA DE HOJE\]', datetime.now().strftime('%d/%m/%Y'), uppercase=False)
+
+    saudacao = (
+        f"EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {_format_vara_text(processo.vara)} "
+        f"DA COMARCA DE {cidade.upper()} - {uf.upper()}"
+    )
+    _replace_with_style(document, r'\[CABEÇALHO\]', saudacao, uppercase=True, bold=True)
+
+    local_date = f"{cidade.capitalize()}/{uf.upper()}, {datetime.now().strftime('%d de %B de %Y').lower()}"
+    _replace_with_style(document, r'\[LOCAL_DATA\]', local_date, uppercase=False)
 
     stream = BytesIO()
     document.save(stream)
