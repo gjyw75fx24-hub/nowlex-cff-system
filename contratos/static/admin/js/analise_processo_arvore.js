@@ -636,7 +636,7 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function showCffSystemDialog(message, type = 'warning') {
+        function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const existing = $('#cff-system-dialog');
             if (existing.length) {
                 existing.remove();
@@ -656,6 +656,13 @@
             $('body').append($dialog);
             $dialog.find('.cff-dialog-ok').on('click', function () {
                 $dialog.remove();
+                if (typeof onClose === 'function') {
+                    try {
+                        onClose();
+                    } catch (err) {
+                        console.error('Erro ao executar callback do diálogo CFF System:', err);
+                    }
+                }
             });
         }
 
@@ -3703,13 +3710,14 @@
                         }
                     }
                     const detailText = details.length ? `\n${details.join('\n')}` : '';
-                    showCffSystemDialog(`${msg}${detailText}`, 'success');
-                    if ('scrollRestoration' in history) {
-                        history.scrollRestoration = 'manual';
-                    }
-                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
-                    // Recarrega a página para que a aba Arquivos reflita os novos anexos
-                    window.location.reload();
+                    const handleReload = () => {
+                        if ('scrollRestoration' in history) {
+                            history.scrollRestoration = 'manual';
+                        }
+                        sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                        window.location.reload();
+                    };
+                    showCffSystemDialog(`${msg}${detailText}`, 'success', handleReload);
                 },
                 error: function (xhr, status, error) {
                     let errorMessage =
@@ -3781,12 +3789,14 @@
                     if (data && data.extrato_url) {
                         extra += `\nExtrato de titularidade disponível.`;
                     }
-                    showCffSystemDialog(`${msg}${extra}`, 'success');
-                    if ('scrollRestoration' in history) {
-                        history.scrollRestoration = 'manual';
-                    }
-                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
-                    window.location.reload();
+                    const handleReload = () => {
+                        if ('scrollRestoration' in history) {
+                            history.scrollRestoration = 'manual';
+                        }
+                        sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                        window.location.reload();
+                    };
+                    showCffSystemDialog(`${msg}${extra}`, 'success', handleReload);
                 },
                 error: function (xhr, status, error) {
                     let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';

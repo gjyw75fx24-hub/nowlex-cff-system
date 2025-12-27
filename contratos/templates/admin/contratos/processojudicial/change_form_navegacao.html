@@ -315,10 +315,13 @@ document.addEventListener('DOMContentLoaded', function() {
       if (opts.download) {
         btn.setAttribute('download', '');
       }
-      btn.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        window.open(href, '_blank');
-      });
+      const openInNewTab = Boolean(opts.openInNewTab);
+      if (opts.download || openInNewTab) {
+        btn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          window.open(href, '_blank');
+        });
+      }
       return btn;
     };
 
