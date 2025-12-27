@@ -3709,15 +3709,30 @@
                             details.push(`Extrato Titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
                         }
                     }
-                    const detailText = details.length ? `\n${details.join('\n')}` : '';
-                    const handleReload = () => {
-                        if ('scrollRestoration' in history) {
-                            history.scrollRestoration = 'manual';
-                        }
-                        sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
-                        window.location.reload();
-                    };
-                    showCffSystemDialog(`${msg}${detailText}`, 'success', handleReload);
+                const successLines = [];
+                if (data && data.monitoria) {
+                    if (data.monitoria.ok) {
+                        successLines.push('Monitória OK');
+                    } else {
+                        successLines.push(`Monitória: Erro${data.monitoria.error ? ` - ${data.monitoria.error}` : ''}`);
+                    }
+                }
+                if (data && data.extrato) {
+                    if (data.extrato.ok) {
+                        successLines.push('Extrato de titularidade OK');
+                    } else {
+                        successLines.push(`Extrato de titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
+                    }
+                }
+                successLines.push('Salvos em Arquivos');
+                const handleReload = () => {
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
+                    }
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                    window.location.reload();
+                };
+                showCffSystemDialog(successLines.join('\n'), 'success', handleReload);
                 },
                 error: function (xhr, status, error) {
                     let errorMessage =
@@ -3781,22 +3796,23 @@
                         .text('Gerando cobrança...');
                 },
                 success: function (data) {
-                    const msg = data && data.message ? data.message : 'Petição de cobrança gerada com sucesso.';
-                    let extra = '';
-                    if (data && data.pdf_url) {
-                        extra += `\nPDF salvo em Arquivos.`;
+                const successLines = ['Cobrança Judicial OK'];
+                if (data && data.extrato) {
+                    if (data.extrato.ok) {
+                        successLines.push('Extrato de titularidade OK');
+                    } else {
+                        successLines.push(`Extrato de titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
                     }
-                    if (data && data.extrato_url) {
-                        extra += `\nExtrato de titularidade disponível.`;
+                }
+                successLines.push('Salvos em Arquivos');
+                const handleReload = () => {
+                    if ('scrollRestoration' in history) {
+                        history.scrollRestoration = 'manual';
                     }
-                    const handleReload = () => {
-                        if ('scrollRestoration' in history) {
-                            history.scrollRestoration = 'manual';
-                        }
-                        sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
-                        window.location.reload();
-                    };
-                    showCffSystemDialog(`${msg}${extra}`, 'success', handleReload);
+                    sessionStorage.setItem('scrollPosition', window.scrollY || document.documentElement.scrollTop || 0);
+                    window.location.reload();
+                };
+                showCffSystemDialog(successLines.join('\n'), 'success', handleReload);
                 },
                 error: function (xhr, status, error) {
                     let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
