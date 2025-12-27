@@ -548,7 +548,7 @@
         modal.foundList.innerHTML = '';
         (preview.found || []).forEach(item => {
             const li = document.createElement('li');
-            li.textContent = `${item.label} (${item.name})`;
+            li.textContent = item.label;
             modal.foundList.appendChild(li);
         });
         if (preview.missing && preview.missing.length) {
