@@ -297,19 +297,25 @@ def _apply_placeholder_styles(document):
 
 
 def _load_template_document(slug, fallback_path):
-    try:
-        template = DocumentoModelo.objects.get(slug=slug)
-        with template.arquivo.open('rb') as handle:
-            data = BytesIO(handle.read())
-        data.seek(0)
-        return Document(data)
-    except (DocumentoModelo.DoesNotExist, ValueError, FileNotFoundError):
-        return Document(fallback_path)
-    except Exception:
+    template = DocumentoModelo.objects.filter(slug=slug).first()
+    if not template:
+        label = dict(DocumentoModelo.SlugChoices.choices).get(slug, '')
+        if label:
+            template = DocumentoModelo.objects.filter(nome__iexact=label).order_by('-atualizado_em').first()
+    if template:
         try:
-            return Document(fallback_path)
-        except Exception:
-            raise
+            with template.arquivo.open('rb') as handle:
+                data = BytesIO(handle.read())
+            data.seek(0)
+            return Document(data)
+        except (ValueError, FileNotFoundError):
+            template = None
+    if fallback_path and os.path.exists(fallback_path):
+        return Document(fallback_path)
+    raise FileNotFoundError(
+        f"Template de documento não encontrado (slug={slug}). "
+        "Envie o arquivo via Documentos Modelo ou coloque o fallback local."
+    )
 
 
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
