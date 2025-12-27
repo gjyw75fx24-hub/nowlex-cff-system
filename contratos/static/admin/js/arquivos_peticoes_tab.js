@@ -591,6 +591,29 @@
         };
     };
 
+    const closePreviewModal = () => {
+        if (!previewModalInstance) {
+            return;
+        }
+        previewModalInstance.overlayEl.classList.remove('open');
+    };
+
+    const triggerDownload = (url, filename) => {
+        if (!url) {
+            return;
+        }
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        if (filename) {
+            link.download = filename;
+        }
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    };
+
     const createSummaryCard = () => {
         if (summaryCardInstance) {
             return summaryCardInstance;
@@ -750,27 +773,14 @@
             if (!response.ok || !data.ok) {
                 throw new Error(data.error || 'Falha ao gerar o ZIP.');
             }
-            modal.resultEl.innerHTML = '';
-            const titleText = document.createTextNode(`ZIP criado: ${data.result?.zip_name || 'arquivo'} — `);
-            modal.resultEl.appendChild(titleText);
+            setStatus('ZIP criado e download iniciado.', 'success');
             if (data.result?.url) {
-                const link = document.createElement('a');
-                link.href = data.result.url;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = 'Baixar';
-                modal.resultEl.appendChild(link);
+                triggerDownload(data.result.url, data.result?.zip_name);
             }
-            modal.resultEl.style.display = 'block';
-            setStatus('ZIP criado com sucesso.', 'success');
-            const summaryEntries = data.result?.entries || currentPreview?.found || [];
-            showSummaryCard({
-                zip_name: data.result?.zip_name,
-                url: data.result?.url,
-                entries: summaryEntries,
-                missing: data.result?.missing || currentPreview?.missing || [],
-                description: `${summaryEntries.length || 0} itens`
-            });
+            closePreviewModal();
+            setTimeout(() => {
+                window.location.reload();
+            }, 800);
         } catch (err) {
             modal.resultEl.textContent = err.message || 'Erro ao gerar o ZIP.';
             modal.resultEl.style.display = 'block';
