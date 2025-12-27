@@ -16,6 +16,7 @@
         const dropdownContainer = widget.querySelector('[data-documento-peticoes-dropdown]');
         const dropdownSelect = widget.querySelector('[data-documento-peticoes-select]');
         const toggleButton = widget.querySelector('[data-documento-peticoes-toggle]');
+        const anexosDeleteUrlTemplate = widget.dataset.anexosDeleteUrlTemplate;
 
         if (!apiUrl) {
             console.error('API URL ausente para os tipos de petição.');
@@ -153,12 +154,13 @@
                 attachmentsBox.appendChild(attachmentsList);
                 attachmentsBox.appendChild(uploadControls);
 
-                row.appendChild(rowMain);
-                row.appendChild(attachmentsBox);
-                fieldsContainer.appendChild(row);
-                renderAttachmentsForTipo(tipo.id || '', attachmentsList);
-            });
-        };
+            row.appendChild(rowMain);
+            row.appendChild(attachmentsBox);
+            fieldsContainer.appendChild(row);
+            renderAttachmentsForTipo(tipo.id || '', attachmentsList);
+        });
+        refreshAttachmentLists();
+    };
 
         const loadTipos = async () => {
             try {
@@ -257,12 +259,15 @@
             items.forEach(item => {
                 const entry = document.createElement('div');
                 entry.className = 'documento-peticoes-anexo-item';
+                const info = document.createElement('div');
+                info.className = 'documento-peticoes-anexo-info';
+
                 const link = document.createElement('a');
                 link.href = item.url;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = item.name || item.file_name || 'Arquivo';
-                entry.appendChild(link);
+                info.appendChild(link);
                 if (item.created_at) {
                     const meta = document.createElement('span');
                     meta.className = 'documento-peticoes-anexo-meta';
@@ -273,8 +278,18 @@
                             month: 'short',
                             day: '2-digit'
                         });
-                        entry.appendChild(meta);
+                        info.appendChild(meta);
                     }
+                }
+                entry.appendChild(info);
+                if (anexosDeleteUrlTemplate) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'documento-peticoes-anexo-remove-btn';
+                    removeBtn.title = 'Remover anexo contínuo';
+                    removeBtn.textContent = '✕';
+                    removeBtn.addEventListener('click', () => deleteAnexo(item.id, tipoId));
+                    entry.appendChild(removeBtn);
                 }
                 listEl.appendChild(entry);
             });
@@ -328,6 +343,36 @@
                 refreshAttachmentLists();
             } catch (error) {
                 showMessage(error.message || 'Erro ao buscar anexos contínuos.', 'error');
+            }
+        };
+
+        const deleteAnexo = async (anexoId, tipoId) => {
+            if (!anexosDeleteUrlTemplate) {
+                showMessage('URL de exclusão de anexos não configurada.', 'error');
+                return;
+            }
+            const url = anexosDeleteUrlTemplate.replace('{id}', encodeURIComponent(anexoId));
+            showMessage('Removendo anexo...', 'info');
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken || ''
+                    },
+                    credentials: 'same-origin'
+                });
+                const data = await parseJsonResponse(response);
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Falha ao remover o anexo.');
+                }
+                const key = String(tipoId || '');
+                const existing = anexosByTipo.get(key) || [];
+                const filtered = existing.filter(item => String(item.id) !== String(anexoId));
+                anexosByTipo.set(key, filtered);
+                refreshAttachmentLists();
+                showMessage('Anexo contínuo removido.', 'success');
+            } catch (error) {
+                showMessage(error.message || 'Erro ao remover anexo contínuo.', 'error');
             }
         };
 

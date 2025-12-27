@@ -163,7 +163,11 @@ document.addEventListener('DOMContentLoaded', function() {
   };
 
   const isMonitoriaBaseName = (text) => {
-    return normalizeFileText(text).includes('01 - monitoria inicial');
+    const normalized = normalizeFileText(text);
+    return (
+      normalized.includes('01 - monitoria inicial') ||
+      normalized.includes('01 - cobranca judicial')
+    );
   };
 
   const getRowFileNameText = (row) => {

@@ -282,6 +282,11 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.tipos_peticao_anexos_view),
                 name='contratos_documentomodelo_tipos_peticao_anexos'
             ),
+            path(
+                'tipos-peticao/anexos/<int:anexo_id>/delete/',
+                self.admin_site.admin_view(self.tipos_peticao_anexo_delete_view),
+                name='contratos_documentomodelo_tipos_peticao_anexos_delete'
+            ),
         ]
         return custom_urls + urls
 
@@ -303,6 +308,10 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
         extra_context.setdefault(
             'tipos_peticao_anexos_url',
             reverse('admin:contratos_documentomodelo_tipos_peticao_anexos')
+        )
+        extra_context.setdefault(
+            'tipos_peticao_anexos_delete_url_template',
+            f"{reverse('admin:contratos_documentomodelo_tipos_peticao_anexos')}{{id}}/delete/"
         )
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -453,6 +462,21 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
                 'anexos': [self._serialize_anexo(anexo) for anexo in anexos]
             })
         return HttpResponseNotAllowed(['GET', 'POST'])
+
+    def tipos_peticao_anexo_delete_view(self, request, anexo_id):
+        if request.method not in ('POST', 'DELETE'):
+            return HttpResponseNotAllowed(['POST', 'DELETE'])
+        try:
+            anexo = TipoPeticaoAnexoContinua.objects.get(pk=anexo_id)
+        except TipoPeticaoAnexoContinua.DoesNotExist:
+            return JsonResponse({'ok': False, 'error': 'Anexo não encontrado.'}, status=404)
+        tipo_id = anexo.tipo_peticao_id
+        anexo.delete()
+        return JsonResponse({
+            'ok': True,
+            'id': anexo_id,
+            'tipo_id': tipo_id
+        })
 
     @staticmethod
     def _serialize_anexo(anexo):
