@@ -1,15 +1,15 @@
 import io
 import os
 import re
+import unicodedata
 import zipfile
 
 from django.core.files.base import ContentFile
 from django.db import transaction
 from ..models import (
-    ComboDocumentoPattern,
     ProcessoArquivo,
-    ProcessoJudicial,
     TipoPeticao,
+    TipoPeticaoAnexoContinua,
     ZipGerado
 )
 
@@ -20,24 +20,33 @@ class PreviewError(Exception):
 
 def build_preview(tipo_id, arquivo_base_id):
     assets = _collect_combo_assets(tipo_id, arquivo_base_id)
+    optional_preview = [
+        {'id': arquivo.id, 'name': arquivo.nome or os.path.basename(arquivo.arquivo.name)}
+        for arquivo in assets['optional_files']
+    ]
+    per_contract_preview = []
+    for entry in assets['per_contract']:
+        per_contract_preview.append({
+            'contrato': entry['contrato'],
+            'a06': entry['preview'].get('a06'),
+            'a07': entry['preview'].get('a07'),
+            'a08': entry['preview'].get('a08'),
+            'a09': entry['preview'].get('a09'),
+        })
     return {
         'zip_name': assets['zip_name'],
+        'suggestedName': assets['zip_name'],
         'contracts': assets['contracts'],
         'missing': assets['missing'],
-        'optional': [
-            {'id': arquivo.id, 'name': arquivo.nome or arquivo.arquivo.name}
-            for arquivo in assets['optional_files']
-        ],
-        'found': [
-            {
-                'label': entry['label'],
-                'arquivo_id': entry['arquivo'].id,
-                'name': entry['arquivo'].nome or entry['arquivo'].arquivo.name
-            }
-            for entry in assets['found_entries']
-        ],
+        'found': assets['preview_found'],
         'tipo_id': assets['tipo'].id,
         'processo_id': assets['processo'].id,
+        'optional': optional_preview,
+        'optional_annexes': optional_preview,
+        'continuous_annexes': assets['continuous_annexes_preview'],
+        'per_contract': per_contract_preview,
+        'file01': assets['file01'],
+        'file05': assets['file05'],
     }
 
 
@@ -51,16 +60,17 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
         arquivo for arquivo in assets['optional_files']
         if str(arquivo.id) in optional_ids_set
     ]
-    files_to_zip = [{'arquivo': base_file, 'label': None}]
-    files_to_zip += [
-        {'arquivo': entry['arquivo'], 'label': entry['label']}
-        for entry in assets['found_entries']
-    ]
-    existing_ids = {item['arquivo'].id for item in files_to_zip}
+    files_to_zip = assets['zip_entries'].copy()
+    existing_ids = {
+        _entry_id(entry['arquivo'])
+        for entry in files_to_zip
+        if entry['arquivo'] is not None
+    }
     for arquivo in optional_files:
-        if arquivo.id not in existing_ids:
+        arquivo_id = arquivo.id
+        if arquivo_id not in existing_ids:
             files_to_zip.append({'arquivo': arquivo, 'label': None})
-            existing_ids.add(arquivo.id)
+            existing_ids.add(arquivo_id)
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -98,11 +108,16 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
         'zip_name': zip_name,
         'entries': [
             {
-                'label': entry['label'],
-                'name': entry['arquivo'].nome or entry['arquivo'].arquivo.name
+                'label': entry.get('label'),
+                'name': _get_entry_name(entry)
             }
             for entry in files_to_zip
-        ]
+            if entry.get('arquivo')
+        ],
+        'missing_count': len(assets['missing']),
+        'missing_message': (
+            f"Existem {len(assets['missing'])} itens faltantes." if assets['missing'] else ''
+        )
     }
 
 
@@ -121,88 +136,277 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
     contratos = _extract_contracts(base_file.nome)
     if not contratos:
         contratos = _extract_contracts_from_processo(processo)
-    patterns = list(tipo.combo_patterns.all())
     files = list(processo.arquivos.all())
     used_ids = {base_file.id}
-    found_entries = []
     missing = []
-    optional_files = []
-
-    for pattern in patterns:
-        if pattern.categoria == ComboDocumentoPattern.CATEGORIA_FIXO:
-            arquivo = _find_match(files, pattern.keywords, None, used_ids)
-            if arquivo:
-                used_ids.add(arquivo.id)
-                found_entries.append({
-                    'label': pattern.label_template,
-                    'arquivo': arquivo
-                })
-            elif pattern.obrigatorio:
-                missing.append(pattern.label_template)
-        elif pattern.categoria == ComboDocumentoPattern.CATEGORIA_CONTRATO:
-            for contrato in contratos:
-                label = _render_label(pattern.label_template, pattern.placeholder, contrato)
-                arquivo = _find_match(files, pattern.keywords, contrato, used_ids)
-                if arquivo:
-                    used_ids.add(arquivo.id)
-                    found_entries.append({'label': label, 'arquivo': arquivo})
-                elif pattern.obrigatorio:
-                    missing.append(label)
-        else:  # ANEXO
-            anexos = _find_all_matches(files, pattern.keywords, None, used_ids)
-            for arquivo in anexos:
-                optional_files.append(arquivo)
-                used_ids.add(arquivo.id)
-
-    zip_name = _build_zip_name(tipo, processo, contratos, _primeiros_nomes_passivo(processo))
-
+    optional_files = _find_optional_annexes(files, used_ids)
+    continuous_annexes = _get_continuous_annexes(tipo)
+    extrato = _find_extrato(files, used_ids)
+    if extrato:
+        used_ids.add(extrato.id)
+    else:
+        missing.append("05 - Extrato de Titularidade")
+    per_contract = _collect_contract_files(contracts, files, used_ids, missing)
+    zip_entries = _build_zip_entries(
+        base_file,
+        continuous_annexes,
+        extrato,
+        per_contract
+    )
+    preview_found = _build_preview_found(base_file, extrato, per_contract)
+    zip_name = _build_zip_name(tipo, processo, contracts, _primeiros_nomes_passivo(processo))
     return {
         'tipo': tipo,
         'processo': processo,
         'base_file': base_file,
-        'contracts': contratos,
+        'contracts': contracts,
         'zip_name': zip_name,
-        'found_entries': found_entries,
         'missing': missing,
         'optional_files': optional_files,
+        'continuous_annexes': continuous_annexes,
+        'per_contract': per_contract,
+        'zip_entries': zip_entries,
+        'preview_found': preview_found,
+        'file01': _build_file_preview(base_file),
+        'file05': _build_file_preview(extrato),
+        'continuous_annexes_preview': [
+            {
+                'id': annex.id,
+                'name': annex.nome or os.path.basename(annex.arquivo.name),
+                'label': annex.nome or os.path.basename(annex.arquivo.name)
+            }
+            for annex in continuous_annexes
+        ]
     }
-
-
-def _find_match(files, keywords, contract, used_ids):
-    candidates = []
-    for arquivo in files:
-        if arquivo.id in used_ids:
-            continue
-        name = (arquivo.nome or arquivo.arquivo.name or '').lower()
-        if contract and contract not in name:
-            continue
-        if all((kw or '').lower() in name for kw in keywords):
-            candidates.append((arquivo, name))
-    if not candidates:
-        return None
-    prioritized = [item for item in candidates if item[1].endswith('.pdf')]
-    if prioritized:
-        return prioritized[0][0]
-    return candidates[0][0]
-
-
-def _find_all_matches(files, keywords, contract, used_ids):
-    found = []
-    for arquivo in files:
-        if arquivo.id in used_ids:
-            continue
-        name = (arquivo.nome or arquivo.arquivo.name or '').lower()
-        if contract and contract not in name:
-            continue
-        if all((kw or '').lower() in name for kw in keywords):
-            found.append(arquivo)
-    return found
 
 
 def _extract_contracts(nome):
     tokens = re.findall(r'\d{5,}', nome or '')
     unique = sorted(set(tokens), key=lambda x: (len(x), x))
     return unique
+
+
+def _normalize_text(value):
+    if not value:
+        return ''
+    normalized = unicodedata.normalize('NFD', value)
+    cleaned = ''.join(ch for ch in normalized if unicodedata.category(ch) != 'Mn')
+    return ' '.join(cleaned.split()).strip().lower()
+
+
+def _get_file_display_name(obj):
+    if not obj:
+        return ''
+    name = getattr(obj, 'nome', None)
+    if name:
+        return name
+    file_field = getattr(obj, 'arquivo', None)
+    if file_field:
+        return os.path.basename(file_field.name or '')
+    return ''
+
+
+def _entry_id(obj):
+    if not obj:
+        return None
+    return getattr(obj, 'id', None)
+
+
+def _get_entry_name(entry):
+    arquivo = entry.get('arquivo')
+    return _get_file_display_name(arquivo)
+
+
+def _find_optional_annexes(files, used_ids):
+    optional = []
+    for arquivo in files:
+        if arquivo.id in used_ids:
+            continue
+        name_norm = _normalize_text(arquivo.nome or arquivo.arquivo.name or '')
+        if name_norm.startswith('anexo'):
+            optional.append(arquivo)
+    return optional
+
+
+def _get_continuous_annexes(tipo):
+    return list(tipo.anexos_continuos.order_by('criado_em'))
+
+
+def _find_extrato(files, used_ids):
+    prefix = '05 - extrato de titularidade'
+    target = _normalize_text(prefix)
+    candidates = []
+    for arquivo in files:
+        if arquivo.id in used_ids:
+            continue
+        name_norm = _normalize_text(arquivo.nome or arquivo.arquivo.name or '')
+        if not name_norm.startswith(target):
+            continue
+        pdf_score = _normalize_text(_get_file_display_name(arquivo)).endswith('.pdf')
+        timestamp = arquivo.criado_em.timestamp() if arquivo.criado_em else 0
+        candidates.append((arquivo, pdf_score, timestamp))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-int(item[1]), -item[2]))
+    return candidates[0][0]
+
+
+def _collect_contract_files(contracts, files, used_ids, missing):
+    results = []
+    for contrato in contracts:
+        entry = {
+            'contrato': contrato,
+            'files': {},
+            'preview': {},
+            'labels': {
+                'a06': f"06 - {contrato} - Contrato",
+                'a07': f"07 - {contrato} - Relatório",
+                'a08': f"08 - {contrato} - Saldo Devedor (ou Cálculo)",
+                'a09': f"09 - {contrato} - TED",
+            }
+        }
+        a06 = _find_by_contract_and_keywords(
+            files,
+            contrato,
+            ['contrato', 'termo de ades', 'termo de adesao'],
+            used_ids=used_ids
+        )
+        if a06:
+            entry['files']['a06'] = a06
+            entry['preview']['a06'] = _build_file_preview(a06, entry['labels']['a06'])
+            used_ids.add(a06.id)
+        else:
+            missing.append(entry['labels']['a06'])
+
+        a07 = _find_by_contract_and_keywords(
+            files,
+            contrato,
+            ['relatorio', 'relatório'],
+            used_ids=used_ids
+        )
+        if a07:
+            entry['files']['a07'] = a07
+            entry['preview']['a07'] = _build_file_preview(a07, entry['labels']['a07'])
+            used_ids.add(a07.id)
+        else:
+            missing.append(entry['labels']['a07'])
+
+        a08 = _find_by_contract_and_keywords(
+            files,
+            contrato,
+            ['calculo de saldo devedor', 'cálculo de saldo devedor', 'saldo devedor'],
+            used_ids=used_ids
+        )
+        if not a08:
+            a08 = _find_by_contract_and_keywords(
+                files,
+                contrato,
+                [],
+                keywords_all=['saldo', 'b6'],
+                used_ids=used_ids
+            )
+        if a08:
+            entry['files']['a08'] = a08
+            entry['preview']['a08'] = _build_file_preview(a08, entry['labels']['a08'])
+            used_ids.add(a08.id)
+        else:
+            missing.append(entry['labels']['a08'])
+
+        a09 = _find_by_contract_and_keywords(
+            files,
+            contrato,
+            ['ted'],
+            used_ids=used_ids
+        )
+        if a09:
+            entry['files']['a09'] = a09
+            entry['preview']['a09'] = _build_file_preview(a09, entry['labels']['a09'])
+            used_ids.add(a09.id)
+        else:
+            missing.append(entry['labels']['a09'])
+
+        results.append(entry)
+    return results
+
+
+def _find_by_contract_and_keywords(files, contract, keywords_any=None, keywords_all=None, used_ids=None):
+    candidates = []
+    contract_norm = _normalize_text(contract)
+    keywords_any_norm = [_normalize_text(kw) for kw in (keywords_any or []) if kw]
+    keywords_all_norm = [_normalize_text(kw) for kw in (keywords_all or []) if kw]
+
+    for arquivo in files:
+        if arquivo.id in (used_ids or set()):
+            continue
+        name_norm = _normalize_text(arquivo.nome or arquivo.arquivo.name or '')
+        if contract_norm and contract_norm not in name_norm:
+            continue
+        if keywords_all_norm and not all(kw in name_norm for kw in keywords_all_norm):
+            continue
+        if keywords_any_norm and not any(kw in name_norm for kw in keywords_any_norm):
+            continue
+        pdf_score = _get_file_display_name(arquivo).lower().endswith('.pdf')
+        match_score = sum(1 for kw in keywords_any_norm if kw in name_norm)
+        timestamp = arquivo.criado_em.timestamp() if arquivo.criado_em else 0
+        candidates.append((arquivo, pdf_score, match_score, timestamp))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-int(item[1]), -item[2], -item[3]))
+    return candidates[0][0]
+
+
+def _build_zip_entries(base_file, continuous_annexes, extrato, per_contract):
+    entries = [{'arquivo': base_file, 'label': None}]
+    for annex in continuous_annexes:
+        entries.append({
+            'arquivo': annex,
+            'label': annex.nome or os.path.basename(annex.arquivo.name)
+        })
+    if extrato:
+        entries.append({'arquivo': extrato, 'label': "05 - Extrato de Titularidade"})
+    for contract_entry in per_contract:
+        for key in ['a06', 'a07', 'a08', 'a09']:
+            arquivo = contract_entry['files'].get(key)
+            label = contract_entry['labels'][key]
+            if arquivo:
+                entries.append({'arquivo': arquivo, 'label': label})
+    return entries
+
+
+def _build_preview_found(base_file, extrato, per_contract):
+    entries = []
+    if base_file:
+        entries.append({
+            'label': base_file.nome or _get_file_display_name(base_file),
+            'arquivo_id': base_file.id,
+            'name': _get_file_display_name(base_file)
+        })
+    if extrato:
+        entries.append({
+            'label': "05 - Extrato de Titularidade",
+            'arquivo_id': extrato.id,
+            'name': _get_file_display_name(extrato)
+        })
+    for contract_entry in per_contract:
+        for key in ['a06', 'a07', 'a08', 'a09']:
+            preview = contract_entry['preview'].get(key)
+            if preview:
+                entries.append({
+                    'label': contract_entry['labels'][key],
+                    'arquivo_id': preview['id'],
+                    'name': preview['name']
+                })
+    return entries
+
+
+def _build_file_preview(arquivo, label=None):
+    if not arquivo:
+        return None
+    return {
+        'id': arquivo.id,
+        'name': _get_file_display_name(arquivo),
+        'label': label
+    }
 
 
 def _extract_contracts_from_processo(processo):
@@ -212,14 +416,6 @@ def _extract_contracts_from_processo(processo):
         if numero and numero not in contratos:
             contratos.append(numero)
     return contratos
-
-
-def _render_label(template, placeholder, contrato):
-    if not contrato:
-        return template
-    if placeholder and placeholder in template:
-        return template.replace(placeholder, contrato)
-    return f"{template} - {contrato}"
 
 
 def _build_zip_name(tipo, processo, contratos, parte_nome):
