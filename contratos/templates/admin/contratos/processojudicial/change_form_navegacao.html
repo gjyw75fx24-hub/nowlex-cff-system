@@ -52,6 +52,10 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
   #arquivos-group table tbody td:nth-child(4) {
     display: none !important;
   }
+  #arquivos-group table tbody tr.add-row td.field-arquivo,
+  #processoarquivo_set-group table tbody tr.add-row td.field-arquivo {
+    display: table-cell !important;
+  }
 
 .monitoria-checkbox-wrapper {
   display: inline-flex;
@@ -411,28 +415,30 @@ document.addEventListener('DOMContentLoaded', function() {
       uploaderLine.style.display = 'block';
     };
 
-    const setupModifyControl = (row, arquivoCell) => {
+    const setupModifyControl = (row, arquivoCell, hasFileLink = false) => {
       if (!row || row.dataset.modifyControlAdded === '1' || !arquivoCell) {
         return;
       }
       const fileUpload = arquivoCell.querySelector('p.file-upload');
-      if (!fileUpload) {
-        return;
-      }
-      const fileInput = fileUpload.querySelector('input[type="file"]');
+      const fileInput = arquivoCell.querySelector('input[type="file"]');
       const nomeCell = row.querySelector('td.field-nome');
       if (!nomeCell) {
         return;
       }
-      Array.from(fileUpload.childNodes).forEach(node => {
-        if (node.nodeType === Node.TEXT_NODE) {
-          node.textContent = '';
-        }
-      });
+      if (!fileInput) {
+        return;
+      }
+      if (fileUpload) {
+        Array.from(fileUpload.childNodes).forEach(node => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            node.textContent = '';
+          }
+        });
+      }
       const modifyRow = document.createElement('div');
       modifyRow.className = 'documento-peticoes-modify-row';
       const label = document.createElement('span');
-      label.textContent = 'Modificar:';
+      label.textContent = hasFileLink ? 'Modificar:' : 'Procurar:';
       label.style.fontWeight = '600';
       const button = document.createElement('button');
       button.type = 'button';
@@ -448,7 +454,9 @@ document.addEventListener('DOMContentLoaded', function() {
       modifyRow.appendChild(button);
       nomeCell.appendChild(modifyRow);
       renderUploaderLine(row, nomeCell);
-      fileUpload.style.display = 'none';
+      if (fileUpload) {
+        fileUpload.style.display = 'none';
+      }
       row.dataset.modifyControlAdded = '1';
     };
 
@@ -553,11 +561,15 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       const arquivoCell = row.querySelector('td.field-arquivo');
-      const link = arquivoCell?.querySelector('a[href*="/media/"], a[href*="processos/"]');
-        if (!link) {
-          return;
-        }
-        link.style.display = 'none';
+      if (!arquivoCell) {
+        return;
+      }
+      const link = arquivoCell.querySelector('a[href*="/media/"], a[href*="processos/"]');
+      setupModifyControl(row, arquivoCell, Boolean(link));
+      if (!link) {
+        return;
+      }
+      link.style.display = 'none';
 
       const btnRow = document.createElement('div');
       btnRow.className = 'documento-peticoes-download-row';
@@ -596,8 +608,6 @@ document.addEventListener('DOMContentLoaded', function() {
         row.appendChild(btnRow);
       }
 
-      setupModifyControl(row, arquivoCell);
-      renderUploaderLine(row, nomeCell);
       appendRemoveButton(row, rightGroup);
 
       row.dataset.downloadButtonsInjected = '1';

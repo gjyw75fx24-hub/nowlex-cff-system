@@ -267,6 +267,44 @@
         });
     };
 
+    const ensureAddRowUploadButton = () => {
+        const rows = Array.from(document.querySelectorAll(
+            '#arquivos-group tr.add-row, #arquivos-group tr.dynamic-arquivos,' +
+            '#processoarquivo_set-group tr.add-row, #processoarquivo_set-group tr.dynamic-processoarquivo'
+        ));
+        rows.forEach(row => {
+            const hasFileLink = row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]');
+            if (hasFileLink) {
+                return;
+            }
+            const uploadParagraph = row.querySelector('td.field-arquivo p.file-upload');
+            const nameInput = row.querySelector('td.field-nome input');
+            const fileInput = row.querySelector('input[type="file"]');
+            if (!fileInput) {
+                return;
+            }
+            if (uploadParagraph && uploadParagraph.dataset.addButton !== '1') {
+                const label = document.createElement('label');
+                label.className = 'documento-peticoes-addfile-button button';
+                label.textContent = 'Procurar...';
+                label.setAttribute('for', fileInput.id);
+                uploadParagraph.appendChild(label);
+                uploadParagraph.dataset.addButton = '1';
+            }
+            if (nameInput && !nameInput.dataset.addButtonRow) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'documento-peticoes-addfile-button';
+                button.textContent = 'Procurar...';
+                button.addEventListener('click', () => {
+                    fileInput.click();
+                });
+                nameInput.insertAdjacentElement('afterend', button);
+                nameInput.dataset.addButtonRow = '1';
+            }
+        });
+    };
+
     const initBaseSelectionObserver = () => {
         const targets = [
             document.querySelector('#processoarquivo_set-group tbody'),
@@ -275,9 +313,15 @@
         if (!targets.length) {
             return;
         }
-        const observer = new MutationObserver(refreshBaseCheckboxes);
+        const observer = new MutationObserver(() => {
+            refreshBaseCheckboxes();
+            bindBaseButtons();
+            ensureAddRowUploadButton();
+        });
         targets.forEach(target => observer.observe(target, { childList: true, subtree: true }));
         refreshBaseCheckboxes();
+        bindBaseButtons();
+        ensureAddRowUploadButton();
     };
 
     let selectedTipoId = window.__arquivos_peticao_selected_tipo_id || '';
