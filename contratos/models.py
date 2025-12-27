@@ -141,6 +141,9 @@ class ProcessoJudicial(models.Model):
             return self.cnj
         
         if self.pk:
+            parte_passiva = self.partes_processuais.filter(tipo_polo='PASSIVO').first()
+            if parte_passiva:
+                return parte_passiva.nome
             parte_principal = self.partes_processuais.first()
             if parte_principal:
                 return f"Cadastro de {parte_principal.nome} (ID: {self.pk})"
