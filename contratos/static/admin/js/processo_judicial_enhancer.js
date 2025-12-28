@@ -132,6 +132,50 @@ document.addEventListener('DOMContentLoaded', function() {
         return removedCount;
     }
 
+    const createSystemAlert = (title, message) => {
+        const existing = document.getElementById('cff-system-alert');
+        if (existing) existing.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'cff-system-alert';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '50%';
+        overlay.style.transform = 'translateX(-50%)';
+        overlay.style.background = '#fff';
+        overlay.style.border = '1px solid #dcdcdc';
+        overlay.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
+        overlay.style.borderRadius = '8px';
+        overlay.style.padding = '16px 24px';
+        overlay.style.zIndex = 2000;
+        overlay.style.minWidth = '280px';
+
+        const titleEl = document.createElement('div');
+        titleEl.style.fontWeight = 'bold';
+        titleEl.style.marginBottom = '8px';
+        titleEl.textContent = title;
+        overlay.appendChild(titleEl);
+
+        const msgEl = document.createElement('div');
+        msgEl.style.marginBottom = '12px';
+        msgEl.style.fontSize = '0.95rem';
+        msgEl.textContent = message;
+        overlay.appendChild(msgEl);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'OK';
+        button.style.border = 'none';
+        button.style.background = '#0d6efd';
+        button.style.color = '#fff';
+        button.style.padding = '6px 12px';
+        button.style.borderRadius = '4px';
+        button.style.cursor = 'pointer';
+        button.addEventListener('click', () => overlay.remove());
+        overlay.appendChild(button);
+
+        document.body.appendChild(overlay);
+    };
+
     const getAndamentosActionBar = () => {
         const group = document.getElementById('andamentos-group');
         if (!group) return null;
@@ -192,7 +236,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', () => {
             const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
             if (!match) {
-                alert('Salve o processo antes de atualizar andamentos.');
+                createSystemAlert('CFF System', 'Salve o processo antes de atualizar andamentos.');
                 return;
             }
             const objectId = match[1];
@@ -207,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!resp.ok) throw new Error('Erro ao acionar atualização.');
                 window.location.reload();
             }).catch(err => {
-                alert(err.message || 'Falha ao atualizar andamentos.');
+                createSystemAlert('CFF System', err.message || 'Falha ao atualizar andamentos.');
             }).finally(() => {
                 btn.disabled = false;
                 btn.innerText = originalText;
@@ -216,7 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
         removeDuplicatesBtn.addEventListener('click', async () => {
             const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
             if (!match) {
-                alert('Salve o processo antes de remover duplicados.');
+                createSystemAlert('CFF System', 'Salve o processo antes de remover duplicados.');
                 return;
             }
 
@@ -247,7 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!messageParts.length) {
                     messageParts.push('Nenhum andamento duplicado encontrado.');
                 }
-                alert(messageParts.join(' '));
+                createSystemAlert('CFF System', messageParts.join(' '));
 
                 if (inlineRemoved === 0 && removed > 0) {
                     const redirectUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
@@ -259,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (inlineRemoved > 0) {
                     messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
                 }
-                alert(messageParts.join(' '));
+                createSystemAlert('CFF System', messageParts.join(' '));
             } finally {
                 removeDuplicatesBtn.disabled = false;
                 removeDuplicatesBtn.innerText = originalText;
