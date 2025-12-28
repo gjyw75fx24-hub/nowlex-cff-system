@@ -353,6 +353,20 @@ document.addEventListener('DOMContentLoaded', function() {
     modal.style.display = 'flex';
   }
 
+  function showZipPreview(href, label) {
+    if (!href) return;
+    const fileName = label || href.split('/').pop() || 'arquivo.zip';
+    const safeName = escapeHtml(fileName);
+    content.innerHTML = `
+      <div style="max-width:480px; text-align:left; display:flex; flex-direction:column; gap:12px;">
+        <h3 style="margin:0 0 6px;font-size:1.1rem;">Pré-visualização do ZIP</h3>
+        <p style="margin:0; color:#333;">Arquivo: <strong>${safeName}</strong></p>
+        <p style="margin:0; color:#555;">Use o botão abaixo para baixar o pacote finalizado.</p>
+        <a href="${href}" target="_blank" rel="noopener" class="button" style="background:#1c7ed6; border-color:#1660af; padding:6px 12px; font-weight:600;">Baixar ZIP</a>
+      </div>`;
+    modal.style.display = 'flex';
+  }
+
   document.body.addEventListener('click', function(e) {
     const link = e.target.closest('a');
     if (!link) return;
@@ -363,8 +377,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
     const isPdf = /\.pdf$/i.test(href);
     const isDocx = /\.docx$/i.test(href);
-    if (!isImage && !isPdf && !isDocx) return;
-    e.preventDefault();
+    const isZip = /\.zip$/i.test(href);
+    if (!isImage && !isPdf && !isDocx && !isZip) return;
 
     if (isDocx) {
       const pdfHref = href.replace(/\.docx$/i, '.pdf');
@@ -382,7 +396,20 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    renderFile(href);
+    if (isZip) {
+      const wantsPreview = link.dataset.zipPreview === '1';
+      if (wantsPreview) {
+        e.preventDefault();
+        showZipPreview(href, link.closest('tr') ? getRowFileNameText(link.closest('tr')) : null);
+        return;
+      }
+      return;
+    }
+
+    if (isImage || isPdf) {
+      e.preventDefault();
+      renderFile(href);
+    }
   }, true);
 
   // Insere botões de Visualizar / PDF / DOC nos arquivos do tipo Monitória/Cobrança e Visualizar/Baixar nos demais
@@ -390,23 +417,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
     if (!arquivosGroup) return;
 
-    const createButton = (text, href, opts = {}) => {
-      const btn = document.createElement('a');
-      btn.href = href;
-      btn.textContent = text;
-      btn.className = 'button';
-      btn.style.padding = '4px 7px';
-      btn.style.background = '#555';
-      btn.style.color = '#fff';
-      btn.style.border = '1px solid #444';
-      btn.style.boxShadow = 'none';
-      btn.style.fontWeight = '400';
-      btn.style.fontSize = '0.85em';
-      if (opts.download) {
-        btn.setAttribute('download', '');
-      }
-      const openInNewTab = Boolean(opts.openInNewTab);
-      if (opts.download || openInNewTab) {
+      const createButton = (text, href, opts = {}) => {
+        const btn = document.createElement('a');
+        btn.href = href;
+        btn.textContent = text;
+        btn.className = 'button';
+        btn.style.padding = '4px 7px';
+        btn.style.background = '#555';
+        btn.style.color = '#fff';
+        btn.style.border = '1px solid #444';
+        btn.style.boxShadow = 'none';
+        btn.style.fontWeight = '400';
+        btn.style.fontSize = '0.85em';
+        if (opts.preview) {
+          btn.dataset.zipPreview = '1';
+        }
+        if (opts.download) {
+          btn.setAttribute('download', '');
+        }
+        const openInNewTab = Boolean(opts.openInNewTab);
+        if (opts.download || openInNewTab) {
         btn.addEventListener('click', function(ev) {
           ev.preventDefault();
           window.open(href, '_blank');
@@ -682,7 +712,10 @@ document.addEventListener('DOMContentLoaded', function() {
       leftGroup.style.display = 'flex';
       leftGroup.style.flexWrap = 'wrap';
       leftGroup.style.gap = '6px';
-      leftGroup.appendChild(createButton('Visualizar', link.href));
+      const isProtocolRowEntry = isProtocolRow(row);
+      const isZipFile = /\.zip$/i.test(link.href);
+      const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
+      leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
       if (isMonitoriaRow(row)) {
         leftGroup.appendChild(createButton('PDF', link.href, { download: true }));
         leftGroup.appendChild(createButton('DOC', link.href, { download: true }));
@@ -707,7 +740,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
       appendRemoveButton(row, rightGroup);
 
+      if (isProtocolRowEntry && !row.dataset.protocolToggleAdded) {
+        const toggle = createProtocolToggle();
+        rightGroup.appendChild(toggle);
+        row.dataset.protocolToggleAdded = '1';
+      }
       row.dataset.downloadButtonsInjected = '1';
+    };
+
+    const normalizeNameForProtocol = (text) => text ? text.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    const isProtocolRow = (row) => {
+      if (!row) return false;
+      const name = getRowFileNameText(row);
+      if (!name) return false;
+      return normalizeNameForProtocol(name).includes('protocolo');
+    };
+
+    const createProtocolToggle = () => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'protocol-toggle';
+      wrapper.title = 'Ative ao confirmar o protocolo no tribunal';
+      wrapper.innerHTML = `
+        <input type="checkbox" class="supervision-toggle-input">
+        <span class="supervision-switch" aria-hidden="true"></span>
+        <span class="supervision-label-text">Confirma Protocolo no Tribunal</span>
+      `;
+      wrapper.addEventListener('click', () => wrapper.querySelector('.protocol-toggle-input').focus());
+      return wrapper;
     };
 
     const tryInsert = () => {
