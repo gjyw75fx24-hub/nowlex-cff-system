@@ -36,16 +36,16 @@ def atualizar_processo_do_escavador(cnj: str) -> ProcessoJudicial | None:
             
             # 4. Popular/atualizar as partes (apenas na criação inicial para evitar sobrecarga)
             if created:
-                parse_partes_processo(processo, dados_api)
+            parse_partes_processo(processo, dados_api)
 
             # 5. Popular/atualizar os andamentos
-            parse_andamentos_processo(processo, dados_api)
+            novos_andamentos = parse_andamentos_processo(processo, dados_api)
 
             # 6. Salvar o processo principal
             processo.save()
             
-            print(f"Processo {cnj} {'criado' if created else 'atualizado'} com sucesso.")
-            return processo
+            print(f"Processo {cnj} {'criado' if created else 'atualizado'} com sucesso ({novos_andamentos} novos andamentos).")
+            return processo, novos_andamentos
 
     except Exception as e:
         print(f"Erro ao salvar os dados do processo {cnj} no banco de dados: {e}")

@@ -46,7 +46,11 @@ class Command(BaseCommand):
             resultado = atualizar_processo_do_escavador(processo.cnj)
             
             if resultado:
-                self.stdout.write(self.style.SUCCESS('OK'))
+                _, novos_andamentos = resultado
+                if novos_andamentos:
+                    self.stdout.write(self.style.SUCCESS('OK'))
+                else:
+                    self.stdout.write(self.style.WARNING('SEM NOVOS ANDAMENTOS'))
             else:
                 self.stdout.write(self.style.ERROR('FALHA'))
             

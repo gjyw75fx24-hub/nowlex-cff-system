@@ -1936,7 +1936,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             from contratos.integracoes_escavador.atualizador import atualizar_processo_do_escavador
             resultado = atualizar_processo_do_escavador(processo.cnj)
             if resultado:
-                self.message_user(request, f"Andamentos atualizados para o processo {processo.cnj}.", level=messages.SUCCESS)
+                _, novos_andamentos = resultado
+                if novos_andamentos:
+                    self.message_user(request, f"Andamentos atualizados para o processo {processo.cnj}.", level=messages.SUCCESS)
+                else:
+                    self.message_user(request, "Nenhum novo andamento encontrado no momento.", level=messages.INFO)
             else:
                 self.message_user(request, f"Não foi possível atualizar andamentos para o processo {processo.cnj}. Verifique o token da API.", level=messages.ERROR)
         except Exception as exc:

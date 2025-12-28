@@ -60,12 +60,13 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
             documento=documento or 'Não informado',
         )
 
-def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict):
+def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> int:
     """
     Cria ou atualiza os andamentos do processo a partir dos dados da API.
     Usa get_or_create para evitar a criação de andamentos duplicados.
     """
     movimentacoes = dados_api.get('movimentacoes', [])
+    novos_andamentos = 0
     for andamento_api in movimentacoes:
         data_str = andamento_api.get('data')
         descricao = andamento_api.get('conteudo')
@@ -74,15 +75,16 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict):
             continue
 
         try:
-            # Converte a data para um objeto datetime com fuso horário
             data_andamento = make_aware(datetime.fromisoformat(data_str))
-            
-            # Cria o andamento apenas se ele não existir
-            AndamentoProcessual.objects.get_or_create(
+
+            _, criado = AndamentoProcessual.objects.get_or_create(
                 processo=processo,
                 data=data_andamento,
                 descricao=descricao
             )
+            if criado:
+                novos_andamentos += 1
         except (ValueError, TypeError):
             print(f"Formato de data inválido para o andamento: {data_str}")
             continue
+    return novos_andamentos
