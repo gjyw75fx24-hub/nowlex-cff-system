@@ -99,7 +99,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     remover_andamentos_duplicados(processo)
     existentes = {
         (andamento.data.isoformat(), _normalize_descricao(andamento.descricao))
-        for andamento in processo.andamentoprocessual_set.all()
+        for andamento in processo.andamentos.all()
     }
     for andamento_api in movimentacoes:
         data_str = andamento_api.get('data')

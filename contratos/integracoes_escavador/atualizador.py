@@ -36,7 +36,7 @@ def atualizar_processo_do_escavador(cnj: str) -> ProcessoJudicial | None:
             
             # 4. Popular/atualizar as partes (apenas na criação inicial para evitar sobrecarga)
             if created:
-            parse_partes_processo(processo, dados_api)
+                parse_partes_processo(processo, dados_api)
 
             # 5. Popular/atualizar os andamentos
             novos_andamentos = parse_andamentos_processo(processo, dados_api)
