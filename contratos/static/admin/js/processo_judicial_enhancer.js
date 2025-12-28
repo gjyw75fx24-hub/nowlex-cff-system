@@ -140,10 +140,12 @@ document.addEventListener('DOMContentLoaded', function() {
         bar = document.createElement('div');
         bar.className = 'andamentos-action-bar analise-inner-tab-navigation';
         const title = group.querySelector('h2');
-        if (title) {
+        if (title && title.parentElement === group) {
             group.insertBefore(bar, title);
+        } else if (group.firstChild) {
+            group.insertBefore(bar, group.firstChild);
         } else {
-            group.prepend(bar);
+            group.appendChild(bar);
         }
         return bar;
     };
