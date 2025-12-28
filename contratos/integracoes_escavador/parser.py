@@ -67,6 +67,10 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     """
     movimentacoes = dados_api.get('movimentacoes', [])
     novos_andamentos = 0
+    existentes = {
+        (andamento.data.isoformat(), andamento.descricao.strip())
+        for andamento in processo.andamentoprocessual_set.all()
+    }
     for andamento_api in movimentacoes:
         data_str = andamento_api.get('data')
         descricao = andamento_api.get('conteudo')
@@ -76,6 +80,9 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
 
         try:
             data_andamento = make_aware(datetime.fromisoformat(data_str))
+            chave = (data_andamento.isoformat(), descricao.strip())
+            if chave in existentes:
+                continue
 
             _, criado = AndamentoProcessual.objects.get_or_create(
                 processo=processo,
@@ -84,6 +91,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
             )
             if criado:
                 novos_andamentos += 1
+                existentes.add(chave)
         except (ValueError, TypeError):
             print(f"Formato de data inválido para o andamento: {data_str}")
             continue
