@@ -213,22 +213,38 @@ def _bold_keywords_in_document(document, keywords):
 
 
 def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
-    if not replacement:
+    if not pattern or replacement is None:
         return
     for paragraph in _iter_container_paragraphs(document):
-        match = paragraph.findText(pattern)
-        while match:
-            el = match.getElement()
-            if el and hasattr(el, 'asText'):
-                text_el = el.asText()
-                start = match.getStartOffset()
-                end = match.getEndOffsetInclusive()
-                text_el.deleteText(start, end)
-                text_el.insertText(start, replacement)
-                if replacement:
-                    new_end = start + len(replacement) - 1
-                    text_el.setBold(start, new_end, bold)
-            match = paragraph.findText(pattern, match)
+        paragraph_text = ''.join(run.text for run in paragraph.runs)
+        if pattern not in paragraph_text:
+            continue
+        segments = paragraph_text.split(pattern)
+        if len(segments) <= 1:
+            continue
+        for run in paragraph.runs:
+            run.text = ''
+        for index, segment in enumerate(segments):
+            if segment:
+                run = paragraph.add_run(segment)
+                run.font.name = 'Times New Roman'
+            if index < len(segments) - 1:
+                replacement_run = paragraph.add_run(replacement)
+                replacement_run.font.name = 'Times New Roman'
+                if bold:
+                    replacement_run.bold = True
+                    replacement_run.font.bold = True
+
+
+def _bold_paragraphs_containing(document, text):
+    if not text:
+        return
+    normalized = text.strip()
+    for paragraph in _iter_container_paragraphs(document):
+        if normalized in paragraph.text:
+            for run in paragraph.runs:
+                run.bold = True
+                run.font.bold = True
 
 
 def _set_run_shading(run, fill_color):
@@ -589,23 +605,34 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo):
     )
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, fallback_path)
 
-    _replace_with_style(document, r'\[VARA\]', _format_vara_text(processo.vara), uppercase=True)
-    _replace_with_style(document, r'\[CIDADE\]', cidade, uppercase=True)
-    _replace_with_style(document, r'\[UF\]', uf.upper(), uppercase=True)
-    _replace_with_style(document, r'\[Processo\]', processo.cnj or '', uppercase=False)
-    _replace_with_style(document, r'\[Polo Passivo\]', polo_passivo.nome, uppercase=False)
-    _replace_with_style(document, r'\[Polo Passivo MAIÚSCULAS\]', polo_passivo.nome, uppercase=True)
-    _replace_with_style(document, r'\[Polo Passivo TODAS MAIÚSCULAS E NEGRITO\]', polo_passivo.nome, uppercase=True, bold=True)
-    _replace_with_style(document, r'\[DATA DE HOJE\]', datetime.now().strftime('%d/%m/%Y'), uppercase=False)
+    _replace_with_style(document, '[VARA]', _format_vara_text(processo.vara), uppercase=True)
+    _replace_with_style(document, '[CIDADE]', cidade, uppercase=True)
+    _replace_with_style(document, '[UF]', uf.upper(), uppercase=True)
+    _replace_with_style(document, '[Processo]', processo.cnj or '', uppercase=False)
+    _replace_with_style(document, '[Polo Passivo]', polo_passivo.nome, uppercase=False)
+    _replace_with_style(document, '[Polo Passivo MAIÚSCULAS]', polo_passivo.nome, uppercase=True)
+    _replace_with_style(document, '[Polo Passivo TODAS MAIÚSCULAS E NEGRITO]', polo_passivo.nome, uppercase=True, bold=True)
+    hoje = datetime.now()
+    month_names = {
+        '01': 'janeiro', '02': 'fevereiro', '03': 'março', '04': 'abril',
+        '05': 'maio', '06': 'junho', '07': 'julho', '08': 'agosto',
+        '09': 'setembro', '10': 'outubro', '11': 'novembro', '12': 'dezembro'
+    }
+    dia = hoje.strftime('%d')
+    mes_extenso = month_names.get(hoje.strftime('%m'), '')
+    ano = hoje.strftime('%Y')
+    data_por_extenso = f"{dia} de {mes_extenso} de {ano}"
+    _replace_with_style(document, '[DATA DE HOJE]', data_por_extenso, uppercase=False)
 
     saudacao = (
         f"EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {_format_vara_text(processo.vara)} "
         f"DA COMARCA DE {cidade.upper()} - {uf.upper()}"
     )
-    _replace_with_style(document, r'\[CABEÇALHO\]', saudacao, uppercase=True, bold=True)
+    _replace_with_style(document, '[CABEÇALHO]', saudacao, uppercase=True, bold=True)
+    _bold_paragraphs_containing(document, saudacao)
 
-    local_date = f"{cidade.capitalize()}/{uf.upper()}, {datetime.now().strftime('%d de %B de %Y').lower()}"
-    _replace_with_style(document, r'\[LOCAL_DATA\]', local_date, uppercase=False)
+    local_date = f"{cidade.capitalize()}/{uf.upper()}, {data_por_extenso}"
+    _replace_with_style(document, '[LOCAL_DATA]', local_date, uppercase=False)
 
     stream = BytesIO()
     document.save(stream)

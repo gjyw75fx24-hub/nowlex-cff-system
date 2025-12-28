@@ -2234,6 +2234,113 @@
             return false;
         }
 
+        function initializePetitionsDropdown($wrap) {
+            if (!$wrap || !$wrap.length) {
+                return;
+            }
+            const wrapEl = $wrap[0];
+            if (!wrapEl || wrapEl.dataset.petitionsInitialized === '1') {
+                return;
+            }
+            wrapEl.dataset.petitionsInitialized = '1';
+
+            const trigger = wrapEl.querySelector('.petitions-trigger');
+            const panel = wrapEl.querySelector('.petitions-panel');
+            const rail = wrapEl.querySelector('.petitions-rail');
+            const indicator = wrapEl.querySelector('.petitions-indicator');
+            if (!trigger || !panel || !rail || !indicator) {
+                return;
+            }
+            const items = Array.from(rail.querySelectorAll('.petitions-item'));
+            if (!items.length) {
+                return;
+            }
+            const actionTarget = {
+                monitoria: '#id_gerar_monitoria_btn',
+                cobranca: '#id_gerar_cobranca_btn',
+                habilitacao: '#id_gerar_habilitacao_btn'
+            };
+
+            const highlightClass = 'petitions-highlighted';
+            const moveIndicator = (btn) => {
+                if (!btn) {
+                    return;
+                }
+                const railRect = rail.getBoundingClientRect();
+                const btnRect = btn.getBoundingClientRect();
+                const left = btnRect.left - railRect.left;
+                const extraPadding = 4;
+                const shiftLeft = btnRect.width * 0.14;
+                indicator.style.width = `${btnRect.width + extraPadding * 2}px`;
+                indicator.style.transform = `translateX(${left - extraPadding - shiftLeft}px)`;
+                items.forEach(item => item.classList.remove(highlightClass));
+                btn.classList.add(highlightClass);
+            };
+
+            const syncIndicatorToActive = () => {
+                const active = panel.querySelector('.petitions-item.is-active') || items[0];
+                moveIndicator(active);
+            };
+
+            const openPanel = (open) => {
+                panel.classList.toggle('open', Boolean(open));
+                trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+                panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+                if (open) {
+                    requestAnimationFrame(syncIndicatorToActive);
+                }
+            };
+
+            const closePanel = () => openPanel(false);
+
+            trigger.addEventListener('click', (event) => {
+                event.stopPropagation();
+                openPanel(!panel.classList.contains('open'));
+            });
+
+            panel.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+
+            const handleDocumentClick = () => closePanel();
+            const handleKeyDown = (event) => {
+                if (event.key === 'Escape') {
+                    closePanel();
+                }
+            };
+            const handleResize = () => {
+                if (panel.classList.contains('open')) {
+                    syncIndicatorToActive();
+                }
+            };
+
+            document.addEventListener('click', handleDocumentClick);
+            document.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('resize', handleResize);
+
+            items.forEach((btn) => {
+                btn.addEventListener('mouseenter', () => moveIndicator(btn));
+                btn.addEventListener('focus', () => moveIndicator(btn));
+                btn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    items.forEach((item) => item.classList.remove('is-active'));
+                    btn.classList.add('is-active');
+                    moveIndicator(btn);
+                    closePanel();
+                    const action = btn.dataset.action;
+                    const selector = actionTarget[action];
+                    if (selector) {
+                        const targetButton = document.querySelector(selector);
+                        if (targetButton) {
+                            targetButton.click();
+                        }
+                    }
+                });
+            });
+
+            syncIndicatorToActive();
+        }
+
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
 
@@ -2253,16 +2360,31 @@
             $headerContainer.append('<h3>Respostas da Análise</h3>');
 
             // Botões de ação
-            const $btnGroup = $('<div style="display:flex; gap:8px; margin-left:auto;"></div>');
             const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
             const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
             const $gerarHabilitacaoBtnDynamic = $('<button type="button" id="id_gerar_habilitacao_btn" class="button" style="background-color: #805ad5; color: white;">Gerar Petição de Habilitação (PDF)</button>');
-            $btnGroup.append($gerarMonitoriaBtnDynamic);
-            $btnGroup.append($gerarCobrancaBtnDynamic);
-            $btnGroup.append($gerarHabilitacaoBtnDynamic);
+            const $petitionsWrap = $(
+                '<div class="petitions-wrap">' +
+                    '<button class="petitions-trigger" id="petitionsTrigger" type="button" aria-expanded="false">Gerar Petições ▾</button>' +
+                    '<div class="petitions-panel" id="petitionsPanel" aria-hidden="true">' +
+                    '<div class="petitions-rail" role="menu" aria-label="Protocolar">' +
+                            '<div class="petitions-indicator" id="petitionsIndicator"></div>' +
+                            '<button class="petitions-item is-active" role="menuitem" data-action="monitoria" type="button">Monitória</button>' +
+                            '<button class="petitions-item" role="menuitem" data-action="cobranca" type="button">Cobrança</button>' +
+                            '<button class="petitions-item" role="menuitem" data-action="habilitacao" type="button">Habilitação</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>'
+            );
+            const $btnGroup = $('<div style="display:flex; align-items:center; margin-left:auto;"></div>');
+            $btnGroup.append($petitionsWrap);
+            const $hiddenButtons = $('<div class="petitions-hidden-buttons" style="display:none;"></div>');
+            $hiddenButtons.append($gerarMonitoriaBtnDynamic, $gerarCobrancaBtnDynamic, $gerarHabilitacaoBtnDynamic);
             $headerContainer.append($btnGroup);
+            $headerContainer.append($hiddenButtons);
             $formattedResponsesContainer.append($headerContainer);
             $gerarMonitoriaBtnDynamic.prop('disabled', true);
+            initializePetitionsDropdown($petitionsWrap);
 
 
             ensureUserResponsesShape();
@@ -3762,6 +3884,13 @@
                 alert('Erro: ID do processo não encontrado para gerar a cobrança.');
                 return;
             }
+            if (!hasAnySummaryCardSelection()) {
+                showCffSystemDialog(
+                    'Selecione primeiro o card de uma análise antes de gerar a Cobrança Judicial.',
+                    'warning'
+                );
+                return;
+            }
             const aggregatedContratoIds = getMonitoriaContractIds({
                 includeGeneralSnapshot: true,
                 includeSummaryCardContracts: true
@@ -3793,7 +3922,7 @@
                 },
                 dataType: 'json',
                 beforeSend: function () {
-                    $('#id_gerar_cobranca_btn')
+            $('#id_gerar_cobranca_btn')
                         .prop('disabled', true)
                         .text('Gerando cobrança...');
                 },

@@ -16,7 +16,7 @@
         dropdown.className = 'inline-group-subtab-dropdown';
         dropdown.innerHTML = `
             <div class="inline-group-subtab-dropdown-header">
-                <span>Petições</span>
+                <span>Protocolar</span>
                 <button type="button" class="inline-group-subtab-dropdown-close" aria-label="Fechar lista">×</button>
             </div>
             <div class="inline-group-subtab-dropdown-body">
@@ -809,7 +809,7 @@
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'inline-group-subtab-button';
-        button.textContent = 'Petições ▾';
+        button.textContent = 'Protocolar ▾';
         subtab.appendChild(button);
 
         const dropdown = createDropdown();
