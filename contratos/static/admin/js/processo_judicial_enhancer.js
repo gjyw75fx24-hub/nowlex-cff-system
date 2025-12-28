@@ -194,6 +194,79 @@ document.addEventListener('DOMContentLoaded', function() {
         return bar;
     };
 
+    const showCffConfirm = (title, message) => {
+        return new Promise(resolve => {
+            const existing = document.getElementById('cff-system-confirm');
+            if (existing) {
+                existing.remove();
+            }
+            const overlay = document.createElement('div');
+            overlay.id = 'cff-system-confirm';
+            overlay.style.position = 'fixed';
+            overlay.style.top = '50%';
+            overlay.style.left = '50%';
+            overlay.style.transform = 'translate(-50%, -50%)';
+            overlay.style.background = '#fff';
+            overlay.style.border = '1px solid #dcdcdc';
+            overlay.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
+            overlay.style.borderRadius = '8px';
+            overlay.style.padding = '16px 24px';
+            overlay.style.zIndex = 2000;
+            overlay.style.minWidth = '320px';
+
+            const titleEl = document.createElement('div');
+            titleEl.style.fontWeight = 'bold';
+            titleEl.style.marginBottom = '8px';
+            titleEl.textContent = title;
+            overlay.appendChild(titleEl);
+
+            const msgEl = document.createElement('div');
+            msgEl.style.marginBottom = '12px';
+            msgEl.style.fontSize = '0.95rem';
+            msgEl.textContent = message;
+            overlay.appendChild(msgEl);
+
+            const actions = document.createElement('div');
+            actions.style.display = 'flex';
+            actions.style.justifyContent = 'flex-end';
+            actions.style.gap = '8px';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = 'Cancelar';
+            cancelBtn.style.border = 'none';
+            cancelBtn.style.background = '#e2e8f0';
+            cancelBtn.style.color = '#1e293b';
+            cancelBtn.style.padding = '6px 12px';
+            cancelBtn.style.borderRadius = '4px';
+            cancelBtn.style.cursor = 'pointer';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(false);
+            });
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.textContent = 'OK';
+            okBtn.style.border = 'none';
+            okBtn.style.background = '#0d6efd';
+            okBtn.style.color = '#fff';
+            okBtn.style.padding = '6px 12px';
+            okBtn.style.borderRadius = '4px';
+            okBtn.style.cursor = 'pointer';
+            okBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(true);
+            });
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(okBtn);
+            overlay.appendChild(actions);
+
+            document.body.appendChild(overlay);
+        });
+    };
+
     // Botões relacionados a andamentos processuais
     const buscaAtivaInput = document.getElementById('id_busca_ativa');
     const andamentosActionsContainer = getAndamentosActionBar();
@@ -307,6 +380,22 @@ document.addEventListener('DOMContentLoaded', function() {
             } finally {
                 removeDuplicatesBtn.disabled = false;
                 removeDuplicatesBtn.innerText = originalText;
+            }
+        });
+    }
+
+    const excluirBtn = document.getElementById('btn_excluir_andamentos_selecionados');
+    if (excluirBtn) {
+        excluirBtn.addEventListener('click', async (e) => {
+            if (excluirBtn.dataset.skipConfirm === 'true') {
+                excluirBtn.dataset.skipConfirm = '';
+                return;
+            }
+            e.preventDefault();
+            const confirmed = await showCffConfirm('CFF System', 'Tem certeza que deseja excluir os andamentos selecionados?');
+            if (confirmed) {
+                excluirBtn.dataset.skipConfirm = 'true';
+                excluirBtn.click();
             }
         });
     }
