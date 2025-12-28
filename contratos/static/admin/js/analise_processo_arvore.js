@@ -166,6 +166,25 @@
             '<button type="button" class="button analise-save-analysis-btn">Concluir Análise</button>'
         );
         $analysisActionRow.append($saveAnalysisButton);
+        const $petitionsWrap = $(
+            '<div class="petitions-wrap">' +
+                '<button class="petitions-trigger" id="petitionsTrigger" type="button" aria-expanded="false">Gerar Petições ▾</button>' +
+                '<div class="petitions-panel" id="petitionsPanel" aria-hidden="true">' +
+                    '<div class="petitions-rail" role="menu" aria-label="Protocolar">' +
+                        '<div class="petitions-indicator" id="petitionsIndicator"></div>' +
+                        '<button class="petitions-item is-active" role="menuitem" data-action="monitoria" type="button">Monitória</button>' +
+                        '<button class="petitions-item" role="menuitem" data-action="cobranca" type="button">Cobrança</button>' +
+                        '<button class="petitions-item" role="menuitem" data-action="habilitacao" type="button">Habilitação</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>'
+        );
+        const $hiddenButtons = $('<div class="petitions-hidden-buttons" style="display:none;"></div>');
+        const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
+        const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
+        const $gerarHabilitacaoBtnDynamic = $('<button type="button" id="id_gerar_habilitacao_btn" class="button" style="background-color: #805ad5; color: white;">Gerar Petição de Habilitação (PDF)</button>');
+        $gerarMonitoriaBtnDynamic.prop('disabled', true);
+        $hiddenButtons.append($gerarMonitoriaBtnDynamic, $gerarCobrancaBtnDynamic, $gerarHabilitacaoBtnDynamic);
 
         const $tabPanels = $('<div class="analise-inner-tab-panels"></div>');
         const $analysisPanel = $(
@@ -183,12 +202,18 @@
             $tabPanels.append($supervisionPanel);
         }
 
-        const $tabWrapper = $('<div class="analise-inner-tab-wrapper"></div>').append(
+        const $tabTopRow = $('<div class="analise-inner-top-row"></div>').append(
             $tabNavigation,
+            $('<div class="analise-inner-petitions-slot"></div>').append($petitionsWrap)
+        );
+        const $tabWrapper = $('<div class="analise-inner-tab-wrapper"></div>').append(
+            $tabTopRow,
             $analysisActionRow,
-            $tabPanels
+            $tabPanels,
+            $hiddenButtons
         );
         $inlineGroup.append($tabWrapper);
+        initializePetitionsDropdown($petitionsWrap);
 
         const clickSaveAndContinueEditor = () => {
             const $continueBtn = $adminForm.find('button[name="_continue"], input[name="_continue"]');
@@ -2355,36 +2380,9 @@
                 return;
             }
 
-            // Container flex para título e botão (posicionado discretamente alinhado à direita)
             const $headerContainer = $('<div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px;"></div>');
             $headerContainer.append('<h3>Respostas da Análise</h3>');
-
-            // Botões de ação
-            const $gerarMonitoriaBtnDynamic = $('<button type="button" id="id_gerar_monitoria_btn" class="button" style="background-color: #28a745; color: white;">Gerar Petição Monitória (PDF)</button>');
-            const $gerarCobrancaBtnDynamic = $('<button type="button" id="id_gerar_cobranca_btn" class="button" style="background-color: #1c7ed6; color: white;">Petição Cobrança Judicial (PDF)</button>');
-            const $gerarHabilitacaoBtnDynamic = $('<button type="button" id="id_gerar_habilitacao_btn" class="button" style="background-color: #805ad5; color: white;">Gerar Petição de Habilitação (PDF)</button>');
-            const $petitionsWrap = $(
-                '<div class="petitions-wrap">' +
-                    '<button class="petitions-trigger" id="petitionsTrigger" type="button" aria-expanded="false">Gerar Petições ▾</button>' +
-                    '<div class="petitions-panel" id="petitionsPanel" aria-hidden="true">' +
-                    '<div class="petitions-rail" role="menu" aria-label="Protocolar">' +
-                            '<div class="petitions-indicator" id="petitionsIndicator"></div>' +
-                            '<button class="petitions-item is-active" role="menuitem" data-action="monitoria" type="button">Monitória</button>' +
-                            '<button class="petitions-item" role="menuitem" data-action="cobranca" type="button">Cobrança</button>' +
-                            '<button class="petitions-item" role="menuitem" data-action="habilitacao" type="button">Habilitação</button>' +
-                        '</div>' +
-                    '</div>' +
-                '</div>'
-            );
-            const $btnGroup = $('<div style="display:flex; align-items:center; margin-left:auto;"></div>');
-            $btnGroup.append($petitionsWrap);
-            const $hiddenButtons = $('<div class="petitions-hidden-buttons" style="display:none;"></div>');
-            $hiddenButtons.append($gerarMonitoriaBtnDynamic, $gerarCobrancaBtnDynamic, $gerarHabilitacaoBtnDynamic);
-            $headerContainer.append($btnGroup);
-            $headerContainer.append($hiddenButtons);
             $formattedResponsesContainer.append($headerContainer);
-            $gerarMonitoriaBtnDynamic.prop('disabled', true);
-            initializePetitionsDropdown($petitionsWrap);
 
 
             ensureUserResponsesShape();

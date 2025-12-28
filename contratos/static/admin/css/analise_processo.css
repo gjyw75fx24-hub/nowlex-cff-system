@@ -530,6 +530,18 @@
     margin-bottom: 16px;
 }
 
+.analise-inner-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.analise-inner-petitions-slot {
+    margin-left: auto;
+}
+
 .analise-inner-tab-button {
     border: 1px solid #c6c6c6;
     background-color: #f4f4f4;
