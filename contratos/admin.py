@@ -932,7 +932,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
 
 
 class ProtocoladosFilter(admin.SimpleListFilter):
-    title = "Por Protocolados"
+    title = "Protocolados"
     parameter_name = "protocolados"
 
     OPTIONS = [
@@ -947,12 +947,28 @@ class ProtocoladosFilter(admin.SimpleListFilter):
         "habilitacao": ["habilitação", "habilitacao"],
     }
 
+    def _protocolados_qs(self, qs, value):
+        keywords = self.LOOKUP_KEYWORDS.get(value)
+        if not keywords:
+            return qs.none()
+        protocol_q = models.Q(arquivos__protocolado_no_tribunal=True)
+        name_q = models.Q()
+        for keyword in keywords:
+            name_q |= models.Q(arquivos__nome__icontains=keyword)
+        return qs.filter(protocol_q & name_q).distinct()
+
     def lookups(self, request, model_admin):
-        return self.OPTIONS
+        qs = model_admin.get_queryset(request)
+        items = []
+        for value, label in self.OPTIONS:
+            count = self._protocolados_qs(qs, value).count()
+            label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+        return items
 
     def choices(self, changelist):
         current = self.value()
-        for value, label in self.OPTIONS:
+        for value, label in self.lookup_choices:
             selected = current == value
             query_string = changelist.get_query_string(
                 {self.parameter_name: value} if not selected else {},
@@ -966,14 +982,9 @@ class ProtocoladosFilter(admin.SimpleListFilter):
 
     def queryset(self, request, queryset):
         val = self.value()
-        if not val or val not in self.LOOKUP_KEYWORDS:
+        if not val:
             return queryset
-        keywords = self.LOOKUP_KEYWORDS[val]
-        protocol_q = models.Q(arquivos__protocolado_no_tribunal=True)
-        name_q = models.Q()
-        for keyword in keywords:
-            name_q |= models.Q(arquivos__nome__icontains=keyword)
-        return queryset.filter(protocol_q & name_q).distinct()
+        return self._protocolados_qs(queryset, val)
 
 
 class PrescricaoOrderFilter(admin.SimpleListFilter):
