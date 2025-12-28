@@ -21,6 +21,9 @@
             if (fullString) {
                 const get = (letra) => (fullString.match(new RegExp(`${letra}:\\s*([\\s\\S]*?)(?=\\s*-\\s*[A-H]:|$)`, 'i')) || [])[1] || '';
                 Object.keys(out).forEach(key => out[key] = get(key).trim());
+                if (out.G) {
+                    out.G = out.G.replace(/CEP:?\\s*/i, '').replace(/\\D/g, '');
+                }
             }
             console.log('[DEBUG] 4. populateInputs - Valores a serem aplicados:', out);
             $inputs.each(function() {
