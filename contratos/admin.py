@@ -1955,7 +1955,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return super().history_view(request, object_id, extra_context=extra_context)
 
     def response_change(self, request, obj):
-        if '_action' in request.POST and request.POST['_action'] == 'excluir_andamentos_selecionados':
+        if request.POST.get('action') == 'excluir_andamentos_selecionados':
             selected_andamento_ids = []
             # Iterate through the POST data to find selected inline items
             for key, value in request.POST.items():
