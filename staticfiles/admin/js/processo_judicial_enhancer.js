@@ -132,25 +132,60 @@ document.addEventListener('DOMContentLoaded', function() {
         return removedCount;
     }
 
-    // Botão "Atualizar andamentos agora" ao lado do checkbox de Busca Ativa
+    const getAndamentosActionBar = () => {
+        const group = document.getElementById('andamentos-group');
+        if (!group) return null;
+        let bar = group.querySelector('.andamentos-action-bar');
+        if (bar) return bar;
+        bar = document.createElement('div');
+        bar.className = 'andamentos-action-bar analise-inner-tab-navigation';
+        const title = group.querySelector('h2');
+        if (title) {
+            group.insertBefore(bar, title);
+        } else {
+            group.prepend(bar);
+        }
+        return bar;
+    };
+
+    // Botões relacionados a andamentos processuais
     const buscaAtivaInput = document.getElementById('id_busca_ativa');
+    const andamentosActionsContainer = getAndamentosActionBar();
     if (buscaAtivaInput && !document.getElementById('btn_atualizar_andamentos')) {
+        const actionHost = andamentosActionsContainer || buscaAtivaInput.parentNode;
         const btn = document.createElement('button');
         btn.id = 'btn_atualizar_andamentos';
         btn.type = 'button';
-        btn.className = 'button';
+        btn.className = 'button analise-inner-tab-button';
         btn.innerText = '🔄 Atualizar andamentos agora';
-        btn.style.marginRight = '10px';
 
-        const container = buscaAtivaInput.parentNode;
-        container.insertBefore(btn, buscaAtivaInput);
+        actionHost.appendChild(btn);
+
         const removeDuplicatesBtn = document.createElement('button');
         removeDuplicatesBtn.id = 'btn_remover_andamentos_duplicados';
         removeDuplicatesBtn.type = 'button';
-        removeDuplicatesBtn.className = 'button';
+        removeDuplicatesBtn.className = 'button analise-inner-tab-button';
         removeDuplicatesBtn.innerText = '🧹 Limpar duplicados';
-        removeDuplicatesBtn.style.marginRight = '10px';
-        container.insertBefore(removeDuplicatesBtn, buscaAtivaInput);
+
+        actionHost.appendChild(removeDuplicatesBtn);
+
+        const buscaField = buscaAtivaInput.closest('.field-busca_ativa') || buscaAtivaInput.closest('.form-row');
+        if (buscaField) {
+            buscaField.style.display = 'none';
+        }
+        buscaAtivaInput.classList.add('supervision-toggle-input');
+        const toggleWrapper = document.createElement('label');
+        toggleWrapper.className = 'protocol-toggle andamentos-busca-toggle';
+        const switchSpan = document.createElement('span');
+        switchSpan.className = 'supervision-switch';
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'supervision-label-text';
+        labelSpan.innerText = 'Busca ativa';
+        toggleWrapper.appendChild(buscaAtivaInput);
+        toggleWrapper.appendChild(switchSpan);
+        toggleWrapper.appendChild(labelSpan);
+
+        actionHost.appendChild(toggleWrapper);
 
         btn.addEventListener('click', () => {
             const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
