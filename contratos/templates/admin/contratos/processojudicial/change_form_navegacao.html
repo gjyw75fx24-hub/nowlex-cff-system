@@ -137,7 +137,11 @@ window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 #arquivos-group th.column-criado_em,
 #processoarquivo_set-group th.column-criado_em,
 #arquivos-group td.field-criado_em,
-#processoarquivo_set-group td.field-criado_em {
+#processoarquivo_set-group td.field-criado_em,
+#arquivos-group th.column-protocolado_no_tribunal,
+#processoarquivo_set-group th.column-protocolado_no_tribunal,
+#arquivos-group td.field-protocolado_no_tribunal,
+#processoarquivo_set-group td.field-protocolado_no_tribunal {
   display: none;
 }
 
@@ -727,7 +731,13 @@ document.addEventListener('DOMContentLoaded', function() {
         leftGroup.appendChild(createButton('Baixar', link.href, { download: true }));
       }
 
+      const rightGroup = document.createElement('div');
+      rightGroup.style.display = 'flex';
+      rightGroup.style.alignItems = 'center';
+
       btnRow.appendChild(leftGroup);
+      btnRow.appendChild(rightGroup);
+
       const nomeCell = row.querySelector('td.field-nome');
       if (nomeCell) {
         nomeCell.appendChild(actionBar);
@@ -737,24 +747,18 @@ document.addEventListener('DOMContentLoaded', function() {
         row.appendChild(btnRow);
       }
 
-      const needsToggle =
+      appendRemoveButton(row, actionBar);
+
+      const shouldShowToggle =
         (isProtocolRowEntry || isHabilitacaoRow(row)) && !row.dataset.protocolToggleAdded;
-      if (needsToggle) {
-        const toggle = createProtocolToggle();
-        actionBar.appendChild(toggle);
-        row.dataset.protocolToggleAdded = '1';
-        const checkbox = toggle.querySelector('.supervision-toggle-input');
-        if (checkbox) {
-          checkbox.addEventListener('change', () => {
-            if (checkbox.checked) {
-              setTimeout(() => {
-                clickSaveAndContinueEditor();
-              }, 150);
-            }
-          });
+      const protocolCheckbox = row.querySelector('input[type="checkbox"][name$="-protocolado_no_tribunal"]');
+      if (shouldShowToggle && protocolCheckbox) {
+        const toggle = createProtocolToggle(protocolCheckbox);
+        if (toggle) {
+          rightGroup.appendChild(toggle);
+          row.dataset.protocolToggleAdded = '1';
         }
       }
-      appendRemoveButton(row, actionBar);
       row.dataset.downloadButtonsInjected = '1';
     };
 
@@ -768,20 +772,47 @@ document.addEventListener('DOMContentLoaded', function() {
     const isHabilitacaoRow = (row) => {
       if (!row) return false;
       const name = getRowFileNameText(row);
-      if (!name) return false;
-      return normalizeNameForProtocol(name).includes('habilitacao');
+      return name && normalizeNameForProtocol(name).includes('habilitacao');
     };
 
-    const createProtocolToggle = () => {
+    const createProtocolToggle = (checkbox) => {
+      if (!checkbox) {
+        return null;
+      }
+      checkbox.style.display = 'none';
+      checkbox.dataset.protocolToggleManaged = '1';
       const wrapper = document.createElement('label');
       wrapper.className = 'protocol-toggle';
       wrapper.title = 'Ative ao confirmar o protocolo no tribunal';
-      wrapper.innerHTML = `
-        <input type="checkbox" class="supervision-toggle-input">
-        <span class="supervision-switch" aria-hidden="true"></span>
-        <span class="supervision-label-text">Confirma Protocolo no Tribunal</span>
-      `;
-      wrapper.addEventListener('click', () => wrapper.querySelector('.supervision-toggle-input')?.focus());
+      wrapper.setAttribute('aria-pressed', 'false');
+      const switchEl = document.createElement('span');
+      switchEl.className = 'supervision-switch';
+      const labelText = document.createElement('span');
+      labelText.className = 'supervision-label-text';
+      labelText.textContent = 'Confirma Protocolo no Tribunal';
+      wrapper.appendChild(switchEl);
+      wrapper.appendChild(labelText);
+
+      const updateState = () => {
+        const checked = Boolean(checkbox.checked);
+        wrapper.classList.toggle('protocol-toggle--active', checked);
+        wrapper.classList.toggle('protocol-toggle--inactive', !checked);
+        wrapper.setAttribute('aria-pressed', checked ? 'true' : 'false');
+      };
+
+      const toggleState = (event) => {
+        event.preventDefault();
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        updateState();
+        setTimeout(() => {
+          clickSaveAndContinueEditor();
+        }, 150);
+      };
+
+      wrapper.addEventListener('click', toggleState);
+      checkbox.addEventListener('change', updateState);
+      updateState();
       return wrapper;
     };
 

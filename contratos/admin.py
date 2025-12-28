@@ -1288,7 +1288,7 @@ class PrazoInline(admin.TabularInline):
 class ProcessoArquivoInline(admin.TabularInline):
     model = ProcessoArquivo
     extra = 0
-    fields = ('nome', 'arquivo', 'enviado_por', 'criado_em')
+    fields = ('nome', 'arquivo', 'enviado_por', 'protocolado_no_tribunal', 'criado_em')
     readonly_fields = ('criado_em',)
     autocomplete_fields = ['enviado_por']
     verbose_name = "Arquivo"

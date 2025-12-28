@@ -177,6 +177,11 @@ class ProcessoArquivo(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='arquivos')
     nome = models.CharField(max_length=255, blank=True, verbose_name="Nome do arquivo")
     arquivo = models.FileField(upload_to=processo_arquivo_upload_path, verbose_name="Arquivo")
+    protocolado_no_tribunal = models.BooleanField(
+        default=False,
+        verbose_name="Confirmado protocolo no tribunal",
+        help_text="Marque para indicar que este arquivo foi protocolado no tribunal."
+    )
     enviado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Enviado por")
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
 
