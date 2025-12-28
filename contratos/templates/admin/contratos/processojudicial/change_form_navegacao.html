@@ -656,7 +656,10 @@ document.addEventListener('DOMContentLoaded', function() {
       btn.style.width = '20px';
       btn.style.height = '20px';
       btn.style.border = 'none';
-      btn.style.fontSize = '1.25rem';
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+      btn.style.fontSize = '1.1rem';
       btn.style.cursor = 'pointer';
       const nomeCell = row.querySelector('td.field-nome');
       const fileName = (row.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'arquivo').trim();
