@@ -61,27 +61,32 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
             documento=documento or 'Não informado',
         )
 
+def _normalize_descricao(descricao: str | None) -> str:
+    if not descricao:
+        return ""
+    return " ".join(descricao.split())
+
+
 def remover_andamentos_duplicados(processo: ProcessoJudicial):
-    duplicados = (
+    seen = set()
+    duplicate_ids = []
+
+    for andamento in (
         AndamentoProcessual.objects
         .filter(processo=processo)
-        .values('data', 'descricao')
-        .annotate(qtd=Count('id'))
-        .filter(qtd__gt=1)
-    )
-    for dup in duplicados:
-        registros = (
-            AndamentoProcessual.objects
-            .filter(
-                processo=processo,
-                data=dup['data'],
-                descricao=dup['descricao']
-            )
-            .order_by('pk')
-        )
-        ids_para_excluir = [obj.pk for obj in list(registros)[1:]]
-        if ids_para_excluir:
-            AndamentoProcessual.objects.filter(pk__in=ids_para_excluir).delete()
+        .order_by('data', 'pk')
+    ):
+        normalized_descricao = _normalize_descricao(andamento.descricao)
+        key = (andamento.data, normalized_descricao)
+        if key in seen:
+            duplicate_ids.append(andamento.pk)
+        else:
+            seen.add(key)
+
+    if duplicate_ids:
+        deleted_count, _ = AndamentoProcessual.objects.filter(pk__in=duplicate_ids).delete()
+        return deleted_count
+    return 0
 
 
 def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> int:
@@ -93,11 +98,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     novos_andamentos = 0
     remover_andamentos_duplicados(processo)
     existentes = {
-        (andamento.data.isoformat(), andamento.descricao.strip())
-        for andamento in processo.andamentoprocessual_set.all()
-    }
-    existentes = {
-        (andamento.data.isoformat(), andamento.descricao.strip())
+        (andamento.data.isoformat(), _normalize_descricao(andamento.descricao))
         for andamento in processo.andamentoprocessual_set.all()
     }
     for andamento_api in movimentacoes:
@@ -109,7 +110,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
 
         try:
             data_andamento = make_aware(datetime.fromisoformat(data_str))
-            chave = (data_andamento.isoformat(), descricao.strip())
+            chave = (data_andamento.isoformat(), _normalize_descricao(descricao))
             if chave in existentes:
                 continue
 

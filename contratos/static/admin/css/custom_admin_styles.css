@@ -463,3 +463,7 @@ a.historylink {
 .analise-summary-card-header .supervisor-status-badge {
     margin-left: auto;
 }
+
+.dynamic-andamento.andamento-duplicate-marked {
+    display: none;
+}

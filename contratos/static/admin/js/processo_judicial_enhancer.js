@@ -100,6 +100,38 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const csrftoken = getCookie('csrftoken');
 
+    function deduplicateInlineAndamentos() {
+        const seen = new Set();
+        let removedCount = 0;
+        document.querySelectorAll('.dynamic-andamento').forEach(row => {
+            const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
+            const dataInput = row.querySelector('input[id$="-data_0"]');
+            const timeInput = row.querySelector('input[id$="-data_1"]');
+            const descricaoInput = row.querySelector('textarea[id$="-descricao"]');
+
+            const dataValue = (dataInput?.value || '').trim();
+            const timeValue = (timeInput?.value || '').trim();
+            const descricaoValue = (descricaoInput?.value || '').replace(/\s+/g, ' ').trim();
+
+            if (!dataValue && !descricaoValue) {
+                return;
+            }
+
+            const key = `${dataValue}||${timeValue}||${descricaoValue}`;
+            if (seen.has(key)) {
+                if (deleteCheckbox && !deleteCheckbox.checked) {
+                    deleteCheckbox.checked = true;
+                    row.classList.add('andamento-duplicate-marked');
+                    row.style.display = 'none';
+                    removedCount += 1;
+                }
+            } else {
+                seen.add(key);
+            }
+        });
+        return removedCount;
+    }
+
     // Botão "Atualizar andamentos agora" ao lado do checkbox de Busca Ativa
     const buscaAtivaInput = document.getElementById('id_busca_ativa');
     if (buscaAtivaInput && !document.getElementById('btn_atualizar_andamentos')) {
@@ -112,6 +144,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const container = buscaAtivaInput.parentNode;
         container.insertBefore(btn, buscaAtivaInput);
+        const removeDuplicatesBtn = document.createElement('button');
+        removeDuplicatesBtn.id = 'btn_remover_andamentos_duplicados';
+        removeDuplicatesBtn.type = 'button';
+        removeDuplicatesBtn.className = 'button';
+        removeDuplicatesBtn.innerText = '🧹 Limpar duplicados';
+        removeDuplicatesBtn.style.marginRight = '10px';
+        container.insertBefore(removeDuplicatesBtn, buscaAtivaInput);
 
         btn.addEventListener('click', () => {
             const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
@@ -137,6 +176,58 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.innerText = originalText;
             });
         });
+        removeDuplicatesBtn.addEventListener('click', async () => {
+            const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+            if (!match) {
+                alert('Salve o processo antes de remover duplicados.');
+                return;
+            }
+
+            const objectId = match[1];
+            const originalText = removeDuplicatesBtn.innerText;
+            removeDuplicatesBtn.disabled = true;
+            removeDuplicatesBtn.innerText = 'Removendo duplicados...';
+            const inlineRemoved = deduplicateInlineAndamentos();
+
+            try {
+                const response = await fetch(`/admin/contratos/processojudicial/${objectId}/remover-andamentos-duplicados/`, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken },
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.message || 'Erro ao remover duplicados.');
+                }
+                const removed = data.removed || 0;
+                const messageParts = [];
+                const serverMessage = data.message || (removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.');
+                if (serverMessage) {
+                    messageParts.push(serverMessage);
+                }
+                if (inlineRemoved > 0) {
+                    messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                }
+                if (!messageParts.length) {
+                    messageParts.push('Nenhum andamento duplicado encontrado.');
+                }
+                alert(messageParts.join(' '));
+
+                if (inlineRemoved === 0 && removed > 0) {
+                    const redirectUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+                    window.location.assign(redirectUrl);
+                }
+            } catch (err) {
+                const messageParts = [];
+                messageParts.push(err.message || 'Falha ao remover duplicados.');
+                if (inlineRemoved > 0) {
+                    messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                }
+                alert(messageParts.join(' '));
+            } finally {
+                removeDuplicatesBtn.disabled = false;
+                removeDuplicatesBtn.innerText = originalText;
+            }
+        });
     }
 
     // Máscara e formatação CNJ no input principal
@@ -161,6 +252,12 @@ document.addEventListener('DOMContentLoaded', function() {
             e.target.value = formatted;
             // Best effort to keep cursor near the end
             e.target.setSelectionRange(formatted.length, formatted.length);
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', () => {
+            deduplicateInlineAndamentos();
         });
     }
 

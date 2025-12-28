@@ -1783,6 +1783,28 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             formset.new_objects = new_objects
             formset.changed_objects = changed_objects
             formset.deleted_objects = deleted_objects
+        elif formset.model == AndamentoProcessual:
+            from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
+
+            processo = form.instance
+            remover_andamentos_duplicados(processo)
+            seen_keys = set()
+
+            for inline_form in formset.forms:
+                cleaned = getattr(inline_form, 'cleaned_data', None)
+                if not cleaned or cleaned.get('DELETE'):
+                    continue
+                data = cleaned.get('data')
+                descricao = (cleaned.get('descricao') or '').strip()
+                if not data or not descricao:
+                    continue
+                chave = (data, descricao)
+                if chave in seen_keys:
+                    cleaned['DELETE'] = True
+                else:
+                    seen_keys.add(chave)
+
+            return super().save_formset(request, form, formset, change)
         else:
             super().save_formset(request, form, formset, change)
 
@@ -1850,6 +1872,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
+            path('<path:object_id>/remover-andamentos-duplicados/', self.admin_site.admin_view(self.remover_andamentos_duplicados_view), name='processo_remover_andamentos_duplicados'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
         ]
         return custom_urls + urls
@@ -1949,23 +1972,38 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
         return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
+    def remover_andamentos_duplicados_view(self, request, object_id):
+        if request.method != 'POST':
+            return JsonResponse({'status': 'error', 'message': 'Método não permitido.'}, status=405)
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
+        try:
+            removed = remover_andamentos_duplicados(processo)
+            message = (f"{removed} andamento(s) duplicado(s) removido(s)." if removed else "Não foram encontrados andamentos duplicados.")
+            return JsonResponse({'status': 'success', 'removed': removed, 'message': message})
+        except Exception as exc:
+            return JsonResponse({'status': 'error', 'message': f"Erro ao remover duplicados: {exc}"}, status=500)
+
     def history_view(self, request, object_id, extra_context=None):
         extra_context = extra_context or {}
         extra_context['object_id'] = object_id
         return super().history_view(request, object_id, extra_context=extra_context)
 
     def response_change(self, request, obj):
-        if request.POST.get('action') == 'excluir_andamentos_selecionados':
-            selected_andamento_ids = []
-            # Iterate through the POST data to find selected inline items
+        delete_trigger = request.POST.get('_action') == 'Excluir Andamentos Selecionados'
+        if delete_trigger or request.POST.get('action') == 'excluir_andamentos_selecionados':
+            selected_andamento_ids = set()
             for key, value in request.POST.items():
-                if key.startswith('andamentos-') and key.endswith('-id') and value:
-                    # Check if the corresponding DELETE checkbox is marked
-                    form_idx = key.split('-')[1]
-                    delete_key = f'andamentos-{form_idx}-DELETE'
-                    if delete_key in request.POST:
-                        selected_andamento_ids.append(value)
-            
+                if not key.endswith('-DELETE'):
+                    continue
+                if not value:
+                    continue
+                base = key[:-7]  # remove trailing '-DELETE'
+                id_key = f'{base}-id'
+                andamento_id = request.POST.get(id_key)
+                if andamento_id:
+                    selected_andamento_ids.add(andamento_id)
+
             if selected_andamento_ids:
                 count, _ = AndamentoProcessual.objects.filter(pk__in=selected_andamento_ids).delete()
                 self.message_user(request, f"{count} andamento(s) foram excluídos com sucesso.", messages.SUCCESS)
@@ -1974,6 +2012,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             
             return HttpResponseRedirect(request.path)
 
+        from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
         remover_andamentos_duplicados(obj)
         messages.success(request, "Processo Salvo!")
         if "_save" in request.POST:
