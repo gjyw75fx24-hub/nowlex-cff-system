@@ -620,7 +620,7 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
 
 
 class LastEditOrderFilter(admin.SimpleListFilter):
-    title = 'Por Última Edição'
+    title = 'Última Edição'
     parameter_name = 'ord_ultima_edicao'
 
     def lookups(self, request, model_admin):
@@ -742,7 +742,7 @@ class CarteiraCountFilter(admin.SimpleListFilter):
 
 
 class NaoJudicializadoFilter(admin.SimpleListFilter):
-    title = 'Por Não Judicializado'
+    title = 'Não Judicializado'
     parameter_name = 'nao_judicializado'
 
     def lookups(self, request, model_admin):
@@ -834,7 +834,7 @@ class JsonbPathQueryFirstText(models.Func):
 
 
 class AprovacaoFilter(admin.SimpleListFilter):
-    title = "Por Aprovação"
+    title = "Aprovação"
     parameter_name = "aprovacao"
     OPTIONS = [
         ("aprovado", "Aprovados"),
@@ -988,7 +988,7 @@ class ProtocoladosFilter(admin.SimpleListFilter):
 
 
 class PrescricaoOrderFilter(admin.SimpleListFilter):
-    title = "Por Prescrição"
+    title = "Prescrição"
     parameter_name = "ord_prescricao"
 
     def lookups(self, request, model_admin):
@@ -1102,7 +1102,7 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
 
 
 class AcordoStatusFilter(admin.SimpleListFilter):
-    title = "Por Acordo"
+    title = "Acordo"
     parameter_name = "acordo_status"
 
     def lookups(self, request, model_admin):
@@ -1473,7 +1473,7 @@ class CarteiraAdmin(admin.ModelAdmin):
         js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js')
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
-    title = 'Por Valor da Causa'
+    title = 'Valor da Causa'
     parameter_name = 'valor_causa_order'
 
     FILTER_OPTIONS = [
@@ -1532,7 +1532,7 @@ class ValorCausaOrderFilter(admin.SimpleListFilter):
 
 
 class ObitoFilter(admin.SimpleListFilter):
-    title = 'Por Óbito'
+    title = 'Óbito'
     parameter_name = 'obito'
 
     OPTIONS = [
