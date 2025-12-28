@@ -169,6 +169,13 @@
     color: #2d3a4b;
     line-height: 1.45;
 }
+.cff-dialog-link {
+    color: #0b73d6;
+    text-decoration: underline;
+}
+.cff-dialog-link:hover {
+    color: #084e9f;
+}
 
 .cff-dialog-actions {
     display: flex;

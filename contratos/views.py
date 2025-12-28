@@ -574,6 +574,33 @@ def _parse_habilitacao_data(polo_passivo):
     }
 
 
+def _collect_missing_habilitacao_fields(processo, polo_passivo):
+    missing = []
+    if not (processo.cnj and processo.cnj.strip()):
+        missing.append('Número de processo (CNJ)')
+    if not (processo.vara and processo.vara.strip()):
+        missing.append('Vara')
+    endereco = polo_passivo.endereco or ''
+    endereco_parts = parse_endereco(endereco)
+    address_labels = {
+        'A': 'Logradouro',
+        'B': 'Número',
+        'D': 'Bairro',
+        'E': 'Cidade',
+        'F': 'Comarca',
+        'G': 'CEP',
+        'H': 'UF'
+    }
+    endereco_missing = [
+        address_labels[key]
+        for key, label in address_labels.items()
+        if not endereco_parts.get(key)
+    ]
+    if endereco_missing:
+        missing.append('Endereço (' + ', '.join(endereco_missing) + ')')
+    return missing
+
+
 def _format_vara_text(vara_raw):
     if not vara_raw:
         return ''
@@ -1256,6 +1283,15 @@ def generate_habilitacao_petition(request, processo_id=None):
     polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
     if not polo_passivo:
         return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
+
+    missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo)
+    if missing_fields:
+        message = (
+            'Não foi possível gerar a habilitação porque faltam os seguintes dados no cadastro (aba Partes): '
+            + '; '.join(missing_fields)
+            + '.'
+        )
+        return JsonResponse({'message': message}, status=422)
 
     try:
         docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo)

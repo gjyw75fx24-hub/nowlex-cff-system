@@ -666,7 +666,24 @@
             if (existing.length) {
                 existing.remove();
             }
-            const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+            const PARTES_TRIGGER = '(aba Partes)';
+            const PARTES_PLACEHOLDER = '__CFF_PARTES_LINK__';
+            let messageWithPlaceholder = message;
+            let hasPartesLink = false;
+
+            if (typeof messageWithPlaceholder === 'string' && messageWithPlaceholder.includes(PARTES_TRIGGER)) {
+                hasPartesLink = true;
+                messageWithPlaceholder = messageWithPlaceholder.replace(PARTES_TRIGGER, PARTES_PLACEHOLDER);
+            }
+
+            let safeMessage = escapeHtml(messageWithPlaceholder).replace(/\n/g, '<br>');
+
+            if (hasPartesLink) {
+                const partesHref = '#partes_processuais-group';
+                const partesLink = `<a href="${partesHref}" class="cff-dialog-link">aba Partes</a>`;
+                safeMessage = safeMessage.replace(PARTES_PLACEHOLDER, partesLink);
+            }
+
             const $dialog = $(
                 `<div id="cff-system-dialog" class="cff-dialog-overlay">
                     <div class="cff-dialog-box ${type}">
@@ -679,17 +696,33 @@
                 </div>`
             );
             $('body').append($dialog);
-            $dialog.find('.cff-dialog-ok').on('click', function () {
+            $dialog.find('.cff-dialog-link').on('click', function (event) {
+                event.preventDefault();
                 $dialog.remove();
-                if (typeof onClose === 'function') {
-                    try {
-                        onClose();
-                    } catch (err) {
-                        console.error('Erro ao executar callback do diálogo CFF System:', err);
+                if (typeof window.__openInlineTab === 'function') {
+                    window.__openInlineTab('Partes');
+                } else {
+                    const target = event.currentTarget.getAttribute('href');
+                    if (target) {
+                        const targetElement = document.querySelector(target);
+                        if (targetElement) {
+                            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
                     }
                 }
             });
-        }
+                $dialog.find('.cff-dialog-ok').on('click', function () {
+                    $dialog.remove();
+                    if (typeof onClose === 'function') {
+                        try {
+                            onClose();
+                        } catch (err) {
+                            console.error('Erro ao executar callback do diálogo CFF System:', err);
+                        }
+                    }
+                });
+            }
+        window.showCffSystemDialog = showCffSystemDialog;
 
         function getSavedProcessCards() {
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
@@ -4026,7 +4059,7 @@
                     } else if (xhr.responseText) {
                         errorMessage = xhr.responseText;
                     }
-                    alert(errorMessage);
+                    showCffSystemDialog(errorMessage, 'warning');
                     console.error('Erro na geração da habilitação:', status, error, xhr);
                 },
                 complete: function () {

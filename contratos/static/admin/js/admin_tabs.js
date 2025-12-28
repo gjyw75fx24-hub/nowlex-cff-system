@@ -293,4 +293,15 @@ window.addEventListener('load', function() {
     }
 
     syncAdvogadoPassivo();
+
+    window.__openInlineTab = function(tabTitle) {
+        if (!tabTitle) return false;
+        const match = tabButtons.find(item => item.title.trim().toLowerCase() === tabTitle.trim().toLowerCase());
+        if (!match) {
+            return false;
+        }
+        activateTab(match.group, match.button);
+        window.scrollTo({ top: match.group.offsetTop - 20, behavior: 'smooth' });
+        return true;
+    };
 });
