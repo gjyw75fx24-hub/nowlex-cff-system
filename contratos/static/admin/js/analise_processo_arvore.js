@@ -994,6 +994,15 @@
                 userResponses.selected_analysis_cards.some(sel => typeof sel === 'string');
         }
 
+        function hasAnySpecificCardSelection() {
+            if (!Array.isArray(userResponses.selected_analysis_cards)) {
+                return false;
+            }
+            return userResponses.selected_analysis_cards.some(
+                sel => typeof sel === 'string' && sel !== GENERAL_MONITORIA_CARD_KEY
+            );
+        }
+
         function syncGeneralMonitoriaSelection(checked) {
             if (!Array.isArray(userResponses.selected_analysis_cards)) {
                 userResponses.selected_analysis_cards = [];
@@ -2354,6 +2363,13 @@
                     closePanel();
                     const action = btn.dataset.action;
                     const selector = actionTarget[action];
+                    if (action === 'monitoria' && !hasAnySpecificCardSelection()) {
+                        showCffSystemDialog(
+                            'Selecione primeiro o card de uma análise antes de gerar a Petição Monitória Inicial.',
+                            'warning'
+                        );
+                        return;
+                    }
                     if (selector) {
                         const targetButton = document.querySelector(selector);
                         if (targetButton) {
@@ -3786,6 +3802,13 @@
 
             if (!currentProcessoId) {
                 alert('Erro: ID do processo não encontrado para gerar a petição.');
+                return;
+            }
+            if (!hasAnySpecificCardSelection()) {
+                showCffSystemDialog(
+                    'Selecione primeiro o card de uma análise antes de gerar a Petição Monitória Inicial.',
+                    'warning'
+                );
                 return;
             }
             const aggregatedContratoIds = getMonitoriaContractIds({
