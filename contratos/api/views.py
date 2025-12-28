@@ -154,7 +154,7 @@ class FetchAddressAPIView(View):
                 'D': d.get('endereco_bairro', ''),
                 'E': d.get('endereco_cidade', ''),
                 'F': _uf_to_nome(uf),
-                'G': f"CEP: {cep}" if cep else '',
+                'G': cep,
                 'H': uf
             }
 
@@ -192,7 +192,7 @@ class SaveManualAddressAPIView(View):
                 'D': data.get('D', ''),
                 'E': data.get('E', ''),
                 'F': data.get('F', ''),
-                'G': f"CEP: {cep}" if cep else '',
+                'G': cep,
                 'H': uf
             }
             
