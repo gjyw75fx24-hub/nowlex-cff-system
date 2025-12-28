@@ -867,7 +867,53 @@ class AprovacaoFilter(admin.SimpleListFilter):
             current = models.Q(**{alias: True})
             match_q = current if match_q is None else match_q | current
         if match_q is None:
-            return queryset.none()
+        return queryset.none()
+
+
+class ProtocoladosFilter(admin.SimpleListFilter):
+    title = "Por Protocolados"
+    parameter_name = "protocolados"
+
+    OPTIONS = [
+        ("monitoria", "Monitória"),
+        ("cobranca", "Cobrança Judicial"),
+        ("habilitacao", "Habilitação"),
+    ]
+
+    LOOKUP_KEYWORDS = {
+        "monitoria": ["monitória", "monitoria"],
+        "cobranca": ["cobrança", "cobranca"],
+        "habilitacao": ["habilitação", "habilitacao"],
+    }
+
+    def lookup_choices(self, request, model_admin):
+        return self.OPTIONS
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.OPTIONS:
+            selected = current == value
+            query_string = changelist.get_query_string(
+                {self.parameter_name: value} if not selected else {},
+                remove=[self.parameter_name, 'o', 'p']
+            )
+            yield {
+                "selected": selected,
+                "query_string": query_string,
+                "display": label,
+            }
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if not val or val not in self.LOOKUP_KEYWORDS:
+            return queryset
+        keywords = self.LOOKUP_KEYWORDS[val]
+        protocol_q = models.Q(arquivos__protocolado_no_tribunal=True)
+        name_q = models.Q()
+        for keyword in keywords:
+            name_q |= models.Q(arquivos__nome__icontains=keyword)
+        return queryset.filter(protocol_q & name_q).distinct()
+
         return queryset.filter(match_q)
 
     def lookups(self, request, model_admin):
@@ -1530,6 +1576,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         LastEditOrderFilter,
         EquipeDelegadoFilter,
         AprovacaoFilter,
+        ProtocoladosFilter,
         PrescricaoOrderFilter,
         ViabilidadeFinanceiraFilter,
         ValorCausaOrderFilter,
