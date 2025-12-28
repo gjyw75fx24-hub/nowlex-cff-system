@@ -762,7 +762,17 @@ document.addEventListener('DOMContentLoaded', function() {
       row.dataset.downloadButtonsInjected = '1';
     };
 
-    const normalizeNameForProtocol = (text) => text ? text.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    const normalizeNameForProtocol = (text) => {
+      if (!text) {
+        return '';
+      }
+      return text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    };
     const isProtocolRow = (row) => {
       if (!row) return false;
       const name = getRowFileNameText(row);
