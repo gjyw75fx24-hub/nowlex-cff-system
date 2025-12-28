@@ -727,13 +727,7 @@ document.addEventListener('DOMContentLoaded', function() {
         leftGroup.appendChild(createButton('Baixar', link.href, { download: true }));
       }
 
-      const rightGroup = document.createElement('div');
-      rightGroup.style.display = 'flex';
-      rightGroup.style.alignItems = 'center';
-
       btnRow.appendChild(leftGroup);
-      btnRow.appendChild(rightGroup);
-
       const nomeCell = row.querySelector('td.field-nome');
       if (nomeCell) {
         nomeCell.appendChild(actionBar);
@@ -743,13 +737,24 @@ document.addEventListener('DOMContentLoaded', function() {
         row.appendChild(btnRow);
       }
 
-      appendRemoveButton(row, actionBar);
-
-      if (isProtocolRowEntry && !row.dataset.protocolToggleAdded) {
+      const needsToggle =
+        (isProtocolRowEntry || isHabilitacaoRow(row)) && !row.dataset.protocolToggleAdded;
+      if (needsToggle) {
         const toggle = createProtocolToggle();
-        rightGroup.appendChild(toggle);
+        actionBar.appendChild(toggle);
         row.dataset.protocolToggleAdded = '1';
+        const checkbox = toggle.querySelector('.supervision-toggle-input');
+        if (checkbox) {
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+              setTimeout(() => {
+                clickSaveAndContinueEditor();
+              }, 150);
+            }
+          });
+        }
       }
+      appendRemoveButton(row, actionBar);
       row.dataset.downloadButtonsInjected = '1';
     };
 
@@ -759,6 +764,12 @@ document.addEventListener('DOMContentLoaded', function() {
       const name = getRowFileNameText(row);
       if (!name) return false;
       return normalizeNameForProtocol(name).includes('protocolo');
+    };
+    const isHabilitacaoRow = (row) => {
+      if (!row) return false;
+      const name = getRowFileNameText(row);
+      if (!name) return false;
+      return normalizeNameForProtocol(name).includes('habilitacao');
     };
 
     const createProtocolToggle = () => {
