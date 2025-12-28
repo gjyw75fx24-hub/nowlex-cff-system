@@ -632,8 +632,8 @@ document.addEventListener('DOMContentLoaded', function() {
       return { overlay, btnSim, btnCancelar };
     };
 
-    const appendRemoveButton = (row, btnRow) => {
-      if (!row || !btnRow || row.dataset.removeBtnAdded === '1') {
+    const appendRemoveButton = (row, container) => {
+      if (!row || !container || row.dataset.removeBtnAdded === '1') {
         return;
       }
       const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
@@ -641,9 +641,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       deleteCheckbox.style.display = 'none';
-      const removeWrapper = document.createElement('div');
-      removeWrapper.style.display = 'flex';
-      removeWrapper.style.alignItems = 'center';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'button';
@@ -652,10 +649,10 @@ document.addEventListener('DOMContentLoaded', function() {
       btn.style.backgroundColor = '#d63636';
       btn.style.color = '#fff';
       btn.style.borderRadius = '999px';
-      btn.style.width = '28px';
-      btn.style.height = '28px';
+      btn.style.width = '32px';
+      btn.style.height = '32px';
       btn.style.border = 'none';
-      btn.style.fontSize = '1.2rem';
+      btn.style.fontSize = '1.25rem';
       btn.style.cursor = 'pointer';
       const nomeCell = row.querySelector('td.field-nome');
       const fileName = (row.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'arquivo').trim();
@@ -678,8 +675,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btnSim.addEventListener('click', simHandler);
         btnCancelar.addEventListener('click', cancelHandler);
       });
-      removeWrapper.appendChild(btn);
-      btnRow.appendChild(removeWrapper);
+      container.appendChild(btn);
       row.dataset.removeBtnAdded = '1';
     };
 
@@ -697,6 +693,13 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       link.style.display = 'none';
+
+      const actionBar = document.createElement('div');
+      actionBar.className = 'documento-peticoes-action-bar';
+      actionBar.style.display = 'flex';
+      actionBar.style.justifyContent = 'flex-end';
+      actionBar.style.gap = '6px';
+      actionBar.style.marginBottom = '6px';
 
       const btnRow = document.createElement('div');
       btnRow.className = 'documento-peticoes-download-row';
@@ -733,12 +736,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
       const nomeCell = row.querySelector('td.field-nome');
       if (nomeCell) {
+        nomeCell.appendChild(actionBar);
         nomeCell.appendChild(btnRow);
       } else {
+        row.appendChild(actionBar);
         row.appendChild(btnRow);
       }
 
-      appendRemoveButton(row, rightGroup);
+      appendRemoveButton(row, actionBar);
 
       if (isProtocolRowEntry && !row.dataset.protocolToggleAdded) {
         const toggle = createProtocolToggle();
