@@ -1933,7 +1933,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
         try:
-            from contratos.integracoes_escavador.atualizador import atualizar_processo_do_escavador
+from contratos.integracoes_escavador.atualizador import atualizar_processo_do_escavador
+from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
             resultado = atualizar_processo_do_escavador(processo.cnj)
             if resultado:
                 _, novos_andamentos = resultado
@@ -1973,6 +1974,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             
             return HttpResponseRedirect(request.path)
 
+        remover_andamentos_duplicados(obj)
         messages.success(request, "Processo Salvo!")
         if "_save" in request.POST:
             return HttpResponseRedirect(request.path)

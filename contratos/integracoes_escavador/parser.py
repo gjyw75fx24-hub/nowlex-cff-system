@@ -61,6 +61,29 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
             documento=documento or 'Não informado',
         )
 
+def remover_andamentos_duplicados(processo: ProcessoJudicial):
+    duplicados = (
+        AndamentoProcessual.objects
+        .filter(processo=processo)
+        .values('data', 'descricao')
+        .annotate(qtd=Count('id'))
+        .filter(qtd__gt=1)
+    )
+    for dup in duplicados:
+        registros = (
+            AndamentoProcessual.objects
+            .filter(
+                processo=processo,
+                data=dup['data'],
+                descricao=dup['descricao']
+            )
+            .order_by('pk')
+        )
+        ids_para_excluir = [obj.pk for obj in list(registros)[1:]]
+        if ids_para_excluir:
+            AndamentoProcessual.objects.filter(pk__in=ids_para_excluir).delete()
+
+
 def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> int:
     """
     Cria ou atualiza os andamentos do processo a partir dos dados da API.
@@ -68,7 +91,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     """
     movimentacoes = dados_api.get('movimentacoes', [])
     novos_andamentos = 0
-    _remover_andamentos_duplicados(processo)
+    remover_andamentos_duplicados(processo)
     existentes = {
         (andamento.data.isoformat(), andamento.descricao.strip())
         for andamento in processo.andamentoprocessual_set.all()
