@@ -867,7 +867,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
             current = models.Q(**{alias: True})
             match_q = current if match_q is None else match_q | current
         if match_q is None:
-        return queryset.none()
+            return queryset.none()
 
 
 class ProtocoladosFilter(admin.SimpleListFilter):
