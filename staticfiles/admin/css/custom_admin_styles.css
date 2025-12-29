@@ -567,10 +567,9 @@ a.historylink {
     color: rgba(255, 255, 255, 0.7);
     margin-top: 4px;
 }
-#tarefas_set-group .field-lista .related-widget-wrapper,
-#listas_set-group .field-lista .related-widget-wrapper,
-#tarefas_set-group .field-responsavel .related-widget-wrapper,
-#listas_set-group .field-responsavel .related-widget-wrapper {
+
+#tarefas_set-group .related-widget-wrapper,
+#listas_set-group .related-widget-wrapper {
     display: none !important;
 }
 
