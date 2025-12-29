@@ -473,22 +473,30 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    const removeInlineRelatedLinks = () => {
+    const removeInlineRelatedLinks = (root = document) => {
         ['tarefas_set-group', 'listas_set-group', 'prazos_set-group'].forEach(groupId => {
             const group = document.getElementById(groupId);
             if (!group) return;
-            const removeWrappers = () => {
-                group.querySelectorAll('.related-widget-wrapper').forEach(el => {
+            const cleanup = (target = group) => {
+                target.querySelectorAll('.related-widget-wrapper').forEach(el => {
                     el.remove();
                 });
             };
-            removeWrappers();
-            const observer = new MutationObserver(removeWrappers);
+            cleanup(root === document ? group : root);
+            const observer = new MutationObserver(() => cleanup(group));
             observer.observe(group, { childList: true, subtree: true });
         });
     };
 
     removeInlineRelatedLinks();
+
+    if (window.django && window.django.jQuery) {
+        window.django.jQuery(document).on('formset:added', (event, row, formsetName) => {
+            if (formsetName && (formsetName === 'tarefas' || formsetName === 'listas' || formsetName === 'prazos')) {
+                removeInlineRelatedLinks(row);
+            }
+        });
+    }
 
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
