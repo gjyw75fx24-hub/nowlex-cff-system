@@ -473,6 +473,23 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const removeInlineRelatedLinks = () => {
+        ['tarefas_set-group', 'listas_set-group'].forEach(groupId => {
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            const cleanup = () => {
+                group.querySelectorAll('.related-widget-wrapper').forEach(el => {
+                    el.style.display = 'none';
+                });
+            };
+            cleanup();
+            const observer = new MutationObserver(cleanup);
+            observer.observe(group, { childList: true, subtree: true });
+        });
+    };
+
+    removeInlineRelatedLinks();
+
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
