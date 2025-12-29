@@ -3273,15 +3273,24 @@ function formatCnjDigits(raw) {
                     break;
 
                 case 'CONTRATOS_MONITORIA':
-                    $questionDiv = $(
+                    const $heading = $(
                         `<div class="form-row field-${question.chave}" data-question-key="${question.chave}">
-                            <label for="${fieldId}">${question.texto_pergunta}:</label>
-                            <button type="button" class="monitoria-hashtag-btn" style="display:none;" aria-label="Mencionar caso não judicializado"></button>
+                            <div class="monitoria-label-row">
+                                <label>${question.texto_pergunta}:</label>
+                                <button type="button" class="monitoria-hashtag-btn" aria-label="Mencionar caso não judicializado"></button>
+                            </div>
                         </div>`
                     );
-                    $container.append($questionDiv);
-                    renderMonitoriaContractSelector(question, $questionDiv, currentResponses, cardIndex);
-                    updateNaoJudHashtag($questionDiv, currentResponses);
+                    $container.append($heading);
+                    const $hashtagBtn = $heading.find('.monitoria-hashtag-btn');
+                    renderMonitoriaContractSelector(
+                        question,
+                        $heading,
+                        currentResponses,
+                        cardIndex,
+                        () => refreshMonitoriaHashtag($hashtagBtn, currentResponses)
+                    );
+                    refreshMonitoriaHashtag($hashtagBtn, currentResponses);
                     return;
 
                 case 'TEXTO':
@@ -3739,11 +3748,60 @@ function formatCnjDigits(raw) {
             window.openNotebookWithMention(mention);
         }
 
+        function mentionNaoJudInNotas(text) {
+            if (typeof window.openNotebookWithMention === 'function') {
+                window.openNotebookWithMention(text || '');
+            }
+        }
+
+        function isNaoJudicializadoActive() {
+            return normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO';
+        }
+
+        function getNaoJudSequence() {
+            if (!Array.isArray(userResponses.processos_vinculados)) {
+                return 1;
+            }
+            const count = userResponses.processos_vinculados.filter(entry => {
+                if (!entry || typeof entry !== 'object') return false;
+                return normalizeResponse(entry?.tipo_de_acao_respostas?.judicializado_pela_massa) === 'NÃO';
+            }).length;
+            return Math.max(1, count + 1);
+        }
+
+        function buildContractsLabel(ids) {
+            const contractNames = (ids || []).map(id => {
+                const contract = allAvailableContratos.find(c => String(c.id) === String(id));
+                return contract ? contract.numero_contrato : null;
+            }).filter(Boolean);
+            return contractNames.length > 0 ? contractNames.join(', ') : 'Nenhum contrato selecionado';
+        }
+
+        function refreshMonitoriaHashtag($button, currentResponses) {
+            if (!$button || !$button.length) {
+                return;
+            }
+            if (!isNaoJudicializadoActive()) {
+                $button.hide();
+                return;
+            }
+            const selection = Array.isArray(currentResponses.contratos_para_monitoria)
+                ? currentResponses.contratos_para_monitoria
+                : [];
+            const contractsText = buildContractsLabel(selection);
+            const label = `#NJ${getNaoJudSequence()}`;
+            $button.text(label);
+            $button.off('click').on('click', () => {
+                mentionNaoJudInNotas(`${label} — Contratos: ${contractsText}`);
+            });
+            $button.show();
+        }
+
         /* =========================================================
          * Seleção de contratos para Monitória ("Propor Monitória")
          * ======================================================= */
 
-        function renderMonitoriaContractSelector(question, $container, currentResponses, cardIndex = null) {
+function renderMonitoriaContractSelector(question, $container, currentResponses, cardIndex = null, onSelectionChanged = null) {
             ensureUserResponsesShape();
 
             const $selectorDiv = $('<div class="form-row field-contratos-monitoria"></div>');
@@ -3811,6 +3869,10 @@ function formatCnjDigits(raw) {
                 currentResponses.contratos_para_monitoria = selection;
                 const overrideValue = selection.length > 0 ? 'SIM' : '';
                 currentResponses.ativar_botao_monitoria = overrideValue;
+
+                if (typeof onSelectionChanged === 'function') {
+                    onSelectionChanged();
+                }
 
                 saveResponses();
             });
