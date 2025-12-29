@@ -9,6 +9,7 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.humanize.templatetags.humanize import intcomma
 from django.db import models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery
 from django.db.models.functions import Abs, Cast, Coalesce, Now
