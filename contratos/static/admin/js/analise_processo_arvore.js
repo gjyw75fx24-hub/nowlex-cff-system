@@ -1732,7 +1732,7 @@
          * Formatação e validação de CNJ
          * ======================================================= */
 
-        function formatCnjDigits(raw) {
+function formatCnjDigits(raw) {
             const digits = String(raw || '').replace(/\D/g, '').slice(0, 20);
             const p1 = digits.slice(0, 7);
             const p2 = digits.slice(7, 9);
@@ -1749,6 +1749,23 @@
             if (p5) out += '.' + p5;
             if (p6) out += '.' + p6;
             return out;
+        }
+
+        function isNonJudicializedEntry(entry) {
+            if (!entry || typeof entry !== 'object') {
+                return false;
+            }
+            const statusValue = normalizeResponse(entry?.tipo_de_acao_respostas?.judicializado_pela_massa);
+            return statusValue === 'NÃO';
+        }
+
+        function getProcessoCnjLabel(entry) {
+            const cnjValue = String(entry?.cnj || '').trim();
+            if (!cnjValue || isNonJudicializedEntry(entry)) {
+                return 'Não informado';
+            }
+            const formatted = formatCnjDigits(cnjValue);
+            return formatted || 'Não informado';
         }
 
         function isValidCnj(cnj) {
@@ -2810,8 +2827,9 @@
             const snapshot = buildProcessoDetailsSnapshot(processo);
             const $card = $('<div class="analise-supervision-card"></div>');
             const $header = $('<div class="analise-supervision-card-header"></div>');
+            const headerLabel = getProcessoCnjLabel(processo);
             const $headerTitle = $(
-                `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
+                `<span>Processo CNJ: <strong>${headerLabel}</strong></span>`
             );
             const $statusBadge = $('<span class="analise-supervision-status-badge"></span>');
 
@@ -3436,8 +3454,9 @@
             );
 
             const $header = $('<div class="processo-card-header"></div>');
+            const cardLabel = getProcessoCnjLabel(cardData);
             const $titleWrapper = $(
-                '<div class="processo-card-title"><span>Processo CNJ</span></div>'
+                `<div class="processo-card-title"><span>Processo CNJ: <strong>${cardLabel}</strong></span></div>`
             );
             const $hashtagBtn = $(
                 `<button type="button" class="processo-cnj-hashtag" aria-label="Mencionar processo CNJ #${indexLabel}">#${indexLabel}</button>`

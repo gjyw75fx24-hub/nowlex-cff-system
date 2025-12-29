@@ -181,7 +181,13 @@ def generate_extrato_titularidade(processo, cpf_value, contratos, parte_name, us
         pdf_bytes = _call_nowlex_extrato(cpf_digits, contract_numbers)
     except Exception as exc:
         logger.error("Falha ao gerar extrato de titularidade: %s", exc, exc_info=True)
-        return {'ok': False, 'error': str(exc)}
+        error_message = str(exc)
+        if "Status 404" in error_message or "Nenhum contrato" in error_message:
+            error_message = (
+                "CFF System NowLex não possui o cadastro do contrato solicitado. "
+                "Não é possível emitir o extrato da titularidade."
+            )
+        return {'ok': False, 'error': error_message}
     filename = _build_extrato_filename(contratos_label, parte_name, cpf_digits)
     pdf_file = ContentFile(pdf_bytes)
     arquivo = ProcessoArquivo(
