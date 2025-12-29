@@ -567,6 +567,10 @@ a.historylink {
     color: rgba(255, 255, 255, 0.7);
     margin-top: 4px;
 }
+#tarefas_set-group .related-widget-wrapper a,
+#listas_set-group .related-widget-wrapper a {
+    display: none !important;
+}
 
 #nav-sidebar {
     font-size: 0.8rem;
