@@ -474,7 +474,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     const removeInlineRelatedLinks = () => {
-        ['tarefas_set-group', 'listas_set-group'].forEach(groupId => {
+        ['tarefas_set-group', 'listas_set-group', 'prazos_set-group'].forEach(groupId => {
             const group = document.getElementById(groupId);
             if (!group) return;
             const removeWrappers = () => {

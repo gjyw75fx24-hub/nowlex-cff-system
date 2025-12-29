@@ -569,7 +569,8 @@ a.historylink {
 }
 
 #tarefas_set-group .related-widget-wrapper,
-#listas_set-group .related-widget-wrapper {
+#listas_set-group .related-widget-wrapper,
+#prazos_set-group .related-widget-wrapper {
     display: none !important;
 }
 
