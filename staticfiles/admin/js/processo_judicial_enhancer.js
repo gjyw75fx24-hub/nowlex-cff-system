@@ -477,13 +477,13 @@ document.addEventListener('DOMContentLoaded', function() {
         ['tarefas_set-group', 'listas_set-group'].forEach(groupId => {
             const group = document.getElementById(groupId);
             if (!group) return;
-            const cleanup = () => {
+            const removeWrappers = () => {
                 group.querySelectorAll('.related-widget-wrapper').forEach(el => {
-                    el.style.display = 'none';
+                    el.remove();
                 });
             };
-            cleanup();
-            const observer = new MutationObserver(cleanup);
+            removeWrappers();
+            const observer = new MutationObserver(removeWrappers);
             observer.observe(group, { childList: true, subtree: true });
         });
     };
