@@ -503,6 +503,16 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     makeInfoCardSticky();
 
+    const repositionHistoryLink = () => {
+        const historyLink = document.querySelector('#content-main .object-tools li .historylink');
+        const delegarTool = document.getElementById('delegar-tool');
+        if (!historyLink || !delegarTool) return;
+        const historyLi = historyLink.closest('li');
+        if (!historyLi) return;
+        delegarTool.parentNode.insertBefore(historyLi, delegarTool.nextSibling);
+    };
+    repositionHistoryLink();
+
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
             const cnjLimpo = cnjInput.value.replace(/\D/g, '');
