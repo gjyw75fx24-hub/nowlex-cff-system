@@ -184,36 +184,41 @@
 
 {% block object-tools-items %}
     {{ block.super }}
-    {% if history_url %}
-        <li>
-            <a href="{{ history_url }}" class="historylink" style="display:inline-block;">Histórico</a>
-        </li>
-    {% endif %}
     {% if original %}
         <style>
-            /* Alinhar botões Histórico e Delegar em coluna */
             #content-main .object-tools {
                 display: flex;
-                flex-direction: column;
-                gap: 6px;
-                align-items: flex-start;
+                flex-direction: row;
+                gap: 8px;
+                align-items: center;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                position: relative;
+                z-index: 205;
             }
             #content-main .object-tools li {
                 float: none;
                 margin: 0;
             }
+            #content-main .object-tools .historylink {
+                display: inline-flex;
+                align-items: center;
+            }
             #delegar-tool {
                 position: relative;
+                order: 0;
             }
             #delegar-form {
                 position: absolute;
-                z-index: 9999;
+                top: 30px;
+                left: 0;
                 background: #fff;
                 border: 1px solid #d9d9d9;
-                border-radius: 6px;
-                padding: 6px 8px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                min-width: 200px;
+                padding: 8px;
+                border-radius: 4px;
+                z-index: 999;
+                min-width: 220px;
                 max-height: 320px;
                 overflow-y: auto;
             }
@@ -238,18 +243,6 @@
             #delegar-list button:hover {
                 background: #f2f2f2;
             }
-            #delegar-tool { position: relative; }
-            #delegar-form {
-                position: absolute;
-                top: 26px;
-                left: 0;
-                background: #fff;
-                border: 1px solid #d9d9d9;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                padding: 8px;
-                border-radius: 4px;
-                z-index: 999;
-            }
         </style>
         <li id="delegar-tool">
             <a href="#" id="delegar-toggle" class="historylink" style="display: inline-block;">Delegar</a>
@@ -267,6 +260,11 @@
                     {% endfor %}
                 </ul>
             </form>
+        </li>
+    {% endif %}
+    {% if history_url %}
+        <li style="order: 1;">
+            <a href="{{ history_url }}" class="historylink">Histórico</a>
         </li>
     {% endif %}
 {% endblock %}
