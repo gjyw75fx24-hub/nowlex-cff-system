@@ -215,32 +215,6 @@ a.historylink {
 .field-carteira .related-widget-wrapper a {
     display: none !important;
 }
-.monitoria-hashtag-wrapper {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-}
-.monitoria-hashtag-btn {
-    display: none;
-    border: 1px solid #0d6efd;
-    border-radius: 6px;
-    background: transparent;
-    color: #0d6efd;
-    padding: 0.2rem 0.9rem;
-    cursor: pointer;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.85rem;
-    transition: background 0.2s ease, color 0.2s ease;
-}
-.monitoria-hashtag-btn:hover {
-    background: rgba(13, 110, 253, 0.08);
-}
-.monitoria-hashtag-btn:focus-visible {
-    outline: 2px solid rgba(13, 110, 253, 0.7);
-    outline-offset: 2px;
-}
 .supervision-toggle {
     display: inline-flex;
     align-items: center;

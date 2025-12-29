@@ -783,54 +783,6 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             });
         }
 
-        function mentionNaoJudInNotas(text) {
-            if (typeof window.openNotebookWithMention === 'function') {
-                window.openNotebookWithMention(text || '');
-            }
-        }
-
-        function getNaoJudSequence() {
-            if (!Array.isArray(userResponses.processos_vinculados)) {
-                return 1;
-            }
-            const count = userResponses.processos_vinculados.filter(entry => {
-                if (!entry || typeof entry !== 'object') return false;
-                const status = normalizeResponse(entry?.tipo_de_acao_respostas?.judicializado_pela_massa);
-                return status === 'NÃO';
-            }).length;
-            return Math.max(1, count + 1);
-        }
-
-        function buildNaoJudMention(currentResponses) {
-            const selection = Array.isArray(currentResponses.contratos_para_monitoria)
-                ? currentResponses.contratos_para_monitoria
-                : [];
-            const contractNames = selection
-                .map(id => allAvailableContratos.find(c => String(c.id) === String(id)))
-                .filter(Boolean)
-                .map(c => c.numero_contrato);
-            const contractsText = contractNames.length ? contractNames.join(', ') : 'Nenhum contrato selecionado';
-            const label = `#NJ${getNaoJudSequence()}`;
-            return `${label} — Contratos: ${contractsText}`;
-        }
-
-        function updateNaoJudHashtag($questionDiv, currentResponses) {
-            if (!$questionDiv || !$questionDiv.length) {
-                return;
-            }
-            const $button = $questionDiv.find('.monitoria-hashtag-btn');
-            if (!$button.length) return;
-            const show = normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO';
-            if (!show) {
-                $button.hide();
-                return;
-            }
-            const mention = buildNaoJudMention(currentResponses);
-            $button.text(mention.split(' — ')[0]);
-            $button.off('click').on('click', () => mentionNaoJudInNotas(mention));
-            $button.show();
-        }
-
         function getSavedProcessCards() {
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
                 return [];
@@ -3288,10 +3240,12 @@ function formatCnjDigits(raw) {
                 return;
             }
 
-            $questionDiv = $(
-                `<div class="form-row field-${question.chave}" data-question-key="${question.chave}"><label for="${fieldId}">${question.texto_pergunta}:</label></div>`
-            );
-            $container.append($questionDiv);
+            if (question.tipo_campo !== 'CONTRATOS_MONITORIA') {
+                $questionDiv = $(
+                    `<div class="form-row field-${question.chave}" data-question-key="${question.chave}"><label for="${fieldId}">${question.texto_pergunta}:</label></div>`
+                );
+                $container.append($questionDiv);
+            }
 
             switch (question.tipo_campo) {
                 case 'OPCOES':
@@ -3319,18 +3273,15 @@ function formatCnjDigits(raw) {
                     break;
 
                 case 'CONTRATOS_MONITORIA':
-                    // "Propor Monitória": só aparece quando a árvore chega aqui.
-                    const $hashtagWrapper = $(`
-                        <div class="monitoria-hashtag-wrapper">
+                    $questionDiv = $(
+                        `<div class="form-row field-${question.chave}" data-question-key="${question.chave}">
                             <label for="${fieldId}">${question.texto_pergunta}:</label>
                             <button type="button" class="monitoria-hashtag-btn" style="display:none;" aria-label="Mencionar caso não judicializado"></button>
-                        </div>
-                    `);
-                    $questionDiv = $('<div class="form-row field-contratos-monitoria"></div>');
-                    $questionDiv.append($hashtagWrapper);
+                        </div>`
+                    );
+                    $container.append($questionDiv);
                     renderMonitoriaContractSelector(question, $questionDiv, currentResponses, cardIndex);
                     updateNaoJudHashtag($questionDiv, currentResponses);
-                    $container.append($questionDiv);
                     return;
 
                 case 'TEXTO':
