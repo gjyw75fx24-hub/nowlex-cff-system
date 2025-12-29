@@ -573,6 +573,11 @@ a.historylink {
     display: none !important;
 }
 
+.dynamic-tarefas .related-widget-wrapper-link,
+.dynamic-listas .related-widget-wrapper-link {
+    display: none !important;
+}
+
 #nav-sidebar {
     font-size: 0.8rem;
 }
