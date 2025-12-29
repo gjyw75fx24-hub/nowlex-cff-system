@@ -3,6 +3,18 @@
   focados em melhorar a visualização dos andamentos.
 */
 
+.info-card-floating {
+    position: sticky;
+    top: 12px;
+    z-index: 150;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+    transition: transform 0.3s ease;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+}
+
+
 /* Estiliza cada bloco de andamento (inline) para parecer um "card" ou "entrada de diário" */
 .dynamic-andamento {
     border: 1px solid #e0e0e0;
@@ -568,15 +580,9 @@ a.historylink {
     margin-top: 4px;
 }
 
-#tarefas-group .related-widget-wrapper,
-#listas-group .related-widget-wrapper,
-#prazos-group .related-widget-wrapper {
-    display: none !important;
-}
-
-.dynamic-tarefas .related-widget-wrapper-link,
-.dynamic-listas .related-widget-wrapper-link,
-#dynamic-prazos .related-widget-wrapper-link {
+#tarefas-group .related-widget-wrapper-link,
+#listas-group .related-widget-wrapper-link,
+#prazos-group .related-widget-wrapper-link {
     display: none !important;
 }
 

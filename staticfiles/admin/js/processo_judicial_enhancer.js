@@ -478,9 +478,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const group = document.getElementById(groupId);
             if (!group) return;
             const cleanup = (target = group) => {
-                target.querySelectorAll('.related-widget-wrapper').forEach(el => {
-                    el.remove();
-                });
+                target.querySelectorAll('a.related-widget-wrapper-link').forEach(el => el.remove());
             };
             cleanup(root === document ? group : root);
             const observer = new MutationObserver(() => cleanup(group));
@@ -497,6 +495,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const makeInfoCardSticky = () => {
+        const card = document.querySelector('.info-card');
+        if (!card) return;
+        card.classList.add('info-card-floating');
+    };
+    makeInfoCardSticky();
 
     if (cnjInput && searchButton) {
         const toggleButtonState = () => {
