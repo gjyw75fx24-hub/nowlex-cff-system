@@ -567,8 +567,15 @@ a.historylink {
     color: rgba(255, 255, 255, 0.7);
     margin-top: 4px;
 }
-#tarefas_set-group .related-widget-wrapper a[class*=\"related\"],
-#listas_set-group .related-widget-wrapper a[class*=\"related\"] {
+
+#tarefas_set-group .field-lista .related-widget-wrapper,
+#listas_set-group .field-lista .related-widget-wrapper,
+#tarefas_set-group .field-responsavel .related-widget-wrapper,
+#listas_set-group .field-responsavel .related-widget-wrapper {
+    display: none !important;
+}
+#tarefas_set-group .related-widget-wrapper a.related-widget-wrapper-link,
+#listas_set-group .related-widget-wrapper a.related-widget-wrapper-link {
     display: none !important;
 }
 
