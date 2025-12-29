@@ -184,7 +184,7 @@ def generate_extrato_titularidade(processo, cpf_value, contratos, parte_name, us
         error_message = str(exc)
         if "Status 404" in error_message or "Nenhum contrato" in error_message:
             error_message = (
-                "CFF System NowLex não possui o cadastro do contrato solicitado. "
+                "NowLex não possui o cadastro do contrato solicitado. "
                 "Não é possível emitir o extrato da titularidade."
             )
         return {'ok': False, 'error': error_message}
