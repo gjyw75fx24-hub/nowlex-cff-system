@@ -3918,10 +3918,11 @@ function formatCnjDigits(raw) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
                     } else {
-                        successLines.push(`Extrato de titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
+                        const message = data.extrato.error || 'Erro desconhecido';
+                        successLines.push(`Extrato de titularidade: Não gerado - ${message}`);
                     }
                 }
-                successLines.push('Salvos em Arquivos');
+                successLines.push('Petição da Monitória salva com sucesso em Arquivos');
                 const handleReload = () => {
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
