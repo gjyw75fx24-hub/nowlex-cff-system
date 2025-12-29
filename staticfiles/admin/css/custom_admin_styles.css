@@ -568,18 +568,15 @@ a.historylink {
     margin-top: 4px;
 }
 
-#tarefas_set-group .related-widget-wrapper,
-#listas_set-group .related-widget-wrapper,
-#prazos_set-group .related-widget-wrapper {
+#tarefas-group .related-widget-wrapper,
+#listas-group .related-widget-wrapper,
+#prazos-group .related-widget-wrapper {
     display: none !important;
 }
 
 .dynamic-tarefas .related-widget-wrapper-link,
-.dynamic-listas .related-widget-wrapper-link {
-    display: none !important;
-}
-
-#prazos_set-group .related-widget-wrapper-link {
+.dynamic-listas .related-widget-wrapper-link,
+#dynamic-prazos .related-widget-wrapper-link {
     display: none !important;
 }
 
