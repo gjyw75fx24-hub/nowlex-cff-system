@@ -579,6 +579,10 @@ a.historylink {
     display: none !important;
 }
 
+#prazos_set-group .related-widget-wrapper-link {
+    display: none !important;
+}
+
 #nav-sidebar {
     font-size: 0.8rem;
 }
