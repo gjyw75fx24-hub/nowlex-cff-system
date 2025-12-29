@@ -661,7 +661,7 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function showCffSystemDialog(message, type = 'warning', onClose = null) {
+function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const existing = $('#cff-system-dialog');
             if (existing.length) {
                 existing.remove();
@@ -723,6 +723,65 @@
                 });
             }
         window.showCffSystemDialog = showCffSystemDialog;
+
+        function showCffConfirmDialog(message, title = 'CFF System') {
+            return new Promise(resolve => {
+                const existing = document.getElementById('cff-system-confirm-dialog');
+                if (existing) {
+                    existing.remove();
+                }
+                const overlay = document.createElement('div');
+                overlay.id = 'cff-system-confirm-dialog';
+                overlay.className = 'cff-dialog-overlay';
+                const dialog = document.createElement('div');
+                dialog.className = 'cff-dialog-box warning';
+                dialog.style.padding = '24px';
+                dialog.style.maxWidth = '360px';
+                dialog.style.margin = '0 auto';
+                dialog.style.textAlign = 'left';
+                const titleEl = document.createElement('div');
+                titleEl.className = 'cff-dialog-title';
+                titleEl.textContent = title;
+                const bodyEl = document.createElement('div');
+                bodyEl.className = 'cff-dialog-body';
+                bodyEl.style.marginTop = '8px';
+                bodyEl.innerHTML = escapeHtml(message).replace(/\n/g, '<br>');
+                const actionsEl = document.createElement('div');
+                actionsEl.className = 'cff-dialog-actions';
+                actionsEl.style.marginTop = '18px';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'cff-dialog-ok';
+                cancelBtn.style.marginRight = '8px';
+                cancelBtn.textContent = 'Cancelar';
+                const okBtn = document.createElement('button');
+                okBtn.type = 'button';
+                okBtn.className = 'cff-dialog-ok';
+                okBtn.textContent = 'OK';
+
+                actionsEl.appendChild(cancelBtn);
+                actionsEl.appendChild(okBtn);
+                dialog.appendChild(titleEl);
+                dialog.appendChild(bodyEl);
+                dialog.appendChild(actionsEl);
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                const cleanup = () => {
+                    overlay.remove();
+                };
+
+                cancelBtn.addEventListener('click', () => {
+                    cleanup();
+                    resolve(false);
+                });
+                okBtn.addEventListener('click', () => {
+                    cleanup();
+                    resolve(true);
+                });
+            });
+        }
 
         function getSavedProcessCards() {
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
@@ -1136,19 +1195,18 @@
             $dynamicQuestionsContainer.before($indicator);
     
             $indicator.find('.cancel-edit-btn').on('click', function() {
-                const confirmar = confirm(
-                    'Deseja cancelar a edição?\n\n' +
-                    'As alterações não salvas serão perdidas.'
-                );
-        
-                if (confirmar) {
-                    $('.edit-mode-indicator').remove();
-                    delete userResponses._editing_card_index;
-                    clearTreeResponsesForNewAnalysis();
-                    renderDecisionTree();
-                    saveResponses();
-                    console.log('Edição cancelada');
-                }
+                showCffConfirmDialog(
+                    'Deseja cancelar a edição?\n\nAs alterações não salvas serão perdidas.'
+                ).then(confirmar => {
+                    if (confirmar) {
+                        $('.edit-mode-indicator').remove();
+                        delete userResponses._editing_card_index;
+                        clearTreeResponsesForNewAnalysis();
+                        renderDecisionTree();
+                        saveResponses();
+                        console.log('Edição cancelada');
+                    }
+                });
             });
     
             $indicator.find('.cancel-edit-btn').hover(
