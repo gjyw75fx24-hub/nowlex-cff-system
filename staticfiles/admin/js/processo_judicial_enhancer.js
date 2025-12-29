@@ -176,6 +176,48 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(overlay);
     };
 
+    const insertAgendaSidebarPlaceholder = () => {
+        const navSidebar = document.getElementById('nav-sidebar');
+        if (!navSidebar || navSidebar.querySelector('.agenda-placeholder-row')) {
+            return;
+        }
+        const processoRow = navSidebar.querySelector('tr.model-processojudicial');
+        if (!processoRow) {
+            return;
+        }
+        const placeholderRow = document.createElement('tr');
+        placeholderRow.className = 'agenda-placeholder-row';
+        const placeholderCell = document.createElement('td');
+        placeholderCell.setAttribute('colspan', '3');
+        placeholderCell.setAttribute('aria-hidden', 'true');
+        placeholderCell.innerHTML = `
+            <div class="agenda-placeholder-card" role="presentation">
+                <div class="agenda-placeholder-card__icon" aria-hidden="true">
+                    <svg viewBox="0 0 36 36" role="presentation" focusable="false">
+                        <rect x="2" y="4" width="32" height="28" rx="4" ry="4" stroke="rgba(255,255,255,0.6)" stroke-width="1.8" fill="none"></rect>
+                        <line x1="2" y1="10" x2="34" y2="10" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"></line>
+                        <line x1="10" y1="2" x2="10" y2="8" stroke="#e2f1ff" stroke-width="2"></line>
+                        <line x1="26" y1="2" x2="26" y2="8" stroke="#e2f1ff" stroke-width="2"></line>
+                        <rect x="5" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                        <rect x="15" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                        <rect x="25" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                        <rect x="5" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                        <rect x="15" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                        <rect x="25" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+                    </svg>
+                </div>
+                <div class="agenda-placeholder-card__body">
+                    <p class="agenda-placeholder-card__title">Agenda Geral</p>
+                    <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
+                    <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
+                </div>
+            </div>
+        `;
+        placeholderRow.appendChild(placeholderCell);
+        processoRow.parentNode.insertBefore(placeholderRow, processoRow.nextSibling);
+    };
+    insertAgendaSidebarPlaceholder();
+
     const getAndamentosActionBar = () => {
         const group = document.getElementById('andamentos-group');
         if (!group) return null;

@@ -27,22 +27,51 @@ window.addEventListener('load', function() {
     const lastActiveTabKey = 'django_admin_last_active_tab';
     let activeTabIndex = 0; // Índice da aba a ser ativada
 
-    inlineGroups.forEach((group, index) => {
-        const title = group.querySelector('h2').textContent;
-        const tabButton = document.createElement('button');
-        tabButton.textContent = title;
-        tabButton.type = 'button';
+    const getInlineTabLabel = (group) => {
+        const header = group.querySelector('h2');
+        const baseTitle = header ? header.textContent.trim() : 'Untitled';
+        const normalizedId = (group.id || '').toLowerCase();
+        const normalizedTitle = baseTitle.toLowerCase();
+        const isTarefa = normalizedId.includes('tarefa') || normalizedTitle.includes('tarefa');
+        const isPrazo = normalizedId.includes('prazo') || normalizedTitle.includes('prazo');
+        if (isTarefa || isPrazo) {
+            return 'Tarefas & Prazos';
+        }
+        return baseTitle;
+    };
 
-        tabButton.addEventListener('click', () => {
-            const scrollPos = window.pageYOffset || document.documentElement.scrollTop || 0;
-            // Salva o título da aba ativa no localStorage
-            localStorage.setItem(lastActiveTabKey, title);
-            
-            activateTab(group, tabButton, scrollPos);
-        });
+    const tabIndexByTitle = new Map();
+    inlineGroups.forEach((group) => {
+        const title = getInlineTabLabel(group);
+        let entryIndex = tabIndexByTitle.get(title);
+        let tabEntry;
+        if (entryIndex === undefined) {
+            const tabButton = document.createElement('button');
+            tabButton.textContent = title;
+            tabButton.type = 'button';
 
-        tabsContainer.appendChild(tabButton);
-        tabButtons.push({ button: tabButton, title: title, group: group });
+            tabEntry = {
+                button: tabButton,
+                title: title,
+                groups: [group],
+            };
+            tabButtons.push(tabEntry);
+            entryIndex = tabButtons.length - 1;
+            tabIndexByTitle.set(title, entryIndex);
+            tabsContainer.appendChild(tabButton);
+
+            tabButton.addEventListener('click', () => {
+                const scrollPos = window.pageYOffset || document.documentElement.scrollTop || 0;
+                // Salva o título da aba ativa no localStorage
+                localStorage.setItem(lastActiveTabKey, title);
+                activateTab(tabButtons[entryIndex], scrollPos);
+            });
+        } else {
+            tabEntry = tabButtons[entryIndex];
+            tabEntry.groups.push(group);
+        }
+        // Mantém a referência ao primeiro grupo como padrão para rolagem
+        tabEntry.primaryGroup = tabEntry.primaryGroup || tabEntry.groups[0];
     });
 
     // Aba falsa "Observações" abre caderno flutuante
@@ -92,16 +121,30 @@ window.addEventListener('load', function() {
             notebookTextarea.value = saved;
             const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
             notebookTextarea.addEventListener('input', save);
+            const insertAtCursor = (textarea, value) => {
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const before = textarea.value.slice(0, start);
+                const after = textarea.value.slice(end);
+                textarea.value = `${before}${value}${after}`;
+                const cursor = before.length + value.length;
+                textarea.selectionStart = textarea.selectionEnd = cursor;
+            };
+
             notebookMentionSaver = (text) => {
                 if (!text || !notebookTextarea) {
                     return;
                 }
-                const mention = text.trim();
-                if (!mention) {
+                const mention = `${text.trim()}\n\n`;
+                if (!mention.trim()) {
                     return;
                 }
-                const current = notebookTextarea.value.trim();
-                notebookTextarea.value = mention + (current ? `\n${current}` : '');
+                const atCursor = notebookTextarea.selectionStart !== null;
+                if (atCursor) {
+                    insertAtCursor(notebookTextarea, mention);
+                } else {
+                    notebookTextarea.value = `${notebookTextarea.value}${mention}`;
+                }
                 save();
             };
 
@@ -223,12 +266,13 @@ window.addEventListener('load', function() {
         });
     })();
 
-    function activateTab(group, tabButton, scrollPos) {
+    function activateTab(entry, scrollPos) {
+        if (!entry) return;
         tabButtons.forEach(item => item.button.classList.remove('active'));
         inlineGroups.forEach(grp => grp.classList.remove('active'));
 
-        tabButton.classList.add('active');
-        group.classList.add('active');
+        entry.button.classList.add('active');
+        entry.groups.forEach(grp => grp.classList.add('active'));
         syncAdvogadoPassivo();
         // Restaura a rolagem após o reflow das abas
         window.requestAnimationFrame(() => {
@@ -238,9 +282,9 @@ window.addEventListener('load', function() {
 
     // Marca abas com erros e prioriza a primeira aba com erro
     const errorSelector = '.errorlist, .errors, .form-row.errors, .inline-related.errors';
-    const firstErrorTabIndex = tabButtons.findIndex(item => item.group.querySelector(errorSelector));
+    const firstErrorTabIndex = tabButtons.findIndex(item => item.groups.some(group => group.querySelector(errorSelector)));
     tabButtons.forEach(item => {
-        if (item.group.querySelector(errorSelector)) {
+        if (item.groups.some(group => group.querySelector(errorSelector))) {
             item.button.classList.add('has-errors');
         }
     });
@@ -261,10 +305,7 @@ window.addEventListener('load', function() {
 
     // Ativa a aba correspondente ao activeTabIndex
     if (tabButtons.length > 0) {
-        activateTab(
-            tabButtons[activeTabIndex].group,
-            tabButtons[activeTabIndex].button
-        );
+        activateTab(tabButtons[activeTabIndex], 0);
     }
 
     function syncAdvogadoPassivo() {
@@ -279,4 +320,18 @@ window.addEventListener('load', function() {
     }
 
     syncAdvogadoPassivo();
+
+    window.__openInlineTab = function(tabTitle) {
+        if (!tabTitle) return false;
+        const match = tabButtons.find(item => item.title.trim().toLowerCase() === tabTitle.trim().toLowerCase());
+        if (!match) {
+            return false;
+        }
+        activateTab(match, 0);
+        const targetGroup = match.primaryGroup || match.groups[0];
+        if (targetGroup) {
+            window.scrollTo({ top: targetGroup.offsetTop - 20, behavior: 'smooth' });
+        }
+        return true;
+    };
 });
