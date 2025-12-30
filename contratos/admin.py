@@ -754,8 +754,8 @@ class NaoJudicializadoFilter(admin.SimpleListFilter):
         count_nao = qs.filter(nao_judicializado=False).count()
         total = count_sim + count_nao
         return [
-            ('1', mark_safe(f"Sim <span class=\"filter-count\">({count_sim})</span>")),
-            ('0', mark_safe(f"Não <span class=\"filter-count\">({count_nao})</span>")),
+            ('1', mark_safe(f"Sem CNJ <span class=\"filter-count\">({count_sim})</span>")),
+            ('0', mark_safe(f"Com CNJ <span class=\"filter-count\">({count_nao})</span>")),
             ('all', mark_safe(f"Todos <span class=\"filter-count\">({total})</span>")),
         ]
 
