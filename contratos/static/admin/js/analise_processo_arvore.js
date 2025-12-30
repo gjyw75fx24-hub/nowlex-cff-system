@@ -1026,6 +1026,55 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             userResponses[SAVED_PROCESSOS_KEY].push(cardData);
         }
 
+        function syncEditingCardWithCurrentResponses() {
+            if (
+                !Number.isFinite(userResponses._editing_card_index) ||
+                userResponses._editing_card_index < 0 ||
+                !Array.isArray(userResponses.processos_vinculados) ||
+                userResponses.processos_vinculados.length === 0
+            ) {
+                return null;
+            }
+            const card = userResponses.processos_vinculados[0];
+            if (!card) {
+                return null;
+            }
+            const monitoriaIds = Array.from(
+                new Set(
+                    (userResponses.contratos_para_monitoria || [])
+                        .map(id => String(id).trim())
+                        .filter(Boolean)
+                )
+            );
+            card.contratos = monitoriaIds.slice();
+            card.tipo_de_acao_respostas = card.tipo_de_acao_respostas || {};
+            card.tipo_de_acao_respostas.contratos_para_monitoria = monitoriaIds.slice();
+            const syncKeys = [
+                'judicializado_pela_massa',
+                'propor_monitoria',
+                'tipo_de_acao',
+                'julgamento',
+                'transitado',
+                'procedencia',
+                'repropor_monitoria',
+                'ativar_botao_monitoria'
+            ];
+            syncKeys.forEach(key => {
+                if (Object.prototype.hasOwnProperty.call(userResponses, key)) {
+                    card.tipo_de_acao_respostas[key] = deepClone(userResponses[key]);
+                }
+            });
+            const supervisionado = Boolean(userResponses.supervisionado_nao_judicializado);
+            const status = userResponses.supervisor_status_nao_judicializado || 'pendente';
+            card.supervisionado = supervisionado;
+            card.supervisor_status = status;
+            card.awaiting_supervision_confirm = Boolean(userResponses.awaiting_supervision_confirm);
+            if (userResponses.barrado_nao_judicializado) {
+                card.barrado = deepClone(userResponses.barrado_nao_judicializado);
+            }
+            return card;
+        }
+
         function storeActiveAnalysisAsProcessCard() {
             ensureUserResponsesShape();
             const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
@@ -1035,6 +1084,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     ? Number(userResponses._editing_card_index)
                     : null;
 
+            if (editingIndex !== null) {
+                syncEditingCardWithCurrentResponses();
+            }
             let snapshot = buildSnapshotFromProcessosVinculados();
             if (!snapshot) {
                 snapshot = captureActiveAnalysisSnapshot();
@@ -1750,7 +1802,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
         window.addEventListener('beforeunload', flushPendingSave);
 
-        function saveResponses() {
+        function saveResponses(options = {}) {
             if (autoSaveTimer) {
                 clearTimeout(autoSaveTimer);
                 autoSaveTimer = null;
@@ -1780,7 +1832,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 "DEBUG A_P_A: saveResponses - TextArea contém:",
                 $responseField.val()
             );
-            displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
+            if (!options.skipRender) {
+                displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
+            }
             updateContractStars();
             updateGenerateButtonState();
             persistLocalResponses();
@@ -1924,64 +1978,102 @@ function formatCnjDigits(raw) {
             return SUPERVISION_STATUS_SEQUENCE[nextIndex];
         }
 
-        function getObservationEntriesForCnj(cnj, relatedContracts) {
-            if (!cnj || typeof localStorage === 'undefined') {
+        function getObservationEntriesForCnj(cnj, relatedContracts, options = {}) {
+            if (!cnj && !options.mentionType) {
                 return [];
             }
             const rawNotes = localStorage.getItem(notebookStorageKey) || '';
             if (!rawNotes.trim()) {
                 return [];
             }
-            const normalizedCnjDigits = cnj.replace(/\D/g, '');
+            const mentionType = options.mentionType || 'cnj';
+            const normalizedTarget = String(cnj || '').trim();
+            const normalizedCnjDigits =
+                mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
             const entries = rawNotes
                 .split(/\n{2,}/)
                 .map(entry => entry.trim())
                 .filter(Boolean);
 
-            const parsedEntries = entries.map(entry => {
-                const lines = entry
+            function parseRawEntry(entryRaw) {
+                const lines = entryRaw
                     .split('\n')
-                    .map(line => line.trim())
-                    .filter(Boolean);
+                    .map(line => line.trim());
                 const mentionLines = lines.filter(line =>
-                    /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                    /cnj/i.test(line) ||
+                    /contratos?\s*:/i.test(line) ||
+                    /#nj\d+/i.test(line)
                 );
                 const contentLines = lines.filter(line =>
-                    !mentionLines.includes(line)
+                    line && !mentionLines.includes(line)
                 );
-                const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                const summaryLine = contentLines[0] || mentionLines[0] || lines.find(Boolean) || '';
                 return {
-                    raw: entry,
+                    raw: entryRaw,
                     mentionLines,
                     contentLines,
                     summary: summaryLine,
-                    cnjDigits: extractCnjDigits(entry)
+                    cnjDigits: extractCnjDigits(entryRaw)
                 };
-            });
+            }
 
-            const matches = [];
-            let capturing = false;
-            parsedEntries.forEach(entry => {
-                const lowerRaw = (entry.raw || '').toLowerCase();
-                const hasTargetCnj = normalizedCnjDigits
-                    ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
-                    : lowerRaw.includes(cnj.toLowerCase());
-                if (hasTargetCnj) {
-                    capturing = true;
-                } else if (
-                    capturing &&
-                    entry.cnjDigits &&
-                    entry.cnjDigits !== normalizedCnjDigits
+            const parsedEntries = entries.map(entry => parseRawEntry(entry));
+            const normalizedEntries = [];
+            for (let idx = 0; idx < parsedEntries.length; idx++) {
+                let current = parsedEntries[idx];
+                if (
+                    mentionType === 'nj' &&
+                    current.mentionLines.length &&
+                    current.contentLines.length === 0
                 ) {
-                    capturing = false;
+                    let j = idx + 1;
+                    while (
+                        j < parsedEntries.length &&
+                        parsedEntries[j].mentionLines.length === 0
+                    ) {
+                        current = parseRawEntry(`${current.raw}\n\n${parsedEntries[j].raw}`);
+                        j += 1;
+                    }
+                    idx = j - 1;
                 }
-                if (capturing) {
-                    matches.push(entry);
-                }
-            });
+                normalizedEntries.push(current);
+            }
 
-            if (!matches.length && relatedContracts && relatedContracts.length) {
-                return parsedEntries.filter(entry =>
+            const entriesToReview = normalizedEntries.length ? normalizedEntries : parsedEntries;
+            let matches = [];
+            if (mentionType === 'cnj') {
+                let capturing = false;
+                entriesToReview.forEach(entry => {
+                    const lowerRaw = (entry.raw || '').toLowerCase();
+                    const hasTargetCnj = normalizedCnjDigits
+                        ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                        : lowerRaw.includes((normalizedTarget || '').toLowerCase());
+                    if (hasTargetCnj) {
+                        capturing = true;
+                    } else if (
+                        capturing &&
+                        entry.cnjDigits &&
+                        entry.cnjDigits !== normalizedCnjDigits
+                    ) {
+                        capturing = false;
+                    }
+                    if (capturing) {
+                        matches.push(entry);
+                    }
+                });
+            } else {
+                const targetLabel = (normalizedTarget || '').trim().toLowerCase();
+                if (targetLabel) {
+                    matches = entriesToReview.filter(entry =>
+                        (entry.mentionLines || []).some(line =>
+                            line.toLowerCase().includes(targetLabel)
+                        )
+                    );
+                }
+            }
+
+            if (!matches.length && mentionType === 'cnj' && relatedContracts && relatedContracts.length) {
+                return entriesToReview.filter(entry =>
                     relatedContracts.some(contractId =>
                         entry.raw.includes(String(contractId))
                     )
@@ -2106,6 +2198,11 @@ function formatCnjDigits(raw) {
 
         function buildProcessoDetailsSnapshot(processo, options = {}) {
             const cnjVinculado = processo.cnj || 'Não informado';
+            const isNonJudicial = isCardNonJudicialized(processo);
+            const mentionType = isNonJudicial ? 'nj' : 'cnj';
+            if (isNonJudicial) {
+                assignNjLabelToCard(processo);
+            }
             const $ulDetalhes = $('<ul></ul>');
             const contratoIds = parseContractsField(processo.contratos);
             const contratoInfos = contratoIds.map(cId => {
@@ -2205,14 +2302,23 @@ function formatCnjDigits(raw) {
             const contractsReferenced = Array.from(
                 new Set(contratoInfos.map(c => c.id))
             );
-            const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
+            const observationTarget = isNonJudicial
+                ? (processo.nj_label || cnjVinculado)
+                : cnjVinculado;
+
+            const observationEntries = getObservationEntriesForCnj(
+                observationTarget,
+                contractsReferenced,
+                { mentionType }
+            );
 
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
                 contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
-                observationEntries
+                observationEntries,
+                observationTarget
             };
         }
 
@@ -2229,7 +2335,10 @@ function formatCnjDigits(raw) {
             if (!observationEntries || !observationEntries.length) {
                 return null;
             }
-            const populatedEntries = observationEntries.filter(entry => entry.contentLines && entry.contentLines.length);
+            const populatedEntries = observationEntries.filter(entry =>
+                (entry.contentLines && entry.contentLines.length) ||
+                (entry.mentionLines && entry.mentionLines.length)
+            );
             if (!populatedEntries.length) {
                 return null;
             }
@@ -2242,9 +2351,12 @@ function formatCnjDigits(raw) {
             populatedEntries.forEach(entry => {
                 const contentLines = (entry.contentLines || []).filter(Boolean);
                 if (contentLines.length) {
-                    contentLines.forEach(line => {
-                        allLines.push(line);
-                    });
+                    contentLines.forEach(line => allLines.push(line));
+                } else if (entry.mentionLines && entry.mentionLines.length) {
+                    entry.mentionLines
+                        .map(line => line.trim())
+                        .filter(Boolean)
+                        .forEach(line => allLines.push(line));
                 }
             });
             $noteTextarea.val(allLines.join('\n'));
@@ -2310,7 +2422,7 @@ function formatCnjDigits(raw) {
                 const value = $textArea.val().trim();
                 processo.supervisor_observacoes = value;
                 processo.supervisor_observacoes_autor = value ? currentSupervisorUsername : '';
-                saveResponses();
+                saveResponses({ skipRender: true });
             };
 
             $textArea.on('input', () => {
@@ -2730,7 +2842,7 @@ function formatCnjDigits(raw) {
                         $detailsRow,
                         [$noteElement, $supervisorNoteElement],
                         {
-                            cnj: snapshot.cnj,
+                            cnj: snapshot.observationTarget,
                             contracts: snapshot.contractIds,
                             mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
                         }
@@ -2916,7 +3028,7 @@ function formatCnjDigits(raw) {
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
             const $supervisorNoteElement = createSupervisorNoteElement(processo);
             appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
-                cnj: snapshot.cnj,
+                cnj: snapshot.observationTarget,
                 contracts: snapshot.contractIds,
                 mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
             });
@@ -3807,9 +3919,17 @@ function formatCnjDigits(raw) {
         }
 
         function mentionNaoJudInNotas(text) {
-            if (typeof window.openNotebookWithMention === 'function') {
-                window.openNotebookWithMention(text || '');
+            if (typeof window.openNotebookWithMention !== 'function') {
+                return;
             }
+            const trimmed = String(text || '').trim();
+            if (!trimmed) {
+                return;
+            }
+            const existing = getNotebookText() || '';
+            const needsSeparator = existing && !existing.endsWith('\n');
+            const separator = needsSeparator ? '\n' : '';
+            window.openNotebookWithMention(`${separator}${trimmed}`);
         }
 
         function isNaoJudicializadoActive() {
