@@ -1,0 +1,136 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.form-row.field-habilitado {
+    display: none;
+}
+.busca-ativa-toggle-row {
+    margin-bottom: 0.6rem;
+}
+.busca-ativa-toggle-row .field-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 0.3rem;
+}
+.busca-ativa-toggle-row label {
+    font-weight: 600;
+    color: #0b2f3d;
+}
+.busca-ativa-toggle-wrapper {
+    display: inline-flex;
+    align-items: center;
+}
+.busca-ativa-toggle {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 0.95rem;
+    padding: 0.15rem 0.7rem;
+    border-radius: 0.35rem;
+    border: 1px solid #2c7ed6;
+    color: #0b52a8;
+    font-weight: 600;
+}
+.busca-ativa-toggle-status {
+    width: 1.4rem;
+    height: 0.7rem;
+    border-radius: 999px;
+    background: #c8c8c8;
+    position: relative;
+    transition: background 0.3s;
+}
+.busca-ativa-toggle-status::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0.15rem;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: white;
+    transform: translate(0, -50%);
+    transition: transform 0.3s;
+}
+.busca-ativa-toggle.active .busca-ativa-toggle-status {
+    background: #007bff;
+}
+.busca-ativa-toggle.active .busca-ativa-toggle-status::after {
+    transform: translate(0.65rem, -50%);
+}
+.busca-ativa-toggle-label:before {
+    content: 'Busca ativa';
+}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const toggle = document.querySelector('.busca-ativa-toggle');
+    if (!toggle) return;
+    const checkbox = document.querySelector(toggle.dataset.target);
+    if (!checkbox) return;
+
+    const label = document.querySelector('.busca-ativa-toggle-row label');
+    const updateState = () => {
+        const enabled = checkbox.checked;
+        if (enabled) {
+            toggle.classList.add('active');
+            toggle.setAttribute('aria-pressed', 'true');
+            if (label) label.textContent = 'Busca ativa habilitada';
+        } else {
+            toggle.classList.remove('active');
+            toggle.setAttribute('aria-pressed', 'false');
+            if (label) label.textContent = 'Busca ativa desabilitada';
+        }
+    };
+
+    const saveToggleState = () => {
+        const form = checkbox.closest('form');
+        if (!form) return;
+        const csrfToken = form.querySelector('input[name=\"csrfmiddlewaretoken\"]')?.value;
+        if (!csrfToken) return;
+        const data = new FormData(form);
+        data.set('_save', 'Salvar');
+        fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'X-CSRFToken': csrfToken
+            },
+            body: data
+        }).catch(() => {});
+    };
+
+    toggle.addEventListener('click', () => {
+        checkbox.click();
+        updateState();
+        saveToggleState();
+    });
+
+    checkbox.addEventListener('change', updateState);
+    updateState();
+});
+</script>
+{% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+{% if original %}
+<div class="form-row busca-ativa-toggle-row">
+    <div class="field-box">
+        <label for="id_habilitado">Busca ativa habilitada</label>
+        <div class="busca-ativa-toggle-wrapper">
+            <button type="button" class="busca-ativa-toggle" data-target="#id_habilitado">
+                <span class="busca-ativa-toggle-status"></span>
+                <span class="busca-ativa-toggle-label"></span>
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

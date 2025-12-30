@@ -18,11 +18,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('Busca ativa desabilitada. Nada a fazer.'))
             return
 
-        # Impede reexecução no mesmo dia
-        if config.ultima_execucao and config.ultima_execucao.date() == now.date():
-            self.stdout.write(self.style.WARNING('Busca ativa já executada hoje.'))
-            return
-
         # Se horário configurado ainda não chegou, encerra
         if now.time() < config.horario:
             self.stdout.write(self.style.WARNING(f"Aguardando horário configurado ({config.horario}) para executar."))

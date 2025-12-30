@@ -2157,6 +2157,7 @@ def delegate_select_user_view(self, request):
 class BuscaAtivaConfigAdmin(admin.ModelAdmin):
     list_display = ("horario", "habilitado", "ultima_execucao")
     readonly_fields = ("ultima_execucao",)
+    change_form_template = "admin/contratos/buscaativaconfig/change_form.html"
 
     def has_add_permission(self, request):
         # Impede múltiplos registros; apenas edição do único registro
