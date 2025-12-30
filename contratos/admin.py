@@ -516,17 +516,19 @@ class TerceiroInteressadoFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
+        extra_remove = ['o', 'p', '_changelist_filters', '_skip_saved_filters']
+        other_filters = [k for k in changelist.params.keys() if k not in (self.parameter_name, '_skip_saved_filters')]
         for value, title in self.lookup_choices:
             selected = current == value
             if selected:
                 query_string = changelist.get_query_string(
                     {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
+                    remove=[self.parameter_name] + extra_remove + other_filters
                 )
             else:
                 query_string = changelist.get_query_string(
                     {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
+                    remove=extra_remove + other_filters
                 )
             yield {
                 'selected': selected,
@@ -750,25 +752,38 @@ class NaoJudicializadoFilter(admin.SimpleListFilter):
         qs = model_admin.get_queryset(request)
         count_sim = qs.filter(nao_judicializado=True).count()
         count_nao = qs.filter(nao_judicializado=False).count()
+        total = count_sim + count_nao
         return [
             ('1', mark_safe(f"Sim <span class=\"filter-count\">({count_sim})</span>")),
             ('0', mark_safe(f"Não <span class=\"filter-count\">({count_nao})</span>")),
+            ('all', mark_safe(f"Todos <span class=\"filter-count\">({total})</span>")),
         ]
+
+    def _base_remove_keys(self, changelist):
+        remove = set(changelist.params.keys())
+        remove.update({'o', 'p', '_changelist_filters'})
+        remove.discard('_skip_saved_filters')
+        return list(remove)
 
     def choices(self, changelist):
         current = self.value()
+        remove_keys = self._base_remove_keys(changelist)
+
+        def build_query(apply_value=None):
+            params = {'_skip_saved_filters': '1'}
+            if apply_value and apply_value != 'all':
+                params[self.parameter_name] = apply_value
+            remove = list(remove_keys)
+            remove.append(self.parameter_name)
+            return changelist.get_query_string(params, remove=remove)
+
         for value, title in self.lookup_choices:
-            selected = current == value
-            if selected:
-                query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
-                )
+            if value == 'all':
+                selected = current is None
+                query_string = build_query(None)
             else:
-                query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
-                )
+                selected = current == value
+                query_string = build_query(value if not selected else None)
             yield {
                 'selected': selected,
                 'query_string': query_string,
@@ -1631,6 +1646,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     def _handle_saved_filters(self, request):
         stored = request.session.get(self.FILTER_SESSION_KEY)
         skip = request.session.pop(self.FILTER_SKIP_KEY, False)
+        if request.GET.get('nao_judicializado') is not None:
+            request.session.pop(self.FILTER_SESSION_KEY, None)
+            request.session[self.FILTER_SKIP_KEY] = True
+            skip = True
         if stored and '=' not in stored:
             stored = None
             request.session.pop(self.FILTER_SESSION_KEY, None)
