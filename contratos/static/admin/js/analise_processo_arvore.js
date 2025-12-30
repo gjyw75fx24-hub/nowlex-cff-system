@@ -2275,6 +2275,9 @@ function formatCnjDigits(raw) {
             if (Array.isArray(options.contracts) && options.contracts.length) {
                 $notesColumn.attr('data-analise-contracts', options.contracts.join(','));
             }
+            if (options.mentionType) {
+                $notesColumn.attr('data-analise-mention-type', options.mentionType);
+            }
             $detailsRow.append($notesColumn);
         }
 
@@ -2723,10 +2726,15 @@ function formatCnjDigits(raw) {
                     $detailsRow.append(snapshot.$detailsList);
                     const $noteElement = createObservationNoteElement(snapshot.observationEntries);
                     const $supervisorNoteElement = createSupervisorNoteElement(processo, { editable: false });
-                    appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
-                        cnj: snapshot.cnj,
-                        contracts: snapshot.contractIds
-                    });
+                    appendNotesColumn(
+                        $detailsRow,
+                        [$noteElement, $supervisorNoteElement],
+                        {
+                            cnj: snapshot.cnj,
+                            contracts: snapshot.contractIds,
+                            mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
+                        }
+                    );
                     $bodyVinculado.append($detailsRow);
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
@@ -2909,7 +2917,8 @@ function formatCnjDigits(raw) {
             const $supervisorNoteElement = createSupervisorNoteElement(processo);
             appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
                 cnj: snapshot.cnj,
-                contracts: snapshot.contractIds
+                contracts: snapshot.contractIds,
+                mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
             });
             $body.append($detailsRow);
 
@@ -2960,7 +2969,8 @@ function formatCnjDigits(raw) {
                     .split(',')
                     .map(id => id.trim())
                     .filter(Boolean);
-                const entries = getObservationEntriesForCnj(cnj, contracts);
+                const mentionType = $column.attr('data-analise-mention-type') || 'cnj';
+                const entries = getObservationEntriesForCnj(cnj, contracts, { mentionType });
                 const $newObservation = createObservationNoteElement(entries);
                 $column.find('.analise-observation-note').remove();
                 if ($newObservation) {
