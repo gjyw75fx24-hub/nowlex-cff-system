@@ -3733,6 +3733,54 @@ function formatCnjDigits(raw) {
             $cardsContainer.append($card);
         }
 
+        function isCardNonJudicialized(card) {
+            if (!card || typeof card !== 'object') return false;
+            const status = normalizeResponse(card?.tipo_de_acao_respostas?.judicializado_pela_massa);
+            if (status === 'NÃO') return true;
+            const cnjValue = String(card?.cnj || '').trim();
+            return !cnjValue || cnjValue.toLowerCase().includes('não');
+        }
+
+        function collectUsedNjIndices() {
+            const indices = new Set();
+            const appendFrom = entries => {
+                if (!Array.isArray(entries)) return;
+                entries.forEach(entry => {
+                    if (!entry || typeof entry !== 'object') return;
+                    if (!isCardNonJudicialized(entry)) return;
+                    const idx = Number(entry.nj_index) || parseInt(String(entry.nj_label || '').replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(idx)) {
+                        indices.add(idx);
+                    }
+                });
+            };
+            appendFrom(userResponses.processos_vinculados);
+            appendFrom(userResponses.saved_processos_vinculados);
+            return indices;
+        }
+
+        function getNextAvailableNjIndex() {
+            const used = collectUsedNjIndices();
+            let idx = 1;
+            while (used.has(idx)) {
+                idx += 1;
+            }
+            return idx;
+        }
+
+        function assignNjLabelToCard(card) {
+            if (!isCardNonJudicialized(card)) {
+                return null;
+            }
+            if (card.nj_index && Number.isFinite(card.nj_index)) {
+                return card.nj_index;
+            }
+            const nextIndex = getNextAvailableNjIndex();
+            card.nj_index = nextIndex;
+            card.nj_label = `#NJ${nextIndex}`;
+            return nextIndex;
+        }
+
         function mentionProcessoInNotas(cardData) {
             if (typeof window.openNotebookWithMention !== 'function') {
                 return;
@@ -3759,14 +3807,7 @@ function formatCnjDigits(raw) {
         }
 
         function getNaoJudSequence() {
-            if (!Array.isArray(userResponses.processos_vinculados)) {
-                return 1;
-            }
-            const count = userResponses.processos_vinculados.filter(entry => {
-                if (!entry || typeof entry !== 'object') return false;
-                return normalizeResponse(entry?.tipo_de_acao_respostas?.judicializado_pela_massa) === 'NÃO';
-            }).length;
-            return Math.max(1, count + 1);
+            return getNextAvailableNjIndex();
         }
 
         function buildContractsLabel(ids) {
@@ -3903,22 +3944,23 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 if (!Array.isArray(userResponses.processos_vinculados)) {
                     userResponses.processos_vinculados = [];
                 }
-                if (checked) {
-                    const card = {
-                        cnj: 'Não Judicializado',
-                        contratos: userResponses.contratos_para_monitoria.slice(),
-                        tipo_de_acao_respostas: {
-                            judicializado_pela_massa: 'NÃO',
-                            propor_monitoria: 'SIM',
-                            contratos_para_monitoria: userResponses.contratos_para_monitoria.slice()
-                        },
-                        supervisionado: true,
-                        supervisor_status: 'pendente',
-                        barrado: { ativo: false, inicio: null, retorno_em: null },
-                        awaiting_supervision_confirm: false
-                    };
-                    userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
-                    userResponses.processos_vinculados.push(card);
+                    if (checked) {
+                        const card = {
+                            cnj: 'Não Judicializado',
+                            contratos: userResponses.contratos_para_monitoria.slice(),
+                            tipo_de_acao_respostas: {
+                                judicializado_pela_massa: 'NÃO',
+                                propor_monitoria: 'SIM',
+                                contratos_para_monitoria: userResponses.contratos_para_monitoria.slice()
+                            },
+                            supervisionado: true,
+                            supervisor_status: 'pendente',
+                            barrado: { ativo: false, inicio: null, retorno_em: null },
+                            awaiting_supervision_confirm: false
+                        };
+                        assignNjLabelToCard(card);
+                        userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
+                        userResponses.processos_vinculados.push(card);
                     userResponses.supervisionado_nao_judicializado = true;
                     userResponses.supervisor_status_nao_judicializado = 'pendente';
                     userResponses.barrado_nao_judicializado = { ativo: false, inicio: null, retorno_em: null };
