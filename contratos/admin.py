@@ -984,12 +984,19 @@ class ProtocoladosFilter(admin.SimpleListFilter):
 
     def choices(self, changelist):
         current = self.value()
+        remove_params = [self.parameter_name, 'o', 'p', '_skip_saved_filters']
         for value, label in self.lookup_choices:
-            selected = current == value
-            query_string = changelist.get_query_string(
-                {self.parameter_name: value} if not selected else {},
-                remove=[self.parameter_name, 'o', 'p']
-            )
+            selected = current == value and current is not None
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=remove_params
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value, '_skip_saved_filters': '1'},
+                    remove=['o', 'p']
+                )
             yield {
                 "selected": selected,
                 "query_string": query_string,
