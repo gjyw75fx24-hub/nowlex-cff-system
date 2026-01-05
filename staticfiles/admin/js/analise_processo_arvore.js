@@ -1924,64 +1924,128 @@ function formatCnjDigits(raw) {
             return SUPERVISION_STATUS_SEQUENCE[nextIndex];
         }
 
-        function getObservationEntriesForCnj(cnj, relatedContracts) {
-            if (!cnj || typeof localStorage === 'undefined') {
+        function splitNotebookEntries(rawNotes) {
+            if (!rawNotes) {
+                return [];
+            }
+            const lines = rawNotes.split(/\r?\n/);
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
+            const segments = [];
+            let current = [];
+            const commitCurrent = () => {
+                if (current.some(line => line.trim())) {
+                    segments.push(current.join('\n'));
+                }
+                current = [];
+            };
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                const isMention = trimmed && mentionLineRegex.test(trimmed);
+                if (isMention && current.some(entryLine => entryLine.trim())) {
+                    commitCurrent();
+                }
+                current.push(line);
+            });
+            commitCurrent();
+            return segments.map(segment => segment.trim()).filter(Boolean);
+        }
+
+        function getObservationEntriesForCnj(cnj, relatedContracts, options = {}) {
+            if (!cnj && !options.mentionType) {
                 return [];
             }
             const rawNotes = localStorage.getItem(notebookStorageKey) || '';
             if (!rawNotes.trim()) {
                 return [];
             }
-            const normalizedCnjDigits = cnj.replace(/\D/g, '');
-            const entries = rawNotes
-                .split(/\n{2,}/)
-                .map(entry => entry.trim())
-                .filter(Boolean);
+        const mentionType = options.mentionType || 'cnj';
+            const normalizedTarget = String(cnj || '').trim();
+            const mentionLabelRaw = String(options.mentionLabel || '').trim();
+            const mentionLabelNormalized = mentionLabelRaw ? mentionLabelRaw.toLowerCase() : '';
+            const normalizedCnjDigits =
+                mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
 
-            const parsedEntries = entries.map(entry => {
-                const lines = entry
+            const entries = splitNotebookEntries(rawNotes);
+
+            function parseRawEntry(entryRaw) {
+                const lines = entryRaw
                     .split('\n')
-                    .map(line => line.trim())
-                    .filter(Boolean);
+                    .map(line => line.trim());
                 const mentionLines = lines.filter(line =>
-                    /cnj/i.test(line) || /contratos?\s*:/i.test(line)
+                    /cnj/i.test(line) ||
+                    /contratos?\s*:/i.test(line) ||
+                    /#nj\d+/i.test(line)
                 );
                 const contentLines = lines.filter(line =>
-                    !mentionLines.includes(line)
+                    line && !mentionLines.includes(line)
                 );
-                const summaryLine = contentLines[0] || mentionLines[0] || lines[0] || '';
+                const summaryLine = contentLines[0] || mentionLines[0] || lines.find(Boolean) || '';
                 return {
-                    raw: entry,
+                    raw: entryRaw,
                     mentionLines,
                     contentLines,
                     summary: summaryLine,
-                    cnjDigits: extractCnjDigits(entry)
+                    cnjDigits: extractCnjDigits(entryRaw)
                 };
-            });
+            }
 
-            const matches = [];
-            let capturing = false;
-            parsedEntries.forEach(entry => {
-                const lowerRaw = (entry.raw || '').toLowerCase();
-                const hasTargetCnj = normalizedCnjDigits
-                    ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
-                    : lowerRaw.includes(cnj.toLowerCase());
-                if (hasTargetCnj) {
-                    capturing = true;
-                } else if (
-                    capturing &&
-                    entry.cnjDigits &&
-                    entry.cnjDigits !== normalizedCnjDigits
+            const parsedEntries = entries.map(entry => parseRawEntry(entry));
+            const normalizedEntries = [];
+            for (let idx = 0; idx < parsedEntries.length; idx++) {
+                let current = parsedEntries[idx];
+                if (
+                    mentionType === 'nj' &&
+                    current.mentionLines.length &&
+                    current.contentLines.length === 0
                 ) {
-                    capturing = false;
+                    let j = idx + 1;
+                    while (
+                        j < parsedEntries.length &&
+                        parsedEntries[j].mentionLines.length === 0
+                    ) {
+                        current = parseRawEntry(`${current.raw}\n\n${parsedEntries[j].raw}`);
+                        j += 1;
+                    }
+                    idx = j - 1;
                 }
-                if (capturing) {
-                    matches.push(entry);
-                }
-            });
+                normalizedEntries.push(current);
+            }
 
-            if (!matches.length && relatedContracts && relatedContracts.length) {
-                return parsedEntries.filter(entry =>
+            const entriesToReview = normalizedEntries.length ? normalizedEntries : parsedEntries;
+            let matches = [];
+            if (mentionType === 'cnj') {
+                let capturing = false;
+                entriesToReview.forEach(entry => {
+                    const lowerRaw = (entry.raw || '').toLowerCase();
+                    const hasTargetCnj = normalizedCnjDigits
+                        ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
+                        : lowerRaw.includes((normalizedTarget || '').toLowerCase());
+                    if (hasTargetCnj) {
+                        capturing = true;
+                    } else if (
+                        capturing &&
+                        entry.cnjDigits &&
+                        entry.cnjDigits !== normalizedCnjDigits
+                    ) {
+                        capturing = false;
+                    }
+                    if (capturing) {
+                        matches.push(entry);
+                    }
+                });
+            } else {
+                const targetLabel = mentionLabelNormalized || (normalizedTarget || '').trim().toLowerCase();
+                if (targetLabel) {
+                    matches = entriesToReview.filter(entry =>
+                        (entry.mentionLines || []).some(line =>
+                            line.toLowerCase().includes(targetLabel)
+                        )
+                    );
+                }
+            }
+
+            if (!matches.length && mentionType === 'cnj' && relatedContracts && relatedContracts.length) {
+                return entriesToReview.filter(entry =>
                     relatedContracts.some(contractId =>
                         entry.raw.includes(String(contractId))
                     )
@@ -2106,6 +2170,11 @@ function formatCnjDigits(raw) {
 
         function buildProcessoDetailsSnapshot(processo, options = {}) {
             const cnjVinculado = processo.cnj || 'Não informado';
+            const isNonJudicial = isCardNonJudicialized(processo);
+            const mentionType = isNonJudicial ? 'nj' : 'cnj';
+            if (isNonJudicial) {
+                assignNjLabelToCard(processo);
+            }
             const $ulDetalhes = $('<ul></ul>');
             const contratoIds = parseContractsField(processo.contratos);
             const contratoInfos = contratoIds.map(cId => {
@@ -2205,14 +2274,22 @@ function formatCnjDigits(raw) {
             const contractsReferenced = Array.from(
                 new Set(contratoInfos.map(c => c.id))
             );
-            const observationEntries = getObservationEntriesForCnj(cnjVinculado, contractsReferenced);
+            const observationTarget = isNonJudicial
+                ? (processo.nj_label || cnjVinculado)
+                : cnjVinculado;
+            const observationEntries = getObservationEntriesForCnj(
+                observationTarget,
+                contractsReferenced,
+                { mentionType, mentionLabel: observationTarget }
+            );
 
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
                 contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
-                observationEntries
+                observationEntries,
+                observationTarget
             };
         }
 
@@ -2229,7 +2306,10 @@ function formatCnjDigits(raw) {
             if (!observationEntries || !observationEntries.length) {
                 return null;
             }
-            const populatedEntries = observationEntries.filter(entry => entry.contentLines && entry.contentLines.length);
+            const populatedEntries = observationEntries.filter(entry =>
+                (entry.contentLines && entry.contentLines.length) ||
+                (entry.mentionLines && entry.mentionLines.length)
+            );
             if (!populatedEntries.length) {
                 return null;
             }
@@ -2238,14 +2318,19 @@ function formatCnjDigits(raw) {
             const $noteContent = $('<div class="analise-observation-content"></div>');
             $noteContent.append('<strong>Observações</strong>');
             const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
             const allLines = [];
             populatedEntries.forEach(entry => {
-                const contentLines = (entry.contentLines || []).filter(Boolean);
-                if (contentLines.length) {
-                    contentLines.forEach(line => {
-                        allLines.push(line);
-                    });
-                }
+                const entryLines = String(entry.raw || '')
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean);
+                entryLines.forEach(line => {
+                    if (mentionLineRegex.test(line)) {
+                        return;
+                    }
+                    allLines.push(line);
+                });
             });
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
@@ -2269,14 +2354,20 @@ function formatCnjDigits(raw) {
             notes.forEach(note => {
                 $notesColumn.append(note);
             });
-            if (options.cnj) {
-                $notesColumn.attr('data-analise-cnj', options.cnj);
+            const observationTarget = options.observationTarget || options.cnj;
+            if (observationTarget) {
+                $notesColumn.attr('data-analise-cnj', observationTarget);
             }
             if (Array.isArray(options.contracts) && options.contracts.length) {
                 $notesColumn.attr('data-analise-contracts', options.contracts.join(','));
             }
             if (options.mentionType) {
                 $notesColumn.attr('data-analise-mention-type', options.mentionType);
+            }
+            const mentionLabel =
+                options.mentionLabel || (options.mentionType === 'nj' ? observationTarget : '');
+            if (mentionLabel) {
+                $notesColumn.attr('data-analise-mention-label', mentionLabel);
             }
             $detailsRow.append($notesColumn);
         }
@@ -2730,9 +2821,10 @@ function formatCnjDigits(raw) {
                         $detailsRow,
                         [$noteElement, $supervisorNoteElement],
                         {
-                            cnj: snapshot.cnj,
+                            observationTarget: snapshot.observationTarget,
                             contracts: snapshot.contractIds,
-                            mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
+                            mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
+                            mentionLabel: snapshot.observationTarget
                         }
                     );
                     $bodyVinculado.append($detailsRow);
@@ -2916,9 +3008,10 @@ function formatCnjDigits(raw) {
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
             const $supervisorNoteElement = createSupervisorNoteElement(processo);
             appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
-                cnj: snapshot.cnj,
+                observationTarget: snapshot.observationTarget,
                 contracts: snapshot.contractIds,
-                mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
+                mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
+                mentionLabel: snapshot.observationTarget
             });
             $body.append($detailsRow);
 
@@ -2970,7 +3063,11 @@ function formatCnjDigits(raw) {
                     .map(id => id.trim())
                     .filter(Boolean);
                 const mentionType = $column.attr('data-analise-mention-type') || 'cnj';
-                const entries = getObservationEntriesForCnj(cnj, contracts, { mentionType });
+                const mentionLabel = $column.attr('data-analise-mention-label') || '';
+                const entries = getObservationEntriesForCnj(cnj, contracts, {
+                    mentionType,
+                    mentionLabel
+                });
                 const $newObservation = createObservationNoteElement(entries);
                 $column.find('.analise-observation-note').remove();
                 if ($newObservation) {
@@ -3789,6 +3886,31 @@ function formatCnjDigits(raw) {
             card.nj_index = nextIndex;
             card.nj_label = `#NJ${nextIndex}`;
             return nextIndex;
+        }
+
+        function markNjObservationAsDeleted(label) {
+            const normalized = String(label || '').trim();
+            if (!normalized) {
+                return;
+            }
+            const existing = getNotebookText();
+            if (!existing) {
+                return;
+            }
+            const escapedLabel = normalized.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const regex = new RegExp(`(^.*${escapedLabel}.*$)`, 'mi');
+            if (!regex.test(existing)) {
+                return;
+            }
+            const updated = existing.replace(regex, match => {
+                if (/Análise Deletada/i.test(match)) {
+                    return match;
+                }
+                return `${match} — Análise Deletada`;
+            });
+            if (updated !== existing) {
+                dispatchObservationUpdate(updated);
+            }
         }
 
         function mentionProcessoInNotas(cardData) {

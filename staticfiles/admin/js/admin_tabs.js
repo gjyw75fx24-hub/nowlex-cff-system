@@ -121,6 +121,38 @@ window.addEventListener('load', function() {
             notebookTextarea.value = saved;
             const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
             notebookTextarea.addEventListener('input', save);
+            const ensureBlankLineBeforeMention = (text, cursorPos) => {
+                const prefixSegment = typeof cursorPos === 'number'
+                    ? text.slice(0, cursorPos)
+                    : text;
+                const normalized = prefixSegment.replace(/[ \t\r]+$/g, '');
+                if (!normalized.trim()) {
+                    return '';
+                }
+                if (normalized.endsWith('\n\n')) {
+                    return '';
+                }
+                if (normalized.endsWith('\n')) {
+                    return '\n';
+                }
+                return '\n\n';
+            };
+
+            const formatMentionForInsertion = (value, textarea, cursorPos) => {
+                if (!value) {
+                    return '';
+                }
+                const trimmed = value.trim();
+                if (!trimmed) {
+                    return '';
+                }
+                const separator = ensureBlankLineBeforeMention(
+                    textarea ? textarea.value : '',
+                    cursorPos
+                );
+                return `${separator}${trimmed}\n\n`;
+            };
+
             const insertAtCursor = (textarea, value) => {
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
@@ -135,7 +167,11 @@ window.addEventListener('load', function() {
                 if (!text || !notebookTextarea) {
                     return;
                 }
-                const mention = `${text.trim()}\n\n`;
+                const mention = formatMentionForInsertion(
+                    text,
+                    notebookTextarea,
+                    notebookTextarea.selectionStart
+                );
                 if (!mention.trim()) {
                     return;
                 }

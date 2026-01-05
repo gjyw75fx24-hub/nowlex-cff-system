@@ -1978,6 +1978,32 @@ function formatCnjDigits(raw) {
             return SUPERVISION_STATUS_SEQUENCE[nextIndex];
         }
 
+        function splitNotebookEntries(rawNotes) {
+            if (!rawNotes) {
+                return [];
+            }
+            const lines = rawNotes.split(/\r?\n/);
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
+            const segments = [];
+            let current = [];
+            const commitCurrent = () => {
+                if (current.some(line => line.trim())) {
+                    segments.push(current.join('\n'));
+                }
+                current = [];
+            };
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                const isMention = trimmed && mentionLineRegex.test(trimmed);
+                if (isMention && current.some(entryLine => entryLine.trim())) {
+                    commitCurrent();
+                }
+                current.push(line);
+            });
+            commitCurrent();
+            return segments.map(segment => segment.trim()).filter(Boolean);
+        }
+
         function getObservationEntriesForCnj(cnj, relatedContracts, options = {}) {
             if (!cnj && !options.mentionType) {
                 return [];
@@ -1986,14 +2012,13 @@ function formatCnjDigits(raw) {
             if (!rawNotes.trim()) {
                 return [];
             }
-            const mentionType = options.mentionType || 'cnj';
-            const normalizedTarget = String(cnj || '').trim();
-            const normalizedCnjDigits =
-                mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
-            const entries = rawNotes
-                .split(/\n{2,}/)
-                .map(entry => entry.trim())
-                .filter(Boolean);
+        const mentionType = options.mentionType || 'cnj';
+        const normalizedTarget = String(cnj || '').trim();
+        const mentionLabelRaw = String(options.mentionLabel || '').trim();
+        const mentionLabelNormalized = mentionLabelRaw ? mentionLabelRaw.toLowerCase() : '';
+        const normalizedCnjDigits =
+            mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
+            const entries = splitNotebookEntries(rawNotes);
 
             function parseRawEntry(entryRaw) {
                 const lines = entryRaw
@@ -2062,7 +2087,7 @@ function formatCnjDigits(raw) {
                     }
                 });
             } else {
-                const targetLabel = (normalizedTarget || '').trim().toLowerCase();
+                const targetLabel = mentionLabelNormalized || (normalizedTarget || '').trim().toLowerCase();
                 if (targetLabel) {
                     matches = entriesToReview.filter(entry =>
                         (entry.mentionLines || []).some(line =>
@@ -2347,17 +2372,19 @@ function formatCnjDigits(raw) {
             const $noteContent = $('<div class="analise-observation-content"></div>');
             $noteContent.append('<strong>Observações</strong>');
             const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
             const allLines = [];
             populatedEntries.forEach(entry => {
-                const contentLines = (entry.contentLines || []).filter(Boolean);
-                if (contentLines.length) {
-                    contentLines.forEach(line => allLines.push(line));
-                } else if (entry.mentionLines && entry.mentionLines.length) {
-                    entry.mentionLines
-                        .map(line => line.trim())
-                        .filter(Boolean)
-                        .forEach(line => allLines.push(line));
-                }
+                const entryLines = String(entry.raw || '')
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean);
+                entryLines.forEach(line => {
+                    if (mentionLineRegex.test(line)) {
+                        return;
+                    }
+                    allLines.push(line);
+                });
             });
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
@@ -2381,14 +2408,20 @@ function formatCnjDigits(raw) {
             notes.forEach(note => {
                 $notesColumn.append(note);
             });
-            if (options.cnj) {
-                $notesColumn.attr('data-analise-cnj', options.cnj);
+            const observationTarget = options.observationTarget || options.cnj;
+            if (observationTarget) {
+                $notesColumn.attr('data-analise-cnj', observationTarget);
             }
             if (Array.isArray(options.contracts) && options.contracts.length) {
                 $notesColumn.attr('data-analise-contracts', options.contracts.join(','));
             }
             if (options.mentionType) {
                 $notesColumn.attr('data-analise-mention-type', options.mentionType);
+            }
+            const mentionLabel =
+                options.mentionLabel || (options.mentionType === 'nj' ? observationTarget : '');
+            if (mentionLabel) {
+                $notesColumn.attr('data-analise-mention-label', mentionLabel);
             }
             $detailsRow.append($notesColumn);
         }
@@ -2725,6 +2758,15 @@ function formatCnjDigits(raw) {
                     $editBtn.attr('data-cnj', snapshot.cnj || '');
                     $editBtn.attr('data-visual-index', String(cardIndex));
                     $deleteBtn.on('click', function () {
+                        const tryMarkDeletion = (card) => {
+                            if (card && card.nj_label && isCardNonJudicialized(card)) {
+                                markNjObservationAsDeleted(card.nj_label);
+                            }
+                        };
+                        const targetCard = Array.isArray(userResponses.processos_vinculados)
+                            ? userResponses.processos_vinculados[cardIndex]
+                            : null;
+                        tryMarkDeletion(targetCard);
                         if (Array.isArray(userResponses.processos_vinculados)) {
                             userResponses.processos_vinculados.splice(cardIndex, 1);
                         }
@@ -2732,8 +2774,10 @@ function formatCnjDigits(raw) {
                         const attrIndex = $(this).attr('data-card-index');
                         const targetIndex = attrIndex ? Number(attrIndex) : null;
                         if (Number.isFinite(targetIndex) && savedCards[targetIndex]) {
+                            tryMarkDeletion(savedCards[targetIndex]);
                             savedCards.splice(targetIndex, 1);
                         } else if (savedCards[cardIndex]) {
+                            tryMarkDeletion(savedCards[cardIndex]);
                             savedCards.splice(cardIndex, 1);
                         }
                         if (Array.isArray(userResponses.selected_analysis_cards)) {
@@ -2842,9 +2886,10 @@ function formatCnjDigits(raw) {
                         $detailsRow,
                         [$noteElement, $supervisorNoteElement],
                         {
-                            cnj: snapshot.observationTarget,
+                            observationTarget: snapshot.observationTarget,
                             contracts: snapshot.contractIds,
-                            mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
+                            mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
+                            mentionLabel: snapshot.observationTarget
                         }
                     );
                     $bodyVinculado.append($detailsRow);
@@ -3028,9 +3073,10 @@ function formatCnjDigits(raw) {
             const $noteElement = createObservationNoteElement(snapshot.observationEntries);
             const $supervisorNoteElement = createSupervisorNoteElement(processo);
             appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
-                cnj: snapshot.observationTarget,
+                observationTarget: snapshot.observationTarget,
                 contracts: snapshot.contractIds,
-                mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj'
+                mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
+                mentionLabel: snapshot.observationTarget
             });
             $body.append($detailsRow);
 
@@ -3082,7 +3128,11 @@ function formatCnjDigits(raw) {
                     .map(id => id.trim())
                     .filter(Boolean);
                 const mentionType = $column.attr('data-analise-mention-type') || 'cnj';
-                const entries = getObservationEntriesForCnj(cnj, contracts, { mentionType });
+                const mentionLabel = $column.attr('data-analise-mention-label') || '';
+                const entries = getObservationEntriesForCnj(cnj, contracts, {
+                    mentionType,
+                    mentionLabel
+                });
                 const $newObservation = createObservationNoteElement(entries);
                 $column.find('.analise-observation-note').remove();
                 if ($newObservation) {
@@ -3901,6 +3951,31 @@ function formatCnjDigits(raw) {
             card.nj_index = nextIndex;
             card.nj_label = `#NJ${nextIndex}`;
             return nextIndex;
+        }
+
+        function markNjObservationAsDeleted(label) {
+            const normalized = String(label || '').trim();
+            if (!normalized) {
+                return;
+            }
+            const existing = getNotebookText();
+            if (!existing) {
+                return;
+            }
+            const escapedLabel = normalized.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const regex = new RegExp(`(^.*${escapedLabel}.*$)`, 'mi');
+            if (!regex.test(existing)) {
+                return;
+            }
+            const updated = existing.replace(regex, match => {
+                if (/Análise Deletada/i.test(match)) {
+                    return match;
+                }
+                return `${match} — Análise Deletada`;
+            });
+            if (updated !== existing) {
+                dispatchObservationUpdate(updated);
+            }
         }
 
         function mentionProcessoInNotas(cardData) {
