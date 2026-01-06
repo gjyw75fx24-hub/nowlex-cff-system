@@ -242,8 +242,60 @@ document.addEventListener('DOMContentLoaded', function() {
                     <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
                 </div>
                 <div class="agenda-panel__body">
-                    <div class="agenda-panel__grid">
-                        <p class="agenda-panel__placeholder">Quadro em construção. Aqui aparecerão os meses e os indicadores T/P/B.</p>
+                    <div class="agenda-panel__calendar-wrapper">
+                        <div class="agenda-panel__calendar-header">
+                            <strong class="agenda-panel__month-title">Janeiro 2025</strong>
+                            <div class="agenda-panel__month-switches">
+                                <button type="button">Jan</button>
+                                <button type="button">Fev</button>
+                                <button type="button">Mar</button>
+                                <button type="button">Abr</button>
+                                <button type="button">Mai</button>
+                                <button type="button">Jun</button>
+                                <button type="button">Jul</button>
+                                <button type="button">Ago</button>
+                                <button type="button">Set</button>
+                                <button type="button">Out</button>
+                                <button type="button">Nov</button>
+                                <button type="button">Dez</button>
+                            </div>
+                        </div>
+                        <div class="agenda-panel__calendar-inner">
+                            <div class="agenda-panel__calendar-grid">
+                                <div class="agenda-panel__weekday">Domingo</div>
+                                <div class="agenda-panel__weekday">Segunda</div>
+                                <div class="agenda-panel__weekday">Terça</div>
+                                <div class="agenda-panel__weekday">Quarta</div>
+                                <div class="agenda-panel__weekday">Quinta</div>
+                                <div class="agenda-panel__weekday">Sexta</div>
+                                <div class="agenda-panel__weekday">Sábado</div>
+                                <div class="agenda-panel__day">
+                                    <div class="agenda-panel__day-number">1</div>
+                                    <div class="agenda-panel__day-tags">
+                                        <span class="agenda-panel__day-tag" data-type="T">T</span>
+                                    </div>
+                                </div>
+                                <div class="agenda-panel__day">
+                                    <div class="agenda-panel__day-number">2</div>
+                                    <div class="agenda-panel__day-tags">
+                                        <span class="agenda-panel__day-tag" data-type="P">P</span>
+                                    </div>
+                                </div>
+                                <!-- More days placeholder -->
+                            </div>
+                            <div class="agenda-panel__details">
+                                <div class="agenda-panel__details-list">
+                                    <p class="agenda-panel__details-title">Eventos do dia</p>
+                                    <div class="agenda-panel__details-list-inner">
+                                        <p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>
+                                    </div>
+                                </div>
+                                <div class="agenda-panel__details-card">
+                                    <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                                    <p class="agenda-panel__details-card-body">Selecione um item para visualizar mais informações.</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="agenda-panel__footer">
@@ -290,6 +342,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 cycleBtn.dataset.months = 1;
                 cycleBtn.textContent = '1 Calendário';
             }
+        });
+        const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
+        const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        overlay.querySelectorAll('.agenda-panel__day-tag').forEach(tag => {
+            tag.addEventListener('click', () => {
+                const type = tag.dataset.type;
+                detailList.innerHTML = '';
+                for (let i = 0; i < 3; i += 1) {
+                    const entry = document.createElement('div');
+                    entry.className = 'agenda-panel__details-item';
+                    entry.tabIndex = 0;
+                    entry.textContent = `${type === 'T' ? 'Tarefa' : 'Prazo'} ${i + 1}`;
+                    entry.addEventListener('click', () => {
+                        detailCardBody.textContent = `Detalhes de ${entry.textContent}: Lorem ipsum dolor sit amet.`;
+                    });
+                    detailList.appendChild(entry);
+                }
+            });
         });
     };
 
