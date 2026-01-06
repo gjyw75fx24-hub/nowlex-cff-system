@@ -269,6 +269,10 @@ document.addEventListener('DOMContentLoaded', function() {
             cycleBtn.dataset.months = next;
             const label = `${next} Calendário${next === 1 ? '' : 's'}`;
             cycleBtn.textContent = label;
+            if (modeButton.dataset.mode !== 'monthly' && next !== 1) {
+                modeButton.dataset.mode = 'monthly';
+                modeButton.textContent = 'Mensal';
+            }
         });
         modeButton.addEventListener('click', () => {
             const sequence = ['monthly', 'weekly', 'daily'];
@@ -282,6 +286,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const next = sequence[(index + 1) % sequence.length];
             modeButton.dataset.mode = next;
             modeButton.textContent = labels[next];
+            if (next !== 'monthly') {
+                cycleBtn.dataset.months = 1;
+                cycleBtn.textContent = '1 Calendário';
+            }
         });
     };
 
