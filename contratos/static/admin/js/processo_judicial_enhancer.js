@@ -210,6 +210,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p class="agenda-placeholder-card__title">Agenda Geral</p>
                     <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
                     <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
+                    <div class="agenda-placeholder-card__actions">
+                        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
+                        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="prazos">Prazos</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -217,6 +221,120 @@ document.addEventListener('DOMContentLoaded', function() {
         processoRow.parentNode.insertBefore(placeholderRow, processoRow.nextSibling);
     };
     insertAgendaSidebarPlaceholder();
+
+    const createAgendaPanel = () => {
+        if (document.querySelector('.agenda-panel-overlay')) {
+            return;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'agenda-panel-overlay';
+        overlay.innerHTML = `
+            <div class="agenda-panel">
+                <div class="agenda-panel__header">
+                    <div>
+                        <span class="agenda-panel__badge">Agenda Geral</span>
+                        <p class="agenda-panel__subtitle">Expandida para duas telas ou modal.</p>
+                    </div>
+                    <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
+                </div>
+                <div class="agenda-panel__controls">
+                    <div class="agenda-panel__view-options">
+                        <button type="button" data-months="1" class="active">1 mês</button>
+                        <button type="button" data-months="2">2 meses</button>
+                        <button type="button" data-months="3">3 meses</button>
+                    </div>
+                    <div class="agenda-panel__mode-options">
+                        <button type="button" data-mode="monthly" class="active">Mensal</button>
+                        <button type="button" data-mode="weekly">Semanal</button>
+                        <button type="button" data-mode="daily">Diário</button>
+                    </div>
+                </div>
+                <div class="agenda-panel__body">
+                    <div class="agenda-panel__grid">
+                        <p class="agenda-panel__placeholder">Quadro em construção. Aqui aparecerão os meses e os indicadores T/P/B.</p>
+                    </div>
+                </div>
+                <div class="agenda-panel__footer">
+                    <button type="button" class="agenda-panel__form-btn" data-form="tarefas">Tarefas</button>
+                    <button type="button" class="agenda-panel__form-btn" data-form="prazos">Prazos</button>
+                    <button type="button" class="agenda-panel__split">Abrir em tela dividida</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const closeButton = overlay.querySelector('.agenda-panel__close');
+        closeButton.addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                overlay.remove();
+            }
+        });
+    };
+
+    const createAgendaFormModal = (type) => {
+        if (document.querySelector(`.agenda-form-modal[data-form="${type}"]`)) {
+            return;
+        }
+        const modal = document.createElement('div');
+        modal.className = 'agenda-form-modal';
+        modal.dataset.form = type;
+        modal.innerHTML = `
+            <div class="agenda-form-modal__card">
+                <div class="agenda-form-modal__header">
+                    <strong>${type === 'tarefas' ? 'Nova Tarefa' : 'Novo Prazo'}</strong>
+                    <button type="button" class="agenda-form-modal__close">×</button>
+                </div>
+                <div class="agenda-form-modal__body">
+                    <label>Contrato / processo
+                        <input type="text" placeholder="Informe o contrato ou processo">
+                    </label>
+                    <label>${type === 'tarefas' ? 'Descrição' : 'Título'}
+                        <textarea placeholder="Digite ${type === 'tarefas' ? 'a descrição da tarefa' : 'o título do prazo'}"></textarea>
+                    </label>
+                    <div class="agenda-form-modal__row">
+                        <label>Data
+                            <input type="date">
+                        </label>
+                        <label>Hora
+                            <input type="time" step="600">
+                        </label>
+                    </div>
+                    <label>Responsável
+                        <input type="text" placeholder="Selecione responsável">
+                    </label>
+                </div>
+                <div class="agenda-form-modal__footer">
+                    <button type="button" class="agenda-form-modal__submit">Salvar</button>
+                    <button type="button" class="agenda-form-modal__cancel">Cancelar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('.agenda-form-modal__close').addEventListener('click', () => modal.remove());
+        modal.querySelector('.agenda-form-modal__cancel').addEventListener('click', () => modal.remove());
+    };
+
+    const openAgendaPanel = () => {
+        createAgendaPanel();
+    };
+
+    const openAgendaForm = (type) => {
+        createAgendaFormModal(type);
+    };
+
+    const attachAgendaActions = () => {
+        const placeholder = document.querySelector('.agenda-placeholder-card');
+        if (!placeholder) return;
+        placeholder.addEventListener('click', () => openAgendaPanel());
+        placeholder.querySelectorAll('[data-agenda-action]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const type = btn.getAttribute('data-agenda-action');
+                openAgendaForm(type);
+            });
+        });
+    };
+    attachAgendaActions();
 
     const getAndamentosActionBar = () => {
         const group = document.getElementById('andamentos-group');

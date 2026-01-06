@@ -680,3 +680,194 @@ a.historylink {
     text-indent: 0;
     transform: none;
 }
+
+.agenda-panel-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 20, 42, 0.65);
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.agenda-panel {
+    width: min(95vw, 1100px);
+    max-height: 90vh;
+    background: #f8fbff;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+.agenda-panel__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 24px;
+    border-bottom: 1px solid #e0e7f1;
+}
+.agenda-panel__badge {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1b3a60;
+}
+.agenda-panel__subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: #586b88;
+}
+.agenda-panel__close {
+    background: transparent;
+    border: none;
+    font-size: 28px;
+    color: #1b3a60;
+    cursor: pointer;
+}
+.agenda-panel__controls {
+    padding: 12px 24px;
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+.agenda-panel__view-options,
+.agenda-panel__mode-options {
+    display: flex;
+    gap: 8px;
+}
+.agenda-panel__view-options button,
+.agenda-panel__mode-options button {
+    padding: 6px 14px;
+    border-radius: 18px;
+    border: none;
+    background: #e3ecfa;
+    color: #1d3a5a;
+    cursor: pointer;
+    font-size: 13px;
+}
+.agenda-panel__view-options button.active,
+.agenda-panel__mode-options button.active {
+    background: #1158a1;
+    color: #fff;
+}
+.agenda-panel__body {
+    flex: 1;
+    padding: 0 24px;
+    overflow: auto;
+}
+.agenda-panel__grid {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #d2dce8;
+    min-height: 260px;
+    display: grid;
+    place-items: center;
+}
+.agenda-panel__placeholder {
+    color: #6c7a92;
+}
+.agenda-panel__footer {
+    padding: 14px 24px 18px;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    border-top: 1px solid #e0e7f1;
+}
+.agenda-panel__form-btn,
+.agenda-panel__split {
+    border-radius: 10px;
+    padding: 8px 16px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+}
+.agenda-panel__form-btn {
+    background: #0f4f92;
+    color: #fff;
+}
+.agenda-panel__split {
+    background: #d7e5fb;
+    color: #1d3a5a;
+}
+.agenda-form-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(21, 33, 60, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    z-index: 2100;
+}
+.agenda-form-modal__card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 24px;
+    width: min(420px, 90vw);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #cdd6e6;
+}
+.agenda-form-modal__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+.agenda-form-modal__close {
+    background: #e2e6ef;
+    border: none;
+    border-radius: 999px;
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
+    cursor: pointer;
+}
+.agenda-form-modal__body label {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #44546b;
+}
+.agenda-form-modal__body input,
+.agenda-form-modal__body textarea {
+    width: 100%;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #bdc5d5;
+    margin-top: 4px;
+    font-size: 14px;
+    font-family: inherit;
+}
+.agenda-form-modal__body textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+.agenda-form-modal__row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+.agenda-form-modal__footer {
+    margin-top: 14px;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+.agenda-form-modal__submit {
+    background: #0072cc;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+}
+.agenda-form-modal__cancel {
+    background: transparent;
+    border: 1px solid #cbd0dd;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+}
