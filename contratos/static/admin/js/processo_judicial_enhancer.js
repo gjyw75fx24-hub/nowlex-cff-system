@@ -238,16 +238,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
                 </div>
                 <div class="agenda-panel__controls">
-                    <div class="agenda-panel__view-options">
-                        <button type="button" data-months="1" class="active">1 mês</button>
-                        <button type="button" data-months="2">2 meses</button>
-                        <button type="button" data-months="3">3 meses</button>
-                    </div>
-                    <div class="agenda-panel__mode-options">
-                        <button type="button" data-mode="monthly" class="active">Mensal</button>
-                        <button type="button" data-mode="weekly">Semanal</button>
-                        <button type="button" data-mode="daily">Diário</button>
-                    </div>
+                    <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
+                    <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
                 </div>
                 <div class="agenda-panel__body">
                     <div class="agenda-panel__grid">
@@ -263,11 +255,33 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         document.body.appendChild(overlay);
         const closeButton = overlay.querySelector('.agenda-panel__close');
+        const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
+        const modeButton = overlay.querySelector('.agenda-panel__cycle-mode');
         closeButton.addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) {
                 overlay.remove();
             }
+        });
+        cycleBtn.addEventListener('click', () => {
+            const current = Number(cycleBtn.dataset.months);
+            const next = current === 3 ? 1 : current + 1;
+            cycleBtn.dataset.months = next;
+            const label = `${next} Calendário${next === 1 ? '' : 's'}`;
+            cycleBtn.textContent = label;
+        });
+        modeButton.addEventListener('click', () => {
+            const sequence = ['monthly', 'weekly', 'daily'];
+            const labels = {
+                monthly: 'Mensal',
+                weekly: 'Semanal',
+                daily: 'Diário',
+            };
+            const current = modeButton.dataset.mode;
+            const index = sequence.indexOf(current);
+            const next = sequence[(index + 1) % sequence.length];
+            modeButton.dataset.mode = next;
+            modeButton.textContent = labels[next];
         });
     };
 

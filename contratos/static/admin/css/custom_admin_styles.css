@@ -748,26 +748,21 @@ a.historylink {
 .agenda-panel__controls {
     padding: 12px 24px;
     display: flex;
-    gap: 18px;
+    gap: 12px;
     flex-wrap: wrap;
 }
-.agenda-panel__view-options,
-.agenda-panel__mode-options {
-    display: flex;
-    gap: 8px;
-}
-.agenda-panel__view-options button,
-.agenda-panel__mode-options button {
-    padding: 6px 14px;
-    border-radius: 18px;
+.agenda-panel__cycle-btn,
+.agenda-panel__cycle-mode {
     border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
     background: #e3ecfa;
     color: #1d3a5a;
     cursor: pointer;
-    font-size: 13px;
+    font-weight: 600;
 }
-.agenda-panel__view-options button.active,
-.agenda-panel__mode-options button.active {
+.agenda-panel__cycle-btn.active,
+.agenda-panel__cycle-mode.active {
     background: #1158a1;
     color: #fff;
 }
