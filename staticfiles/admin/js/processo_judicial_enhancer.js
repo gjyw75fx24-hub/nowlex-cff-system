@@ -512,11 +512,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         modeButton.addEventListener('click', () => {
-            const sequence = ['monthly', 'weekly', 'daily'];
+            const sequence = ['monthly', 'weekly'];
             const labels = {
                 monthly: 'Mensal',
                 weekly: 'Semanal',
-                daily: 'Diário',
             };
             const current = modeButton.dataset.mode || 'monthly';
             const index = sequence.indexOf(current);

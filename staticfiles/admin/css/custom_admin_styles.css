@@ -721,6 +721,9 @@ a.historylink {
     box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
     overflow: hidden;
 }
+.agenda-panel--weekly .agenda-panel {
+    max-height: 65vh;
+}
 .agenda-panel__header {
     display: flex;
     justify-content: space-between;
@@ -776,6 +779,11 @@ a.historylink {
     flex-direction: column;
     gap: 14px;
 }
+.agenda-panel--weekly .agenda-panel__calendar-wrapper {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 8px 16px 12px;
+}
 .agenda-panel__calendar-header {
     display: flex;
     justify-content: space-between;
@@ -810,6 +818,9 @@ a.historylink {
     grid-template-columns: 3fr 2fr;
     gap: 16px;
 }
+.agenda-panel--weekly .agenda-panel__calendar-inner {
+    gap: 10px;
+}
 .agenda-panel__calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -824,10 +835,17 @@ a.historylink {
     row-gap: 4px;
     margin-top: 0;
 }
+.agenda-panel--weekly .agenda-panel__calendar-grid {
+    width: min(650px, 75vw);
+    max-width: 650px;
+}
 .agenda-panel__calendar-grid-wrapper {
     position: relative;
     display: flex;
     align-items: center;
+}
+.agenda-panel--weekly .agenda-panel__calendar-grid-wrapper {
+    justify-content: center;
 }
 .agenda-panel__calendar-nav {
     position: absolute;
@@ -860,6 +878,9 @@ a.historylink {
 }
 .agenda-panel__calendar-grid--weekly .agenda-panel__weekday {
     color: #45506d;
+}
+.agenda-panel--weekly .agenda-panel__calendar-grid {
+    grid-auto-rows: minmax(70px, 110px);
 }
 .agenda-panel__weekday {
     font-size: 12px;
