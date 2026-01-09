@@ -269,6 +269,10 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     });
     const sampleCalendarDays = createSampleCalendarDays();
+    sampleCalendarDays.forEach(dayInfo => {
+        normalizeEntryMetadata(dayInfo, 'T');
+        normalizeEntryMetadata(dayInfo, 'P');
+    });
 
     const populateDetailEntries = (dayData, type, detailList, detailCardBody) => {
         const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
@@ -300,6 +304,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 event.dataTransfer.effectAllowed = 'move';
             });
             detailList.appendChild(entry);
+        });
+    };
+
+    const normalizeEntryMetadata = (dayInfo, type) => {
+        const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+        if (!list) return;
+        list.forEach((entry, index) => {
+            const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
+            entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
+            entry.label = `${prefix} ${dayInfo.day}.${index + 1}`;
+            entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
         });
     };
 
@@ -399,37 +414,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
             });
             const setupDropZone = () => {
-                const handleDrop = (event) => {
-                    event.preventDefault();
-                    dayCell.classList.remove('agenda-panel__day--drag-over');
-                    const payload = event.dataTransfer.getData('text/plain');
-                    if (!payload) return;
-                    let parsed;
-                    try {
-                        parsed = JSON.parse(payload);
-                    } catch {
-                        return;
-                    }
-                    if (!parsed || parsed.day === dayInfo.day) return;
-                    const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
-                    const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
-                    if (!sourceDay) {
-                        return;
-                    }
-                    if (parsed.source === 'detail') {
-                        const sourceList = sourceDay[typeKey];
-                        const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
-                        if (entryIndex === -1) return;
-                        const [movedEntry] = sourceList.splice(entryIndex, 1);
-                        dayInfo[typeKey].push(movedEntry);
-                    } else if (parsed.source === 'calendar') {
-                        const transferred = sourceDay[typeKey];
-                        if (!transferred.length) return;
-                        dayInfo[typeKey].push(...transferred);
-                        sourceDay[typeKey] = [];
-                    }
-                    rerender && rerender();
-                };
+            const handleDrop = (event) => {
+                event.preventDefault();
+                dayCell.classList.remove('agenda-panel__day--drag-over');
+                const payload = event.dataTransfer.getData('text/plain');
+                if (!payload) return;
+                let parsed;
+                try {
+                    parsed = JSON.parse(payload);
+                } catch {
+                    return;
+                }
+                if (!parsed || parsed.day === dayInfo.day) return;
+                const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
+                const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
+                if (!sourceDay) {
+                    return;
+                }
+                if (parsed.source === 'detail') {
+                    const sourceList = sourceDay[typeKey];
+                    const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
+                    if (entryIndex === -1) return;
+                    const [movedEntry] = sourceList.splice(entryIndex, 1);
+                    dayInfo[typeKey].push(movedEntry);
+                    normalizeEntryMetadata(sourceDay, parsed.type);
+                    normalizeEntryMetadata(dayInfo, parsed.type);
+                } else if (parsed.source === 'calendar') {
+                    const transferred = sourceDay[typeKey];
+                    if (!transferred.length) return;
+                    dayInfo[typeKey].push(...transferred);
+                    sourceDay[typeKey] = [];
+                    normalizeEntryMetadata(sourceDay, parsed.type);
+                    normalizeEntryMetadata(dayInfo, parsed.type);
+                }
+                rerender && rerender();
+            };
                 dayCell.addEventListener('dragover', (event) => {
                     event.preventDefault();
                     dayCell.classList.add('agenda-panel__day--drag-over');
