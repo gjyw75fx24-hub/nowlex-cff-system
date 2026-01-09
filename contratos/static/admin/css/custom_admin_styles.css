@@ -888,6 +888,10 @@ a.historylink {
     border-color: #bfc8df;
     background: #f4f6fb;
 }
+.agenda-panel__day--drag-over {
+    border-color: #7c88d0;
+    background: #e4e7ff;
+}
 .agenda-panel__day--active {
     border-color: #4a63cf;
     background: #dfe4ff;

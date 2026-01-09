@@ -177,7 +177,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody);
+        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null);
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender) => {
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -335,35 +335,74 @@ document.addEventListener('DOMContentLoaded', function() {
                 gridElement.appendChild(dayCell);
                 return;
             }
+            dayCell.dataset.day = dayInfo.day;
             const number = document.createElement('div');
             number.className = 'agenda-panel__day-number';
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
-            if (dayInfo.tasksT.length) {
+            const attachTag = (entryData, type) => {
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
-                tag.dataset.type = 'T';
-                tag.textContent = 'T';
+                tag.dataset.type = type;
+                tag.dataset.entryId = entryData.id;
+                tag.textContent = type;
+                tag.draggable = true;
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody);
                     setActiveDay(dayCell);
                 });
-                tagsWrapper.appendChild(tag);
-            }
-            if (dayInfo.tasksP.length) {
-                const tag = document.createElement('span');
-                tag.className = 'agenda-panel__day-tag';
-                tag.dataset.type = 'P';
-                tag.textContent = 'P';
-                tag.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
-                    setActiveDay(dayCell);
+                tag.addEventListener('dragstart', (event) => {
+                    event.dataTransfer.setData('text/plain', JSON.stringify({
+                        day: dayInfo.day,
+                        type,
+                        entry: entryData,
+                    }));
+                    event.dataTransfer.effectAllowed = 'move';
+                });
+                tag.addEventListener('dragend', () => {
+                    document.querySelectorAll('.agenda-panel__day--drag-over').forEach(cell => {
+                        cell.classList.remove('agenda-panel__day--drag-over');
+                    });
                 });
                 tagsWrapper.appendChild(tag);
-            }
+            };
+            dayInfo.tasksT.forEach(entry => attachTag(entry, 'T'));
+            dayInfo.tasksP.forEach(entry => attachTag(entry, 'P'));
+            const setupDragEvents = () => {
+                const handleDrop = (event) => {
+                    event.preventDefault();
+                    dayCell.classList.remove('agenda-panel__day--drag-over');
+                    const payload = event.dataTransfer.getData('text/plain');
+                    if (!payload) return;
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(payload);
+                    } catch {
+                        return;
+                    }
+                    if (!parsed || parsed.day === dayInfo.day) return;
+                    const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
+                    if (!sourceDay) return;
+                    const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
+                    const sourceList = sourceDay[typeKey];
+                    const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
+                    if (entryIndex === -1) return;
+                    const [movedEntry] = sourceList.splice(entryIndex, 1);
+                    dayInfo[typeKey].push(movedEntry);
+                    rerender && rerender();
+                };
+                dayCell.addEventListener('dragover', (event) => {
+                    event.preventDefault();
+                    dayCell.classList.add('agenda-panel__day--drag-over');
+                });
+                dayCell.addEventListener('dragleave', () => {
+                    dayCell.classList.remove('agenda-panel__day--drag-over');
+                });
+                dayCell.addEventListener('drop', handleDrop);
+            };
+            setupDragEvents();
             dayCell.addEventListener('click', () => {
                 if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
@@ -481,7 +520,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const renderCalendar = () => {
             updateMonthTitle();
             setActiveMonthButton(calendarState.monthIndex);
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState);
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar);
         };
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
