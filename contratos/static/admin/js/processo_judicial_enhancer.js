@@ -244,6 +244,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return Math.max(0, Math.min(offset, maxOffset));
     };
 
+    const normalizeEntryMetadata = (dayInfo, type) => {
+        const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+        if (!list) return;
+        list.forEach((entry, index) => {
+            const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
+            entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
+            entry.label = `${prefix} ${dayInfo.day}.${index + 1}`;
+            entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
+        });
+    };
+
     const createSampleCalendarDays = () => Array.from({ length: 31 }, (_, index) => {
         const day = index + 1;
         const hasT = day % 3 === 0;
@@ -304,17 +315,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 event.dataTransfer.effectAllowed = 'move';
             });
             detailList.appendChild(entry);
-        });
-    };
-
-    const normalizeEntryMetadata = (dayInfo, type) => {
-        const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
-        if (!list) return;
-        list.forEach((entry, index) => {
-            const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
-            entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = `${prefix} ${dayInfo.day}.${index + 1}`;
-            entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
         });
     };
 
