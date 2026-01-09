@@ -227,6 +227,22 @@ document.addEventListener('DOMContentLoaded', function() {
     insertAgendaSidebarPlaceholder();
 
     const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const getMonthLabel = (state) => {
+        const monthName = MONTHS[state.monthIndex % MONTHS.length];
+        if (state.mode === 'weekly') {
+            const weekNumber = Math.floor(state.weekOffset / 7) + 1;
+            return `Semana ${weekNumber} · ${monthName} 2025`;
+        }
+        return `${monthName} 2025`;
+    };
+    const clampWeekOffset = (offset) => {
+        if (sampleCalendarDays.length <= 7) {
+            return 0;
+        }
+        const maxOffset = sampleCalendarDays.length - 7;
+        return Math.max(0, Math.min(offset, maxOffset));
+    };
 
     const createSampleCalendarDays = () => Array.from({ length: 31 }, (_, index) => {
         const day = index + 1;
@@ -274,8 +290,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state) => {
         gridElement.innerHTML = '';
+        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
+        detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+        gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', state.mode === 'weekly');
         let activeDayCell = null;
         const setActiveDay = (cell) => {
             if (activeDayCell) {
@@ -292,9 +311,30 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
-        sampleCalendarDays.forEach((dayInfo, index) => {
+        const baseDays = state.mode === 'weekly'
+            ? sampleCalendarDays.slice(state.weekOffset, state.weekOffset + 7)
+            : sampleCalendarDays;
+        const filler = state.mode === 'weekly'
+            ? Math.max(0, 7 - baseDays.length)
+            : 0;
+        const daysToRender = state.mode === 'weekly'
+            ? [...baseDays, ...Array(filler).fill(null)]
+            : baseDays;
+        daysToRender.forEach((dayInfo) => {
             const dayCell = document.createElement('div');
             dayCell.className = 'agenda-panel__day';
+            if (state.mode === 'weekly') {
+                dayCell.classList.add('agenda-panel__day--weekly');
+            }
+            if (!dayInfo) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'agenda-panel__day-number';
+                placeholder.innerHTML = '&nbsp;';
+                dayCell.appendChild(placeholder);
+                dayCell.classList.add('agenda-panel__day--placeholder');
+                gridElement.appendChild(dayCell);
+                return;
+            }
             const number = document.createElement('div');
             number.className = 'agenda-panel__day-number';
             number.textContent = dayInfo.day;
@@ -380,7 +420,15 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                         </div>
                         <div class="agenda-panel__calendar-inner">
-                            <div class="agenda-panel__calendar-grid" data-calendar-placeholder></div>
+                            <div class="agenda-panel__calendar-grid-wrapper">
+                                <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--prev" data-direction="prev" aria-label="Voltar">
+                                    ‹
+                                </button>
+                                <div class="agenda-panel__calendar-grid" data-calendar-placeholder></div>
+                                <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--next" data-direction="next" aria-label="Avançar">
+                                    ›
+                                </button>
+                            </div>
                             <div class="agenda-panel__details">
                                 <div class="agenda-panel__details-list">
                                     <p class="agenda-panel__details-title">Eventos do dia</p>
@@ -407,6 +455,46 @@ document.addEventListener('DOMContentLoaded', function() {
         const closeButton = overlay.querySelector('.agenda-panel__close');
         const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
         const modeButton = overlay.querySelector('.agenda-panel__cycle-mode');
+        const prevNavBtn = overlay.querySelector('[data-direction="prev"]');
+        const nextNavBtn = overlay.querySelector('[data-direction="next"]');
+        const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
+        const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
+        const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
+        const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
+        const calendarState = {
+            mode: 'monthly',
+            months: 1,
+            monthIndex: 0,
+            weekOffset: 0,
+        };
+        const normalizeMonthIndex = (value) => ((value % MONTHS.length) + MONTHS.length) % MONTHS.length;
+        const setActiveMonthButton = (index) => {
+            const normalized = normalizeMonthIndex(index);
+            monthButtons.forEach((btn, idx) => {
+                btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
+            });
+        };
+        const updateMonthTitle = () => {
+            monthTitleEl.textContent = getMonthLabel(calendarState);
+        };
+        const renderCalendar = () => {
+            updateMonthTitle();
+            setActiveMonthButton(calendarState.monthIndex);
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState);
+        };
+        const handleNavigation = (direction) => {
+            if (calendarState.mode === 'weekly') {
+                const step = 7;
+                const delta = direction === 'next' ? step : -step;
+                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset + delta);
+            } else {
+                const delta = direction === 'next' ? 1 : -1;
+                const totalMonths = MONTHS.length;
+                calendarState.monthIndex = (calendarState.monthIndex + delta + totalMonths) % totalMonths;
+            }
+            renderCalendar();
+        };
         closeButton.addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) {
@@ -435,15 +523,30 @@ document.addEventListener('DOMContentLoaded', function() {
             const next = sequence[(index + 1) % sequence.length];
             modeButton.dataset.mode = next;
             modeButton.textContent = labels[next];
+            calendarState.mode = next;
+            if (next === 'weekly') {
+                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset);
+            } else {
+                calendarState.weekOffset = 0;
+            }
             if (next !== 'monthly') {
                 cycleBtn.dataset.months = 1;
                 cycleBtn.textContent = '1 Calendário';
             }
+            renderCalendar();
         });
-        const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
-        const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody);
+        prevNavBtn.addEventListener('click', () => handleNavigation('prev'));
+        nextNavBtn.addEventListener('click', () => handleNavigation('next'));
+        overlay.querySelectorAll('.agenda-panel__month-switches button').forEach((btn, index) => {
+            btn.addEventListener('click', () => {
+                calendarState.monthIndex = index;
+                if (calendarState.mode === 'weekly') {
+                    calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset);
+                }
+                renderCalendar();
+            });
+        });
+        renderCalendar();
     };
 
     const createAgendaFormModal = (type) => {

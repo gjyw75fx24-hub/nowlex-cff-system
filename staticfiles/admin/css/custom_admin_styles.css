@@ -797,6 +797,13 @@ a.historylink {
     background: #e9edf7;
     font-size: 12px;
     cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+.agenda-panel__month-switches button.agenda-panel__month-switches-btn--active {
+    background: #dfe4ff;
+    border: 1px solid #c5cde4;
+    color: #0f3a5d;
+    box-shadow: 0 6px 14px rgba(15, 38, 108, 0.25);
 }
 .agenda-panel__calendar-inner {
     display: grid;
@@ -806,11 +813,53 @@ a.historylink {
 .agenda-panel__calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
+    grid-template-rows: 24px repeat(6, minmax(70px, auto));
     border: 1px solid #dfe3ec;
     border-radius: 10px;
-    padding: 12px;
+    padding: 12px 6px 4px;
     background: #fff;
     grid-auto-rows: minmax(70px, auto);
+    width: 100%;
+    column-gap: 4px;
+    row-gap: 4px;
+    margin-top: 0;
+}
+.agenda-panel__calendar-grid-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.agenda-panel__calendar-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid #dfe3ec;
+    background: #fff;
+    color: #1d3a5a;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 16px rgba(15, 38, 108, 0.2);
+}
+.agenda-panel__calendar-nav--prev {
+    left: -18px;
+}
+.agenda-panel__calendar-nav--next {
+    right: -18px;
+}
+.agenda-panel__calendar-grid--weekly {
+    background: #eef2ff;
+    border-color: #cfd6eb;
+    padding: 18px 12px;
+    grid-auto-rows: minmax(110px, auto);
+}
+.agenda-panel__calendar-grid--weekly .agenda-panel__weekday {
+    color: #45506d;
 }
 .agenda-panel__weekday {
     font-size: 12px;
@@ -818,7 +867,8 @@ a.historylink {
     text-transform: uppercase;
     text-align: center;
     color: #6a748a;
-    padding: 4px 0;
+    padding: 2px 0 0;
+    margin-bottom: 0;
 }
 .agenda-panel__day {
     border: 1px solid #dfe3ec;
@@ -842,6 +892,17 @@ a.historylink {
     border-color: #4a63cf;
     background: #dfe4ff;
     box-shadow: 0 10px 25px rgba(15, 38, 108, 0.2);
+}
+.agenda-panel__day--weekly {
+    min-height: 120px;
+    border-radius: 12px;
+    background: #fff;
+}
+.agenda-panel__day--placeholder {
+    border-color: transparent;
+    background: transparent;
+    cursor: default;
+    box-shadow: none;
 }
 .agenda-panel__day-number {
     font-size: 14px;
