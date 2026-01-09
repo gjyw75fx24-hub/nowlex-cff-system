@@ -174,6 +174,10 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.appendChild(button);
 
         document.body.appendChild(overlay);
+        const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
+        const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
+        const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        renderCalendarDays(calendarGridEl, detailList, detailCardBody);
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -206,21 +210,136 @@ document.addEventListener('DOMContentLoaded', function() {
                         <rect x="25" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
                     </svg>
                 </div>
-                    <div class="agenda-placeholder-card__body">
-                        <p class="agenda-placeholder-card__title">Agenda Geral</p>
-                        <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
-                        <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
-                        <div class="agenda-placeholder-card__actions">
-                            <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
-                            <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="prazos">Prazos</button>
-                        </div>
+                <div class="agenda-placeholder-card__body">
+                    <p class="agenda-placeholder-card__title">Agenda Geral</p>
+                    <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
+                    <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
+                    <div class="agenda-placeholder-card__actions">
+                        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
+                        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="prazos">Prazos</button>
                     </div>
                 </div>
-            `;
+            </div>
+        `;
         placeholderRow.appendChild(placeholderCell);
         processoRow.parentNode.insertBefore(placeholderRow, processoRow.nextSibling);
     };
     insertAgendaSidebarPlaceholder();
+
+    const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+    const createSampleCalendarDays = () => Array.from({ length: 31 }, (_, index) => {
+        const day = index + 1;
+        const hasT = day % 3 === 0;
+        const hasP = day % 4 === 0;
+        const tasksT = hasT
+            ? Array.from({ length: 2 }, (_, i) => ({
+                id: `t-${day}-${i}`,
+                label: `Tarefa ${day}.${i + 1}`,
+                description: `Descrição da Tarefa ${day}.${i + 1}`,
+            }))
+            : [];
+        const tasksP = hasP
+            ? Array.from({ length: 2 }, (_, i) => ({
+                id: `p-${day}-${i}`,
+                label: `Prazo ${day}.${i + 1}`,
+                description: `Descrição do Prazo ${day}.${i + 1}`,
+            }))
+            : [];
+        return {
+            day,
+            tasksT,
+            tasksP,
+        };
+    });
+    const sampleCalendarDays = createSampleCalendarDays();
+
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody) => {
+        const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
+        if (!entries.length) {
+            detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
+            detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            return;
+        }
+        detailList.innerHTML = '';
+        entries.forEach(entryData => {
+            const entry = document.createElement('div');
+            entry.className = 'agenda-panel__details-item';
+            entry.tabIndex = 0;
+            entry.textContent = entryData.label;
+            entry.addEventListener('click', () => {
+                detailCardBody.textContent = entryData.description;
+            });
+            detailList.appendChild(entry);
+        });
+    };
+
+    const renderCalendarDays = (gridElement, detailList, detailCardBody) => {
+        gridElement.innerHTML = '';
+        let activeDayCell = null;
+        const setActiveDay = (cell) => {
+            if (activeDayCell) {
+                activeDayCell.classList.remove('agenda-panel__day--active');
+            }
+            activeDayCell = cell;
+            if (activeDayCell) {
+                activeDayCell.classList.add('agenda-panel__day--active');
+            }
+        };
+        WEEKDAYS.forEach(weekday => {
+            const label = document.createElement('div');
+            label.className = 'agenda-panel__weekday';
+            label.textContent = weekday;
+            gridElement.appendChild(label);
+        });
+        sampleCalendarDays.forEach((dayInfo, index) => {
+            const dayCell = document.createElement('div');
+            dayCell.className = 'agenda-panel__day';
+            const number = document.createElement('div');
+            number.className = 'agenda-panel__day-number';
+            number.textContent = dayInfo.day;
+            const tagsWrapper = document.createElement('div');
+            tagsWrapper.className = 'agenda-panel__day-tags';
+            if (dayInfo.tasksT.length) {
+                const tag = document.createElement('span');
+                tag.className = 'agenda-panel__day-tag';
+                tag.dataset.type = 'T';
+                tag.textContent = 'T';
+                tag.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
+                    setActiveDay(dayCell);
+                });
+                tagsWrapper.appendChild(tag);
+            }
+            if (dayInfo.tasksP.length) {
+                const tag = document.createElement('span');
+                tag.className = 'agenda-panel__day-tag';
+                tag.dataset.type = 'P';
+                tag.textContent = 'P';
+                tag.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
+                    setActiveDay(dayCell);
+                });
+                tagsWrapper.appendChild(tag);
+            }
+            dayCell.addEventListener('click', () => {
+                if (dayInfo.tasksT.length) {
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
+                } else if (dayInfo.tasksP.length) {
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
+                } else {
+                    detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
+                    detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+                }
+                setActiveDay(dayCell);
+            });
+            dayCell.appendChild(number);
+            dayCell.appendChild(tagsWrapper);
+            gridElement.appendChild(dayCell);
+        });
+    };
 
     const createAgendaPanel = () => {
         if (document.querySelector('.agenda-panel-overlay')) {
@@ -261,28 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                         </div>
                         <div class="agenda-panel__calendar-inner">
-                            <div class="agenda-panel__calendar-grid">
-                                <div class="agenda-panel__weekday">Domingo</div>
-                                <div class="agenda-panel__weekday">Segunda</div>
-                                <div class="agenda-panel__weekday">Terça</div>
-                                <div class="agenda-panel__weekday">Quarta</div>
-                                <div class="agenda-panel__weekday">Quinta</div>
-                                <div class="agenda-panel__weekday">Sexta</div>
-                                <div class="agenda-panel__weekday">Sábado</div>
-                                <div class="agenda-panel__day">
-                                    <div class="agenda-panel__day-number">1</div>
-                                    <div class="agenda-panel__day-tags">
-                                        <span class="agenda-panel__day-tag" data-type="T">T</span>
-                                    </div>
-                                </div>
-                                <div class="agenda-panel__day">
-                                    <div class="agenda-panel__day-number">2</div>
-                                    <div class="agenda-panel__day-tags">
-                                        <span class="agenda-panel__day-tag" data-type="P">P</span>
-                                    </div>
-                                </div>
-                                <!-- More days placeholder -->
-                            </div>
+                            <div class="agenda-panel__calendar-grid" data-calendar-placeholder></div>
                             <div class="agenda-panel__details">
                                 <div class="agenda-panel__details-list">
                                     <p class="agenda-panel__details-title">Eventos do dia</p>
@@ -316,11 +414,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         cycleBtn.addEventListener('click', () => {
-            const current = Number(cycleBtn.dataset.months);
+            const current = Number(cycleBtn.dataset.months) || 1;
             const next = current === 3 ? 1 : current + 1;
             cycleBtn.dataset.months = next;
-            const label = `${next} Calendário${next === 1 ? '' : 's'}`;
-            cycleBtn.textContent = label;
+            cycleBtn.textContent = `${next} Calendário${next === 1 ? '' : 's'}`;
             if (modeButton.dataset.mode !== 'monthly' && next !== 1) {
                 modeButton.dataset.mode = 'monthly';
                 modeButton.textContent = 'Mensal';
@@ -333,7 +430,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 weekly: 'Semanal',
                 daily: 'Diário',
             };
-            const current = modeButton.dataset.mode;
+            const current = modeButton.dataset.mode || 'monthly';
             const index = sequence.indexOf(current);
             const next = sequence[(index + 1) % sequence.length];
             modeButton.dataset.mode = next;
@@ -345,22 +442,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        overlay.querySelectorAll('.agenda-panel__day-tag').forEach(tag => {
-            tag.addEventListener('click', () => {
-                const type = tag.dataset.type;
-                detailList.innerHTML = '';
-                for (let i = 0; i < 3; i += 1) {
-                    const entry = document.createElement('div');
-                    entry.className = 'agenda-panel__details-item';
-                    entry.tabIndex = 0;
-                    entry.textContent = `${type === 'T' ? 'Tarefa' : 'Prazo'} ${i + 1}`;
-                    entry.addEventListener('click', () => {
-                        detailCardBody.textContent = `Detalhes de ${entry.textContent}: Lorem ipsum dolor sit amet.`;
-                    });
-                    detailList.appendChild(entry);
-                }
-            });
-        });
+        const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
+        renderCalendarDays(calendarGridEl, detailList, detailCardBody);
     };
 
     const createAgendaFormModal = (type) => {
