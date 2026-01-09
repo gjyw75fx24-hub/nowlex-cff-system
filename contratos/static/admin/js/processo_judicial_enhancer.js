@@ -355,10 +355,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
             const renderTag = (type, entries) => {
-                if (!entries.length) return;
+                if (!entries.length) {
+                    return;
+                }
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
+                tag.draggable = true;
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -371,6 +374,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     event.stopPropagation();
                     populateDetailEntries(dayInfo, type, detailList, detailCardBody);
                     setActiveDay(dayCell);
+                });
+                tag.addEventListener('dragstart', (event) => {
+                    event.dataTransfer.setData('text/plain', JSON.stringify({
+                        source: 'calendar',
+                        day: dayInfo.day,
+                        type,
+                    }));
+                    event.dataTransfer.effectAllowed = 'move';
                 });
                 tagsWrapper.appendChild(tag);
             };
@@ -399,15 +410,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch {
                         return;
                     }
-                    if (!parsed || parsed.source !== 'detail' || parsed.day === dayInfo.day) return;
-                    const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
-                    if (!sourceDay) return;
+                    if (!parsed || parsed.day === dayInfo.day) return;
                     const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
-                    const sourceList = sourceDay[typeKey];
-                    const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
-                    if (entryIndex === -1) return;
-                    const [movedEntry] = sourceList.splice(entryIndex, 1);
-                    dayInfo[typeKey].push(movedEntry);
+                    const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
+                    if (!sourceDay) {
+                        return;
+                    }
+                    if (parsed.source === 'detail') {
+                        const sourceList = sourceDay[typeKey];
+                        const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
+                        if (entryIndex === -1) return;
+                        const [movedEntry] = sourceList.splice(entryIndex, 1);
+                        dayInfo[typeKey].push(movedEntry);
+                    } else if (parsed.source === 'calendar') {
+                        const transferred = sourceDay[typeKey];
+                        if (!transferred.length) return;
+                        dayInfo[typeKey].push(...transferred);
+                        sourceDay[typeKey] = [];
+                    }
                     rerender && rerender();
                 };
                 dayCell.addEventListener('dragover', (event) => {
