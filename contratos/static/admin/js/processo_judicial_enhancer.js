@@ -286,15 +286,29 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.addEventListener('click', () => {
                 detailCardBody.textContent = entryData.description;
             });
+            entry.dataset.type = type;
+            entry.dataset.entryId = entryData.id;
+            entry.dataset.day = dayData.day;
+            entry.draggable = true;
+            entry.addEventListener('dragstart', (event) => {
+                event.dataTransfer.setData('text/plain', JSON.stringify({
+                    source: 'detail',
+                    type,
+                    day: dayData.day,
+                    entry: entryData,
+                }));
+                event.dataTransfer.effectAllowed = 'move';
+            });
             detailList.appendChild(entry);
         });
     };
 
     const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender) => {
+        const effectiveState = state || { mode: 'monthly', weekOffset: 0 };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
-        gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', state.mode === 'weekly');
+        gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const setActiveDay = (cell) => {
             if (activeDayCell) {
@@ -311,19 +325,19 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
-        const baseDays = state.mode === 'weekly'
-            ? sampleCalendarDays.slice(state.weekOffset, state.weekOffset + 7)
+        const baseDays = effectiveState.mode === 'weekly'
+            ? sampleCalendarDays.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
             : sampleCalendarDays;
-        const filler = state.mode === 'weekly'
+        const filler = effectiveState.mode === 'weekly'
             ? Math.max(0, 7 - baseDays.length)
             : 0;
-        const daysToRender = state.mode === 'weekly'
+        const daysToRender = effectiveState.mode === 'weekly'
             ? [...baseDays, ...Array(filler).fill(null)]
             : baseDays;
         daysToRender.forEach((dayInfo) => {
             const dayCell = document.createElement('div');
             dayCell.className = 'agenda-panel__day';
-            if (state.mode === 'weekly') {
+            if (effectiveState.mode === 'weekly') {
                 dayCell.classList.add('agenda-panel__day--weekly');
             }
             if (!dayInfo) {
@@ -335,42 +349,45 @@ document.addEventListener('DOMContentLoaded', function() {
                 gridElement.appendChild(dayCell);
                 return;
             }
-            dayCell.dataset.day = dayInfo.day;
             const number = document.createElement('div');
             number.className = 'agenda-panel__day-number';
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
-            const attachTag = (entryData, type) => {
+            const renderTag = (type, entries) => {
+                if (!entries.length) return;
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
-                tag.dataset.entryId = entryData.id;
-                tag.textContent = type;
-                tag.draggable = true;
+                const label = document.createElement('span');
+                label.className = 'agenda-panel__day-tag-letter';
+                label.textContent = type;
+                const count = document.createElement('span');
+                count.className = 'agenda-panel__day-tag-count';
+                count.textContent = entries.length;
+                tag.appendChild(label);
+                tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
                     populateDetailEntries(dayInfo, type, detailList, detailCardBody);
                     setActiveDay(dayCell);
                 });
-                tag.addEventListener('dragstart', (event) => {
-                    event.dataTransfer.setData('text/plain', JSON.stringify({
-                        day: dayInfo.day,
-                        type,
-                        entry: entryData,
-                    }));
-                    event.dataTransfer.effectAllowed = 'move';
-                });
-                tag.addEventListener('dragend', () => {
-                    document.querySelectorAll('.agenda-panel__day--drag-over').forEach(cell => {
-                        cell.classList.remove('agenda-panel__day--drag-over');
-                    });
-                });
                 tagsWrapper.appendChild(tag);
             };
-            dayInfo.tasksT.forEach(entry => attachTag(entry, 'T'));
-            dayInfo.tasksP.forEach(entry => attachTag(entry, 'P'));
-            const setupDragEvents = () => {
+            renderTag('T', dayInfo.tasksT);
+            renderTag('P', dayInfo.tasksP);
+            dayCell.addEventListener('click', () => {
+                if (dayInfo.tasksT.length) {
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
+                } else if (dayInfo.tasksP.length) {
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
+                } else {
+                    detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
+                    detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+                }
+                setActiveDay(dayCell);
+            });
+            const setupDropZone = () => {
                 const handleDrop = (event) => {
                     event.preventDefault();
                     dayCell.classList.remove('agenda-panel__day--drag-over');
@@ -382,7 +399,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch {
                         return;
                     }
-                    if (!parsed || parsed.day === dayInfo.day) return;
+                    if (!parsed || parsed.source !== 'detail' || parsed.day === dayInfo.day) return;
                     const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
                     if (!sourceDay) return;
                     const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
@@ -402,18 +419,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 dayCell.addEventListener('drop', handleDrop);
             };
-            setupDragEvents();
-            dayCell.addEventListener('click', () => {
-                if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
-                } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
-                } else {
-                    detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
-                    detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
-                }
-                setActiveDay(dayCell);
-            });
+            setupDropZone();
             dayCell.appendChild(number);
             dayCell.appendChild(tagsWrapper);
             gridElement.appendChild(dayCell);
