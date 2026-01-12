@@ -1040,14 +1040,6 @@ a.historylink {
     border-color: #4c7ee5;
     background: #e7ecff;
 }
-.agenda-panel__day--history::after {
-    content: '';
-    position: absolute;
-    inset: 5px;
-    border: 1px solid rgba(76, 126, 229, 0.7);
-    border-radius: 12px;
-    animation: pulse-blue-outline 2s infinite;
-}
 .agenda-panel__details-original {
     font-size: 10px;
     color: #495575;
@@ -1068,17 +1060,6 @@ a.historylink {
     }
     100% {
         box-shadow: 0 0 0 0 rgba(0, 116, 255, 0);
-    }
-}
-@keyframes pulse-blue-outline {
-    0% {
-        box-shadow: 0 0 0 0 rgba(76, 126, 229, 0.4);
-    }
-    70% {
-        box-shadow: 0 0 12px 4px rgba(76, 126, 229, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(76, 126, 229, 0);
     }
 }
 .agenda-form-modal {
