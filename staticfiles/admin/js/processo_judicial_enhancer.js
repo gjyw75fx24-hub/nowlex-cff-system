@@ -252,6 +252,7 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
             entry.label = `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
+            entry.originalDay = entry.originalDay || dayInfo.day;
         });
     };
 
@@ -297,7 +298,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
             entry.tabIndex = 0;
-            entry.textContent = entryData.label;
+            const label = document.createElement('span');
+            label.className = 'agenda-panel__details-item-label';
+            label.textContent = entryData.label;
+            entry.appendChild(label);
+            if (entryData.originalDay && entryData.originalDay !== dayData.day) {
+                const original = document.createElement('span');
+                original.className = 'agenda-panel__details-original';
+                original.textContent = `Origem: ${entryData.originalDay}`;
+                entry.appendChild(original);
+            }
             entry.addEventListener('click', () => {
                 detailCardBody.textContent = entryData.description;
             });
@@ -349,6 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const daysToRender = effectiveState.mode === 'weekly'
             ? [...baseDays, ...Array(filler).fill(null)]
             : baseDays;
+        const showHistory = effectiveState.showHistory;
         daysToRender.forEach((dayInfo) => {
             const dayCell = document.createElement('div');
             dayCell.className = 'agenda-panel__day';
@@ -369,6 +380,12 @@ document.addEventListener('DOMContentLoaded', function() {
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
+            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP].some(entry => entry.originalDay && entry.originalDay !== dayInfo.day);
+            if (showHistory && hasHistory) {
+                dayCell.classList.add('agenda-panel__day--history');
+            } else {
+                dayCell.classList.remove('agenda-panel__day--history');
+            }
             const renderTag = (type, entries) => {
                 if (!entries.length) {
                     return;
@@ -545,12 +562,25 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
+        const footer = overlay.querySelector('.agenda-panel__footer');
+        const historyButton = document.createElement('button');
+        historyButton.type = 'button';
+        historyButton.className = 'agenda-panel__history-toggle';
+        historyButton.innerHTML = '<span class="agenda-panel__history-icon">🕒</span>';
+        historyButton.title = 'Mostrar histórico de alterações';
+        historyButton.addEventListener('click', () => {
+            calendarState.showHistory = !calendarState.showHistory;
+            historyButton.classList.toggle('agenda-panel__history-toggle--active', calendarState.showHistory);
+            renderCalendar();
+        });
+        footer.insertBefore(historyButton, footer.querySelector('.agenda-panel__form-btn'));
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
         const calendarState = {
             mode: 'monthly',
             months: 1,
             monthIndex: 0,
             weekOffset: 0,
+            showHistory: false,
         };
         const normalizeMonthIndex = (value) => ((value % MONTHS.length) + MONTHS.length) % MONTHS.length;
         const setActiveMonthButton = (index) => {
@@ -565,6 +595,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const renderCalendar = () => {
             updateMonthTitle();
             setActiveMonthButton(calendarState.monthIndex);
+            overlay.classList.toggle('agenda-panel--weekly', calendarState.mode === 'weekly');
+            overlay.classList.toggle('agenda-panel--history', calendarState.showHistory);
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar);
         };
         const handleNavigation = (direction) => {
