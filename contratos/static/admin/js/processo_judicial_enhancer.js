@@ -236,11 +236,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return `${monthName} 2025`;
     };
-    const clampWeekOffset = (offset) => {
-        if (sampleCalendarDays.length <= 7) {
-            return 0;
-        }
-        const maxOffset = sampleCalendarDays.length - 7;
+    const clampWeekOffset = (offset, state) => {
+        const data = getMonthData(state.monthIndex, state.year || 2025);
+        const maxOffset = Math.max(0, data.length - 7);
         return Math.max(0, Math.min(offset, maxOffset));
     };
 
@@ -256,35 +254,48 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const createSampleCalendarDays = () => Array.from({ length: 31 }, (_, index) => {
-        const day = index + 1;
-        const hasT = day % 3 === 0;
-        const hasP = day % 4 === 0;
-        const tasksT = hasT
-            ? Array.from({ length: 2 }, (_, i) => ({
-                id: `t-${day}-${i}`,
-                label: `Tarefa ${day}.${i + 1}`,
-                description: `Descrição da Tarefa ${day}.${i + 1}`,
-            }))
-            : [];
-        const tasksP = hasP
-            ? Array.from({ length: 2 }, (_, i) => ({
-                id: `p-${day}-${i}`,
-                label: `Prazo ${day}.${i + 1}`,
-                description: `Descrição do Prazo ${day}.${i + 1}`,
-            }))
-            : [];
-        return {
-            day,
-            tasksT,
-            tasksP,
-        };
-    });
-    const sampleCalendarDays = createSampleCalendarDays();
-    sampleCalendarDays.forEach(dayInfo => {
-        normalizeEntryMetadata(dayInfo, 'T');
-        normalizeEntryMetadata(dayInfo, 'P');
-    });
+    const createSampleCalendarDays = (monthIndex, year = 2025) => {
+        const days = new Date(year, monthIndex + 1, 0).getDate();
+        return Array.from({ length: days }, (_, index) => {
+            const day = index + 1;
+            const hasT = day % 3 === 0;
+            const hasP = day % 4 === 0;
+            const tasksT = hasT
+                ? Array.from({ length: 2 }, (_, i) => ({
+                    id: `t-${day}-${i}`,
+                    label: `Tarefa ${day}.${i + 1}`,
+                    description: `Descrição da Tarefa ${day}.${i + 1}`,
+                    originalDay: day,
+                }))
+                : [];
+            const tasksP = hasP
+                ? Array.from({ length: 2 }, (_, i) => ({
+                    id: `p-${day}-${i}`,
+                    label: `Prazo ${day}.${i + 1}`,
+                    description: `Descrição do Prazo ${day}.${i + 1}`,
+                    originalDay: day,
+                }))
+                : [];
+            const dayInfo = {
+                day,
+                tasksT,
+                tasksP,
+                monthIndex,
+                year,
+            };
+            normalizeEntryMetadata(dayInfo, 'T');
+            normalizeEntryMetadata(dayInfo, 'P');
+            return dayInfo;
+        });
+    };
+    const calendarMonths = {};
+    const getMonthData = (monthIndex, year = 2025) => {
+        const key = `${year}-${monthIndex}`;
+        if (!calendarMonths[key]) {
+            calendarMonths[key] = createSampleCalendarDays(monthIndex, year);
+        }
+        return calendarMonths[key];
+    };
 
     const populateDetailEntries = (dayData, type, detailList, detailCardBody) => {
         const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
@@ -320,6 +331,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     source: 'detail',
                     type,
                     day: dayData.day,
+                    monthIndex: dayData.monthIndex,
+                    year: dayData.year,
                     entry: entryData,
                 }));
                 event.dataTransfer.effectAllowed = 'move';
@@ -350,6 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
+        const sampleCalendarDays = getMonthData(effectiveState.monthIndex, effectiveState.year || 2025);
         const baseDays = effectiveState.mode === 'weekly'
             ? sampleCalendarDays.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
             : sampleCalendarDays;
@@ -411,6 +425,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     event.dataTransfer.setData('text/plain', JSON.stringify({
                         source: 'calendar',
                         day: dayInfo.day,
+                        monthIndex: dayInfo.monthIndex,
+                        year: dayInfo.year,
                         type,
                     }));
                     event.dataTransfer.effectAllowed = 'move';
@@ -431,23 +447,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
             });
             const setupDropZone = () => {
-            const handleDrop = (event) => {
-                event.preventDefault();
-                dayCell.classList.remove('agenda-panel__day--drag-over');
-                const payload = event.dataTransfer.getData('text/plain');
-                if (!payload) return;
-                let parsed;
-                try {
-                    parsed = JSON.parse(payload);
-                } catch {
-                    return;
-                }
-                if (!parsed || parsed.day === dayInfo.day) return;
-                const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
-                const sourceDay = sampleCalendarDays.find(d => d.day === parsed.day);
-                if (!sourceDay) {
-                    return;
-                }
+                const handleDrop = (event) => {
+                    event.preventDefault();
+                    dayCell.classList.remove('agenda-panel__day--drag-over');
+                    const payload = event.dataTransfer.getData('text/plain');
+                    if (!payload) return;
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(payload);
+                    } catch {
+                        return;
+                    }
+                    if (!parsed || parsed.day === dayInfo.day) return;
+                    const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
+                    const sourceMonth = getMonthData(parsed.monthIndex ?? calendarState.monthIndex, parsed.year || 2025);
+                    const sourceDay = sourceMonth.find(d => d.day === parsed.day);
+                    if (!sourceDay) {
+                        return;
+                    }
                 if (parsed.source === 'detail') {
                     const sourceList = sourceDay[typeKey];
                     const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
