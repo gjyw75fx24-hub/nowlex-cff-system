@@ -803,18 +803,32 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
     parameter_name = "delegado_para"
 
     def lookups(self, request, model_admin):
-        qs = model_admin.get_queryset(request)
-        counts = qs.values('delegado_para_id').annotate(total=models.Count('id')).filter(delegado_para_id__isnull=False)
-        user_map = {u.id: u for u in User.objects.filter(id__in=[c['delegado_para_id'] for c in counts])}
-        items = []
-        for row in counts:
-            user = user_map.get(row['delegado_para_id'])
-            username = user.username if user else ''
-            full_name = user.get_full_name() if user else ''
-            label = full_name or username or 'Sem nome'
-            label = mark_safe(f"{label} <span class='filter-count'>({row['total']})</span>")
-            items.append((row['delegado_para_id'], label))
-        items.sort(key=lambda x: str(x[1]).lower())
+        # Usar o queryset base para contagens para refletir o total real
+        base_qs = model_admin.model.objects.all()
+        
+        counts = {
+            row['delegado_para_id']: row['total'] 
+            for row in base_qs.values('delegado_para_id').annotate(total=models.Count('id')).filter(delegado_para_id__isnull=False)
+        }
+        
+        count_nao_delegado = base_qs.filter(delegado_para__isnull=True).count()
+        
+        items = [
+            ('none', mark_safe(f"Não Delegado <span class='filter-count'>({count_nao_delegado})</span>"))
+        ]
+        
+        users = User.objects.filter(is_staff=True, is_active=True).order_by('username')
+        
+        user_items = []
+        for user in users:
+            total = counts.get(user.id, 0)
+            full_name = user.get_full_name() or user.username
+            label = mark_safe(f"{full_name} <span class='filter-count'>({total})</span>")
+            user_items.append((user.id, label))
+
+        user_items.sort(key=lambda x: str(x[1]).lower())
+        items.extend(user_items)
+        
         return items
 
     def choices(self, changelist):
@@ -838,6 +852,8 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
             }
 
     def queryset(self, request, queryset):
+        if self.value() == 'none':
+            return queryset.filter(delegado_para__isnull=True)
         if self.value():
             return queryset.filter(delegado_para_id=self.value())
         return queryset
