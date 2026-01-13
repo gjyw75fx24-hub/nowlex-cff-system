@@ -1388,7 +1388,7 @@ class PrazoInline(admin.TabularInline):
     model = Prazo
     form = PrazoInlineForm
     extra = 0
-    template = 'admin/contratos/processojudicial/prazos_tabular.html'
+    template = 'admin/edit_inline/tabular.html'
 
 class ProcessoArquivoInline(admin.TabularInline):
     model = ProcessoArquivo
