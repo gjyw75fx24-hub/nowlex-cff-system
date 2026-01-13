@@ -807,6 +807,38 @@ a.historylink {
     letter-spacing: 0.08em;
 }
 
+#prazos-group .prazo-delete-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.6rem;
+    padding: 0;
+    font-size: 1.4rem;
+    color: #97383a;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    position: relative;
+}
+
+#prazos-group .prazo-delete-link:hover {
+    transform: scale(1.1);
+}
+
+#prazos-group .prazo-delete-x {
+    color: #97383a !important;
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1;
+    text-shadow: none;
+}
+
+#prazos-group .prazo-delete-link + input {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+}
+
 #nav-sidebar {
     font-size: 0.8rem;
 }

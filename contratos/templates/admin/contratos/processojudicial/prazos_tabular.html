@@ -17,7 +17,6 @@
             <th class="column-alerta_valor">{% trans "Alerta" %}</th>
             <th class="column-alerta_unidade">{% trans "Alerta unidade" %}</th>
             <th class="column-responsavel">{% trans "Responsável" %}</th>
-            {% if inline_admin_formset.formset.can_delete %}<th class="column-delete">{% trans "Remover" %}</th>{% endif %}
           </tr>
         </thead>
 
@@ -46,14 +45,6 @@
               {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.responsavel %}
               {{ form.concluido.as_hidden }}
             {% endwith %}
-            {% if inline_admin_formset.formset.can_delete %}
-              <td class="delete">
-                {% if inline_admin_form.original_content_type_id %}
-                  <label for="{{ inline_admin_form.deletion_field.field.id }}" class="inline-deletelink">×</label>
-                  {{ inline_admin_form.deletion_field.field }}
-                {% endif %}
-              </td>
-            {% endif %}
           </tr>
             <tr class="form-row prazo-observacoes-row">
               <td class="prazo-observacoes-empty"></td>
@@ -71,10 +62,6 @@
                   {% endwith %}
                 </div>
               </td>
-              <td class="prazo-observacoes-empty"></td>
-              {% if inline_admin_formset.formset.can_delete %}
-                <td class="prazo-observacoes-empty"></td>
-              {% endif %}
             </tr>
             <tr class="form-row prazo-concluido-row">
               <td class="prazo-observacoes-empty"></td>
@@ -82,17 +69,19 @@
                 <button type="button"
                         class="prazo-concluido-toggle"
                         data-input-id="{{ inline_admin_form.form.concluido.id_for_label }}"
-                        data-label-on="Concluído"
-                        data-label-off="Pendente"
+                        data-label-on="CONCLUÍDO"
+                        data-label-off="PENDENTE"
                         aria-pressed="false">
                   <span class="prazo-toggle-thumb"></span>
                   <span class="prazo-toggle-label"></span>
                 </button>
+                {% if inline_admin_formset.formset.can_delete %}
+                  <label for="{{ inline_admin_form.deletion_field.field.id }}" class="prazo-delete-link inline-deletelink" title="{% trans "Excluir prazo" %}">
+                    <span class="prazo-delete-x" aria-hidden="true">×</span>
+                  </label>
+                  {{ inline_admin_form.deletion_field.field }}
+                {% endif %}
               </td>
-              <td class="prazo-observacoes-empty"></td>
-              {% if inline_admin_formset.formset.can_delete %}
-                <td class="prazo-observacoes-empty"></td>
-              {% endif %}
             </tr>
         {% endfor %}
         {% if inline_admin_formset.formset.can_delete %}
