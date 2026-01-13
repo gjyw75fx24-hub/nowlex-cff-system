@@ -595,6 +595,27 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         footer.insertBefore(historyButton, footer.querySelector('.agenda-panel__form-btn'));
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
+        const capitalizeLabel = (value) => {
+            if (!value) return '';
+            return value
+                .split(' ')
+                .filter(Boolean)
+                .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+                .join(' ');
+        };
+        const getDefaultUserLabel = () => {
+            const userTools = document.getElementById('user-tools');
+            if (!userTools) return null;
+            const strong = userTools.querySelector('strong');
+            if (strong?.textContent?.trim()) {
+                return capitalizeLabel(strong.textContent);
+            }
+            const anchor = userTools.querySelector('a');
+            if (anchor?.textContent?.trim()) {
+                return capitalizeLabel(anchor.textContent);
+            }
+            return null;
+        };
         const calendarState = {
             mode: 'monthly',
             months: 1,
@@ -607,13 +628,18 @@ document.addEventListener('DOMContentLoaded', function() {
             usersLoading: false,
             usersLoaded: false,
             usersError: false,
+            defaultUserLabel: getDefaultUserLabel(),
         };
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
             const lastName = (user.last_name || '').trim();
             const fullName = [firstName, lastName].filter(Boolean).join(' ');
-            return fullName || user.username || 'Usuário';
+            if (fullName) return capitalizeLabel(fullName);
+            if (user.username) {
+                return capitalizeLabel(user.username);
+            }
+            return 'Usuário';
         };
         const getUserInitials = (user) => {
             if (!user) return '';
@@ -628,8 +654,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return `${first || ''}${last || ''}`.toUpperCase();
         };
         const updateSubtitleText = () => {
-            if (calendarState.activeUser) {
-                subtitleEl.textContent = `Agenda de ${formatUserLabel(calendarState.activeUser)}`;
+            const focusedLabel = calendarState.activeUser
+                ? formatUserLabel(calendarState.activeUser)
+                : calendarState.defaultUserLabel;
+            if (focusedLabel) {
+                subtitleEl.textContent = `Agenda de ${focusedLabel}`;
             } else {
                 subtitleEl.textContent = 'Expandida para duas telas ou modal.';
             }
