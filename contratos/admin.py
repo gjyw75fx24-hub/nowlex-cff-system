@@ -1375,9 +1375,20 @@ class TarefaInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ['responsavel']
 
+class PrazoInlineForm(forms.ModelForm):
+    class Meta:
+        model = Prazo
+        fields = '__all__'
+        widgets = {
+            'observacoes': forms.Textarea(attrs={'placeholder': 'Observações', 'rows': 5}),
+        }
+
+
 class PrazoInline(admin.TabularInline):
     model = Prazo
+    form = PrazoInlineForm
     extra = 0
+    template = 'admin/contratos/processojudicial/prazos_tabular.html'
 
 class ProcessoArquivoInline(admin.TabularInline):
     model = ProcessoArquivo

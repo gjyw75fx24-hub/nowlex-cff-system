@@ -636,6 +636,177 @@ a.historylink {
     display: none !important;
 }
 
+#prazos-group .prazo-observacoes-row td {
+    border-top: 0;
+    padding-top: 4px;
+}
+
+#prazos-group .prazo-observacoes-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#prazos-group .prazo-observacoes-wrapper label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+#prazos-group table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#prazos-group th,
+#prazos-group td {
+    padding: 0.5rem 0.8rem;
+    vertical-align: top;
+}
+
+#prazos-group th {
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #4f5665;
+    text-align: left;
+}
+
+#prazos-group .prazo-inline-table td {
+    text-align: left;
+}
+
+#prazos-group .field-data_limite .datetime {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+#prazos-group .field-data_limite .datetime br {
+    display: none;
+}
+
+#prazos-group .field-data_limite .datetime label {
+    margin: 0;
+    font-weight: 600;
+    color: #2c6e91;
+    font-size: 0.85rem;
+}
+
+#prazos-group .field-data_limite .datetimeshortcuts {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    color: #2c6e91;
+}
+
+#prazos-group .field-data_limite .datetimeshortcuts a {
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+#prazos-group .field-data_limite .datetimeshortcuts .datetimeicon {
+    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+#prazos-group .prazo-observacoes-row {
+    background: #f6f8fb;
+}
+
+#prazos-group .prazo-observacoes-cell {
+    padding: 0.8rem;
+}
+
+#prazos-group .prazo-observacoes-wrapper {
+    width: 100%;
+}
+
+#prazos-group .prazo-observacoes-wrapper textarea {
+    width: 100%;
+    min-height: 120px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+#prazos-group .prazo-observacoes-wrapper textarea::placeholder {
+    color: #9aa3b3;
+}
+
+#prazos-group .prazo-observacoes-empty {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+#prazos-group .prazo-concluido-row {
+    background: #fff;
+}
+
+#prazos-group .prazo-concluido-cell {
+    padding: 0.4rem 0.8rem 0.8rem;
+}
+
+#prazos-group .prazo-concluido-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 999px;
+    border: none;
+    background: #f4f7fb;
+    color: #2c6e91;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+#prazos-group .prazo-concluido-toggle.is-on {
+    background: #2c6e91;
+    color: #fff;
+}
+
+#prazos-group .prazo-toggle-thumb {
+    width: 42px;
+    height: 22px;
+    border-radius: 999px;
+    background: #d3daeb;
+    position: relative;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+#prazos-group .prazo-toggle-thumb::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+}
+
+#prazos-group .prazo-concluido-toggle.is-on .prazo-toggle-thumb {
+    background: #0b546d;
+}
+
+#prazos-group .prazo-concluido-toggle.is-on .prazo-toggle-thumb::after {
+    transform: translateX(20px);
+}
+
+#prazos-group .prazo-toggle-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+}
+
 #nav-sidebar {
     font-size: 0.8rem;
 }

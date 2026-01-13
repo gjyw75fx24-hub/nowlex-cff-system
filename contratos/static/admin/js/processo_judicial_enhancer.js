@@ -248,11 +248,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!list) return;
         list.forEach((entry, index) => {
             const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
-            const titleText = `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
             entry.label = `${index + 1}`;
-            entry.title = titleText;
-            entry.description = `Descrição da ${titleText}`;
+            entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
         });
     };
@@ -315,8 +313,7 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.tabIndex = 0;
             const label = document.createElement('span');
             label.className = 'agenda-panel__details-item-label';
-            const titleText = entryData.title ? ` ${entryData.title}` : '';
-            label.textContent = `${entryData.label}${titleText}`;
+            label.textContent = entryData.label;
             entry.appendChild(label);
             if (entryData.originalDay && entryData.originalDay !== dayData.day) {
                 const original = document.createElement('span');
@@ -883,13 +880,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     <label>Contrato / processo
                         <input type="text" placeholder="Informe o contrato ou processo">
                     </label>
-                    <label>${type === 'tarefas' ? 'Título da Tarefa' : 'Título'}
-                        <textarea placeholder="Digite ${type === 'tarefas' ? 'o título da tarefa' : 'o título do prazo'}"></textarea>
+                    <label>${type === 'tarefas' ? 'Descrição' : 'Título'}
+                        <textarea placeholder="Digite ${type === 'tarefas' ? 'a descrição da tarefa' : 'o título do prazo'}"></textarea>
                     </label>
-                    ${type === 'tarefas' ? `
-                    <label>Descrição
-                        <textarea placeholder="Digite a descrição da tarefa"></textarea>
-                    </label>` : ''}
                     <div class="agenda-form-modal__row">
                         <label>Data
                             <input type="date">

@@ -1,0 +1,134 @@
+{% load i18n admin_urls static %}
+<div class="js-inline-admin-formset inline-group" id="{{ inline_admin_formset.formset.prefix }}-group"
+     data-inline-type="tabular"
+     data-inline-formset="{{ inline_admin_formset.formset.opts.inline_formset_data }}">
+  <div class="tabular inline-related {% if forloop.last %}last-related{% endif %}">
+    {{ inline_admin_formset.management_form }}
+    <fieldset class="module {{ inline_admin_formset.classes }}" id="{{ inline_admin_formset.formset.prefix }}-fieldset"
+              aria-labelledby="{{ inline_admin_formset.formset.prefix }}-fieldset-heading">
+      {% if inline_admin_formset.formset.prefix %}<h2 id="{{ inline_admin_formset.formset.prefix }}-heading" class="inline-heading">{% if inline_admin_formset.opts.verbose_name_plural %}{{ inline_admin_formset.opts.verbose_name_plural|capfirst }}{% else %}{{ inline_admin_formset.opts.verbose_name|capfirst }}{% endif %}</h2>{% endif %}
+      {{ inline_admin_formset.formset.non_form_errors }}
+      <table class="prazo-inline-table">
+        <thead>
+          <tr>
+            <th class="original"></th>
+            <th class="column-titulo">{% trans "Título" %}</th>
+            <th class="column-data_limite">{% trans "Data limite" %}</th>
+            <th class="column-alerta_valor">{% trans "Alerta" %}</th>
+            <th class="column-alerta_unidade">{% trans "Alerta unidade" %}</th>
+            <th class="column-responsavel">{% trans "Responsável" %}</th>
+            {% if inline_admin_formset.formset.can_delete %}<th class="column-delete">{% trans "Remover" %}</th>{% endif %}
+          </tr>
+        </thead>
+
+        <tbody>
+        {% for inline_admin_form in inline_admin_formset %}
+          {% if inline_admin_form.original or inline_admin_form.show_url %}
+            <tr class="form-row has_original {% if inline_admin_form.form.non_field_errors %}errors{% endif %}{% if inline_admin_form.form.errors %} errors{% endif %}{% if inline_admin_form.deleted %} deleted{% endif %}" id="{{ inline_admin_form.form.prefix }}">
+          {% else %}
+            <tr class="form-row {% if inline_admin_form.form.non_field_errors %}errors{% endif %}{% if inline_admin_form.form.errors %} errors{% endif %}{% if inline_admin_form.deleted %} deleted{% endif %}" id="{{ inline_admin_form.form.prefix }}">
+          {% endif %}
+            <td class="original">
+              {% if inline_admin_form.original %}{{ inline_admin_form.original }}{% endif %}
+              {% if inline_admin_form.show_url %}<a href="{{ inline_admin_form.absolute_url }}">{% trans "View on site" %}</a>{% endif %}
+              {% for hidden in inline_admin_form.form.hidden_fields %}
+                {{ hidden }}
+              {% endfor %}
+              {% if inline_admin_form.form.non_field_errors %}
+                <ul class="errorlist">{% for error in inline_admin_form.form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+              {% endif %}
+            </td>
+            {% with form=inline_admin_form.form %}
+              {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.titulo %}
+              {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.data_limite %}
+              {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.alerta_valor %}
+              {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.alerta_unidade %}
+              {% include 'admin/contratos/processojudicial/prazos_field_cell.html' with field=form.responsavel %}
+              {{ form.concluido.as_hidden }}
+            {% endwith %}
+            {% if inline_admin_formset.formset.can_delete %}
+              <td class="delete">
+                {% if inline_admin_form.original_content_type_id %}
+                  <label for="{{ inline_admin_form.deletion_field.field.id }}" class="inline-deletelink">×</label>
+                  {{ inline_admin_form.deletion_field.field }}
+                {% endif %}
+              </td>
+            {% endif %}
+          </tr>
+            <tr class="form-row prazo-observacoes-row">
+              <td class="prazo-observacoes-empty"></td>
+              <td class="prazo-observacoes-cell" colspan="5">
+                <div class="prazo-observacoes-wrapper">
+                  {% with observacoes_field=inline_admin_form.form.observacoes %}
+                    {% if observacoes_field.errors %}
+                      <ul class="errorlist">
+                        {% for error in observacoes_field.errors %}
+                          <li>{{ error }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                    {{ observacoes_field }}
+                  {% endwith %}
+                </div>
+              </td>
+              <td class="prazo-observacoes-empty"></td>
+              {% if inline_admin_formset.formset.can_delete %}
+                <td class="prazo-observacoes-empty"></td>
+              {% endif %}
+            </tr>
+            <tr class="form-row prazo-concluido-row">
+              <td class="prazo-observacoes-empty"></td>
+              <td class="prazo-concluido-cell" colspan="5">
+                <button type="button"
+                        class="prazo-concluido-toggle"
+                        data-input-id="{{ inline_admin_form.form.concluido.id_for_label }}"
+                        data-label-on="Concluído"
+                        data-label-off="Pendente"
+                        aria-pressed="false">
+                  <span class="prazo-toggle-thumb"></span>
+                  <span class="prazo-toggle-label"></span>
+                </button>
+              </td>
+              <td class="prazo-observacoes-empty"></td>
+              {% if inline_admin_formset.formset.can_delete %}
+                <td class="prazo-observacoes-empty"></td>
+              {% endif %}
+            </tr>
+        {% endfor %}
+        {% if inline_admin_formset.formset.can_delete %}
+          <tr class="add-row"><td colspan="9"><a role="button" class="addlink" href="#">{% blocktrans with inline_admin_formset.opts.verbose_name as verbose_name %}Adicionar outro {{ verbose_name }}{% endblocktrans %}</a></td></tr>
+        {% else %}
+          <tr class="add-row"><td colspan="8"><a role="button" class="addlink" href="#">{% blocktrans with inline_admin_formset.opts.verbose_name as verbose_name %}Adicionar outro {{ verbose_name }}{% endblocktrans %}</a></td></tr>
+        {% endif %}
+        </tbody>
+      </table>
+      <script>
+      (function initializePrazoToggle() {
+        const setup = () => {
+          document.querySelectorAll('.prazo-concluido-toggle').forEach(btn => {
+            const input = document.getElementById(btn.dataset.inputId);
+            const label = btn.querySelector('.prazo-toggle-label');
+            if (!input || !label) return;
+            const updateState = () => {
+              const active = input.checked;
+              label.textContent = active ? btn.dataset.labelOn : btn.dataset.labelOff;
+              btn.classList.toggle('is-on', active);
+              btn.setAttribute('aria-pressed', active);
+            };
+            updateState();
+            btn.addEventListener('click', () => {
+              input.checked = !input.checked;
+              updateState();
+            });
+          });
+        };
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setup);
+        } else {
+          setup();
+        }
+      })();
+      </script>
+    </fieldset>
+  </div>
+</div>

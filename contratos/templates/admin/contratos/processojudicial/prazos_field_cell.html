@@ -1,0 +1,13 @@
+<td class="field-{{ field.name }}{% if field.errors %} errors{% endif %}{% if field.is_hidden %} hidden{% endif %}">
+  {% if field.errors %}
+    <ul class="errorlist">
+      {% for error in field.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {{ field }}
+  {% if field.help_text %}
+    <p class="help">{{ field.help_text|safe }}</p>
+  {% endif %}
+</td>
