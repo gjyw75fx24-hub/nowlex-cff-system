@@ -676,11 +676,37 @@ a.historylink {
     text-align: left;
 }
 
+#prazos-group .prazo-inline-table input,
+#prazos-group .prazo-inline-table select,
+#prazos-group .prazo-inline-table textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#prazos-group .field-titulo input {
+    max-width: 300px;
+}
+
+#prazos-group .field-data_limite input.vDateField,
+#prazos-group .field-data_limite input.vTimeField {
+    max-width: 140px;
+}
+
+#prazos-group .field-alerta_valor input {
+    max-width: 70px;
+}
+
+#prazos-group .field-alerta_unidade select,
+#prazos-group .field-responsavel select {
+    max-width: 140px;
+}
+
 #prazos-group .field-data_limite .datetime {
     display: flex;
     align-items: center;
-    gap: 0.8rem;
-    margin-bottom: 0.5rem;
+    gap: 0.3rem;
+    margin-bottom: 0.3rem;
+    flex-wrap: nowrap;
 }
 
 #prazos-group .field-data_limite .datetime br {
