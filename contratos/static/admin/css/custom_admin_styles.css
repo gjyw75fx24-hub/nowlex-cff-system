@@ -808,29 +808,36 @@ a.historylink {
 }
 
 #prazos-group .prazo-delete-link {
+    width: 44px;
+    height: 44px;
+    margin-left: 0.75rem;
+    padding: 0;
+    border-radius: 50%;
+    border: none;
+    background: radial-gradient(circle at 50% 35%, #ff6c47, #cc1b2b 70%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-left: 0.6rem;
-    padding: 0;
-    font-size: 1.4rem;
-    color: #97383a;
-    background: transparent;
-    border: none;
-    cursor: pointer;
     position: relative;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
 #prazos-group .prazo-delete-link:hover {
-    transform: scale(1.1);
+    transform: translateY(-1px) scale(1.05);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 
-#prazos-group .prazo-delete-x {
-    color: #97383a !important;
-    font-size: 1.4rem;
-    font-weight: 700;
-    line-height: 1;
-    text-shadow: none;
+#prazos-group .prazo-delete-icon {
+    display: block;
+    width: 26px;
+    height: 26px;
+    background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%3E%3Cg%20fill%3D%27none%27%20stroke%3D%27%23fff%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M5%206h14%27%2F%3E%3Cpath%20d%3D%27M9%206V4a1%201%200%200%201%201-1h4a1%201%200%200%201%201%201v2%27%2F%3E%3Cpath%20d%3D%27M6%208%207.5%2020a1%201%200%200%200%201%201h7a1%201%200%200%200%201-1L18%208%27%2F%3E%3Cpath%20d%3D%27M10%2011v6%27%2F%3E%3Cpath%20d%3D%27M14%2011v6%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+    background-size: 78%;
+    background-position: center;
+    background-repeat: no-repeat;
+    text-indent: -9999px;
 }
 
 #prazos-group .prazo-delete-link + input {

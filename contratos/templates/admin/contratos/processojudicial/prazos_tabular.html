@@ -77,7 +77,7 @@
                 </button>
                 {% if inline_admin_formset.formset.can_delete %}
                   <label for="{{ inline_admin_form.deletion_field.field.id }}" class="prazo-delete-link inline-deletelink" title="{% trans "Excluir prazo" %}">
-                    <span class="prazo-delete-x" aria-hidden="true">×</span>
+                    <span class="prazo-delete-icon" aria-hidden="true"></span>
                   </label>
                   {{ inline_admin_form.deletion_field.field }}
                 {% endif %}
