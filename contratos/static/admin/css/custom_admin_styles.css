@@ -683,6 +683,10 @@ a.historylink {
     box-sizing: border-box;
 }
 
+#prazos-group .field-observacoes textarea {
+    min-height: 110px;
+}
+
 #prazos-group .field-titulo input {
     max-width: 300px;
 }
@@ -831,6 +835,16 @@ a.historylink {
 #prazos-group .prazo-toggle-label {
     font-size: 0.75rem;
     letter-spacing: 0.08em;
+}
+
+#prazos-group .field-status-delete {
+    white-space: nowrap;
+}
+
+#prazos-group .prazo-status-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 #prazos-group .prazo-delete-link {
