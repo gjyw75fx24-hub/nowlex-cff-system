@@ -1333,22 +1333,22 @@ a.historylink {
     padding-bottom: 6px;
     overscroll-behavior-x: contain;
 }
-.inline-scroll-inner {
-    display: inline-block;
-    min-width: 900px;
-    width: 100%;
-}
 .inline-scroll-container .tabular {
     display: inline-block;
     min-width: 900px;
-    width: 100%;
+    width: -moz-max-content;
+    width: -webkit-max-content;
+    width: max-content;
 }
 .inline-scroll-container .tabular h2 {
     display: block;
     width: 100%;
 }
 .inline-scroll-container .tabular table {
-    width: 100%;
+    width: -moz-max-content;
+    width: -webkit-max-content;
+    width: max-content;
+    min-width: 900px;
 }
 .agenda-panel__footer {
     padding: 14px 24px 18px;
