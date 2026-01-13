@@ -177,8 +177,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        const detailTitleEl = overlay.querySelector('.agenda-panel__details-title');
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null);
+        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -231,16 +230,47 @@ document.addEventListener('DOMContentLoaded', function() {
     const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const getMonthLabel = (state) => {
         const monthName = MONTHS[state.monthIndex % MONTHS.length];
+        const year = state.year || new Date().getFullYear();
         if (state.mode === 'weekly') {
             const weekNumber = Math.floor(state.weekOffset / 7) + 1;
-            return `Semana ${weekNumber} · ${monthName} 2025`;
+            return `Semana ${weekNumber} · ${monthName} ${year}`;
         }
-        return `${monthName} 2025`;
+        return `${monthName} ${year}`;
     };
     const clampWeekOffset = (offset, state) => {
-        const data = getMonthData(state.monthIndex, state.year || 2025);
+        const data = getMonthData(state.monthIndex, state.year || new Date().getFullYear());
         const maxOffset = Math.max(0, data.length - 7);
         return Math.max(0, Math.min(offset, maxOffset));
+    };
+
+    const parseDateInputValue = (value) => {
+        if (!value) return null;
+        const normalized = value.trim();
+        const isoMatch = normalized.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+            return {
+                year: Number(isoMatch[1]),
+                monthIndex: Number(isoMatch[2]) - 1,
+                day: Number(isoMatch[3]),
+            };
+        }
+        const brMatch = normalized.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (brMatch) {
+            return {
+                year: Number(brMatch[3]),
+                monthIndex: Number(brMatch[2]) - 1,
+                day: Number(brMatch[1]),
+            };
+        }
+        const parsed = new Date(normalized);
+        if (!Number.isNaN(parsed.getTime())) {
+            return {
+                year: parsed.getFullYear(),
+                monthIndex: parsed.getMonth(),
+                day: parsed.getDate(),
+            };
+        }
+        return null;
     };
 
     const normalizeEntryMetadata = (dayInfo, type) => {
@@ -248,58 +278,103 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!list) return;
         list.forEach((entry, index) => {
             const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
-            entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = `${index + 1}`;
-            entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
+            entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
+            entry.label = entry.label || `${index + 1}`;
+            const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
+            entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
         });
     };
 
-    const createSampleCalendarDays = (monthIndex, year = 2025) => {
+    const createCalendarDays = (monthIndex, year = new Date().getFullYear()) => {
         const days = new Date(year, monthIndex + 1, 0).getDate();
         return Array.from({ length: days }, (_, index) => {
-            const day = index + 1;
-            const hasT = day % 3 === 0;
-            const hasP = day % 4 === 0;
-            const tasksT = hasT
-                ? Array.from({ length: 2 }, (_, i) => ({
-                    id: `t-${day}-${i}`,
-                    label: `Tarefa ${day}.${i + 1}`,
-                    description: `Descrição da Tarefa ${day}.${i + 1}`,
-                    originalDay: day,
-                }))
-                : [];
-            const tasksP = hasP
-                ? Array.from({ length: 2 }, (_, i) => ({
-                    id: `p-${day}-${i}`,
-                    label: `Prazo ${day}.${i + 1}`,
-                    description: `Descrição do Prazo ${day}.${i + 1}`,
-                    originalDay: day,
-                }))
-                : [];
-            const dayInfo = {
-                day,
-                tasksT,
-                tasksP,
+            return {
+                day: index + 1,
+                tasksT: [],
+                tasksP: [],
                 monthIndex,
                 year,
             };
-            normalizeEntryMetadata(dayInfo, 'T');
-            normalizeEntryMetadata(dayInfo, 'P');
-            return dayInfo;
         });
     };
     const calendarMonths = {};
-    const getMonthData = (monthIndex, year = 2025) => {
+    const resetCalendarMonths = () => {
+        Object.keys(calendarMonths).forEach((key) => delete calendarMonths[key]);
+    };
+    const getMonthData = (monthIndex, year = new Date().getFullYear()) => {
         const key = `${year}-${monthIndex}`;
         if (!calendarMonths[key]) {
-            calendarMonths[key] = createSampleCalendarDays(monthIndex, year);
+            calendarMonths[key] = createCalendarDays(monthIndex, year);
         }
         return calendarMonths[key];
     };
 
+    const collectAgendaEntriesFromInline = () => {
+        const entries = [];
+        const appendEntry = (entry) => {
+            if (!entry) return;
+            entries.push(entry);
+        };
+        document.querySelectorAll('#tarefas-group .dynamic-tarefas').forEach((row, index) => {
+            if (row.classList.contains('empty-form')) return;
+            const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
+            if (deleteCheckbox?.checked) return;
+            const dateInput = row.querySelector('input[id$="-data"]');
+            const descInput = row.querySelector('input[id$="-descricao"]');
+            const parsedDate = parseDateInputValue(dateInput?.value);
+            if (!parsedDate) return;
+            const idInput = row.querySelector('input[id$="-id"]');
+            appendEntry({
+                type: 'T',
+                id: idInput?.value ? `t-${idInput.value}` : `t-${index + 1}-${parsedDate.day}`,
+                label: `${index + 1}`,
+                description: (descInput?.value || '').trim(),
+                originalDay: parsedDate.day,
+                day: parsedDate.day,
+                monthIndex: parsedDate.monthIndex,
+                year: parsedDate.year,
+            });
+        });
+        document.querySelectorAll('#prazos-group .dynamic-prazos').forEach((row, index) => {
+            if (row.classList.contains('empty-form')) return;
+            const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
+            if (deleteCheckbox?.checked) return;
+            const dateInput = row.querySelector('input[id$="-data_limite_0"]') || row.querySelector('input[id$="-data_limite"]');
+            const parsedDate = parseDateInputValue(dateInput?.value);
+            if (!parsedDate) return;
+            const titleInput = row.querySelector('input[id$="-titulo"]');
+            const idInput = row.querySelector('input[id$="-id"]');
+            appendEntry({
+                type: 'P',
+                id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
+                label: `${index + 1}`,
+                description: (titleInput?.value || '').trim(),
+                originalDay: parsedDate.day,
+                day: parsedDate.day,
+                monthIndex: parsedDate.monthIndex,
+                year: parsedDate.year,
+            });
+        });
+        return entries;
+    };
+
+    const hydrateAgendaFromInlineData = () => {
+        resetCalendarMonths();
+        const entries = collectAgendaEntriesFromInline();
+        entries.forEach((entry) => {
+            const days = getMonthData(entry.monthIndex, entry.year);
+            const dayInfo = days[entry.day - 1];
+            if (!dayInfo) return;
+            const targetList = entry.type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+            targetList.push(entry);
+            normalizeEntryMetadata(dayInfo, entry.type);
+        });
+        return entries;
+    };
+
     const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle) => {
-        setDetailTitle?.(dayData?.day);
+        setDetailTitle?.(dayData?.day, type);
         const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
@@ -315,6 +390,10 @@ document.addEventListener('DOMContentLoaded', function() {
             label.className = 'agenda-panel__details-item-label';
             label.textContent = entryData.label;
             entry.appendChild(label);
+            const text = document.createElement('span');
+            text.className = 'agenda-panel__details-item-text';
+            text.textContent = entryData.description || '';
+            entry.appendChild(text);
             if (entryData.originalDay && entryData.originalDay !== dayData.day) {
                 const original = document.createElement('span');
                 original.className = 'agenda-panel__details-original';
@@ -343,17 +422,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, detailTitleEl) => {
-        const effectiveState = state || { mode: 'monthly', weekOffset: 0 };
-        const updateDetailTitle = (dayNumber) => {
-            if (!detailTitleEl) {
-                return;
-            }
-            detailTitleEl.textContent = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
-        };
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle) => {
+        if (!gridElement || !detailList || !detailCardBody) {
+            return;
+        }
+        const todayFallback = new Date();
+        const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+        setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const setActiveDay = (cell) => {
@@ -371,7 +449,7 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
-        const sampleCalendarDays = getMonthData(effectiveState.monthIndex, effectiveState.year || 2025);
+        const sampleCalendarDays = getMonthData(effectiveState.monthIndex, effectiveState.year || new Date().getFullYear());
         const baseDays = effectiveState.mode === 'weekly'
             ? sampleCalendarDays.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
             : sampleCalendarDays;
@@ -426,7 +504,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, updateDetailTitle);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle);
                     setActiveDay(dayCell);
                 });
                 tag.addEventListener('dragstart', (event) => {
@@ -444,14 +522,14 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             dayCell.addEventListener('click', () => {
-                updateDetailTitle(dayInfo.day);
                 if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, updateDetailTitle);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, updateDetailTitle);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+                    setDetailTitle?.(dayInfo.day, null);
                 }
                 setActiveDay(dayCell);
             });
@@ -588,7 +666,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        const getDetailTitleEl = () => overlay.querySelector('.agenda-panel__details-title');
+        const detailTitleWrapper = overlay.querySelector('.agenda-panel__details-title');
+        const detailTitleText = document.createElement('span');
+        detailTitleText.className = 'agenda-panel__details-title-text';
+        const detailTitleType = document.createElement('span');
+        detailTitleType.className = 'agenda-panel__details-type';
+        detailTitleWrapper.textContent = '';
+        detailTitleWrapper.append(detailTitleText, detailTitleType);
+        const setDetailTitle = (dayNumber, type) => {
+            const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
+            detailTitleText.textContent = base;
+            const typeLabel = type === 'T' ? 'Tarefa' : type === 'P' ? 'Prazo' : '';
+            detailTitleType.textContent = typeLabel;
+            detailTitleType.dataset.type = type || '';
+            detailTitleType.style.visibility = typeLabel ? 'visible' : 'hidden';
+        };
+        setDetailTitle(null, null);
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const usersToggle = overlay.querySelector('.agenda-panel__users-toggle');
         const subtitleEl = overlay.querySelector('.agenda-panel__subtitle');
@@ -626,10 +719,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             return null;
         };
+        const today = new Date();
         const calendarState = {
             mode: 'monthly',
             months: 1,
-            monthIndex: 0,
+            monthIndex: today.getMonth(),
+            year: today.getFullYear(),
             weekOffset: 0,
             showHistory: false,
             view: 'calendar',
@@ -640,6 +735,7 @@ document.addEventListener('DOMContentLoaded', function() {
             usersError: false,
             defaultUserLabel: getDefaultUserLabel(),
         };
+        hydrateAgendaFromInlineData();
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
@@ -692,10 +788,7 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarGridEl.classList.remove('agenda-panel__calendar-grid--weekly');
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em um usuário para abrir a agenda dele.</p>';
             detailCardBody.textContent = 'Selecione um usuário para exibir a agenda geral dele.';
-            const detailTitleElInstance = getDetailTitleEl();
-            if (detailTitleElInstance) {
-                detailTitleElInstance.textContent = 'Eventos do dia';
-            }
+            setDetailTitle(null, null);
             if (calendarState.usersLoading) {
                 const spinner = document.createElement('div');
                 spinner.className = 'agenda-panel__users-loading';
@@ -786,17 +879,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderUserSelectionGrid();
                 return;
             }
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, getDetailTitleEl());
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
         };
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
                 const step = 7;
                 const delta = direction === 'next' ? step : -step;
-                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset + delta);
+                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset + delta, calendarState);
             } else {
                 const delta = direction === 'next' ? 1 : -1;
-                const totalMonths = MONTHS.length;
-                calendarState.monthIndex = (calendarState.monthIndex + delta + totalMonths) % totalMonths;
+                let monthIndex = calendarState.monthIndex + delta;
+                let year = calendarState.year;
+                if (monthIndex > 11) {
+                    monthIndex = 0;
+                    year += 1;
+                } else if (monthIndex < 0) {
+                    monthIndex = 11;
+                    year -= 1;
+                }
+                calendarState.monthIndex = monthIndex;
+                calendarState.year = year;
             }
             renderCalendar();
         };
@@ -829,7 +931,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modeButton.textContent = labels[next];
             calendarState.mode = next;
             if (next === 'weekly') {
-                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset);
+                calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset, calendarState);
             } else {
                 calendarState.weekOffset = 0;
             }
@@ -855,7 +957,7 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.addEventListener('click', () => {
                 calendarState.monthIndex = index;
                 if (calendarState.mode === 'weekly') {
-                    calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset);
+                    calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset, calendarState);
                 }
                 renderCalendar();
             });
