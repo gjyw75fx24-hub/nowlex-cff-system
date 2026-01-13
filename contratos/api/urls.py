@@ -8,6 +8,7 @@ urlpatterns = [
     path('processo/<int:processo_id>/tarefas/', views.TarefaCreateAPIView.as_view(), name='tarefa_create'),
     path('processo/<int:processo_id>/prazos/', views.PrazoCreateAPIView.as_view(), name='prazo_create'),
     path('users/', views.UserSearchAPIView.as_view(), name='user_search'),
+    path('agenda/users/', views.AgendaUsersAPIView.as_view(), name='agenda_users'),
     path('listas-de-tarefas/', views.ListaDeTarefasAPIView.as_view(), name='listadetarefas_list_create'),
     
     # URL para o botão de busca de dados online de processo

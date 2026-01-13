@@ -517,6 +517,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="agenda-panel__controls">
                     <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
                     <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
+                    <button type="button" class="agenda-panel__users-toggle" data-view="users" aria-pressed="false">Usuários</button>
                 </div>
                 <div class="agenda-panel__body">
                     <div class="agenda-panel__calendar-wrapper">
@@ -579,6 +580,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
+        const usersToggle = overlay.querySelector('.agenda-panel__users-toggle');
+        const subtitleEl = overlay.querySelector('.agenda-panel__subtitle');
         const footer = overlay.querySelector('.agenda-panel__footer');
         const historyButton = document.createElement('button');
         historyButton.type = 'button';
@@ -598,6 +601,38 @@ document.addEventListener('DOMContentLoaded', function() {
             monthIndex: 0,
             weekOffset: 0,
             showHistory: false,
+            view: 'calendar',
+            activeUser: null,
+            users: [],
+            usersLoading: false,
+            usersLoaded: false,
+            usersError: false,
+        };
+        const formatUserLabel = (user) => {
+            if (!user) return '';
+            const firstName = (user.first_name || '').trim();
+            const lastName = (user.last_name || '').trim();
+            const fullName = [firstName, lastName].filter(Boolean).join(' ');
+            return fullName || user.username || 'Usuário';
+        };
+        const getUserInitials = (user) => {
+            if (!user) return '';
+            const label = formatUserLabel(user);
+            if (!label) return (user.username || 'U').slice(0, 2).toUpperCase();
+            const parts = label.split(' ');
+            if (parts.length === 1) {
+                return parts[0].slice(0, 2).toUpperCase();
+            }
+            const first = parts[0][0];
+            const last = parts[parts.length - 1][0];
+            return `${first || ''}${last || ''}`.toUpperCase();
+        };
+        const updateSubtitleText = () => {
+            if (calendarState.activeUser) {
+                subtitleEl.textContent = `Agenda de ${formatUserLabel(calendarState.activeUser)}`;
+            } else {
+                subtitleEl.textContent = 'Expandida para duas telas ou modal.';
+            }
         };
         const normalizeMonthIndex = (value) => ((value % MONTHS.length) + MONTHS.length) % MONTHS.length;
         const setActiveMonthButton = (index) => {
@@ -607,13 +642,107 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         };
         const updateMonthTitle = () => {
+            if (calendarState.view === 'users') {
+                monthTitleEl.textContent = 'Usuários';
+                return;
+            }
             monthTitleEl.textContent = getMonthLabel(calendarState);
+        };
+        const renderUserSelectionGrid = () => {
+            calendarGridEl.innerHTML = '';
+            calendarGridEl.classList.remove('agenda-panel__calendar-grid--weekly');
+            detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em um usuário para abrir a agenda dele.</p>';
+            detailCardBody.textContent = 'Selecione um usuário para exibir a agenda geral dele.';
+            if (calendarState.usersLoading) {
+                const spinner = document.createElement('div');
+                spinner.className = 'agenda-panel__users-loading';
+                spinner.textContent = 'Carregando usuários...';
+                calendarGridEl.appendChild(spinner);
+                return;
+            }
+            if (calendarState.usersError) {
+                const message = document.createElement('div');
+                message.className = 'agenda-panel__users-error';
+                message.textContent = 'Não foi possível carregar os usuários. Tente novamente.';
+                calendarGridEl.appendChild(message);
+                return;
+            }
+            if (!calendarState.users.length) {
+                const emptyMessage = document.createElement('p');
+                emptyMessage.className = 'agenda-panel__details-empty';
+                emptyMessage.textContent = 'Nenhum usuário cadastrado foi encontrado.';
+                calendarGridEl.appendChild(emptyMessage);
+                return;
+            }
+            calendarState.users.forEach((user) => {
+                const card = document.createElement('button');
+                card.type = 'button';
+                card.className = 'agenda-panel__user-card';
+                if (calendarState.activeUser?.id === user.id) {
+                    card.classList.add('agenda-panel__user-card--active');
+                }
+                const initials = document.createElement('span');
+                initials.className = 'agenda-panel__user-card-initials';
+                initials.textContent = getUserInitials(user);
+                const name = document.createElement('span');
+                name.className = 'agenda-panel__user-card-name';
+                name.textContent = formatUserLabel(user);
+                const username = document.createElement('span');
+                username.className = 'agenda-panel__user-card-username';
+                username.textContent = user.username;
+                card.append(initials, name, username);
+                card.addEventListener('click', () => {
+                    calendarState.activeUser = user;
+                    calendarState.view = 'calendar';
+                    calendarState.weekOffset = 0;
+                    usersToggle?.classList.remove('agenda-panel__users-toggle--active');
+                    renderCalendar();
+                });
+                calendarGridEl.appendChild(card);
+            });
+        };
+        const loadAgendaUsers = () => {
+            if (calendarState.usersLoaded || calendarState.usersLoading) {
+                return;
+            }
+            calendarState.usersLoading = true;
+            calendarState.usersError = false;
+            fetch('/api/agenda/users/')
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao buscar usuários');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    calendarState.users = Array.isArray(data) ? data : [];
+                    calendarState.usersLoaded = true;
+                    calendarState.usersLoading = false;
+                    calendarState.usersError = false;
+                    renderCalendar();
+                })
+                .catch(() => {
+                    calendarState.users = [];
+                    calendarState.usersLoading = false;
+                    calendarState.usersLoaded = true;
+                    calendarState.usersError = true;
+                    renderCalendar();
+                });
         };
         const renderCalendar = () => {
             updateMonthTitle();
+            updateSubtitleText();
             setActiveMonthButton(calendarState.monthIndex);
             overlay.classList.toggle('agenda-panel--weekly', calendarState.mode === 'weekly');
             overlay.classList.toggle('agenda-panel--history', calendarState.showHistory);
+            const isUserView = calendarState.view === 'users';
+            usersToggle?.classList.toggle('agenda-panel__users-toggle--active', isUserView);
+            calendarGridEl.classList.toggle('agenda-panel__users-grid--active', isUserView);
+            usersToggle?.setAttribute('aria-pressed', `${isUserView}`);
+            if (isUserView) {
+                renderUserSelectionGrid();
+                return;
+            }
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar);
         };
         const handleNavigation = (direction) => {
@@ -664,6 +793,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (next !== 'monthly') {
                 cycleBtn.dataset.months = 1;
                 cycleBtn.textContent = '1 Calendário';
+            }
+            renderCalendar();
+        });
+        usersToggle?.addEventListener('click', () => {
+            const nextView = calendarState.view === 'users' ? 'calendar' : 'users';
+            calendarState.view = nextView;
+            if (nextView === 'users') {
+                calendarState.usersLoaded = false;
+                calendarState.usersError = false;
+                loadAgendaUsers();
             }
             renderCalendar();
         });

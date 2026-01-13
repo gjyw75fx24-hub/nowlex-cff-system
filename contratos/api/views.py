@@ -74,6 +74,19 @@ class UserSearchAPIView(generics.ListAPIView):
             ).distinct()[:10]
         return User.objects.none()
 
+
+class AgendaUsersAPIView(APIView):
+    """
+    Lista os usuários ativos para a seleção na Agenda Geral.
+    """
+    def get(self, request):
+        users = (
+            User.objects.filter(is_active=True)
+            .order_by('first_name', 'last_name', 'username')[:40]
+        )
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
 class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     """
     API para listar e criar Listas de Tarefas.
