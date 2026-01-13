@@ -1374,6 +1374,7 @@ class TarefaInline(admin.TabularInline):
     model = Tarefa
     extra = 0
     autocomplete_fields = ['responsavel']
+    fields = ['descricao', 'lista', 'data', 'responsavel', 'prioridade', 'observacoes', 'concluida']
 
 class PrazoInlineForm(forms.ModelForm):
     class Meta:
@@ -1389,6 +1390,7 @@ class PrazoInline(admin.TabularInline):
     form = PrazoInlineForm
     extra = 0
     template = 'admin/edit_inline/tabular.html'
+    fields = ['titulo', 'data_limite', 'alerta_valor', 'alerta_unidade', 'responsavel', 'observacoes', 'concluido']
 
 class ProcessoArquivoInline(admin.TabularInline):
     model = ProcessoArquivo
