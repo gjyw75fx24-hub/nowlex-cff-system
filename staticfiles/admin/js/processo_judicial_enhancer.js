@@ -177,7 +177,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null);
+        const detailTitleEl = overlay.querySelector('.agenda-panel__details-title');
+        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, detailTitleEl);
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -248,7 +249,7 @@ document.addEventListener('DOMContentLoaded', function() {
         list.forEach((entry, index) => {
             const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
             entry.id = `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = `${prefix} ${dayInfo.day}.${index + 1}`;
+            entry.label = `${index + 1}`;
             entry.description = `Descrição da ${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
         });
@@ -297,7 +298,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return calendarMonths[key];
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle) => {
+        setDetailTitle?.(dayData?.day);
         const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
@@ -341,8 +343,14 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, detailTitleEl) => {
         const effectiveState = state || { mode: 'monthly', weekOffset: 0 };
+        const updateDetailTitle = (dayNumber) => {
+            if (!detailTitleEl) {
+                return;
+            }
+            detailTitleEl.textContent = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
+        };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -418,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, updateDetailTitle);
                     setActiveDay(dayCell);
                 });
                 tag.addEventListener('dragstart', (event) => {
@@ -436,10 +444,11 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             dayCell.addEventListener('click', () => {
+                updateDetailTitle(dayInfo.day);
                 if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, updateDetailTitle);
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, updateDetailTitle);
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -465,24 +474,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!sourceDay) {
                         return;
                     }
-                if (parsed.source === 'detail') {
-                    const sourceList = sourceDay[typeKey];
-                    const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
-                    if (entryIndex === -1) return;
-                    const [movedEntry] = sourceList.splice(entryIndex, 1);
-                    dayInfo[typeKey].push(movedEntry);
-                    normalizeEntryMetadata(sourceDay, parsed.type);
-                    normalizeEntryMetadata(dayInfo, parsed.type);
-                } else if (parsed.source === 'calendar') {
-                    const transferred = sourceDay[typeKey];
-                    if (!transferred.length) return;
-                    dayInfo[typeKey].push(...transferred);
-                    sourceDay[typeKey] = [];
-                    normalizeEntryMetadata(sourceDay, parsed.type);
-                    normalizeEntryMetadata(dayInfo, parsed.type);
-                }
-                rerender && rerender();
-            };
+                    if (parsed.source === 'detail') {
+                        const sourceList = sourceDay[typeKey];
+                        const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
+                        if (entryIndex === -1) return;
+                        const [movedEntry] = sourceList.splice(entryIndex, 1);
+                        dayInfo[typeKey].push(movedEntry);
+                        normalizeEntryMetadata(sourceDay, parsed.type);
+                        normalizeEntryMetadata(dayInfo, parsed.type);
+                    } else if (parsed.source === 'calendar') {
+                        const transferred = sourceDay[typeKey];
+                        if (!transferred.length) return;
+                        dayInfo[typeKey].push(...transferred);
+                        sourceDay[typeKey] = [];
+                        normalizeEntryMetadata(sourceDay, parsed.type);
+                        normalizeEntryMetadata(dayInfo, parsed.type);
+                    }
+                    rerender && rerender();
+                };
                 dayCell.addEventListener('dragover', (event) => {
                     event.preventDefault();
                     dayCell.classList.add('agenda-panel__day--drag-over');
@@ -579,6 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        const getDetailTitleEl = () => overlay.querySelector('.agenda-panel__details-title');
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const usersToggle = overlay.querySelector('.agenda-panel__users-toggle');
         const subtitleEl = overlay.querySelector('.agenda-panel__subtitle');
@@ -682,6 +692,10 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarGridEl.classList.remove('agenda-panel__calendar-grid--weekly');
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em um usuário para abrir a agenda dele.</p>';
             detailCardBody.textContent = 'Selecione um usuário para exibir a agenda geral dele.';
+            const detailTitleElInstance = getDetailTitleEl();
+            if (detailTitleElInstance) {
+                detailTitleElInstance.textContent = 'Eventos do dia';
+            }
             if (calendarState.usersLoading) {
                 const spinner = document.createElement('div');
                 spinner.className = 'agenda-panel__users-loading';
@@ -772,7 +786,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderUserSelectionGrid();
                 return;
             }
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar);
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, getDetailTitleEl());
         };
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
