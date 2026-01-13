@@ -1313,6 +1313,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const wrapInlineTableForScroll = () => {
+        ['tarefas-group', 'prazos-group'].forEach(groupId => {
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            const tabular = group.querySelector('.tabular');
+            if (!tabular || tabular.parentElement.classList.contains('inline-scroll-container')) return;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'inline-scroll-container';
+            tabular.classList.add('inline-scroll-inner');
+            tabular.parentNode.insertBefore(wrapper, tabular);
+            wrapper.appendChild(tabular);
+        });
+    };
+    wrapInlineTableForScroll();
+
     const makeInfoCardSticky = () => {
         const card = document.querySelector('.info-card');
         if (!card) return;
