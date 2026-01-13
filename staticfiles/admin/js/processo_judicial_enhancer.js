@@ -322,6 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (deleteCheckbox?.checked) return;
             const dateInput = row.querySelector('input[id$="-data"]');
             const descInput = row.querySelector('input[id$="-descricao"]');
+            const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const idInput = row.querySelector('input[id$="-id"]');
@@ -330,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 id: idInput?.value ? `t-${idInput.value}` : `t-${index + 1}-${parsedDate.day}`,
                 label: `${index + 1}`,
                 description: (descInput?.value || '').trim(),
+                detail: (obsInput?.value || '').trim(),
                 originalDay: parsedDate.day,
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
@@ -344,12 +346,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const titleInput = row.querySelector('input[id$="-titulo"]');
+            const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const idInput = row.querySelector('input[id$="-id"]');
             appendEntry({
                 type: 'P',
                 id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
                 label: `${index + 1}`,
                 description: (titleInput?.value || '').trim(),
+                detail: (obsInput?.value || '').trim(),
                 originalDay: parsedDate.day,
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
@@ -401,7 +405,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 entry.appendChild(original);
             }
             entry.addEventListener('click', () => {
-                detailCardBody.textContent = entryData.description;
+                const detail = entryData.detail || entryData.observacoes || entryData.description;
+                detailCardBody.textContent = detail || 'Sem observações adicionais.';
             });
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;

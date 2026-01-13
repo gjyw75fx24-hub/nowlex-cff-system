@@ -540,6 +540,7 @@ class Tarefa(models.Model):
     responsavel = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tarefas_responsaveis')
     prioridade = models.CharField(max_length=1, choices=PRIORIDADE_CHOICES, default='M')
     concluida = models.BooleanField(default=False)
+    observacoes = models.TextField(blank=True, null=True, verbose_name="Observações")
 
     def __str__(self):
         return self.descricao

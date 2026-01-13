@@ -19,7 +19,7 @@ class TarefaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tarefa
-        fields = ['id', 'descricao', 'lista', 'data', 'responsavel', 'prioridade', 'prioridade_display', 'concluida']
+        fields = ['id', 'descricao', 'lista', 'data', 'responsavel', 'prioridade', 'prioridade_display', 'concluida', 'observacoes']
 
 class PrazoSerializer(serializers.ModelSerializer):
     responsavel = UserSerializer(read_only=True)
