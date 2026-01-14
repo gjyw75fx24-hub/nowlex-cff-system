@@ -416,7 +416,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const mergeEntriesByBackend = (primary = [], secondary = []) => {
         const map = new Map();
         const add = (entry, prefer = false) => {
-            const key = entry.backendId ? `b-${entry.backendId}` : `i-${entry.id}`;
+            const typeKey = entry.type === 'P' ? 'p' : 't';
+            const key = entry.backendId ? `b-${typeKey}-${entry.backendId}` : `i-${entry.id}`;
             if (!prefer && map.has(key)) return;
             map.set(key, entry);
         };
