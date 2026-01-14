@@ -1384,6 +1384,34 @@ class PrazoInlineForm(forms.ModelForm):
             'observacoes': forms.Textarea(attrs={'placeholder': 'Observações', 'rows': 5}),
         }
 
+    def clean(self):
+        cleaned = super().clean()
+        # Permite preencher só a data; completa hora padrão 00:00
+        date_key = self.add_prefix('data_limite_0')
+        time_key = self.add_prefix('data_limite_1')
+        date_raw = self.data.get(date_key) or self.data.get(self.add_prefix('data_limite'))
+        time_raw = self.data.get(time_key) or '00:00'
+        if date_raw and not cleaned.get('data_limite'):
+            parsed_date = None
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+                try:
+                    parsed_date = datetime.datetime.strptime(date_raw, fmt).date()
+                    break
+                except Exception:
+                    continue
+            if parsed_date:
+                try:
+                    parsed_time = datetime.datetime.strptime(time_raw, '%H:%M').time()
+                except Exception:
+                    parsed_time = datetime.time(0, 0)
+                dt = datetime.datetime.combine(parsed_date, parsed_time)
+                if timezone.is_naive(dt):
+                    dt = timezone.make_aware(dt, timezone.get_current_timezone())
+                cleaned['data_limite'] = dt
+                if 'data_limite' in self._errors:
+                    del self._errors['data_limite']
+        return cleaned
+
 
 class PrazoInline(admin.TabularInline):
     model = Prazo
