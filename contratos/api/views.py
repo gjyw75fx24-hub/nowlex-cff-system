@@ -44,8 +44,16 @@ class AgendaGeralAPIView(APIView):
     Retorna todas as tarefas e prazos para a Agenda Geral.
     """
     def get(self, request):
-        tarefas = Tarefa.objects.select_related('processo', 'responsavel', 'lista').all()
-        prazos = Prazo.objects.select_related('processo', 'responsavel').all()
+        tarefas = (
+            Tarefa.objects
+            .select_related('processo', 'responsavel', 'lista')
+            .filter(concluida=False)
+        )
+        prazos = (
+            Prazo.objects
+            .select_related('processo', 'responsavel')
+            .filter(concluido=False)
+        )
 
         tarefas_data = TarefaSerializer(tarefas, many=True).data
         for item in tarefas_data:

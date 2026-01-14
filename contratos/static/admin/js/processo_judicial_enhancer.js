@@ -323,6 +323,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (row.classList.contains('empty-form')) return;
             const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
             if (deleteCheckbox?.checked) return;
+            const doneCheckbox = row.querySelector('input[id$="-concluida"]');
+            if (doneCheckbox && doneCheckbox.checked) return;
             const dateInput = row.querySelector('input[id$="-data"]');
             const descInput = row.querySelector('input[id$="-descricao"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
@@ -349,6 +351,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (row.classList.contains('empty-form')) return;
             const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
             if (deleteCheckbox?.checked) return;
+            const doneCheckbox = row.querySelector('input[id$="-concluido"]');
+            if (doneCheckbox && doneCheckbox.checked) return;
             const dateInput = row.querySelector('input[id$="-data_limite_0"]') || row.querySelector('input[id$="-data_limite"]');
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
@@ -380,6 +384,13 @@ document.addEventListener('DOMContentLoaded', function() {
             seen.add(key);
             return true;
         });
+    };
+    const debounce = (fn, delay = 300) => {
+        let timer = null;
+        return (...args) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn(...args), delay);
+        };
     };
 
     const applyEntriesToCalendar = (entries = []) => {
@@ -539,6 +550,11 @@ document.addEventListener('DOMContentLoaded', function() {
         setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
+        const recordActiveDay = (dayInfo, type) => {
+            if (!state) return;
+            state.activeDay = { day: dayInfo.day, monthIndex: dayInfo.monthIndex, year: dayInfo.year };
+            state.activeType = type || state.activeType || null;
+        };
         const setActiveDay = (cell) => {
             if (activeDayCell) {
                 activeDayCell.classList.remove('agenda-panel__day--active');
@@ -610,6 +626,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
                     populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle);
+                    recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
                 tag.addEventListener('dragstart', (event) => {
@@ -629,15 +646,23 @@ document.addEventListener('DOMContentLoaded', function() {
             dayCell.addEventListener('click', () => {
                 if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                    recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
                     populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                    recordActiveDay(dayInfo, 'P');
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
                     setDetailTitle?.(dayInfo.day, null);
+                    recordActiveDay(dayInfo, null);
                 }
                 setActiveDay(dayCell);
             });
+            const isActiveDay =
+                state?.activeDay &&
+                state.activeDay.day === dayInfo.day &&
+                state.activeDay.monthIndex === dayInfo.monthIndex &&
+                state.activeDay.year === dayInfo.year;
             const setupDropZone = () => {
                 const handleDrop = (event) => {
                     event.preventDefault();
@@ -688,6 +713,21 @@ document.addEventListener('DOMContentLoaded', function() {
             dayCell.appendChild(number);
             dayCell.appendChild(tagsWrapper);
             gridElement.appendChild(dayCell);
+            if (isActiveDay) {
+                setActiveDay(dayCell);
+                const preferredType = state.activeType;
+                if (preferredType === 'T' && dayInfo.tasksT.length) {
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                } else if (preferredType === 'P' && dayInfo.tasksP.length) {
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                } else if (dayInfo.tasksT.length) {
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                    recordActiveDay(dayInfo, 'T');
+                } else if (dayInfo.tasksP.length) {
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                    recordActiveDay(dayInfo, 'P');
+                }
+            }
         });
     };
 
@@ -704,7 +744,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="agenda-panel__badge">Agenda Geral</span>
                         <p class="agenda-panel__subtitle">Expandida para duas telas ou modal.</p>
                     </div>
-                    <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
+                    <div class="agenda-panel__header-actions">
+                        <button type="button" class="agenda-panel__refresh-btn" aria-label="Atualizar agenda">↻</button>
+                        <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
+                    </div>
                 </div>
                 <div class="agenda-panel__controls">
                     <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
@@ -764,6 +807,7 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         document.body.appendChild(overlay);
         const closeButton = overlay.querySelector('.agenda-panel__close');
+        const refreshButton = overlay.querySelector('.agenda-panel__refresh-btn');
         const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
         const modeButton = overlay.querySelector('.agenda-panel__cycle-mode');
         const prevNavBtn = overlay.querySelector('[data-direction="prev"]');
@@ -844,14 +888,16 @@ document.addEventListener('DOMContentLoaded', function() {
             view: 'calendar',
             activeUser: null,
             focused: false,
+            activeDay: null,
+            activeType: null,
             users: [],
             usersLoading: false,
             usersLoaded: false,
             usersError: false,
             defaultUserLabel: getDefaultUserLabel(),
         };
-        const inlineEntries = hydrateAgendaFromInlineData();
-        let agendaEntries = dedupeEntries(inlineEntries);
+        const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
+        let agendaEntries = getInlineEntries();
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
@@ -1023,7 +1069,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderCalendar();
             });
         }
-        hydrateAgendaFromApi(inlineEntries, calendarState, renderCalendar, (combined) => {
+        const refreshAgendaData = () => {
+            if (refreshButton) {
+                refreshButton.disabled = true;
+            }
+            const inline = getInlineEntries();
+            hydrateAgendaFromApi(inline, calendarState, () => {
+                applyAgendaEntriesToState();
+                renderCalendar();
+                if (refreshButton) {
+                    refreshButton.disabled = false;
+                }
+            }, (combined) => {
+                agendaEntries = dedupeEntries(combined);
+            });
+        };
+        if (refreshButton) {
+            refreshButton.addEventListener('click', () => {
+                refreshAgendaData();
+            });
+        }
+        hydrateAgendaFromApi(agendaEntries, calendarState, () => {
+            applyAgendaEntriesToState();
+            renderCalendar();
+        }, (combined) => {
             agendaEntries = dedupeEntries(combined);
         });
         const handleNavigation = (direction) => {

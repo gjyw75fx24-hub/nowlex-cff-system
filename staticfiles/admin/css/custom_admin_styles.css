@@ -1319,6 +1319,27 @@ a.historylink {
     font-weight: 600;
     text-decoration-color: #1b5b34;
 }
+.agenda-panel__refresh-btn {
+    margin-left: 8px;
+    border: none;
+    background: #eef3fb;
+    color: #3b4b72;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: background 0.2s, transform 0.1s;
+}
+.agenda-panel__refresh-btn:hover {
+    background: #dce6fb;
+}
+.agenda-panel__refresh-btn:active {
+    transform: scale(0.97);
+}
 .agenda-panel__details-list-inner {
     max-height: 200px;
     overflow: auto;
