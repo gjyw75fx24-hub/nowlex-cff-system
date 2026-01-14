@@ -707,11 +707,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
                 tag.draggable = true;
-                tag.addEventListener('dragstart', () => {
-                    dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
-                        entry.type = entry.type || type;
-                    });
-                });
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -727,20 +722,31 @@ document.addEventListener('DOMContentLoaded', function() {
                     setActiveDay(dayCell);
                 });
                 tag.addEventListener('dragstart', (event) => {
-                const payload = {
-                    source: 'calendar',
-                    day: dayInfo.day,
-                    monthIndex: dayInfo.monthIndex,
-                    year: dayInfo.year,
-                    type,
-                    entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
-                        id: entry.id,
-                        backendId: entry.backendId,
-                        type: entry.type || type,
-                    })),
-                };
+                    const payload = {
+                        source: 'calendar',
+                        day: dayInfo.day,
+                        monthIndex: dayInfo.monthIndex,
+                        year: dayInfo.year,
+                        type,
+                        entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
+                            id: entry.id,
+                            backendId: entry.backendId,
+                            type: entry.type || type,
+                        })),
+                    };
+                    dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
+                        entry.type = entry.type || type;
+                    });
+                    // Usa drag image só da sigla selecionada para não carregar as duas
+                    const clone = tag.cloneNode(true);
+                    clone.style.position = 'absolute';
+                    clone.style.top = '-999px';
+                    document.body.appendChild(clone);
+                    const rect = clone.getBoundingClientRect();
+                    event.dataTransfer.setDragImage(clone, rect.width / 2, rect.height / 2);
                     event.dataTransfer.setData('text/plain', JSON.stringify(payload));
                     event.dataTransfer.effectAllowed = 'move';
+                    setTimeout(() => document.body.removeChild(clone), 0);
                 });
                 tagsWrapper.appendChild(tag);
             };
@@ -1050,10 +1056,16 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         moveAgendaEntries = (entriesToMove = [], targetDayInfo) => {
             if (!targetDayInfo || !entriesToMove.length) return;
-            const backendSet = new Set(entriesToMove.map(e => `${e.backendId || ''}`));
+            const backendPairs = entriesToMove
+                .filter(e => e.backendId !== null && e.backendId !== undefined && e.backendId !== '')
+                .map(e => `${e.type || ''}-${e.backendId}`);
+            const backendSet = new Set(backendPairs);
             const idSet = new Set(entriesToMove.map(e => e.id));
             agendaEntries = agendaEntries.map(item => {
-                if (backendSet.has(`${item.backendId || ''}`) || idSet.has(item.id)) {
+                const key = item.backendId ? `${item.type || ''}-${item.backendId}` : null;
+                const matchesBackend = key && backendSet.has(key);
+                const matchesId = idSet.has(item.id);
+                if (matchesBackend || matchesId) {
                     const newOrigin = item.originalDay || targetDayInfo.day;
                     rememberOrigin({ backendId: item.backendId, originalDay: newOrigin, day: newOrigin });
                     return {
