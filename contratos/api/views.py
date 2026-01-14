@@ -65,12 +65,20 @@ class AgendaGeralAPIView(APIView):
         tarefas_data = TarefaSerializer(tarefas, many=True).data
         for item in tarefas_data:
             item['type'] = 'T'
-            item['date'] = item.get('data')
+            raw_date = item.get('data')
+            if hasattr(raw_date, 'isoformat'):
+                raw_date = raw_date.isoformat()
+            item['date'] = (raw_date or '')[:10]
 
         prazos_data = PrazoSerializer(prazos, many=True).data
         for item in prazos_data:
             item['type'] = 'P'
-            item['date'] = item.get('data_limite')
+            raw_limit = item.get('data_limite')
+            if hasattr(raw_limit, 'date'):
+                raw_limit = raw_limit.date().isoformat()
+            elif hasattr(raw_limit, 'isoformat'):
+                raw_limit = raw_limit.isoformat()
+            item['date'] = (raw_limit or '')[:10]
             item['title'] = item.get('titulo')
 
         agenda_items = sorted(
