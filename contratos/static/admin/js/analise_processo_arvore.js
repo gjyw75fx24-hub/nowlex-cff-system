@@ -122,6 +122,86 @@
             reprovado: 'status-reprovado'
         };
         const currentSupervisorUsername = window.__analise_username || 'Supervisor';
+        let countdownTimer = null;
+        let countdownEl = null;
+
+        const ensureCountdownStyle = () => {
+            if (document.getElementById('cff-countdown-style')) return;
+            const style = document.createElement('style');
+            style.id = 'cff-countdown-style';
+            style.textContent = `
+            .cff-countdown-bubble {
+                position: fixed;
+                bottom: 16px;
+                right: 16px;
+                width: 68px;
+                height: 68px;
+                border-radius: 50%;
+                background: #1f6feb;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-direction: column;
+                font-size: 13px;
+                font-weight: 600;
+                box-shadow: 0 8px 18px rgba(0,0,0,0.15);
+                animation: cff-pulse 1.4s ease-in-out infinite;
+                z-index: 9999;
+                pointer-events: none;
+            }
+            .cff-countdown-bubble small {
+                font-size: 11px;
+                font-weight: 500;
+                opacity: 0.9;
+            }
+            @keyframes cff-pulse {
+                0% { transform: scale(1); opacity: 0.95; }
+                50% { transform: scale(1.06); opacity: 1; }
+                100% { transform: scale(1); opacity: 0.95; }
+            }
+            `;
+            document.head.appendChild(style);
+        };
+
+        const startCountdown = (seconds = 3) => {
+            clearInterval(countdownTimer);
+            if (countdownEl) {
+                countdownEl.remove();
+                countdownEl = null;
+            }
+            ensureCountdownStyle();
+            countdownEl = document.createElement('div');
+            countdownEl.className = 'cff-countdown-bubble';
+            const label = document.createElement('small');
+            label.textContent = 'Gerando em';
+            const value = document.createElement('div');
+            value.textContent = `${seconds}`;
+            countdownEl.append(label, value);
+            document.body.appendChild(countdownEl);
+
+            let remaining = seconds;
+            countdownTimer = setInterval(() => {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    countdownEl?.remove();
+                    countdownEl = null;
+                    return;
+                }
+                value.textContent = `${remaining}`;
+            }, 1000);
+        };
+
+        const stopCountdown = () => {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+            if (countdownEl) {
+                countdownEl.remove();
+                countdownEl = null;
+            }
+        };
 
 
         const $inlineGroup = $('.analise-procedural-group');
@@ -4249,7 +4329,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/processo/${currentProcessoId}/gerar-monitoria/`;
+            const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria/`;
 
             $.ajax({
                 url: url,
@@ -4264,6 +4344,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', true)
                         .text('Gerando...');
+                    startCountdown(5);
                 },
                 success: function (data) {
                     const msg = data && data.message ? data.message : 'Operação concluída.';
@@ -4320,6 +4401,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     console.error('Erro na geração da petição:', status, error, xhr);
                 },
                 complete: function () {
+                    stopCountdown();
                     $('#id_gerar_monitoria_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição Monitória');
@@ -4422,7 +4504,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/processo/${currentProcessoId}/gerar-habilitacao/`;
+            const url = `/contratos/processo/${currentProcessoId}/gerar-habilitacao/`;
 
             $.ajax({
                 url: url,
@@ -4480,7 +4562,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/processo/${currentProcessoId}/gerar-monitoria-docx/`;
+            const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria-docx/`;
 
             $.ajax({
                 url: url,
