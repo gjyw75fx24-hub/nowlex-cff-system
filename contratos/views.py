@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.db.models import Max
 from django.db import transaction
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 import re
 import logging
@@ -717,6 +718,7 @@ def _fetch_extrato_titularidade(processo, polo_passivo, contratos, user):
         logger.warning("Erro ao salvar extrato de titularidade: %s", exc, exc_info=True)
     return None
 
+@login_required
 @require_POST
 def buscar_dados_escavador_view(request):
     """
@@ -849,6 +851,7 @@ def merge_status_view(request):
         return JsonResponse({'status': 'error', 'message': f'Ocorreu um erro inesperado: {e}'}, status=500)
 
 
+@login_required
 def lista_processos(request):
     """
     Busca todos os processos no banco e os envia para o template de lista.
@@ -860,6 +863,7 @@ def lista_processos(request):
     return render(request, 'contratos/lista_processos.html', contexto)
 
 
+@login_required
 def detalhe_processo(request, pk):
     """
     Busca um processo específico pelo seu ID (pk) e envia para o template de detalhe.
@@ -873,6 +877,7 @@ def detalhe_processo(request, pk):
     }
     return render(request, 'contratos/detalhe_processo.html', contexto)
 
+@login_required
 @require_GET
 def get_decision_tree_data(request):
     """
@@ -949,6 +954,7 @@ def get_decision_tree_data(request):
         'tree_data': current_tree_config
     })
 
+@login_required
 @require_GET
 def get_processo_contratos_api(request, processo_id):
     """
@@ -1082,6 +1088,7 @@ def number_to_words_pt_br(num):
 
     return inteiro_phrase.capitalize()
 
+@login_required
 @require_POST
 def generate_monitoria_petition(request, processo_id=None):
     # aceita tanto o ID vindo na URL quanto no POST (fallback)
@@ -1177,6 +1184,7 @@ def generate_monitoria_petition(request, processo_id=None):
         return HttpResponse(f"Erro ao gerar a petição: {e}", status=500)
 
 
+@login_required
 @require_POST
 def generate_cobranca_judicial_petition(request, processo_id=None):
     processo_id = processo_id or request.POST.get('processo_id')
@@ -1269,6 +1277,7 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
     return JsonResponse(response_payload)
 
 
+@login_required
 @require_POST
 def generate_habilitacao_petition(request, processo_id=None):
     processo_id = processo_id or request.POST.get('processo_id')
@@ -1328,6 +1337,7 @@ def generate_habilitacao_petition(request, processo_id=None):
     })
 
 
+@login_required
 @require_POST
 def generate_monitoria_docx_download(request, processo_id=None):
     processo_id = processo_id or request.POST.get('processo_id')
@@ -1382,6 +1392,7 @@ def generate_monitoria_docx_download(request, processo_id=None):
         return HttpResponse(f"Erro ao gerar DOCX editável: {e}", status=500)
 
 
+@login_required
 @require_GET
 def download_monitoria_pdf(request, processo_id=None):
     """

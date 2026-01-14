@@ -1,6 +1,7 @@
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.models import User
 from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
@@ -14,6 +15,8 @@ import os
 import re
 from django.http import JsonResponse
 from django.views import View
+from django.contrib.auth.decorators import login_required
+from django.utils.decorators import method_decorator
 import json
 from datetime import datetime
 from datetime import date as date_cls, time as time_cls
@@ -22,6 +25,8 @@ class AgendaAPIView(APIView):
     """
     API para buscar todas as tarefas e prazos de um processo.
     """
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, processo_id):
         try:
             processo = ProcessoJudicial.objects.get(pk=processo_id)
@@ -45,6 +50,8 @@ class AgendaGeralAPIView(APIView):
     """
     Retorna todas as tarefas e prazos para a Agenda Geral.
     """
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         status_param = (request.query_params.get('status') or '').lower()
         show_completed = status_param in ['completed', 'concluidos', 'concluida', 'concluido']
@@ -91,6 +98,7 @@ class TarefaCreateAPIView(generics.CreateAPIView):
     """
     API para criar uma nova tarefa para um processo.
     """
+    permission_classes = [IsAuthenticated]
     serializer_class = TarefaSerializer
 
     def perform_create(self, serializer):
@@ -101,6 +109,7 @@ class PrazoCreateAPIView(generics.CreateAPIView):
     """
     API para criar um novo prazo para um processo.
     """
+    permission_classes = [IsAuthenticated]
     serializer_class = PrazoSerializer
 
     def perform_create(self, serializer):
@@ -111,6 +120,7 @@ class UserSearchAPIView(generics.ListAPIView):
     """
     API para buscar usuários (responsáveis) por nome.
     """
+    permission_classes = [IsAuthenticated]
     serializer_class = UserSerializer
 
     def get_queryset(self):
@@ -128,6 +138,8 @@ class AgendaUsersAPIView(APIView):
     """
     Lista os usuários ativos para a seleção na Agenda Geral.
     """
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         users = (
             User.objects.filter(is_active=True)
@@ -162,6 +174,8 @@ class AgendaTarefaUpdateDateAPIView(APIView):
     """
     Atualiza a data de uma tarefa específica (drag&drop).
     """
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, pk):
         new_date = request.data.get('date')
         if not new_date:
@@ -179,6 +193,8 @@ class AgendaPrazoUpdateDateAPIView(APIView):
     Atualiza a data de um prazo específico (drag&drop).
     Preserva a hora atual de data_limite se houver.
     """
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, pk):
         new_date_raw = request.data.get('date')
         if not new_date_raw:
@@ -222,6 +238,7 @@ class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     """
     API para listar e criar Listas de Tarefas.
     """
+    permission_classes = [IsAuthenticated]
     queryset = ListaDeTarefas.objects.all()
     serializer_class = ListaDeTarefasSerializer
 
@@ -267,6 +284,7 @@ def _montar_texto_endereco(m):
         f"H: {m.get('H', '')}"
     )
 
+@method_decorator(login_required, name='dispatch')
 class FetchAddressAPIView(View):
     """
     Busca o endereço na API externa usando o CPF.
@@ -314,6 +332,7 @@ class FetchAddressAPIView(View):
         except requests.exceptions.RequestException as e:
             return JsonResponse({'error': f'Erro de conexão com a API de endereços: {e}'}, status=500)
 
+@method_decorator(login_required, name='dispatch')
 class SaveManualAddressAPIView(View):
     """
     Salva o endereço fornecido manualmente e replica para outros processos com o mesmo CPF.
@@ -361,6 +380,7 @@ class SaveManualAddressAPIView(View):
             return JsonResponse({'error': f'Ocorreu um erro interno: {e}'}, status=500)
 
 
+@method_decorator(login_required, name='dispatch')
 class BuscarDadosEscavadorView(View):
     """
     Busca os dados de um processo na API do Escavador usando o número CNJ.
