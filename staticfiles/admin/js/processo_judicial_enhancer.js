@@ -1200,7 +1200,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 counters.className = 'agenda-panel__user-card-counts';
                 counters.style.fontSize = '11px';
                 counters.style.color = '#4b5563';
-                counters.textContent = `Pendentes — T ${user.pending_tasks || 0} · P ${user.pending_prazos || 0}`;
+                const isCompletedMode = calendarState.showCompleted;
+                const taskCount = isCompletedMode ? (user.completed_tasks || 0) : (user.pending_tasks || 0);
+                const prazoCount = isCompletedMode ? (user.completed_prazos || 0) : (user.pending_prazos || 0);
+                const label = isCompletedMode ? 'Concluídos' : 'Pendentes';
+                counters.textContent = `${label} — T ${taskCount} · P ${prazoCount}`;
                 card.append(initials, name, username, counters);
                 card.addEventListener('click', () => {
                     calendarState.activeUser = user;
