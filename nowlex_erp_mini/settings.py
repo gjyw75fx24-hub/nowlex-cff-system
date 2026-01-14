@@ -2,9 +2,25 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import dj_database_url
+import sentry_sdk
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
+
+# Sentry configuration
+sentry_enabled = os.getenv('SENTRY_ENABLED', 'False').lower() in ('true', '1', 'yes')
+if sentry_enabled:
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=os.getenv('SENTRY_DSN'),
+        environment=os.getenv('SENTRY_ENVIRONMENT'),
+        integrations=[
+            DjangoIntegration(),
+        ],
+        traces_sample_rate=0.1,
+        send_default_pii=True,
+    )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -159,6 +175,49 @@ if not DEBUG:
 
 # CSRF Trusted Origins (adicione seu domínio Render aqui)
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.getenv('CSRF_TRUSTED_ORIGINS') else []
+
+# Logging configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'sentry': {
+            'level': 'ERROR',
+            'class': 'sentry_sdk.integrations.logging.SentryHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'contratos': {
+            'handlers': ['console', 'sentry'],
+            'level': os.getenv('LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
 
 # URLs de autenticação - redireciona para o admin
 LOGIN_URL = '/admin/login/'

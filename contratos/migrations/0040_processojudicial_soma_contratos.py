@@ -7,20 +7,15 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.SeparateDatabaseAndState(
-            database_operations=[],
-            state_operations=[
-                migrations.AddField(
-                    model_name='processojudicial',
-                    name='soma_contratos',
-                    field=models.DecimalField(
-                        max_digits=14,
-                        decimal_places=2,
-                        default=0,
-                        editable=False,
-                        verbose_name='Soma dos Contratos'
-                    ),
-                ),
-            ],
+        migrations.AddField(
+            model_name='processojudicial',
+            name='soma_contratos',
+            field=models.DecimalField(
+                max_digits=14,
+                decimal_places=2,
+                default=0,
+                editable=False,
+                verbose_name='Soma dos Contratos'
+            ),
         ),
     ]
