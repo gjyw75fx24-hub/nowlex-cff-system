@@ -6,6 +6,7 @@ from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
 from django.db.models import Q
 from django.urls import reverse
+from django.utils import timezone
 
 # Imports adicionados para as novas views
 import requests
@@ -120,6 +121,48 @@ class AgendaUsersAPIView(APIView):
         )
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data)
+
+class AgendaTarefaUpdateDateAPIView(APIView):
+    """
+    Atualiza a data de uma tarefa específica (drag&drop).
+    """
+    def post(self, request, pk):
+        new_date = request.data.get('date')
+        if not new_date:
+            return Response({'error': 'date é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tarefa = Tarefa.objects.get(pk=pk)
+        except Tarefa.DoesNotExist:
+            return Response({'error': 'Tarefa não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        tarefa.data = new_date
+        tarefa.save(update_fields=['data'])
+        return Response({'status': 'ok', 'id': tarefa.id, 'data': tarefa.data})
+
+class AgendaPrazoUpdateDateAPIView(APIView):
+    """
+    Atualiza a data de um prazo específico (drag&drop).
+    Preserva a hora atual de data_limite se houver.
+    """
+    def post(self, request, pk):
+        new_date = request.data.get('date')
+        if not new_date:
+            return Response({'error': 'date é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            prazo = Prazo.objects.get(pk=pk)
+        except Prazo.DoesNotExist:
+            return Response({'error': 'Prazo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        current_dt = prazo.data_limite or timezone.now()
+        try:
+            parsed_date = timezone.datetime.fromisoformat(f"{new_date}")
+        except Exception:
+            try:
+                parsed_date = timezone.datetime.strptime(new_date, '%Y-%m-%d')
+            except Exception:
+                return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        updated_dt = parsed_date.replace(hour=current_dt.hour, minute=current_dt.minute, second=current_dt.second, microsecond=0, tzinfo=current_dt.tzinfo)
+        prazo.data_limite = updated_dt
+        prazo.save(update_fields=['data_limite'])
+        return Response({'status': 'ok', 'id': prazo.id, 'data_limite': prazo.data_limite})
 
 class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     """

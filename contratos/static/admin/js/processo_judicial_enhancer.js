@@ -272,6 +272,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return null;
     };
+    const formatDateIso = (year, monthIndex, day) => {
+        const y = String(year).padStart(4, '0');
+        const m = String(monthIndex + 1).padStart(2, '0');
+        const d = String(day).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
+    let updateAgendaEntryDate = () => {};
+    let moveAgendaEntries = () => {};
 
     const normalizeEntryMetadata = (dayInfo, type) => {
         const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
@@ -335,6 +343,7 @@ document.addEventListener('DOMContentLoaded', function() {
             appendEntry({
                 type: 'T',
                 id: idInput?.value ? `t-${idInput.value}` : `t-${index + 1}-${parsedDate.day}`,
+                backendId: idInput?.value ? Number(idInput.value) : null,
                 label: `${index + 1}`,
                 description: (descInput?.value || '').trim(),
                 detail: (obsInput?.value || '').trim(),
@@ -362,6 +371,7 @@ document.addEventListener('DOMContentLoaded', function() {
             appendEntry({
                 type: 'P',
                 id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
+                backendId: idInput?.value ? Number(idInput.value) : null,
                 label: `${index + 1}`,
                 description: (titleInput?.value || '').trim(),
                 detail: (obsInput?.value || '').trim(),
@@ -385,6 +395,34 @@ document.addEventListener('DOMContentLoaded', function() {
             return true;
         });
     };
+    const rebuildAgendaEntriesFromCalendar = () => {
+        const rebuilt = [];
+        Object.keys(calendarMonths).forEach(key => {
+            const days = calendarMonths[key] || [];
+            days.forEach(day => {
+                const common = { monthIndex: day.monthIndex, year: day.year, day: day.day };
+                day.tasksT.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'T' }));
+                day.tasksP.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'P' }));
+            });
+        });
+        return rebuilt;
+    };
+    const persistEntryDate = (entryData, targetDayInfo) => {
+        if (!entryData?.backendId || !targetDayInfo) return;
+        const payloadDate = formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
+        const isTask = entryData.type === 'T';
+        const url = isTask
+            ? `/api/agenda/tarefa/${entryData.backendId}/update-date/`
+            : `/api/agenda/prazo/${entryData.backendId}/update-date/`;
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken || '',
+            },
+            body: JSON.stringify({ date: payloadDate }),
+        }).catch(() => {});
+    };
     const debounce = (fn, delay = 300) => {
         let timer = null;
         return (...args) => {
@@ -398,7 +436,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const days = getMonthData(entry.monthIndex, entry.year);
             const dayInfo = days[entry.day - 1];
             if (!dayInfo) return;
-            const targetList = entry.type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+            const entryType = entry.type === 'P' ? 'P' : 'T';
+            entry.type = entryType;
+            const targetList = entryType === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
             targetList.push(entry);
             normalizeEntryMetadata(dayInfo, entry.type);
         });
@@ -418,6 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
+            backendId: item.id || null,
             label: item.id ? `${item.id}` : `${parsed.day}`,
             description: type === 'T' ? (item.descricao || '') : (item.title || item.titulo || ''),
             detail: item.observacoes || '',
@@ -530,7 +571,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     day: dayData.day,
                     monthIndex: dayData.monthIndex,
                     year: dayData.year,
-                    entry: entryData,
+                    entry: {
+                        id: entryData.id,
+                        backendId: entryData.backendId,
+                        type,
+                    },
                 }));
                 event.dataTransfer.effectAllowed = 'move';
             });
@@ -615,6 +660,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
                 tag.draggable = true;
+                tag.addEventListener('dragstart', () => {
+                    dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
+                        entry.type = entry.type || type;
+                    });
+                });
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -630,13 +680,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     setActiveDay(dayCell);
                 });
                 tag.addEventListener('dragstart', (event) => {
-                    event.dataTransfer.setData('text/plain', JSON.stringify({
-                        source: 'calendar',
-                        day: dayInfo.day,
-                        monthIndex: dayInfo.monthIndex,
-                        year: dayInfo.year,
-                        type,
-                    }));
+                const payload = {
+                    source: 'calendar',
+                    day: dayInfo.day,
+                    monthIndex: dayInfo.monthIndex,
+                    year: dayInfo.year,
+                    type,
+                    entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
+                        id: entry.id,
+                        backendId: entry.backendId,
+                        type: entry.type || type,
+                    })),
+                };
+                    event.dataTransfer.setData('text/plain', JSON.stringify(payload));
                     event.dataTransfer.effectAllowed = 'move';
                 });
                 tagsWrapper.appendChild(tag);
@@ -677,29 +733,39 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     if (!parsed || parsed.day === dayInfo.day) return;
                     const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
-                    const sourceMonth = getMonthData(parsed.monthIndex ?? calendarState.monthIndex, parsed.year || 2025);
+                    const sourceMonth = getMonthData(parsed.monthIndex ?? effectiveState.monthIndex, parsed.year || effectiveState.year || new Date().getFullYear());
                     const sourceDay = sourceMonth.find(d => d.day === parsed.day);
                     if (!sourceDay) {
                         return;
                     }
-                if (parsed.source === 'detail') {
-                    const sourceList = sourceDay[typeKey];
-                    const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
-                    if (entryIndex === -1) return;
-                    const [movedEntry] = sourceList.splice(entryIndex, 1);
-                    dayInfo[typeKey].push(movedEntry);
-                    normalizeEntryMetadata(sourceDay, parsed.type);
-                    normalizeEntryMetadata(dayInfo, parsed.type);
-                } else if (parsed.source === 'calendar') {
-                    const transferred = sourceDay[typeKey];
-                    if (!transferred.length) return;
-                    dayInfo[typeKey].push(...transferred);
-                    sourceDay[typeKey] = [];
-                    normalizeEntryMetadata(sourceDay, parsed.type);
-                    normalizeEntryMetadata(dayInfo, parsed.type);
-                }
-                rerender && rerender();
-            };
+                    if (parsed.source === 'detail') {
+                        const sourceList = sourceDay[typeKey];
+                        const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
+                        if (entryIndex === -1) return;
+                        const [movedEntry] = sourceList.splice(entryIndex, 1);
+                        dayInfo[typeKey].push(movedEntry);
+                        normalizeEntryMetadata(sourceDay, parsed.type);
+                        normalizeEntryMetadata(dayInfo, parsed.type);
+                        persistEntryDate(movedEntry, dayInfo);
+                        moveAgendaEntries([movedEntry], dayInfo);
+                    } else if (parsed.source === 'calendar') {
+                        const transferred = sourceDay[typeKey];
+                        if (!transferred.length) return;
+                        dayInfo[typeKey].push(...transferred);
+                        sourceDay[typeKey] = [];
+                        normalizeEntryMetadata(sourceDay, parsed.type);
+                        normalizeEntryMetadata(dayInfo, parsed.type);
+                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
+                        entriesPayload.forEach(entry => persistEntryDate(entry, dayInfo));
+                        moveAgendaEntries(entriesPayload, dayInfo);
+                    }
+                    agendaEntries = dedupeEntries(rebuildAgendaEntriesFromCalendar());
+                    if (state) {
+                        state.activeDay = { day: dayInfo.day, monthIndex: dayInfo.monthIndex, year: dayInfo.year };
+                        state.activeType = parsed.type;
+                    }
+                    rerender && rerender();
+                };
                 dayCell.addEventListener('dragover', (event) => {
                     event.preventDefault();
                     dayCell.classList.add('agenda-panel__day--drag-over');
@@ -898,6 +964,39 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
         let agendaEntries = getInlineEntries();
+        updateAgendaEntryDate = (entryId, backendId, type, targetDayInfo) => {
+            if (!targetDayInfo) return;
+            agendaEntries = agendaEntries.map(item => {
+                const matchesBackend = backendId && item.backendId && `${item.backendId}` === `${backendId}`;
+                const matchesId = entryId && item.id === entryId;
+                if (!(matchesBackend || matchesId)) return item;
+                const newType = item.type || type;
+                return {
+                    ...item,
+                    type: newType,
+                    day: targetDayInfo.day,
+                    monthIndex: targetDayInfo.monthIndex,
+                    year: targetDayInfo.year,
+                };
+            });
+        };
+        moveAgendaEntries = (entriesToMove = [], targetDayInfo) => {
+            if (!targetDayInfo || !entriesToMove.length) return;
+            const backendSet = new Set(entriesToMove.map(e => `${e.backendId || ''}`));
+            const idSet = new Set(entriesToMove.map(e => e.id));
+            agendaEntries = agendaEntries.map(item => {
+                if (backendSet.has(`${item.backendId || ''}`) || idSet.has(item.id)) {
+                    return {
+                        ...item,
+                        day: targetDayInfo.day,
+                        monthIndex: targetDayInfo.monthIndex,
+                        year: targetDayInfo.year,
+                        type: item.type || entriesToMove[0]?.type,
+                    };
+                }
+                return item;
+            });
+        };
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
