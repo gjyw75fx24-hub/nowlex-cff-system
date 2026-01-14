@@ -124,10 +124,26 @@ class AgendaUsersAPIView(APIView):
         users = (
             User.objects.filter(is_active=True)
             .annotate(
-                pending_tasks=Count('tarefas_responsaveis', filter=Q(tarefas_responsaveis__concluida=False)),
-                pending_prazos=Count('prazos_responsaveis', filter=Q(prazos_responsaveis__concluido=False)),
-                completed_tasks=Count('tarefas_responsaveis', filter=Q(tarefas_responsaveis__concluida=True)),
-                completed_prazos=Count('prazos_responsaveis', filter=Q(prazos_responsaveis__concluido=True)),
+                pending_tasks=Count(
+                    'tarefas_responsaveis',
+                    filter=Q(tarefas_responsaveis__concluida=False),
+                    distinct=True,
+                ),
+                pending_prazos=Count(
+                    'prazos_responsaveis',
+                    filter=Q(prazos_responsaveis__concluido=False),
+                    distinct=True,
+                ),
+                completed_tasks=Count(
+                    'tarefas_responsaveis',
+                    filter=Q(tarefas_responsaveis__concluida=True),
+                    distinct=True,
+                ),
+                completed_prazos=Count(
+                    'prazos_responsaveis',
+                    filter=Q(prazos_responsaveis__concluido=True),
+                    distinct=True,
+                ),
             )
             .order_by('first_name', 'last_name', 'username')[:40]
         )
