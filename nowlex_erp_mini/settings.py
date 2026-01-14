@@ -2,7 +2,6 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import dj_database_url
-import sentry_sdk
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -10,6 +9,7 @@ load_dotenv()
 # Sentry configuration
 sentry_enabled = os.getenv('SENTRY_ENABLED', 'False').lower() in ('true', '1', 'yes')
 if sentry_enabled:
+    import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
 
     sentry_sdk.init(
@@ -196,10 +196,6 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        'sentry': {
-            'level': 'ERROR',
-            'class': 'sentry_sdk.integrations.logging.SentryHandler',
-        },
     },
     'root': {
         'handlers': ['console'],
@@ -207,7 +203,7 @@ LOGGING = {
     },
     'loggers': {
         'contratos': {
-            'handlers': ['console', 'sentry'],
+            'handlers': ['console'],
             'level': os.getenv('LOG_LEVEL', 'INFO'),
             'propagate': False,
         },
@@ -218,6 +214,14 @@ LOGGING = {
         },
     },
 }
+
+# Add Sentry handler if enabled
+if sentry_enabled:
+    LOGGING['handlers']['sentry'] = {
+        'level': 'ERROR',
+        'class': 'sentry_sdk.integrations.logging.SentryHandler',
+    }
+    LOGGING['loggers']['contratos']['handlers'].append('sentry')
 
 # URLs de autenticação - redireciona para o admin
 LOGIN_URL = '/admin/login/'
