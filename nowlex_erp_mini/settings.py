@@ -14,7 +14,7 @@ if sentry_enabled:
 
     sentry_sdk.init(
         dsn=os.getenv('SENTRY_DSN'),
-        environment=os.getenv('SENTRY_ENVIRONMENT'),
+        environment=os.getenv('SENTRY_ENVIRONMENT', 'dev'),
         integrations=[
             DjangoIntegration(),
         ],
