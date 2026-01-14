@@ -211,6 +211,21 @@ files = [
 ]
 
 [[package]]
+name = "dj-database-url"
+version = "3.1.0"
+description = "Use Database URLs in your Django Application."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "dj_database_url-3.1.0-py3-none-any.whl", hash = "sha256:155a56fbbecbaaf1348ccd73bf29138b4c9988363ba08261a0f0145e392e638c"},
+    {file = "dj_database_url-3.1.0.tar.gz", hash = "sha256:d80218426b83f9302c8d27d4fccf52de5cf0cab179f0645fb2839f37605d1353"},
+]
+
+[package.dependencies]
+django = ">=4.2"
+
+[[package]]
 name = "django"
 version = "5.2.4"
 description = "A high-level Python web framework that encourages rapid development and clean, pragmatic design."
@@ -335,6 +350,28 @@ websockets = ">=13.0.0,<15.1.0"
 [package.extras]
 aiohttp = ["aiohttp (<3.13.3)"]
 local-tokenizer = ["protobuf", "sentencepiece (>=0.2.0)"]
+
+[[package]]
+name = "gunicorn"
+version = "23.0.0"
+description = "WSGI HTTP Server for UNIX"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "gunicorn-23.0.0-py3-none-any.whl", hash = "sha256:ec400d38950de4dfd418cff8328b2c8faed0edb0d517d3394e457c317908ca4d"},
+    {file = "gunicorn-23.0.0.tar.gz", hash = "sha256:f014447a0101dc57e294f6c18ca6b40227a4c90e9bdb586042628030cba004ec"},
+]
+
+[package.dependencies]
+packaging = "*"
+
+[package.extras]
+eventlet = ["eventlet (>=0.24.1,!=0.36.0)"]
+gevent = ["gevent (>=1.4.0)"]
+setproctitle = ["setproctitle"]
+testing = ["coverage", "eventlet", "gevent", "pytest", "pytest-cov"]
+tornado = ["tornado (>=0.2)"]
 
 [[package]]
 name = "h11"
@@ -565,6 +602,18 @@ cssselect = ["cssselect (>=0.7)"]
 html-clean = ["lxml_html_clean"]
 html5 = ["html5lib"]
 htmlsoup = ["BeautifulSoup4"]
+
+[[package]]
+name = "packaging"
+version = "25.0"
+description = "Core utilities for Python packages"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"},
+    {file = "packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f"},
+]
 
 [[package]]
 name = "psycopg2-binary"
@@ -1129,7 +1178,22 @@ files = [
     {file = "websockets-15.0.1.tar.gz", hash = "sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee"},
 ]
 
+[[package]]
+name = "whitenoise"
+version = "6.11.0"
+description = "Radically simplified static file serving for WSGI applications"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "whitenoise-6.11.0-py3-none-any.whl", hash = "sha256:b2aeb45950597236f53b5342b3121c5de69c8da0109362aee506ce88e022d258"},
+    {file = "whitenoise-6.11.0.tar.gz", hash = "sha256:0f5bfce6061ae6611cd9396a8231e088722e4fc67bc13a111be74c738d99375f"},
+]
+
+[package.extras]
+brotli = ["brotli"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "c3f09f57a20968087a9b48a57d93144fc668518c9a9a5cee28d1dd2ffbb2c2f3"
+content-hash = "24b9d83e8fd539c2dcc66f6a306ab31fcb690f55639e13eb5ac74325e5b7f555"

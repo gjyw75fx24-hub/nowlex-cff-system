@@ -17,6 +17,9 @@ djangorestframework = "^3.16.0"
 python-docx = "^1.2.0"
 google-genai = "^1.53.0"
 docx2pdf = "^0.1.8"
+gunicorn = "^23.0.0"
+whitenoise = "^6.11.0"
+dj-database-url = "^3.1.0"
 
 [build-system]
 requires = ["poetry-core"]

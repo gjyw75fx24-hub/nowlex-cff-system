@@ -1,0 +1,42 @@
+databases:
+  - name: nowlex-db
+    databaseName: nowlex_erp_mini
+    user: nowlex
+    plan: free  # Mude para 'starter' ou 'standard' em produção
+    region: oregon  # ou 'ohio', 'frankfurt', etc.
+    postgresMajorVersion: "16"  # PostgreSQL 16 (versão mais recente)
+
+services:
+  - type: web
+    name: nowlex-erp-mini
+    runtime: python
+    plan: free  # Mude para 'starter' ou 'standard' em produção
+    region: oregon
+    buildCommand: ./build.sh
+    startCommand: gunicorn nowlex_erp_mini.wsgi:application
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nowlex-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://nowlex-erp-mini.onrender.com"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Adicione suas chaves de API aqui (configure manualmente no dashboard)
+      # - key: ESCAVADOR_API_TOKEN
+      #   sync: false
+      # - key: JUSBRASIL_BEARER_TOKEN
+      #   sync: false
+      # - key: GEMINI_API_KEY
+      #   sync: false
+      # - key: NOWLEX_JUDICIAL_API_KEY
+      #   sync: false
+      # - key: END_API_KEY
+      #   sync: false
