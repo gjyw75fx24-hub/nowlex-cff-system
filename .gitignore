@@ -7,12 +7,25 @@ __pycache__/
 dist/
 build/
 *.pyo
+*.pyc
 
 # macOS
 .DS_Store
+
 # Django uploads
 media/
 
-# Python cache
-__pycache__/
-*.pyc
+# Arquivos de ambiente (NUNCA commitar!)
+.env
+.env.*
+*.env
+.env.local
+.env.*.local
+
+# Arquivos de credenciais
+credentials.json
+secrets.json
+*.pem
+*.key
+.env
+.env
