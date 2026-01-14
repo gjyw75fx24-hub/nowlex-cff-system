@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from django.contrib.auth.models import User
 from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.urls import reverse
 from django.utils import timezone
 
@@ -46,15 +46,20 @@ class AgendaGeralAPIView(APIView):
     Retorna todas as tarefas e prazos para a Agenda Geral.
     """
     def get(self, request):
+        status_param = (request.query_params.get('status') or '').lower()
+        show_completed = status_param in ['completed', 'concluidos', 'concluida', 'concluido']
+        tarefa_filter = {'concluida': True} if show_completed else {'concluida': False}
+        prazo_filter = {'concluido': True} if show_completed else {'concluido': False}
+
         tarefas = (
             Tarefa.objects
             .select_related('processo', 'responsavel', 'lista')
-            .filter(concluida=False)
+            .filter(**tarefa_filter)
         )
         prazos = (
             Prazo.objects
             .select_related('processo', 'responsavel')
-            .filter(concluido=False)
+            .filter(**prazo_filter)
         )
 
         tarefas_data = TarefaSerializer(tarefas, many=True).data
@@ -118,6 +123,12 @@ class AgendaUsersAPIView(APIView):
     def get(self, request):
         users = (
             User.objects.filter(is_active=True)
+            .annotate(
+                pending_tasks=Count('tarefas_responsaveis', filter=Q(tarefas_responsaveis__concluida=False)),
+                pending_prazos=Count('prazos_responsaveis', filter=Q(prazos_responsaveis__concluido=False)),
+                completed_tasks=Count('tarefas_responsaveis', filter=Q(tarefas_responsaveis__concluida=True)),
+                completed_prazos=Count('prazos_responsaveis', filter=Q(prazos_responsaveis__concluido=True)),
+            )
             .order_by('first_name', 'last_name', 'username')[:40]
         )
         serializer = UserSerializer(users, many=True)

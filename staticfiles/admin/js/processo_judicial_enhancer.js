@@ -505,7 +505,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null, preferApiOnly = false) => {
-        fetch('/api/agenda/geral/')
+        const statusParam = calendarStateRef?.showCompleted ? 'completed' : 'pending';
+        const url = `/api/agenda/geral/?status=${statusParam}`;
+        fetch(url)
             .then((response) => {
                 if (!response.ok) throw new Error();
                 return response.json();
@@ -948,6 +950,12 @@ document.addEventListener('DOMContentLoaded', function() {
             focusToggle.title = 'Mostrar apenas itens deste processo';
             subtitleEl.parentNode.insertBefore(focusToggle, subtitleEl.nextSibling);
         }
+        const summaryBar = document.createElement('div');
+        summaryBar.className = 'agenda-panel__summary';
+        summaryBar.style.fontSize = '12px';
+        summaryBar.style.color = '#4b5563';
+        summaryBar.style.marginTop = '2px';
+        subtitleEl.parentNode.insertBefore(summaryBar, subtitleEl.nextSibling);
         const footer = overlay.querySelector('.agenda-panel__footer');
         const historyButton = document.createElement('button');
         historyButton.type = 'button';
@@ -959,7 +967,19 @@ document.addEventListener('DOMContentLoaded', function() {
             historyButton.classList.toggle('agenda-panel__history-toggle--active', calendarState.showHistory);
             renderCalendar();
         });
-        footer.insertBefore(historyButton, footer.querySelector('.agenda-panel__form-btn'));
+        const completedButton = document.createElement('button');
+        completedButton.type = 'button';
+        completedButton.className = 'agenda-panel__history-toggle agenda-panel__completed-toggle';
+        completedButton.textContent = 'Concluídos';
+        completedButton.title = 'Alternar visualização de concluídos';
+        completedButton.addEventListener('click', () => {
+            calendarState.showCompleted = !calendarState.showCompleted;
+            completedButton.classList.toggle('agenda-panel__history-toggle--active', calendarState.showCompleted);
+            refreshAgendaData(true);
+        });
+        const firstFormBtn = footer.querySelector('.agenda-panel__form-btn');
+        footer.insertBefore(completedButton, firstFormBtn);
+        footer.insertBefore(historyButton, completedButton);
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
         const capitalizeLabel = (value) => {
             if (!value) return '';
@@ -990,12 +1010,14 @@ document.addEventListener('DOMContentLoaded', function() {
             year: today.getFullYear(),
             weekOffset: 0,
             showHistory: false,
+            showCompleted: false,
             view: 'calendar',
             activeUser: null,
             focused: false,
             activeDay: null,
             activeType: null,
             preserveView: false,
+            lastAppliedEntries: [],
             users: [],
             usersLoading: false,
             usersLoaded: false,
@@ -1079,6 +1101,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
         };
+        const renderSummaryBar = (entries = []) => {
+            if (!summaryBar) return;
+            const counters = {
+                T: { month: 0, total: 0 },
+                P: { month: 0, total: 0 },
+            };
+            const monthIdx = calendarState.monthIndex;
+            const year = calendarState.year;
+            entries.forEach((entry) => {
+                const type = entry.type === 'P' ? 'P' : 'T';
+                counters[type].total += 1;
+                if (entry.monthIndex === monthIdx && entry.year === year) {
+                    counters[type].month += 1;
+                }
+            });
+            const modeLabel = calendarState.showCompleted ? 'Concluídos' : 'Pendentes';
+            summaryBar.textContent = `${modeLabel} — Mês: T ${counters.T.month} · P ${counters.P.month} | Total: T ${counters.T.total} · P ${counters.P.total}`;
+        };
     const applyAgendaEntriesToState = () => {
         resetCalendarMonths();
         let entriesToApply = agendaEntries;
@@ -1094,11 +1134,12 @@ document.addEventListener('DOMContentLoaded', function() {
             );
         }
         applyEntriesToCalendar(entriesToApply);
+        calendarState.lastAppliedEntries = entriesToApply;
         if (!calendarState.preserveView && entriesToApply.length) {
             const first = entriesToApply
-                    .slice()
-                    .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
-                if (first) {
+                .slice()
+                .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+            if (first) {
                     calendarState.monthIndex = first.monthIndex;
                     calendarState.year = first.year;
                 }
@@ -1155,7 +1196,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const username = document.createElement('span');
                 username.className = 'agenda-panel__user-card-username';
                 username.textContent = user.username;
-                card.append(initials, name, username);
+                const counters = document.createElement('div');
+                counters.className = 'agenda-panel__user-card-counts';
+                counters.style.fontSize = '11px';
+                counters.style.color = '#4b5563';
+                counters.textContent = `Pendentes — T ${user.pending_tasks || 0} · P ${user.pending_prazos || 0}`;
+                card.append(initials, name, username, counters);
                 card.addEventListener('click', () => {
                     calendarState.activeUser = user;
                     calendarState.view = 'calendar';
@@ -1211,6 +1257,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             applyAgendaEntriesToState();
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
+            renderSummaryBar(calendarState.lastAppliedEntries || []);
         };
         if (focusToggle) {
             focusToggle.addEventListener('click', () => {
@@ -1224,7 +1271,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (refreshButton) {
                 refreshButton.disabled = true;
             }
-            const inline = getInlineEntries();
+            const inline = calendarState.showCompleted ? [] : getInlineEntries();
+            const preferApiOnly = calendarState.showCompleted || false;
             hydrateAgendaFromApi(inline, calendarState, () => {
                 applyAgendaEntriesToState();
                 renderCalendar();
@@ -1233,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }, (combined) => {
                 agendaEntries = combined;
-            }, true);
+            }, preferApiOnly);
         };
         if (refreshButton) {
             refreshButton.addEventListener('click', () => {

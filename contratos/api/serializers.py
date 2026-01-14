@@ -4,9 +4,23 @@ from django.urls import reverse
 from ..models import Tarefa, Prazo, ListaDeTarefas
 
 class UserSerializer(serializers.ModelSerializer):
+    pending_tasks = serializers.IntegerField(read_only=True, default=0)
+    pending_prazos = serializers.IntegerField(read_only=True, default=0)
+    completed_tasks = serializers.IntegerField(read_only=True, default=0)
+    completed_prazos = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name']
+        fields = [
+            'id',
+            'username',
+            'first_name',
+            'last_name',
+            'pending_tasks',
+            'pending_prazos',
+            'completed_tasks',
+            'completed_prazos',
+        ]
 
 class ListaDeTarefasSerializer(serializers.ModelSerializer):
     class Meta:
