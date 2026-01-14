@@ -16,4 +16,8 @@ urlpatterns = [
     # URLs do app de contratos (incluindo a API)
     path('favicon.ico', RedirectView.as_view(url=static_file('favicon/favicon-32x32.png'), permanent=False)),
     path('contratos/', include('contratos.urls')),
+
+    # API na raiz para compatibilidade com frontend
+    path('api/', include('contratos.api.urls', namespace='api_root')),
+    path('api/decision-tree/', contratos_views.get_decision_tree_data, name='decision_tree_root'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
