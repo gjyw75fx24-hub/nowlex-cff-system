@@ -316,6 +316,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!entry) return;
             entries.push(entry);
         };
+        const processMatch = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+        const processId = processMatch ? processMatch[1] : null;
         document.querySelectorAll('#tarefas-group .dynamic-tarefas').forEach((row, index) => {
             if (row.classList.contains('empty-form')) return;
             const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
@@ -338,6 +340,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
                 year: parsedDate.year,
+                admin_url: processId ? `/admin/contratos/processojudicial/${processId}/change/` : '',
             });
         });
         document.querySelectorAll('#prazos-group .dynamic-prazos').forEach((row, index) => {
@@ -360,14 +363,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
                 year: parsedDate.year,
+                admin_url: processId ? `/admin/contratos/processojudicial/${processId}/change/` : '',
             });
         });
         return entries;
     };
 
-    const hydrateAgendaFromInlineData = () => {
-        resetCalendarMonths();
-        const entries = collectAgendaEntriesFromInline();
+    const applyEntriesToCalendar = (entries = []) => {
         entries.forEach((entry) => {
             const days = getMonthData(entry.monthIndex, entry.year);
             const dayInfo = days[entry.day - 1];
@@ -376,7 +378,62 @@ document.addEventListener('DOMContentLoaded', function() {
             targetList.push(entry);
             normalizeEntryMetadata(dayInfo, entry.type);
         });
+    };
+
+    const hydrateAgendaFromInlineData = () => {
+        const entries = collectAgendaEntriesFromInline();
+        applyEntriesToCalendar(entries);
         return entries;
+    };
+
+    const normalizeApiEntry = (item) => {
+        if (!item) return null;
+        const type = item.type === 'P' ? 'P' : 'T';
+        const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
+        if (!parsed) return null;
+        return {
+            type,
+            id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
+            label: item.id ? `${item.id}` : `${parsed.day}`,
+            description: type === 'T' ? (item.descricao || '') : (item.title || item.titulo || ''),
+            detail: item.observacoes || '',
+            priority: type === 'T' ? (item.prioridade || '') : '',
+            originalDay: parsed.day,
+            day: parsed.day,
+            monthIndex: parsed.monthIndex,
+            year: parsed.year,
+            admin_url: item.admin_url || '',
+            processo_id: item.processo_id,
+        };
+    };
+
+    const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null) => {
+        fetch('/api/agenda/geral/')
+            .then((response) => {
+                if (!response.ok) throw new Error();
+                return response.json();
+            })
+            .then((data) => {
+                const apiEntries = Array.isArray(data) ? data.map(normalizeApiEntry).filter(Boolean) : [];
+                const combined = [...inlineEntries, ...apiEntries];
+                resetCalendarMonths();
+                applyEntriesToCalendar(combined);
+                if (calendarStateRef && combined.length) {
+                    const first = combined
+                        .slice()
+                        .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+                    if (first) {
+                        calendarStateRef.monthIndex = first.monthIndex;
+                        calendarStateRef.year = first.year;
+                    }
+                }
+                renderFn && renderFn();
+            })
+            .catch(() => {
+                resetCalendarMonths();
+                applyEntriesToCalendar(inlineEntries);
+                renderFn && renderFn();
+            });
     };
 
     const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle) => {
@@ -420,6 +477,12 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
                 detailCardBody.textContent = detail || 'Sem observações adicionais.';
+            });
+            entry.addEventListener('dblclick', () => {
+                const url = entryData.admin_url || entryData.url;
+                if (url) {
+                    window.open(url, '_blank');
+                }
             });
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;
@@ -753,7 +816,7 @@ document.addEventListener('DOMContentLoaded', function() {
             usersError: false,
             defaultUserLabel: getDefaultUserLabel(),
         };
-        hydrateAgendaFromInlineData();
+        const inlineEntries = hydrateAgendaFromInlineData();
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
@@ -899,6 +962,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
         };
+        hydrateAgendaFromApi(inlineEntries, calendarState, renderCalendar);
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
                 const step = 7;

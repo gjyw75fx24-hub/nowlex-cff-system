@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
 from django.db.models import Q
+from django.urls import reverse
 
 # Imports adicionados para as novas views
 import requests
@@ -37,6 +38,31 @@ class AgendaAPIView(APIView):
             return Response(agenda_items)
         except ProcessoJudicial.DoesNotExist:
             return Response({"error": "Processo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+class AgendaGeralAPIView(APIView):
+    """
+    Retorna todas as tarefas e prazos para a Agenda Geral.
+    """
+    def get(self, request):
+        tarefas = Tarefa.objects.select_related('processo', 'responsavel', 'lista').all()
+        prazos = Prazo.objects.select_related('processo', 'responsavel').all()
+
+        tarefas_data = TarefaSerializer(tarefas, many=True).data
+        for item in tarefas_data:
+            item['type'] = 'T'
+            item['date'] = item.get('data')
+
+        prazos_data = PrazoSerializer(prazos, many=True).data
+        for item in prazos_data:
+            item['type'] = 'P'
+            item['date'] = item.get('data_limite')
+            item['title'] = item.get('titulo')
+
+        agenda_items = sorted(
+            tarefas_data + prazos_data,
+            key=lambda x: x.get('date') or ''
+        )
+        return Response(agenda_items)
 
 class TarefaCreateAPIView(generics.CreateAPIView):
     """
