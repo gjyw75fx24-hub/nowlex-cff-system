@@ -1314,6 +1314,18 @@ a.historylink {
     align-items: center;
     gap: 8px;
 }
+.agenda-panel__details-item--priority-low {
+    background: #e8f1fb;
+    border: 1px solid #b9d4f5;
+}
+.agenda-panel__details-item--priority-medium {
+    background: #fff6e0;
+    border: 1px solid #f2d9a6;
+}
+.agenda-panel__details-item--priority-high {
+    background: #fde8e6;
+    border: 1px solid #f5b1aa;
+}
 .agenda-panel__details-item-text {
     color: #3c4564;
     font-size: 13px;

@@ -323,6 +323,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const dateInput = row.querySelector('input[id$="-data"]');
             const descInput = row.querySelector('input[id$="-descricao"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
+            const priorityInput = row.querySelector('select[id$="-prioridade"]') || row.querySelector('input[id$="-prioridade"]');
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const idInput = row.querySelector('input[id$="-id"]');
@@ -332,6 +333,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 label: `${index + 1}`,
                 description: (descInput?.value || '').trim(),
                 detail: (obsInput?.value || '').trim(),
+                priority: (priorityInput?.value || '').trim(),
                 originalDay: parsedDate.day,
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
@@ -390,6 +392,17 @@ document.addEventListener('DOMContentLoaded', function() {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
             entry.tabIndex = 0;
+            const priorityCode = (entryData.priority || '').toUpperCase();
+            const priorityClass = priorityCode === 'A'
+                ? 'agenda-panel__details-item--priority-high'
+                : priorityCode === 'M'
+                    ? 'agenda-panel__details-item--priority-medium'
+                    : priorityCode === 'B'
+                        ? 'agenda-panel__details-item--priority-low'
+                        : '';
+            if (priorityClass) {
+                entry.classList.add(priorityClass);
+            }
             const label = document.createElement('span');
             label.className = 'agenda-panel__details-item-label';
             label.textContent = entryData.label;
