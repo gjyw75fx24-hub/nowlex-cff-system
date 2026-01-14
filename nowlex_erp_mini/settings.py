@@ -159,3 +159,8 @@ if not DEBUG:
 
 # CSRF Trusted Origins (adicione seu domínio Render aqui)
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.getenv('CSRF_TRUSTED_ORIGINS') else []
+
+# URLs de autenticação - redireciona para o admin
+LOGIN_URL = '/admin/login/'
+LOGIN_REDIRECT_URL = '/admin/'
+LOGOUT_REDIRECT_URL = '/admin/login/'
