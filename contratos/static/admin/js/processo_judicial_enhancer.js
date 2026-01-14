@@ -278,6 +278,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = String(day).padStart(2, '0');
         return `${y}-${m}-${d}`;
     };
+    const entryOrigins = new Map();
+    const rememberOrigin = (entry) => {
+        if (!entry || !entry.backendId) return;
+        if (!entryOrigins.has(entry.backendId)) {
+            entryOrigins.set(entry.backendId, entry.originalDay || entry.day);
+        }
+    };
+    const applyOriginFromMap = (entry) => {
+        if (!entry || !entry.backendId) return;
+        if (entryOrigins.has(entry.backendId)) {
+            entry.originalDay = entryOrigins.get(entry.backendId);
+        }
+    };
     let updateAgendaEntryDate = () => {};
     let moveAgendaEntries = () => {};
 
@@ -340,7 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const idInput = row.querySelector('input[id$="-id"]');
-            appendEntry({
+            const entry = {
                 type: 'T',
                 id: idInput?.value ? `t-${idInput.value}` : `t-${index + 1}-${parsedDate.day}`,
                 backendId: idInput?.value ? Number(idInput.value) : null,
@@ -354,7 +367,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
-            });
+            };
+            rememberOrigin(entry);
+            appendEntry(entry);
         });
         document.querySelectorAll('#prazos-group .dynamic-prazos').forEach((row, index) => {
             if (row.classList.contains('empty-form')) return;
@@ -368,7 +383,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const titleInput = row.querySelector('input[id$="-titulo"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const idInput = row.querySelector('input[id$="-id"]');
-            appendEntry({
+            const entry = {
                 type: 'P',
                 id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
                 backendId: idInput?.value ? Number(idInput.value) : null,
@@ -381,7 +396,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
-            });
+            };
+            rememberOrigin(entry);
+            appendEntry(entry);
         });
         return entries;
     };
@@ -394,6 +411,17 @@ document.addEventListener('DOMContentLoaded', function() {
             seen.add(key);
             return true;
         });
+    };
+    const mergeEntriesByBackend = (primary = [], secondary = []) => {
+        const map = new Map();
+        const add = (entry, prefer = false) => {
+            const key = entry.backendId ? `b-${entry.backendId}` : `i-${entry.id}`;
+            if (!prefer && map.has(key)) return;
+            map.set(key, entry);
+        };
+        primary.forEach(entry => add(entry, true));
+        secondary.forEach(entry => add(entry, false));
+        return Array.from(map.values());
     };
     const rebuildAgendaEntriesFromCalendar = () => {
         const rebuilt = [];
@@ -455,7 +483,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const type = item.type === 'P' ? 'P' : 'T';
         const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
         if (!parsed) return null;
-        return {
+        const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
             backendId: item.id || null,
@@ -470,9 +498,12 @@ document.addEventListener('DOMContentLoaded', function() {
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
         };
+        applyOriginFromMap(entry);
+        rememberOrigin(entry);
+        return entry;
     };
 
-    const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null) => {
+    const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null, preferApiOnly = false) => {
         fetch('/api/agenda/geral/')
             .then((response) => {
                 if (!response.ok) throw new Error();
@@ -480,7 +511,10 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then((data) => {
                 const apiEntries = Array.isArray(data) ? data.map(normalizeApiEntry).filter(Boolean) : [];
-                const combined = dedupeEntries([...inlineEntries, ...apiEntries]);
+                if (preferApiOnly) {
+                    entryOrigins.clear();
+                }
+                const combined = preferApiOnly ? apiEntries : mergeEntriesByBackend(apiEntries, inlineEntries);
                 resetCalendarMonths();
                 if (setEntriesRef) {
                     setEntriesRef(combined);
@@ -956,6 +990,7 @@ document.addEventListener('DOMContentLoaded', function() {
             focused: false,
             activeDay: null,
             activeType: null,
+            preserveView: false,
             users: [],
             usersLoading: false,
             usersLoaded: false,
@@ -986,6 +1021,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const idSet = new Set(entriesToMove.map(e => e.id));
             agendaEntries = agendaEntries.map(item => {
                 if (backendSet.has(`${item.backendId || ''}`) || idSet.has(item.id)) {
+                    const newOrigin = item.originalDay || targetDayInfo.day;
+                    rememberOrigin({ backendId: item.backendId, originalDay: newOrigin, day: newOrigin });
                     return {
                         ...item,
                         day: targetDayInfo.day,
@@ -1044,7 +1081,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 entriesToApply = agendaEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
             }
             applyEntriesToCalendar(entriesToApply);
-            if (entriesToApply.length) {
+            if (!calendarState.preserveView && entriesToApply.length) {
                 const first = entriesToApply
                     .slice()
                     .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
@@ -1053,6 +1090,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     calendarState.year = first.year;
                 }
             }
+            calendarState.preserveView = false;
         };
         const updateMonthTitle = () => {
             if (calendarState.view === 'users') {
@@ -1144,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         };
         const renderCalendar = () => {
+            resetCalendarMonths();
             updateMonthTitle();
             updateSubtitleText();
             setActiveMonthButton(calendarState.monthIndex);
@@ -1180,8 +1219,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     refreshButton.disabled = false;
                 }
             }, (combined) => {
-                agendaEntries = dedupeEntries(combined);
-            });
+                agendaEntries = combined;
+            }, true);
         };
         if (refreshButton) {
             refreshButton.addEventListener('click', () => {
@@ -1192,7 +1231,7 @@ document.addEventListener('DOMContentLoaded', function() {
             applyAgendaEntriesToState();
             renderCalendar();
         }, (combined) => {
-            agendaEntries = dedupeEntries(combined);
+            agendaEntries = combined;
         });
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
@@ -1213,6 +1252,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 calendarState.monthIndex = monthIndex;
                 calendarState.year = year;
             }
+            calendarState.preserveView = true;
             renderCalendar();
         };
         closeButton.addEventListener('click', () => overlay.remove());
@@ -1272,6 +1312,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (calendarState.mode === 'weekly') {
                     calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset, calendarState);
                 }
+                calendarState.preserveView = true;
                 renderCalendar();
             });
         });

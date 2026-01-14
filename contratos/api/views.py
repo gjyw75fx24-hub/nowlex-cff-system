@@ -16,6 +16,7 @@ from django.http import JsonResponse
 from django.views import View
 import json
 from datetime import datetime
+from datetime import date as date_cls, time as time_cls
 
 class AgendaAPIView(APIView):
     """
@@ -144,22 +145,40 @@ class AgendaPrazoUpdateDateAPIView(APIView):
     Preserva a hora atual de data_limite se houver.
     """
     def post(self, request, pk):
-        new_date = request.data.get('date')
-        if not new_date:
+        new_date_raw = request.data.get('date')
+        if not new_date_raw:
             return Response({'error': 'date é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             prazo = Prazo.objects.get(pk=pk)
         except Prazo.DoesNotExist:
             return Response({'error': 'Prazo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
         current_dt = prazo.data_limite or timezone.now()
+        parsed_date = None
         try:
-            parsed_date = timezone.datetime.fromisoformat(f"{new_date}")
+            # Tenta yyyy-mm-dd
+            parsed_date = date_cls.fromisoformat(str(new_date_raw))
         except Exception:
             try:
-                parsed_date = timezone.datetime.strptime(new_date, '%Y-%m-%d')
+                parsed_date = timezone.datetime.fromisoformat(str(new_date_raw)).date()
             except Exception:
                 return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
-        updated_dt = parsed_date.replace(hour=current_dt.hour, minute=current_dt.minute, second=current_dt.second, microsecond=0, tzinfo=current_dt.tzinfo)
+        # Preserva a hora atual, ajustando o fuso do objeto existente
+        if isinstance(current_dt, timezone.datetime):
+            tzinfo = current_dt.tzinfo or timezone.get_current_timezone()
+            updated_dt = timezone.datetime(
+                parsed_date.year,
+                parsed_date.month,
+                parsed_date.day,
+                current_dt.hour,
+                current_dt.minute,
+                current_dt.second,
+                current_dt.microsecond,
+                tzinfo=tzinfo
+            )
+        else:
+            updated_dt = timezone.datetime.combine(parsed_date, time_cls())
+            if timezone.is_naive(updated_dt):
+                updated_dt = timezone.make_aware(updated_dt, timezone.get_current_timezone())
         prazo.data_limite = updated_dt
         prazo.save(update_fields=['data_limite'])
         return Response({'status': 'ok', 'id': prazo.id, 'data_limite': prazo.data_limite})
