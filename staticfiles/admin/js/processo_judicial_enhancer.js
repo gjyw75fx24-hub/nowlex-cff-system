@@ -300,7 +300,8 @@ document.addEventListener('DOMContentLoaded', function() {
         list.forEach((entry, index) => {
             const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
             entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = entry.label || `${index + 1}`;
+            // Reordena sempre de forma sequencial por tipo e dia (já filtrado por usuário, se ativo)
+            entry.label = `${index + 1}`;
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
