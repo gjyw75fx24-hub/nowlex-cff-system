@@ -14,6 +14,8 @@ build/
 
 # Django uploads
 media/
+# Exceção: templates de documentos são versionados
+!media/documentos_modelo/
 
 # Arquivos de ambiente (NUNCA commitar!)
 .env
