@@ -1298,6 +1298,27 @@ a.historylink {
 .agenda-panel__details-type[data-type="P"] {
     color: #a63a5c;
 }
+.agenda-panel__focus-toggle {
+    display: inline-block;
+    margin: 2px 0 0 0;
+    border: none;
+    background: none;
+    color: #506287;
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: color 0.2s, text-decoration-color 0.2s;
+}
+.agenda-panel__focus-toggle:hover {
+    color: #2f4b80;
+    text-decoration-color: #2f4b80;
+}
+.agenda-panel__focus-toggle--active {
+    color: #1b5b34;
+    font-weight: 600;
+    text-decoration-color: #1b5b34;
+}
 .agenda-panel__details-list-inner {
     max-height: 200px;
     overflow: auto;

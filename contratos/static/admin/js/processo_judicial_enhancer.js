@@ -310,14 +310,15 @@ document.addEventListener('DOMContentLoaded', function() {
         return calendarMonths[key];
     };
 
+    const processMatch = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+    const currentProcessId = processMatch ? processMatch[1] : null;
+
     const collectAgendaEntriesFromInline = () => {
         const entries = [];
         const appendEntry = (entry) => {
             if (!entry) return;
             entries.push(entry);
         };
-        const processMatch = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
-        const processId = processMatch ? processMatch[1] : null;
         document.querySelectorAll('#tarefas-group .dynamic-tarefas').forEach((row, index) => {
             if (row.classList.contains('empty-form')) return;
             const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
@@ -340,7 +341,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
                 year: parsedDate.year,
-                admin_url: processId ? `/admin/contratos/processojudicial/${processId}/change/` : '',
+                admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
+                processo_id: currentProcessId ? Number(currentProcessId) : null,
             });
         });
         document.querySelectorAll('#prazos-group .dynamic-prazos').forEach((row, index) => {
@@ -363,10 +365,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: parsedDate.day,
                 monthIndex: parsedDate.monthIndex,
                 year: parsedDate.year,
-                admin_url: processId ? `/admin/contratos/processojudicial/${processId}/change/` : '',
+                admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
+                processo_id: currentProcessId ? Number(currentProcessId) : null,
             });
         });
         return entries;
+    };
+
+    const dedupeEntries = (entries = []) => {
+        const seen = new Set();
+        return entries.filter((entry) => {
+            const key = entry.id || `${entry.type}-${entry.processo_id || 'x'}-${entry.day}-${entry.monthIndex}-${entry.year}-${entry.label}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     };
 
     const applyEntriesToCalendar = (entries = []) => {
@@ -407,7 +420,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     };
 
-    const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null) => {
+    const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null) => {
         fetch('/api/agenda/geral/')
             .then((response) => {
                 if (!response.ok) throw new Error();
@@ -415,11 +428,18 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then((data) => {
                 const apiEntries = Array.isArray(data) ? data.map(normalizeApiEntry).filter(Boolean) : [];
-                const combined = [...inlineEntries, ...apiEntries];
+                const combined = dedupeEntries([...inlineEntries, ...apiEntries]);
                 resetCalendarMonths();
-                applyEntriesToCalendar(combined);
-                if (calendarStateRef && combined.length) {
-                    const first = combined
+                if (setEntriesRef) {
+                    setEntriesRef(combined);
+                }
+                let filtered = combined;
+                if (calendarStateRef?.focused && currentProcessId) {
+                    filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
+                }
+                applyEntriesToCalendar(filtered);
+                if (calendarStateRef && filtered.length) {
+                    const first = filtered
                         .slice()
                         .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
                     if (first) {
@@ -431,7 +451,11 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(() => {
                 resetCalendarMonths();
-                applyEntriesToCalendar(inlineEntries);
+                let filtered = inlineEntries;
+                if (calendarStateRef?.focused && currentProcessId) {
+                    filtered = inlineEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
+                }
+                applyEntriesToCalendar(filtered);
                 renderFn && renderFn();
             });
     };
@@ -766,6 +790,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const usersToggle = overlay.querySelector('.agenda-panel__users-toggle');
         const subtitleEl = overlay.querySelector('.agenda-panel__subtitle');
+        let focusToggle = null;
+        if (currentProcessId) {
+            focusToggle = document.createElement('button');
+            focusToggle.type = 'button';
+            focusToggle.className = 'agenda-panel__focus-toggle';
+            focusToggle.textContent = 'Agenda Focada';
+            focusToggle.title = 'Mostrar apenas itens deste processo';
+            subtitleEl.parentNode.insertBefore(focusToggle, subtitleEl.nextSibling);
+        }
         const footer = overlay.querySelector('.agenda-panel__footer');
         const historyButton = document.createElement('button');
         historyButton.type = 'button';
@@ -810,6 +843,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showHistory: false,
             view: 'calendar',
             activeUser: null,
+            focused: false,
             users: [],
             usersLoading: false,
             usersLoaded: false,
@@ -817,6 +851,7 @@ document.addEventListener('DOMContentLoaded', function() {
             defaultUserLabel: getDefaultUserLabel(),
         };
         const inlineEntries = hydrateAgendaFromInlineData();
+        let agendaEntries = dedupeEntries(inlineEntries);
         const formatUserLabel = (user) => {
             if (!user) return '';
             const firstName = (user.first_name || '').trim();
@@ -856,6 +891,23 @@ document.addEventListener('DOMContentLoaded', function() {
             monthButtons.forEach((btn, idx) => {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
+        };
+        const applyAgendaEntriesToState = () => {
+            resetCalendarMonths();
+            let entriesToApply = agendaEntries;
+            if (calendarState.focused && currentProcessId) {
+                entriesToApply = agendaEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
+            }
+            applyEntriesToCalendar(entriesToApply);
+            if (entriesToApply.length) {
+                const first = entriesToApply
+                    .slice()
+                    .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+                if (first) {
+                    calendarState.monthIndex = first.monthIndex;
+                    calendarState.year = first.year;
+                }
+            }
         };
         const updateMonthTitle = () => {
             if (calendarState.view === 'users') {
@@ -960,9 +1012,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderUserSelectionGrid();
                 return;
             }
+            applyAgendaEntriesToState();
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
         };
-        hydrateAgendaFromApi(inlineEntries, calendarState, renderCalendar);
+        if (focusToggle) {
+            focusToggle.addEventListener('click', () => {
+                calendarState.focused = !calendarState.focused;
+                focusToggle.classList.toggle('agenda-panel__focus-toggle--active', calendarState.focused);
+                applyAgendaEntriesToState();
+                renderCalendar();
+            });
+        }
+        hydrateAgendaFromApi(inlineEntries, calendarState, renderCalendar, (combined) => {
+            agendaEntries = dedupeEntries(combined);
+        });
         const handleNavigation = (direction) => {
             if (calendarState.mode === 'weekly') {
                 const step = 7;
