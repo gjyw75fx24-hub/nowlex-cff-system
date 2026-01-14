@@ -520,6 +520,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     setEntriesRef(combined);
                 }
                 let filtered = combined;
+                const activeUserId = calendarStateRef?.activeUser?.id;
+                if (activeUserId) {
+                    filtered = filtered.filter(entry => entry?.responsavel?.id === activeUserId);
+                }
                 if (calendarStateRef?.focused && currentProcessId) {
                     filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
                 }
@@ -1074,15 +1078,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
         };
-        const applyAgendaEntriesToState = () => {
-            resetCalendarMonths();
-            let entriesToApply = agendaEntries;
-            if (calendarState.focused && currentProcessId) {
-                entriesToApply = agendaEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
-            }
-            applyEntriesToCalendar(entriesToApply);
-            if (!calendarState.preserveView && entriesToApply.length) {
-                const first = entriesToApply
+    const applyAgendaEntriesToState = () => {
+        resetCalendarMonths();
+        let entriesToApply = agendaEntries;
+        const activeUserId = calendarState.activeUser?.id;
+        if (activeUserId) {
+            entriesToApply = entriesToApply.filter(
+                entry => `${entry?.responsavel?.id || ''}` === `${activeUserId}`
+            );
+        }
+        if (calendarState.focused && currentProcessId) {
+            entriesToApply = entriesToApply.filter(
+                entry => `${entry.processo_id || ''}` === `${currentProcessId}`
+            );
+        }
+        applyEntriesToCalendar(entriesToApply);
+        if (!calendarState.preserveView && entriesToApply.length) {
+            const first = entriesToApply
                     .slice()
                     .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
                 if (first) {

@@ -350,6 +350,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const descInput = row.querySelector('input[id$="-descricao"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const priorityInput = row.querySelector('select[id$="-prioridade"]') || row.querySelector('input[id$="-prioridade"]');
+            const responsavelInput = row.querySelector('select[id$="-responsavel"]') || row.querySelector('input[id$="-responsavel"]');
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const idInput = row.querySelector('input[id$="-id"]');
@@ -367,6 +368,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
+                responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
             rememberOrigin(entry);
             appendEntry(entry);
@@ -383,6 +385,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const titleInput = row.querySelector('input[id$="-titulo"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const idInput = row.querySelector('input[id$="-id"]');
+            const responsavelInput = row.querySelector('select[id$="-responsavel"]') || row.querySelector('input[id$="-responsavel"]');
             const entry = {
                 type: 'P',
                 id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
@@ -396,6 +399,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
+                responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
             rememberOrigin(entry);
             appendEntry(entry);
@@ -497,6 +501,7 @@ document.addEventListener('DOMContentLoaded', function() {
             year: parsed.year,
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
+            responsavel: item.responsavel || null,
         };
         applyOriginFromMap(entry);
         rememberOrigin(entry);
@@ -520,6 +525,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     setEntriesRef(combined);
                 }
                 let filtered = combined;
+                const activeUserId = calendarStateRef?.activeUser?.id;
+                if (activeUserId) {
+                    filtered = filtered.filter(entry => entry?.responsavel?.id === activeUserId);
+                }
                 if (calendarStateRef?.focused && currentProcessId) {
                     filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
                 }
@@ -1074,15 +1083,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
         };
-        const applyAgendaEntriesToState = () => {
-            resetCalendarMonths();
-            let entriesToApply = agendaEntries;
-            if (calendarState.focused && currentProcessId) {
-                entriesToApply = agendaEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
-            }
-            applyEntriesToCalendar(entriesToApply);
-            if (!calendarState.preserveView && entriesToApply.length) {
-                const first = entriesToApply
+    const applyAgendaEntriesToState = () => {
+        resetCalendarMonths();
+        let entriesToApply = agendaEntries;
+        const activeUserId = calendarState.activeUser?.id;
+        if (activeUserId) {
+            entriesToApply = entriesToApply.filter(
+                entry => `${entry?.responsavel?.id || ''}` === `${activeUserId}`
+            );
+        }
+        if (calendarState.focused && currentProcessId) {
+            entriesToApply = entriesToApply.filter(
+                entry => `${entry.processo_id || ''}` === `${currentProcessId}`
+            );
+        }
+        applyEntriesToCalendar(entriesToApply);
+        if (!calendarState.preserveView && entriesToApply.length) {
+            const first = entriesToApply
                     .slice()
                     .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
                 if (first) {
