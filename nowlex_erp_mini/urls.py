@@ -9,8 +9,11 @@ from django.templatetags.static import static as static_file
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    
+
+    # Redireciona a página inicial para o admin
+    path('', RedirectView.as_view(url='/admin/', permanent=False)),
+
     # URLs do app de contratos (incluindo a API)
     path('favicon.ico', RedirectView.as_view(url=static_file('favicon/favicon-32x32.png'), permanent=False)),
-    path('', include('contratos.urls')),
+    path('contratos/', include('contratos.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
