@@ -1226,12 +1226,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const initials = document.createElement('span');
                 initials.className = 'agenda-panel__user-card-initials';
                 initials.textContent = getUserInitials(user);
-                const name = document.createElement('span');
-                name.className = 'agenda-panel__user-card-name';
-                name.textContent = formatUserLabel(user);
                 const username = document.createElement('span');
                 username.className = 'agenda-panel__user-card-username';
-                username.textContent = user.username;
+                username.textContent = user.username || formatUserLabel(user);
                 const counters = document.createElement('div');
                 counters.className = 'agenda-panel__user-card-counts';
                 counters.style.fontSize = '11px';
@@ -1241,7 +1238,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const prazoCount = isCompletedMode ? (user.completed_prazos || 0) : (user.pending_prazos || 0);
                 const label = isCompletedMode ? 'Concluídos' : 'Pendentes';
                 counters.textContent = `${label} — T ${taskCount} · P ${prazoCount}`;
-                card.append(initials, name, username, counters);
+                card.append(initials, username, counters);
                 card.addEventListener('click', () => {
                     calendarState.activeUser = user;
                     calendarState.view = 'calendar';
