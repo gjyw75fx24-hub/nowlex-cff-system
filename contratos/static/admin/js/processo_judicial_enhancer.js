@@ -279,6 +279,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = String(day).padStart(2, '0');
         return `${y}-${m}-${d}`;
     };
+    const formatDateLabel = (isoDate) => {
+        if (!isoDate) return '';
+        const parsed = new Date(isoDate);
+        if (Number.isNaN(parsed.getTime())) {
+            return isoDate;
+        }
+        return parsed.toLocaleDateString('pt-BR');
+    };
     const entryOrigins = new Map();
     const getOriginKey = (entry) => {
         if (!entry) return null;
@@ -289,14 +297,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const key = getOriginKey(entry);
         if (!key) return;
         if (!entryOrigins.has(key)) {
-            entryOrigins.set(key, entry.originalDay || entry.day);
+            const originDate = entry.originalDate || formatDateIso(entry.year, entry.monthIndex, entry.day);
+            entryOrigins.set(key, originDate || entry.originalDay || entry.day);
         }
     };
     const applyOriginFromMap = (entry) => {
         const key = getOriginKey(entry);
         if (!key) return;
         if (entryOrigins.has(key)) {
-            entry.originalDay = entryOrigins.get(key);
+            const storedOrigin = entryOrigins.get(key);
+            if (typeof storedOrigin === 'string' && storedOrigin.includes('-')) {
+                entry.originalDate = storedOrigin;
+                const parsed = parseDateInputValue(storedOrigin);
+                if (parsed) {
+                    entry.originalDay = parsed.day;
+                }
+            } else {
+                entry.originalDay = storedOrigin;
+            }
         }
     };
     let updateAgendaEntryDate = () => {};
@@ -313,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
+            entry.originalDate = entry.originalDate || formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
         });
     };
 
@@ -507,6 +526,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!parsed) return null;
         const originalRaw = item.original_date || item.data_origem || item.data_limite_origem;
         const originalParsed = parseDateInputValue(originalRaw);
+        const originalDate = originalParsed
+            ? formatDateIso(originalParsed.year, originalParsed.monthIndex, originalParsed.day)
+            : formatDateIso(parsed.year, parsed.monthIndex, parsed.day);
         const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
@@ -516,6 +538,7 @@ document.addEventListener('DOMContentLoaded', function() {
             detail: item.observacoes || '',
             priority: type === 'T' ? (item.prioridade || '') : '',
             originalDay: originalParsed ? originalParsed.day : parsed.day,
+            originalDate,
             day: parsed.day,
             monthIndex: parsed.monthIndex,
             year: parsed.year,
@@ -609,10 +632,11 @@ document.addEventListener('DOMContentLoaded', function() {
             text.className = 'agenda-panel__details-item-text';
             text.textContent = entryData.description || '';
             entry.appendChild(text);
-            if (entryData.originalDay && entryData.originalDay !== dayData.day) {
+            const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
+            if (entryData.originalDate && entryData.originalDate !== currentDate) {
                 const original = document.createElement('span');
                 original.className = 'agenda-panel__details-original';
-                original.textContent = `Origem: ${entryData.originalDay}`;
+                original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
                 entry.appendChild(original);
             }
             entry.addEventListener('click', () => {
@@ -711,7 +735,9 @@ document.addEventListener('DOMContentLoaded', function() {
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
-            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP].some(entry => entry.originalDay && entry.originalDay !== dayInfo.day);
+            const currentDate = formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
+            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP]
+                .some(entry => entry.originalDate && entry.originalDate !== currentDate);
             if (showHistory && hasHistory) {
                 dayCell.classList.add('agenda-panel__day--history');
             } else {
@@ -1084,8 +1110,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const matchesBackend = key && backendSet.has(key);
                 const matchesId = idSet.has(item.id);
                 if (matchesBackend || matchesId) {
-                    const newOrigin = item.originalDay || targetDayInfo.day;
-                    rememberOrigin({ backendId: item.backendId, originalDay: newOrigin, day: newOrigin });
+                    const newOrigin = item.originalDate || formatDateIso(item.year, item.monthIndex, item.day);
+                    rememberOrigin({
+                        backendId: item.backendId,
+                        originalDate: newOrigin,
+                        year: item.year,
+                        monthIndex: item.monthIndex,
+                        day: item.day,
+                    });
                     return {
                         ...item,
                         day: targetDayInfo.day,
