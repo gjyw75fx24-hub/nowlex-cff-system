@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 import subprocess
 import threading
+import shutil
 
 # Imports para geração de DOCX
 from docx import Document
@@ -474,14 +475,30 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 
 
 def _convert_docx_to_pdf_bytes(docx_bytes):
+    def _find_soffice():
+        candidates = [
+            "soffice",
+            "/usr/bin/soffice",
+            "libreoffice",
+            "/usr/bin/libreoffice",
+        ]
+        for candidate in candidates:
+            if shutil.which(candidate):
+                return candidate
+        return None
+
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             docx_path = tmpdir_path / "input.docx"
             pdf_path = tmpdir_path / "input.pdf"
             docx_path.write_bytes(docx_bytes)
+            soffice_cmd = _find_soffice()
+            if not soffice_cmd:
+                logger.error("Falha na conversão: comando soffice/libreoffice não encontrado no ambiente.")
+                return None
             cmd = [
-                "soffice",
+                soffice_cmd,
                 "--headless",
                 "--nologo",
                 "--nodefault",

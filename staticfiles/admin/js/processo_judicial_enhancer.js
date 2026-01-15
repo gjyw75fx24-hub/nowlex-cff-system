@@ -279,16 +279,23 @@ document.addEventListener('DOMContentLoaded', function() {
         return `${y}-${m}-${d}`;
     };
     const entryOrigins = new Map();
+    const getOriginKey = (entry) => {
+        if (!entry) return null;
+        if (entry.backendId) return `${entry.type || ''}-${entry.backendId}`;
+        return entry.id ? `local-${entry.id}` : null;
+    };
     const rememberOrigin = (entry) => {
-        if (!entry || !entry.backendId) return;
-        if (!entryOrigins.has(entry.backendId)) {
-            entryOrigins.set(entry.backendId, entry.originalDay || entry.day);
+        const key = getOriginKey(entry);
+        if (!key) return;
+        if (!entryOrigins.has(key)) {
+            entryOrigins.set(key, entry.originalDay || entry.day);
         }
     };
     const applyOriginFromMap = (entry) => {
-        if (!entry || !entry.backendId) return;
-        if (entryOrigins.has(entry.backendId)) {
-            entry.originalDay = entryOrigins.get(entry.backendId);
+        const key = getOriginKey(entry);
+        if (!key) return;
+        if (entryOrigins.has(key)) {
+            entry.originalDay = entryOrigins.get(key);
         }
     };
     let updateAgendaEntryDate = () => {};
