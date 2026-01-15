@@ -238,9 +238,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return `${monthName} ${year}`;
     };
     const clampWeekOffset = (offset, state) => {
-        const data = getMonthData(state.monthIndex, state.year || new Date().getFullYear());
-        const maxOffset = Math.max(0, data.length - 7);
-        return Math.max(0, Math.min(offset, maxOffset));
+        const grid = buildMonthGrid(state.monthIndex, state.year || new Date().getFullYear());
+        const maxOffset = Math.max(0, grid.length - 7);
+        const normalized = Math.max(0, Math.min(offset, maxOffset));
+        return normalized - (normalized % 7);
     };
 
     const parseDateInputValue = (value) => {
@@ -337,6 +338,14 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarMonths[key] = createCalendarDays(monthIndex, year);
         }
         return calendarMonths[key];
+    };
+    const buildMonthGrid = (monthIndex, year = new Date().getFullYear()) => {
+        const days = getMonthData(monthIndex, year);
+        const firstWeekday = new Date(year, monthIndex, 1).getDay();
+        const leading = Array(firstWeekday).fill(null);
+        const total = leading.length + days.length;
+        const trailing = (7 - (total % 7)) % 7;
+        return [...leading, ...days, ...Array(trailing).fill(null)];
     };
 
     const processMatch = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
@@ -671,10 +680,10 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
-        const sampleCalendarDays = getMonthData(effectiveState.monthIndex, effectiveState.year || new Date().getFullYear());
+        const calendarGrid = buildMonthGrid(effectiveState.monthIndex, effectiveState.year || new Date().getFullYear());
         const baseDays = effectiveState.mode === 'weekly'
-            ? sampleCalendarDays.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
-            : sampleCalendarDays;
+            ? calendarGrid.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
+            : calendarGrid;
         const filler = effectiveState.mode === 'weekly'
             ? Math.max(0, 7 - baseDays.length)
             : 0;
