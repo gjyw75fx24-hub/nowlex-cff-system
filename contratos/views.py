@@ -189,6 +189,9 @@ def generate_extrato_titularidade(processo, cpf_value, contratos, parte_name, us
                 "NowLex não possui o cadastro do contrato solicitado. "
                 "Não é possível emitir o extrato da titularidade."
             )
+        if 'NOWLEX_JUDICIAL_API_KEY' in error_message:
+            # Permite seguir sem o extrato se a chave não estiver configurada
+            return {'ok': False, 'error': 'Extrato não gerado (chave NowLex ausente).'}
         return {'ok': False, 'error': error_message}
     filename = _build_extrato_filename(contratos_label, parte_name, cpf_digits)
     pdf_file = ContentFile(pdf_bytes)
@@ -1153,31 +1156,50 @@ def generate_monitoria_petition(request, processo_id=None):
         docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
         base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
         pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
-        if not pdf_bytes:
-            return HttpResponse("Não foi possível converter o DOCX para PDF. Verifique o conversor.", status=500)
 
-        pdf_name = f"{base_filename}.pdf"
-        pdf_file = ContentFile(pdf_bytes)
+        monitoria_info = {}
+        pdf_url = ''
+        docx_url = ''
+
+        # Sempre salva o DOCX, mesmo se o PDF falhar (para não bloquear o usuário)
         try:
-            arquivo_pdf = ProcessoArquivo(
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
                 processo=processo,
-                nome=pdf_name,
+                nome=docx_name,
                 enviado_por=request.user if request.user.is_authenticated else None,
             )
-            arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-            pdf_url = arquivo_pdf.arquivo.url
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
         except Exception as exc:
-            logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
-            return HttpResponse("Falha ao salvar o PDF gerado nos Arquivos.", status=500)
+            logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
+            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+
+        if pdf_bytes:
+            pdf_name = f"{base_filename}.pdf"
+            pdf_file = ContentFile(pdf_bytes)
+            try:
+                arquivo_pdf = ProcessoArquivo(
+                    processo=processo,
+                    nome=pdf_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+                pdf_url = arquivo_pdf.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
+                pdf_bytes = None  # para marcar como pendente
 
         monitoria_info = {
-            "ok": True,
+            "ok": bool(pdf_bytes),
             "pdf_url": pdf_url,
-            "pdf_pending": False,
-            "docx_download_url": request.build_absolute_uri(
+            "pdf_pending": not bool(pdf_bytes),
+            "docx_download_url": docx_url or request.build_absolute_uri(
                 reverse('contratos:generate_monitoria_docx', kwargs={'processo_id': processo_id_int})
             ),
         }
+
         extrato_result = generate_extrato_titularidade(
             processo=processo,
             cpf_value=polo_passivo.documento,
@@ -1189,7 +1211,7 @@ def generate_monitoria_petition(request, processo_id=None):
 
         response_payload = {
             "status": "success",
-            "message": "Petição gerada (PDF salvo em Arquivos).",
+            "message": "Petição gerada (PDF salvo em Arquivos)." if monitoria_info["ok"] else "Petição gerada (PDF não gerado; DOCX disponível).",
             "monitoria": monitoria_info,
             "extrato": extrato_result,
             "dest_path": dest_path,
