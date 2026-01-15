@@ -76,6 +76,10 @@ class AgendaGeralAPIView(APIView):
             if hasattr(raw_date, 'isoformat'):
                 raw_date = raw_date.isoformat()
             item['date'] = (raw_date or '')[:10]
+            raw_origin = item.get('data_origem')
+            if hasattr(raw_origin, 'isoformat'):
+                raw_origin = raw_origin.isoformat()
+            item['original_date'] = (raw_origin or '')[:10]
 
         prazos_data = PrazoSerializer(prazos, many=True).data
         for item in prazos_data:
@@ -101,6 +105,10 @@ class AgendaGeralAPIView(APIView):
                     date_str = (raw_limit.date().isoformat() if hasattr(raw_limit, 'date') else '')
             item['date'] = date_str
             item['title'] = item.get('titulo')
+            raw_origin = item.get('data_limite_origem')
+            if hasattr(raw_origin, 'isoformat'):
+                raw_origin = raw_origin.isoformat()
+            item['original_date'] = (raw_origin or '')[:10]
 
         agenda_items = sorted(
             tarefas_data + prazos_data,
@@ -198,9 +206,17 @@ class AgendaTarefaUpdateDateAPIView(APIView):
             tarefa = Tarefa.objects.get(pk=pk)
         except Tarefa.DoesNotExist:
             return Response({'error': 'Tarefa não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        if tarefa.data_origem is None:
+            tarefa.data_origem = tarefa.data
         tarefa.data = new_date
-        tarefa.save(update_fields=['data'])
-        return Response({'status': 'ok', 'id': tarefa.id, 'data': tarefa.data})
+        update_fields = ['data', 'data_origem'] if tarefa.data_origem is not None else ['data']
+        tarefa.save(update_fields=update_fields)
+        return Response({
+            'status': 'ok',
+            'id': tarefa.id,
+            'data': tarefa.data,
+            'data_origem': tarefa.data_origem,
+        })
 
 class AgendaPrazoUpdateDateAPIView(APIView):
     """
@@ -218,6 +234,12 @@ class AgendaPrazoUpdateDateAPIView(APIView):
         except Prazo.DoesNotExist:
             return Response({'error': 'Prazo não encontrado'}, status=status.HTTP_404_NOT_FOUND)
         current_dt = prazo.data_limite or timezone.now()
+        if prazo.data_limite_origem is None:
+            if isinstance(current_dt, timezone.datetime):
+                current_local = timezone.localtime(current_dt, timezone.get_default_timezone()) if timezone.is_aware(current_dt) else current_dt
+                prazo.data_limite_origem = current_local.date()
+            else:
+                prazo.data_limite_origem = current_dt.date() if hasattr(current_dt, 'date') else None
         parsed_date = None
         try:
             # Tenta yyyy-mm-dd
@@ -247,8 +269,14 @@ class AgendaPrazoUpdateDateAPIView(APIView):
                 local_tz
             )
         prazo.data_limite = updated_dt
-        prazo.save(update_fields=['data_limite'])
-        return Response({'status': 'ok', 'id': prazo.id, 'data_limite': prazo.data_limite})
+        update_fields = ['data_limite', 'data_limite_origem'] if prazo.data_limite_origem is not None else ['data_limite']
+        prazo.save(update_fields=update_fields)
+        return Response({
+            'status': 'ok',
+            'id': prazo.id,
+            'data_limite': prazo.data_limite,
+            'data_limite_origem': prazo.data_limite_origem,
+        })
 
 class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     """

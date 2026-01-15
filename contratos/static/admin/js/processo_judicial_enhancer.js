@@ -496,6 +496,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const type = item.type === 'P' ? 'P' : 'T';
         const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
         if (!parsed) return null;
+        const originalRaw = item.original_date || item.data_origem || item.data_limite_origem;
+        const originalParsed = parseDateInputValue(originalRaw);
         const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
@@ -504,7 +506,7 @@ document.addEventListener('DOMContentLoaded', function() {
             description: type === 'T' ? (item.descricao || '') : (item.title || item.titulo || ''),
             detail: item.observacoes || '',
             priority: type === 'T' ? (item.prioridade || '') : '',
-            originalDay: parsed.day,
+            originalDay: originalParsed ? originalParsed.day : parsed.day,
             day: parsed.day,
             monthIndex: parsed.monthIndex,
             year: parsed.year,
