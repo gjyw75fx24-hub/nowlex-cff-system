@@ -1181,6 +1181,119 @@ a.historylink {
     border-color: #f5c2c2;
     color: #9b1c1c;
 }
+
+.minhas-acoes-row th {
+    padding-left: 0.7em;
+}
+
+.minhas-acoes-trigger {
+    background: transparent;
+    border: none;
+    color: var(--link-fg);
+    font: inherit;
+    font-weight: 600;
+    padding: 4px 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+.minhas-acoes-trigger:hover {
+    color: var(--link-hover-color);
+    text-decoration: underline;
+}
+
+.minhas-acoes-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 320px;
+    max-height: 70vh;
+    background: #ffffff;
+    border: 1px solid #dfe3ed;
+    border-radius: 12px;
+    box-shadow: 0 18px 32px rgba(15, 38, 108, 0.18);
+    display: none;
+    flex-direction: column;
+    z-index: 9999;
+}
+
+.minhas-acoes-panel--open {
+    display: flex;
+}
+
+.minhas-acoes-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e7ebf4;
+    font-size: 0.95rem;
+    color: #102752;
+}
+
+.minhas-acoes-panel__close {
+    border: none;
+    background: transparent;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #5b6c8a;
+}
+
+.minhas-acoes-panel__body {
+    padding: 12px 14px;
+    overflow-y: auto;
+}
+
+.minhas-acoes-panel__loading,
+.minhas-acoes-panel__empty {
+    margin: 0;
+    color: #5b6c8a;
+    font-size: 0.9rem;
+}
+
+.minhas-acoes-panel__list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.minhas-acoes-panel__item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f6f8ff;
+    color: #102752;
+    text-decoration: none;
+}
+
+.minhas-acoes-panel__item:hover {
+    background: #e8edff;
+}
+
+.minhas-acoes-panel__item-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.minhas-acoes-panel__item-meta {
+    font-size: 0.75rem;
+    color: #5b6c8a;
+}
+
+.minhas-acoes-panel__item-desc {
+    font-size: 0.8rem;
+    color: #4b597b;
+}
+
+#nav-sidebar .section {
+    padding-top: 2px;
+}
+
+#nav-sidebar .minhas-acoes-row + tr .section {
+    padding-top: 0;
+}
 .agenda-panel__weekday {
     font-size: 12px;
     font-weight: 700;
