@@ -83,19 +83,20 @@ class AgendaGeralAPIView(APIView):
             raw_limit = item.get('data_limite')
             date_str = ''
             if isinstance(raw_limit, str):
-                try:
-                    dt = timezone.datetime.fromisoformat(raw_limit.replace('Z', '+00:00'))
-                    if timezone.is_naive(dt):
-                        dt = timezone.make_aware(dt, timezone.get_default_timezone())
-                    date_str = timezone.localtime(dt, timezone.get_default_timezone()).date().isoformat()
-                except Exception:
-                    date_str = (raw_limit or '')[:10]
+                match = re.match(r'^(\d{4}-\d{2}-\d{2})', raw_limit)
+                if match:
+                    date_str = match.group(1)
+                else:
+                    try:
+                        dt = timezone.datetime.fromisoformat(raw_limit.replace('Z', '+00:00'))
+                        if timezone.is_naive(dt):
+                            dt = timezone.make_aware(dt, timezone.get_default_timezone())
+                        date_str = timezone.localtime(dt, timezone.get_default_timezone()).date().isoformat()
+                    except Exception:
+                        date_str = (raw_limit or '')[:10]
             elif hasattr(raw_limit, 'date'):
                 try:
-                    dt = raw_limit
-                    if timezone.is_naive(dt):
-                        dt = timezone.make_aware(dt, timezone.get_default_timezone())
-                    date_str = timezone.localtime(dt, timezone.get_default_timezone()).date().isoformat()
+                    date_str = raw_limit.date().isoformat()
                 except Exception:
                     date_str = (raw_limit.date().isoformat() if hasattr(raw_limit, 'date') else '')
             item['date'] = date_str
