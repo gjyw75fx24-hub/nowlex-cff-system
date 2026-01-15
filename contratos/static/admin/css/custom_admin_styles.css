@@ -1158,6 +1158,7 @@ a.historylink {
 .agenda-panel__user-card-username {
     font-size: 0.85rem;
     color: #4b597b;
+    margin-top: 6px;
 }
 .agenda-panel__user-card span {
     display: block;
