@@ -226,8 +226,8 @@ class AgendaPrazoUpdateDateAPIView(APIView):
                 parsed_date = timezone.datetime.fromisoformat(str(new_date_raw)).date()
             except Exception:
                 return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
-        # Preserva a hora, mas sempre no fuso local para evitar "voltar" um dia
-        local_tz = timezone.get_current_timezone()
+        # Preserva a hora, mas sempre no fuso default para evitar "voltar" um dia
+        local_tz = timezone.get_default_timezone()
         if isinstance(current_dt, timezone.datetime):
             current_local = timezone.localtime(current_dt, local_tz) if timezone.is_aware(current_dt) else current_dt
             updated_dt = timezone.datetime(
