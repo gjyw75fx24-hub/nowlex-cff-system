@@ -1207,7 +1207,11 @@ def generate_monitoria_petition(request, processo_id=None):
             parte_name=polo_passivo.nome,
             usuario=request.user if request.user.is_authenticated else None
         )
-        dest_path = os.path.dirname(arquivo_pdf.arquivo.name or '')
+        # Usa o arquivo PDF se existir, senão usa o DOCX para obter o dest_path
+        if pdf_bytes and 'arquivo_pdf' in dir():
+            dest_path = os.path.dirname(arquivo_pdf.arquivo.name or '')
+        else:
+            dest_path = os.path.dirname(arquivo_docx.arquivo.name or '')
 
         response_payload = {
             "status": "success",
