@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'storages',
     'contratos.apps.ContratosConfig',
 ]
 
@@ -145,8 +146,7 @@ STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
-# WhiteNoise - Compressão e cache de arquivos estáticos em produção
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# WhiteNoise - configuração movida para o bloco STORAGES abaixo
 
 
 # Default primary key field type
@@ -160,8 +160,44 @@ JUDICIAL_API_KEY = os.getenv("JUDICIAL_API_KEY")
 NOWLEX_JUDICIAL_API_KEY = os.getenv("NOWLEX_JUDICIAL_API_KEY")
 
 # Arquivos enviados (uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Configuração do AWS S3 para armazenamento de arquivos
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
+AWS_S3_SIGNATURE_VERSION = 's3v4'  # Versão de assinatura mais segura
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
+AWS_DEFAULT_ACL = None
+AWS_S3_FILE_OVERWRITE = False
+AWS_QUERYSTRING_AUTH = True  # Gera URLs assinadas automaticamente (protegido)
+AWS_QUERYSTRING_EXPIRE = 5600  # URLs válidas por 5 hora (renovam automaticamente) - teste
+
+# Usa S3 em produção se as credenciais estiverem configuradas, senão usa armazenamento local
+if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_STORAGE_BUCKET_NAME:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    # MEDIA_URL não é usado com URLs assinadas - o storage gera URLs automaticamente
+    MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/'
+else:
+    # Armazenamento local (desenvolvimento)
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 # Configurações de segurança para produção
 if not DEBUG:

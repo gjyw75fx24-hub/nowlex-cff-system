@@ -342,7 +342,8 @@ def _apply_placeholder_styles(document):
                 _set_run_shading(run, highlight_fill)
 
 
-def _load_template_document(slug, fallback_path):
+def _load_template_document(slug, fallback_path=None):
+    """Carrega template do banco de dados (S3 em produção)."""
     template = DocumentoModelo.objects.filter(slug=slug).first()
     if not template:
         label = dict(DocumentoModelo.SlugChoices.choices).get(slug, '')
@@ -354,13 +355,14 @@ def _load_template_document(slug, fallback_path):
                 data = BytesIO(handle.read())
             data.seek(0)
             return Document(data)
-        except (ValueError, FileNotFoundError):
-            template = None
-    if fallback_path and os.path.exists(fallback_path):
-        return Document(fallback_path)
+        except (ValueError, FileNotFoundError) as e:
+            raise FileNotFoundError(
+                f"Arquivo do template '{slug}' não encontrado no S3. "
+                f"Verifique se o arquivo foi enviado corretamente. Erro: {e}"
+            )
     raise FileNotFoundError(
         f"Template de documento não encontrado (slug={slug}). "
-        "Envie o arquivo via Documentos Modelo ou coloque o fallback local."
+        "Cadastre o arquivo via Admin > Documentos Modelo."
     )
 
 
@@ -401,12 +403,7 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
         'July', 'julho').replace('August', 'agosto').replace('September', 'setembro').replace(
         'October', 'outubro').replace('November', 'novembro').replace('December', 'dezembro')
 
-    fallback_path = os.path.join(
-        settings.BASE_DIR,
-        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
-        '1 - Base - Inicial Monitoria - B6.docx'
-    )
-    document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, fallback_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, None)
 
     # Ajusta posição do rodapé para evitar cortes no PDF (mantém margens do template)
     for section in document.sections:
@@ -478,6 +475,11 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 
 
 def _convert_docx_to_pdf_bytes(docx_bytes):
+    """
+    Converte DOCX para PDF.
+    Tenta primeiro usar LibreOffice (melhor qualidade).
+    Se não disponível, usa mammoth + xhtml2pdf (100% Python).
+    """
     def _find_soffice():
         candidates = [
             "soffice",
@@ -490,43 +492,110 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
                 return candidate
         return None
 
+    # Tenta LibreOffice primeiro (melhor qualidade)
+    soffice_cmd = _find_soffice()
+    if soffice_cmd:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                docx_path = tmpdir_path / "input.docx"
+                pdf_path = tmpdir_path / "input.pdf"
+                docx_path.write_bytes(docx_bytes)
+                cmd = [
+                    soffice_cmd,
+                    "--headless",
+                    "--nologo",
+                    "--nodefault",
+                    "--norestore",
+                    "--nofirststartwizard",
+                    "--convert-to",
+                    "pdf:writer_pdf_Export",
+                    "--outdir",
+                    str(tmpdir_path),
+                    str(docx_path),
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=90)
+                if result.returncode == 0 and pdf_path.exists():
+                    return pdf_path.read_bytes()
+                else:
+                    logger.warning(
+                        "LibreOffice falhou, tentando fallback: rc=%s",
+                        result.returncode,
+                    )
+        except Exception as exc:
+            logger.warning("Erro com LibreOffice, tentando fallback: %s", exc)
+
+    # Fallback: mammoth + xhtml2pdf (100% Python, sem dependências externas)
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            docx_path = tmpdir_path / "input.docx"
-            pdf_path = tmpdir_path / "input.pdf"
-            docx_path.write_bytes(docx_bytes)
-            soffice_cmd = _find_soffice()
-            if not soffice_cmd:
-                logger.error("Falha na conversão: comando soffice/libreoffice não encontrado no ambiente.")
-                return None
-            cmd = [
-                soffice_cmd,
-                "--headless",
-                "--nologo",
-                "--nodefault",
-                "--norestore",
-                "--nofirststartwizard",
-                "--convert-to",
-                "pdf:writer_pdf_Export",
-                "--outdir",
-                str(tmpdir_path),
-                str(docx_path),
-            ]
-            result = subprocess.run(cmd, capture_output=True, timeout=90)
-            if result.returncode != 0:
-                logger.error(
-                    "Falha na conversão para PDF (soffice): rc=%s stdout=%s stderr=%s",
-                    result.returncode,
-                    result.stdout.decode(errors="ignore"),
-                    result.stderr.decode(errors="ignore"),
-                )
-                return None
-            if pdf_path.exists():
-                return pdf_path.read_bytes()
+        import mammoth
+        from xhtml2pdf import pisa
+
+        # Converte DOCX para HTML usando mammoth
+        docx_io = BytesIO(docx_bytes)
+        result = mammoth.convert_to_html(docx_io)
+        html_content = result.value
+
+        # Adiciona CSS para melhor formatação do PDF
+        html_with_style = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                @page {{
+                    size: A4;
+                    margin: 2cm;
+                }}
+                body {{
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 12pt;
+                    line-height: 1.5;
+                    color: #000;
+                }}
+                p {{
+                    margin: 0 0 10pt 0;
+                    text-align: justify;
+                }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 10pt 0;
+                }}
+                td, th {{
+                    border: 1px solid #000;
+                    padding: 5pt;
+                }}
+                h1 {{ font-size: 14pt; font-weight: bold; margin: 12pt 0 6pt 0; }}
+                h2 {{ font-size: 13pt; font-weight: bold; margin: 10pt 0 5pt 0; }}
+                h3 {{ font-size: 12pt; font-weight: bold; margin: 8pt 0 4pt 0; }}
+                strong, b {{ font-weight: bold; }}
+                em, i {{ font-style: italic; }}
+                u {{ text-decoration: underline; }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+
+        # Converte HTML para PDF usando xhtml2pdf
+        pdf_io = BytesIO()
+        pisa_status = pisa.CreatePDF(html_with_style, dest=pdf_io, encoding='UTF-8')
+
+        if pisa_status.err:
+            logger.error("Erro ao converter HTML para PDF com xhtml2pdf: %s", pisa_status.err)
+            return None
+
+        pdf_io.seek(0)
+        return pdf_io.read()
+
+    except ImportError as e:
+        logger.error("Bibliotecas mammoth/xhtml2pdf não instaladas: %s", e)
+        return None
     except Exception as exc:
-        logger.error("Erro ao converter DOCX para PDF: %s", exc, exc_info=True)
-    return None
+        logger.error("Erro ao converter DOCX para PDF (fallback): %s", exc, exc_info=True)
+        return None
 
 
 def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
@@ -553,12 +622,7 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     dados['VALOR DA CAUSA POR EXTENSO'] = valor_extenso
     dados['DATA DE HOJE'] = datetime.now().strftime("%d/%m/%Y")
 
-    fallback_path = os.path.join(
-        settings.BASE_DIR,
-        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
-        '4 - Modelo da Ação de Cobrança.docx'
-    )
-    document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, fallback_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, None)
     for section in document.sections:
         try:
             section.footer_distance = Cm(1.5)
@@ -652,12 +716,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo):
     endereco = replacements.get('ENDERECO', '')
     cidade = replacements.get('CIDADE', '')
     uf = replacements.get('UF', '')
-    fallback_path = os.path.join(
-        settings.BASE_DIR,
-        'contratos', 'documents', 'Base de Minutas Oficiais Modelo',
-        '3 - Base Modelo de Substituição de Polo e Habilitação.docx'
-    )
-    document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, fallback_path)
+    document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
     _replace_with_style(document, '[VARA]', _format_vara_text(processo.vara), uppercase=True)
     _replace_with_style(document, '[CIDADE]', cidade, uppercase=True)
@@ -1470,3 +1529,271 @@ def download_monitoria_pdf(request, processo_id=None):
     except Exception as exc:
         logger.error("Erro ao preparar download do PDF da monitória: %s", exc, exc_info=True)
         return HttpResponse("Erro ao preparar download do PDF.", status=500)
+
+
+@login_required
+@require_GET
+def proxy_arquivo_view(request, arquivo_id):
+    """
+    Proxy para servir arquivos do S3 com Content-Disposition: inline
+    permitindo visualização no iframe em vez de forçar download.
+    """
+    try:
+        arquivo = get_object_or_404(ProcessoArquivo, pk=arquivo_id)
+    except ProcessoArquivo.DoesNotExist:
+        return HttpResponse("Arquivo não encontrado.", status=404)
+
+    if not arquivo.arquivo:
+        return HttpResponse("Arquivo sem conteúdo.", status=404)
+
+    try:
+        # Lê o arquivo do S3
+        arquivo.arquivo.open('rb')
+        file_content = arquivo.arquivo.read()
+        arquivo.arquivo.close()
+
+        # Determina o content-type baseado na extensão
+        arquivo_name = arquivo.arquivo.name.lower()
+        if arquivo_name.endswith('.pdf'):
+            content_type = 'application/pdf'
+        elif arquivo_name.endswith('.docx'):
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        elif arquivo_name.endswith('.doc'):
+            content_type = 'application/msword'
+        elif arquivo_name.endswith('.png'):
+            content_type = 'image/png'
+        elif arquivo_name.endswith('.jpg') or arquivo_name.endswith('.jpeg'):
+            content_type = 'image/jpeg'
+        else:
+            content_type = 'application/octet-stream'
+
+        # Retorna com headers corretos para visualização inline
+        response = HttpResponse(file_content, content_type=content_type)
+        response['Content-Disposition'] = 'inline'
+        response['Content-Length'] = len(file_content)
+        response['X-Content-Type-Options'] = 'nosniff'
+        response['Cache-Control'] = 'private, max-age=3600'
+        return response
+
+    except Exception as exc:
+        logger.error("Erro ao servir arquivo via proxy: %s", exc, exc_info=True)
+        return HttpResponse("Erro ao carregar arquivo.", status=500)
+
+
+@login_required
+@require_GET
+def convert_docx_to_pdf_download(request, arquivo_id):
+    """
+    Converte um arquivo DOCX existente para PDF on-demand e retorna o download.
+    Se o PDF correspondente já existe, retorna ele diretamente.
+    """
+    try:
+        arquivo = get_object_or_404(ProcessoArquivo, pk=arquivo_id)
+    except ProcessoArquivo.DoesNotExist:
+        return HttpResponse("Arquivo não encontrado.", status=404)
+
+    arquivo_path = arquivo.arquivo.name if arquivo.arquivo else ''
+    if not arquivo_path:
+        return HttpResponse("Arquivo sem conteúdo.", status=404)
+
+    # Verifica se é um DOCX
+    is_docx = arquivo_path.lower().endswith('.docx')
+    is_pdf = arquivo_path.lower().endswith('.pdf')
+
+    if is_pdf:
+        # Já é PDF, retorna direto
+        try:
+            arquivo.arquivo.open('rb')
+            filename = (arquivo.nome or os.path.basename(arquivo_path)).replace('_', ' ')
+            return FileResponse(
+                arquivo.arquivo,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/pdf'
+            )
+        except Exception as exc:
+            logger.error("Erro ao baixar PDF: %s", exc, exc_info=True)
+            return HttpResponse("Erro ao baixar PDF.", status=500)
+
+    if not is_docx:
+        return HttpResponse("Arquivo não é DOCX nem PDF.", status=400)
+
+    # Verifica se já existe um PDF correspondente
+    base_name = arquivo_path.rsplit('.', 1)[0]
+    pdf_path = base_name + '.pdf'
+
+    # Tenta encontrar o PDF existente no mesmo processo
+    existing_pdf = ProcessoArquivo.objects.filter(
+        processo=arquivo.processo,
+        arquivo__iendswith='.pdf',
+        nome__icontains=arquivo.nome.rsplit('.', 1)[0] if arquivo.nome else ''
+    ).first()
+
+    if existing_pdf and existing_pdf.arquivo:
+        try:
+            existing_pdf.arquivo.open('rb')
+            filename = (existing_pdf.nome or os.path.basename(existing_pdf.arquivo.name)).replace('_', ' ')
+            return FileResponse(
+                existing_pdf.arquivo,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/pdf'
+            )
+        except Exception:
+            pass  # Se falhar, tenta converter
+
+    # Converte DOCX para PDF
+    try:
+        arquivo.arquivo.open('rb')
+        docx_bytes = arquivo.arquivo.read()
+        arquivo.arquivo.close()
+    except Exception as exc:
+        logger.error("Erro ao ler DOCX para conversão: %s", exc, exc_info=True)
+        return HttpResponse("Erro ao ler arquivo DOCX.", status=500)
+
+    pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+    if not pdf_bytes:
+        return HttpResponse(
+            "Não foi possível converter o DOCX para PDF. "
+            "O conversor (LibreOffice) pode não estar disponível.",
+            status=500
+        )
+
+    # Salva o PDF gerado
+    pdf_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.pdf'
+    pdf_file = ContentFile(pdf_bytes)
+    novo_arquivo_pdf = ProcessoArquivo(
+        processo=arquivo.processo,
+        nome=pdf_filename,
+        enviado_por=request.user if request.user.is_authenticated else None,
+    )
+    novo_arquivo_pdf.arquivo.save(pdf_filename, pdf_file, save=True)
+
+    # Retorna o PDF para download
+    return FileResponse(
+        BytesIO(pdf_bytes),
+        as_attachment=True,
+        filename=pdf_filename.replace('_', ' '),
+        content_type='application/pdf'
+    )
+
+
+def _convert_pdf_to_docx_bytes(pdf_bytes):
+    """
+    Converte PDF para DOCX usando pdf2docx (100% Python).
+    """
+    try:
+        from pdf2docx import Converter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            pdf_path = tmpdir_path / "input.pdf"
+            docx_path = tmpdir_path / "output.docx"
+
+            pdf_path.write_bytes(pdf_bytes)
+
+            # Converte PDF para DOCX
+            cv = Converter(str(pdf_path))
+            cv.convert(str(docx_path))
+            cv.close()
+
+            if docx_path.exists():
+                return docx_path.read_bytes()
+
+    except ImportError as e:
+        logger.error("Biblioteca pdf2docx não instalada: %s", e)
+    except Exception as exc:
+        logger.error("Erro ao converter PDF para DOCX: %s", exc, exc_info=True)
+
+    return None
+
+
+@login_required
+@require_GET
+def convert_pdf_to_docx_download(request, arquivo_id):
+    """
+    Converte um arquivo PDF existente para DOCX on-demand e retorna o download.
+    """
+    try:
+        arquivo = get_object_or_404(ProcessoArquivo, pk=arquivo_id)
+    except ProcessoArquivo.DoesNotExist:
+        return HttpResponse("Arquivo não encontrado.", status=404)
+
+    arquivo_path = arquivo.arquivo.name if arquivo.arquivo else ''
+    if not arquivo_path:
+        return HttpResponse("Arquivo sem conteúdo.", status=404)
+
+    is_pdf = arquivo_path.lower().endswith('.pdf')
+    is_docx = arquivo_path.lower().endswith('.docx')
+
+    if is_docx:
+        # Já é DOCX, retorna direto
+        try:
+            arquivo.arquivo.open('rb')
+            filename = (arquivo.nome or os.path.basename(arquivo_path)).replace('_', ' ')
+            return FileResponse(
+                arquivo.arquivo,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
+        except Exception as exc:
+            logger.error("Erro ao baixar DOCX: %s", exc, exc_info=True)
+            return HttpResponse("Erro ao baixar DOCX.", status=500)
+
+    if not is_pdf:
+        return HttpResponse("Arquivo não é PDF nem DOCX.", status=400)
+
+    # Tenta encontrar o DOCX existente no mesmo processo
+    existing_docx = ProcessoArquivo.objects.filter(
+        processo=arquivo.processo,
+        arquivo__iendswith='.docx',
+        nome__icontains=arquivo.nome.rsplit('.', 1)[0] if arquivo.nome else ''
+    ).first()
+
+    if existing_docx and existing_docx.arquivo:
+        try:
+            existing_docx.arquivo.open('rb')
+            filename = (existing_docx.nome or os.path.basename(existing_docx.arquivo.name)).replace('_', ' ')
+            return FileResponse(
+                existing_docx.arquivo,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
+        except Exception:
+            pass  # Se falhar, tenta converter
+
+    # Converte PDF para DOCX
+    try:
+        arquivo.arquivo.open('rb')
+        pdf_bytes = arquivo.arquivo.read()
+        arquivo.arquivo.close()
+    except Exception as exc:
+        logger.error("Erro ao ler PDF para conversão: %s", exc, exc_info=True)
+        return HttpResponse("Erro ao ler arquivo PDF.", status=500)
+
+    docx_bytes = _convert_pdf_to_docx_bytes(pdf_bytes)
+    if not docx_bytes:
+        return HttpResponse(
+            "Não foi possível converter o PDF para DOCX.",
+            status=500
+        )
+
+    # Salva o DOCX gerado
+    docx_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.docx'
+    docx_file = ContentFile(docx_bytes)
+    novo_arquivo_docx = ProcessoArquivo(
+        processo=arquivo.processo,
+        nome=docx_filename,
+        enviado_por=request.user if request.user.is_authenticated else None,
+    )
+    novo_arquivo_docx.arquivo.save(docx_filename, docx_file, save=True)
+
+    # Retorna o DOCX para download
+    return FileResponse(
+        BytesIO(docx_bytes),
+        as_attachment=True,
+        filename=docx_filename.replace('_', ' '),
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
