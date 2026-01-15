@@ -28,7 +28,7 @@ def buscar_processo_por_cnj(cnj: str) -> dict:
     token = settings.ESCAVADOR_API_TOKEN
     # DEBUG: Verifica se o token foi carregado do .env
     if token:
-        print(f"DEBUG: Usando token que começa com '{token[:5]}' e termina com '{token[-5:]}'")
+        print(f"DEBUG: Usando token que começa")
     else:
         print("DEBUG: ERRO - Token do Escavador não foi encontrado nas configurações (settings.py).")
         return {}
