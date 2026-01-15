@@ -1,13 +1,20 @@
 # nowlex_erp_mini/urls.py
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from contratos import views as contratos_views
 from django.conf import settings
 from django.conf.urls.static import static
 from django.views.generic.base import RedirectView
 from django.templatetags.static import static as static_file
+from . import views as core_views
+from django.shortcuts import redirect
+
+def admin_root_redirect(request):
+    return redirect('/admin/contratos/processojudicial/')
 
 urlpatterns = [
+    re_path(r'^admin/$', admin.site.admin_view(admin_root_redirect), name='admin_root_redirect'),
+    path('admin/minhas-acoes/', core_views.minhas_acoes, name='admin_minhas_acoes'),
     path('admin/', admin.site.urls),
 
     # Redireciona a página inicial para o admin

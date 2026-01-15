@@ -226,6 +226,155 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     insertAgendaSidebarPlaceholder();
 
+    const insertMinhasAcoesLink = () => {
+        const navSidebar = document.getElementById('nav-sidebar');
+        if (!navSidebar) return;
+        const usersLink = Array.from(navSidebar.querySelectorAll('a'))
+            .find((link) => link.textContent.trim() === 'Usuários');
+        const userRow = usersLink?.closest('tr');
+        if (!userRow || userRow.nextElementSibling?.classList.contains('minhas-acoes-row')) {
+            return;
+        }
+        const row = document.createElement('tr');
+        row.className = 'minhas-acoes-row';
+        const th = document.createElement('th');
+        th.scope = 'row';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'minhas-acoes-trigger';
+        button.textContent = 'Minhas ações';
+        th.appendChild(button);
+        const td = document.createElement('td');
+        row.append(th, td);
+        userRow.parentNode.insertBefore(row, userRow.nextSibling);
+        button.addEventListener('click', () => toggleMinhasAcoesPanel());
+    };
+
+    const removeViewSiteLink = () => {
+        const userTools = document.getElementById('user-tools');
+        if (!userTools) return;
+        const link = Array.from(userTools.querySelectorAll('a'))
+            .find((anchor) => anchor.textContent.trim().toLowerCase() === 'ver o site'
+                || anchor.textContent.trim().toLowerCase() === 'view site');
+        if (!link) return;
+        const previous = link.previousSibling;
+        const next = link.nextSibling;
+        link.remove();
+        if (previous && previous.nodeType === Node.TEXT_NODE && previous.textContent.includes('/')) {
+            previous.remove();
+        } else if (next && next.nodeType === Node.TEXT_NODE && next.textContent.includes('/')) {
+            next.remove();
+        }
+    };
+
+    const createMinhasAcoesPanel = () => {
+        if (document.querySelector('.minhas-acoes-panel')) {
+            return document.querySelector('.minhas-acoes-panel');
+        }
+        const panel = document.createElement('aside');
+        panel.className = 'minhas-acoes-panel';
+        panel.innerHTML = `
+            <div class="minhas-acoes-panel__header">
+                <strong>Minhas ações</strong>
+                <button type="button" class="minhas-acoes-panel__close" aria-label="Fechar">×</button>
+            </div>
+            <div class="minhas-acoes-panel__body">
+                <p class="minhas-acoes-panel__loading">Carregando ações...</p>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        panel.querySelector('.minhas-acoes-panel__close').addEventListener('click', () => {
+            panel.classList.remove('minhas-acoes-panel--open');
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                panel.classList.remove('minhas-acoes-panel--open');
+            }
+        });
+        return panel;
+    };
+
+    const renderMinhasAcoes = (panel, items) => {
+        const body = panel.querySelector('.minhas-acoes-panel__body');
+        if (!body) return;
+        if (!items.length) {
+            body.innerHTML = '<p class="minhas-acoes-panel__empty">Nenhuma ação recente.</p>';
+            return;
+        }
+        const list = document.createElement('div');
+        list.className = 'minhas-acoes-panel__list';
+        items.forEach((item) => {
+            const entry = document.createElement(item.change_url ? 'a' : 'div');
+            entry.className = 'minhas-acoes-panel__item';
+            if (item.change_url) {
+                entry.href = item.change_url;
+                entry.target = '_blank';
+                entry.rel = 'noopener noreferrer';
+            }
+            const title = document.createElement('span');
+            title.className = 'minhas-acoes-panel__item-title';
+            title.textContent = item.object_repr || 'Registro';
+            const meta = document.createElement('span');
+            meta.className = 'minhas-acoes-panel__item-meta';
+            const typeLabel = item.content_type ? `${item.content_type} · ` : '';
+            meta.textContent = `${typeLabel}${item.action_time_display || ''}`;
+            entry.append(title, meta);
+            if (item.change_message) {
+                const desc = document.createElement('span');
+                desc.className = 'minhas-acoes-panel__item-desc';
+                desc.textContent = item.change_message;
+                entry.appendChild(desc);
+            }
+            list.appendChild(entry);
+        });
+        body.innerHTML = '';
+        body.appendChild(list);
+    };
+
+    const loadMinhasAcoes = (panel) => {
+        const body = panel.querySelector('.minhas-acoes-panel__body');
+        if (body) {
+            body.innerHTML = '<p class="minhas-acoes-panel__loading">Carregando ações...</p>';
+        }
+        fetch('/admin/minhas-acoes/')
+            .then((response) => response.json())
+            .then((data) => {
+                renderMinhasAcoes(panel, Array.isArray(data.items) ? data.items : []);
+            })
+            .catch(() => {
+                if (body) {
+                    body.innerHTML = '<p class="minhas-acoes-panel__empty">Não foi possível carregar as ações.</p>';
+                }
+            });
+    };
+
+    const positionMinhasAcoesPanel = (panel, trigger) => {
+        if (!panel || !trigger) return;
+        const rect = trigger.getBoundingClientRect();
+        const sidebar = document.getElementById('nav-sidebar');
+        const sidebarRect = sidebar?.getBoundingClientRect();
+        const left = (sidebarRect ? sidebarRect.left : rect.left) - 6;
+        panel.style.left = `${Math.max(0, left)}px`;
+        panel.style.top = `${rect.bottom + 6}px`;
+        panel.style.right = 'auto';
+        const maxLeft = window.innerWidth - panel.offsetWidth - 12;
+        if (panel.offsetWidth && left > maxLeft) {
+            panel.style.left = `${Math.max(0, maxLeft)}px`;
+        }
+    };
+
+    const toggleMinhasAcoesPanel = () => {
+        const panel = createMinhasAcoesPanel();
+        panel.classList.toggle('minhas-acoes-panel--open');
+        if (panel.classList.contains('minhas-acoes-panel--open')) {
+            positionMinhasAcoesPanel(panel, document.querySelector('.minhas-acoes-trigger'));
+            loadMinhasAcoes(panel);
+        }
+    };
+
+    insertMinhasAcoesLink();
+    removeViewSiteLink();
+
     const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
     const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const getMonthLabel = (state) => {
