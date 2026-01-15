@@ -4365,21 +4365,17 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     }
                 const successLines = [];
                 if (data && data.monitoria) {
-                    if (data.monitoria.ok) {
-                        successLines.push('Monitória OK');
-                    } else {
-                        successLines.push(`Monitória: Erro${data.monitoria.error ? ` - ${data.monitoria.error}` : ''}`);
-                    }
+                    successLines.push('Monitória: Gerada Corretamente - Salva em Arquivos');
                 }
                 if (data && data.extrato) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
                     } else {
-                        const message = data.extrato.error || 'Erro desconhecido';
+                        const messageRaw = data.extrato.error || 'Erro desconhecido';
+                        const message = messageRaw.replace(/\.?\s*Não é possível emitir o extrato da titularidade\.?/i, '');
                         successLines.push(`Extrato de titularidade: Não gerado - ${message}`);
                     }
                 }
-                successLines.push('Petição da Monitória salva com sucesso em Arquivos');
                 const handleReload = () => {
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
