@@ -81,11 +81,24 @@ class AgendaGeralAPIView(APIView):
         for item in prazos_data:
             item['type'] = 'P'
             raw_limit = item.get('data_limite')
-            if hasattr(raw_limit, 'date'):
-                raw_limit = raw_limit.date().isoformat()
-            elif hasattr(raw_limit, 'isoformat'):
-                raw_limit = raw_limit.isoformat()
-            item['date'] = (raw_limit or '')[:10]
+            date_str = ''
+            if isinstance(raw_limit, str):
+                try:
+                    dt = timezone.datetime.fromisoformat(raw_limit.replace('Z', '+00:00'))
+                    if timezone.is_naive(dt):
+                        dt = timezone.make_aware(dt, timezone.get_default_timezone())
+                    date_str = timezone.localtime(dt, timezone.get_default_timezone()).date().isoformat()
+                except Exception:
+                    date_str = (raw_limit or '')[:10]
+            elif hasattr(raw_limit, 'date'):
+                try:
+                    dt = raw_limit
+                    if timezone.is_naive(dt):
+                        dt = timezone.make_aware(dt, timezone.get_default_timezone())
+                    date_str = timezone.localtime(dt, timezone.get_default_timezone()).date().isoformat()
+                except Exception:
+                    date_str = (raw_limit.date().isoformat() if hasattr(raw_limit, 'date') else '')
+            item['date'] = date_str
             item['title'] = item.get('titulo')
 
         agenda_items = sorted(
