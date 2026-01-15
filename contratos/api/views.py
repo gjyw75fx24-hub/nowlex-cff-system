@@ -226,23 +226,25 @@ class AgendaPrazoUpdateDateAPIView(APIView):
                 parsed_date = timezone.datetime.fromisoformat(str(new_date_raw)).date()
             except Exception:
                 return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
-        # Preserva a hora atual, ajustando o fuso do objeto existente
+        # Preserva a hora, mas sempre no fuso local para evitar "voltar" um dia
+        local_tz = timezone.get_current_timezone()
         if isinstance(current_dt, timezone.datetime):
-            tzinfo = current_dt.tzinfo or timezone.get_current_timezone()
+            current_local = timezone.localtime(current_dt, local_tz) if timezone.is_aware(current_dt) else current_dt
             updated_dt = timezone.datetime(
                 parsed_date.year,
                 parsed_date.month,
                 parsed_date.day,
-                current_dt.hour,
-                current_dt.minute,
-                current_dt.second,
-                current_dt.microsecond,
-                tzinfo=tzinfo
+                current_local.hour,
+                current_local.minute,
+                current_local.second,
+                current_local.microsecond,
             )
+            updated_dt = timezone.make_aware(updated_dt, local_tz)
         else:
-            updated_dt = timezone.datetime.combine(parsed_date, time_cls())
-            if timezone.is_naive(updated_dt):
-                updated_dt = timezone.make_aware(updated_dt, timezone.get_current_timezone())
+            updated_dt = timezone.make_aware(
+                timezone.datetime.combine(parsed_date, time_cls()),
+                local_tz
+            )
         prazo.data_limite = updated_dt
         prazo.save(update_fields=['data_limite'])
         return Response({'status': 'ok', 'id': prazo.id, 'data_limite': prazo.data_limite})
