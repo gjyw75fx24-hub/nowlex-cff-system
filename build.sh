@@ -3,10 +3,6 @@
 
 set -o errexit  # Sai em caso de erro
 
-# Dependências de sistema (LibreOffice para conversão DOCX->PDF)
-apt-get update
-apt-get install -y libreoffice-core libreoffice-writer fonts-dejavu-core
-
 # Instalar dependências Python
 pip install -r requirements.txt
 
