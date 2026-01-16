@@ -1337,18 +1337,37 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         docx_bytes = _build_cobranca_docx_bytes(processo, polo_passivo, contratos_lista)
         base_filename = _build_cobranca_base_filename(polo_passivo, contratos_lista)
         pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
-        if not pdf_bytes:
-            return HttpResponse("Não foi possível converter o DOCX para PDF. Verifique o conversor.", status=500)
+        docx_url = ''
+        pdf_url = ''
 
-        pdf_name = f"{base_filename}.pdf"
-        pdf_file = ContentFile(pdf_bytes)
-        arquivo_pdf = ProcessoArquivo(
-            processo=processo,
-            nome=pdf_name,
-            enviado_por=request.user if request.user.is_authenticated else None,
-        )
-        arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-        pdf_url = arquivo_pdf.arquivo.url
+        try:
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
+                processo=processo,
+                nome=docx_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
+        except Exception as exc:
+            logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
+            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+
+        if pdf_bytes:
+            pdf_name = f"{base_filename}.pdf"
+            pdf_file = ContentFile(pdf_bytes)
+            try:
+                arquivo_pdf = ProcessoArquivo(
+                    processo=processo,
+                    nome=pdf_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+                pdf_url = arquivo_pdf.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar PDF da cobrança judicial: %s", exc, exc_info=True)
+                pdf_bytes = None
     except FileNotFoundError as fe:
         logger.error("Template de cobrança não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
@@ -1364,11 +1383,18 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         usuario=request.user if request.user.is_authenticated else None
     )
 
+    cobranca_info = {
+        "ok": bool(pdf_bytes),
+        "pdf_url": pdf_url,
+        "pdf_pending": not bool(pdf_bytes),
+        "docx_url": docx_url,
+    }
+
     response_payload = {
         "status": "success",
-        "message": "Petição de cobrança gerada (PDF salvo em Arquivos).",
-        "pdf_url": pdf_url,
-        "extrato": extrato_result
+        "message": "Petição de cobrança gerada (PDF salvo em Arquivos)." if cobranca_info["ok"] else "Petição de cobrança gerada (PDF não gerado; DOCX disponível).",
+        "cobranca": cobranca_info,
+        "extrato": extrato_result,
     }
     if extrato_result and isinstance(extrato_result, dict):
         pdf_url_extrato = extrato_result.get("pdf_url")
@@ -1413,18 +1439,38 @@ def generate_habilitacao_petition(request, processo_id=None):
     try:
         docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo)
         pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
-        if not pdf_bytes:
-            return HttpResponse("Não foi possível converter o DOCX para PDF.", status=500)
+        base_filename = _build_habilitacao_base_filename(polo_passivo, processo)
+        docx_url = ''
+        pdf_url = ''
 
-        pdf_name = f"{_build_habilitacao_base_filename(polo_passivo, processo)}.pdf"
-        pdf_file = ContentFile(pdf_bytes)
-        arquivo_pdf = ProcessoArquivo(
-            processo=processo,
-            nome=pdf_name,
-            enviado_por=request.user if request.user.is_authenticated else None,
-        )
-        arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-        pdf_url = arquivo_pdf.arquivo.url
+        try:
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
+                processo=processo,
+                nome=docx_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
+        except Exception as exc:
+            logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
+            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+
+        if pdf_bytes:
+            pdf_name = f"{base_filename}.pdf"
+            pdf_file = ContentFile(pdf_bytes)
+            try:
+                arquivo_pdf = ProcessoArquivo(
+                    processo=processo,
+                    nome=pdf_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
+                pdf_url = arquivo_pdf.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar PDF da habilitação: %s", exc, exc_info=True)
+                pdf_bytes = None
     except FileNotFoundError as fe:
         logger.error("Template de habilitação não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
@@ -1432,10 +1478,17 @@ def generate_habilitacao_petition(request, processo_id=None):
         logger.error(f"Erro ao gerar petição de habilitação para o processo {processo_id}: {exc}", exc_info=True)
         return HttpResponse(f"Erro ao gerar a petição de habilitação: {exc}", status=500)
 
+    habilitacao_info = {
+        "ok": bool(pdf_bytes),
+        "pdf_url": pdf_url,
+        "pdf_pending": not bool(pdf_bytes),
+        "docx_url": docx_url,
+    }
+
     return JsonResponse({
         "status": "success",
-        "message": "Petição de habilitação gerada (PDF salvo em Arquivos).",
-        "pdf_url": pdf_url
+        "message": "Petição de habilitação gerada (PDF salvo em Arquivos)." if habilitacao_info["ok"] else "Petição de habilitação gerada (PDF não gerado; DOCX disponível).",
+        "habilitacao": habilitacao_info,
     })
 
 

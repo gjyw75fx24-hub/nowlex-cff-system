@@ -4455,7 +4455,18 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                         .text('Gerando cobrança...');
                 },
                 success: function (data) {
-                const successLines = ['Cobrança Judicial OK - Salvo em Arquivos'];
+                const successLines = [];
+                if (data && data.cobranca) {
+                    if (data.cobranca.ok) {
+                        successLines.push('Cobrança Judicial OK - Salvo em Arquivos');
+                    } else {
+                        successLines.push('Cobrança Judicial gerada (PDF não gerado; DOCX disponível).');
+                    }
+                } else if (data && data.message) {
+                    successLines.push(data.message);
+                } else {
+                    successLines.push('Cobrança Judicial OK - Salvo em Arquivos');
+                }
                 if (data && data.extrato) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
@@ -4521,7 +4532,18 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                         .text('Gerando habilitação...');
                 },
                 success: function (data) {
-                    const lines = ['Habilitação OK', 'Salvos em Arquivos'];
+                    const lines = [];
+                    if (data && data.habilitacao) {
+                        if (data.habilitacao.ok) {
+                            lines.push('Habilitação OK - Salvo em Arquivos');
+                        } else {
+                            lines.push('Habilitação gerada (PDF não gerado; DOCX disponível).');
+                        }
+                    } else if (data && data.message) {
+                        lines.push(data.message);
+                    } else {
+                        lines.push('Habilitação OK - Salvo em Arquivos');
+                    }
                     const handleReload = () => {
                         if ('scrollRestoration' in history) {
                             history.scrollRestoration = 'manual';
