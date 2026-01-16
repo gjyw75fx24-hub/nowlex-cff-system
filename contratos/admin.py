@@ -500,6 +500,85 @@ admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
 
+def configuracao_analise_view(request):
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Configuração de Análise",
+    })
+    return render(request, "admin/contratos/configuracao_analise.html", context)
+
+def configuracao_analise_tipos_view(request):
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Tipos de Análise",
+    })
+    return render(request, "admin/contratos/configuracao_analise_tipos.html", context)
+
+def configuracao_analise_novas_monitorias_view(request):
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Novas Monitórias",
+    })
+    return render(request, "admin/contratos/configuracao_analise_novas_monitorias.html", context)
+
+_original_get_admin_urls = admin.site.get_urls
+
+def _get_admin_urls():
+    urls = _original_get_admin_urls()
+    custom_urls = [
+        path(
+            "contratos/configuracao-analise/",
+            admin.site.admin_view(configuracao_analise_view),
+            name="contratos_configuracao_analise",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/",
+            admin.site.admin_view(configuracao_analise_tipos_view),
+            name="contratos_configuracao_analise_tipos",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/novas-monitorias/",
+            admin.site.admin_view(configuracao_analise_novas_monitorias_view),
+            name="contratos_configuracao_analise_novas_monitorias",
+        ),
+    ]
+    return custom_urls + urls
+
+admin.site.get_urls = _get_admin_urls
+
+_original_get_app_list = admin.site.get_app_list
+
+def _get_app_list(request):
+    app_list = _original_get_app_list(request)
+    for app in app_list:
+        if app.get("app_label") != "contratos":
+            continue
+        insertion_index = None
+        filtered_models = []
+        for idx, model in enumerate(app.get("models", [])):
+            if model.get("object_name") in {"QuestaoAnalise", "OpcaoResposta"}:
+                if insertion_index is None:
+                    insertion_index = idx
+                continue
+            filtered_models.append(model)
+        if insertion_index is None:
+            insertion_index = 0
+        filtered_models.insert(
+            min(insertion_index, len(filtered_models)),
+            {
+                "name": "Configuração de Análise",
+                "object_name": "ConfiguracaoAnalise",
+                "admin_url": reverse("admin:contratos_configuracao_analise"),
+                "add_url": None,
+                "perms": {"add": False, "change": False, "delete": False, "view": True},
+                "view_only": True,
+            },
+        )
+        app["models"] = filtered_models
+    return app_list
+
+admin.site.get_app_list = _get_app_list
+
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
     parameter_name = "terceiro_interessado"
