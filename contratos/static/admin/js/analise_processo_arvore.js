@@ -4438,7 +4438,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
+            const url = `/contratos/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
 
             $.ajax({
                 url: url,
@@ -4455,15 +4455,20 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                         .text('Gerando cobrança...');
                 },
                 success: function (data) {
-                const successLines = ['Cobrança Judicial OK'];
+                const successLines = ['Cobrança Judicial OK - Salvo em Arquivos'];
                 if (data && data.extrato) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
                     } else {
-                        successLines.push(`Extrato de titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
+                        const rawMessage = data.extrato.error || '';
+                        const cleaned = rawMessage
+                            .replace(/\.?\s*Não é possível emitir o extrato da titularidade\.?/i, '')
+                            .replace(/^NowLex/i, 'A NowLex')
+                            .trim();
+                        const finalMessage = cleaned || 'A NowLex não possui o cadastro do contrato solicitado';
+                        successLines.push(`Extrato de titularidade: Não gerado - ${finalMessage}.`);
                     }
                 }
-                successLines.push('Salvos em Arquivos');
                 const handleReload = () => {
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
