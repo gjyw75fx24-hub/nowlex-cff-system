@@ -1815,7 +1815,7 @@ def convert_docx_to_pdf_download(request, arquivo_id):
     if not pdf_bytes:
         return HttpResponse(
             "Não foi possível converter o DOCX para PDF. "
-            "O conversor (LibreOffice) pode não estar disponível.",
+            "O conversor não está disponível no servidor.",
             status=500
         )
 
