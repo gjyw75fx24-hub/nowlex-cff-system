@@ -1885,6 +1885,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 excluirBtn.click();
             }
         });
+        const andamentosGroup = document.getElementById('andamentos-group');
+        const submitRow = excluirBtn.closest('.submit-row');
+        if (andamentosGroup && submitRow) {
+            const updateVisibility = () => {
+                submitRow.style.display = andamentosGroup.classList.contains('active') ? '' : 'none';
+            };
+            updateVisibility();
+            const tabsContainer = document.querySelector('.inline-group-tabs');
+            if (tabsContainer) {
+                tabsContainer.addEventListener('click', (event) => {
+                    const target = event.target;
+                    if (target && target.tagName === 'BUTTON') {
+                        window.requestAnimationFrame(updateVisibility);
+                    }
+                });
+            }
+            const observer = new MutationObserver(updateVisibility);
+            observer.observe(andamentosGroup, { attributes: true, attributeFilter: ['class'] });
+        }
     }
 
     // Máscara e formatação CNJ no input principal
