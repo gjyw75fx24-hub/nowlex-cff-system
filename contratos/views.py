@@ -479,6 +479,7 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
     Converte DOCX para PDF.
     Tenta primeiro usar LibreOffice (melhor qualidade).
     Se não disponível, usa mammoth + xhtml2pdf (100% Python).
+    Como último recurso, usa reportlab direto do DOCX (texto/tabelas).
     """
     def _find_soffice():
         candidates = [
@@ -592,9 +593,109 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
 
     except ImportError as e:
         logger.error("Bibliotecas mammoth/xhtml2pdf não instaladas: %s", e)
-        return None
     except Exception as exc:
         logger.error("Erro ao converter DOCX para PDF (fallback): %s", exc, exc_info=True)
+        # continua para o fallback de reportlab
+
+    # Fallback final: renderização simples com reportlab (texto/tabelas)
+    try:
+        from docx import Document
+        from docx.table import Table as DocxTable
+        from docx.text.paragraph import Paragraph as DocxParagraph
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        import html as html_lib
+
+        def iter_block_items(parent):
+            for child in parent.element.body.iterchildren():
+                if child.tag.endswith('}p'):
+                    yield DocxParagraph(child, parent)
+                elif child.tag.endswith('}tbl'):
+                    yield DocxTable(child, parent)
+
+        def run_to_markup(run):
+            text = html_lib.escape(run.text or '').replace('\n', '<br/>')
+            if not text:
+                return ''
+            if run.bold:
+                text = f"<b>{text}</b>"
+            if run.italic:
+                text = f"<i>{text}</i>"
+            if run.underline:
+                text = f"<u>{text}</u>"
+            return text
+
+        alignment_map = {
+            None: TA_LEFT,
+            0: TA_LEFT,
+            1: TA_CENTER,
+            2: TA_RIGHT,
+            3: TA_JUSTIFY,
+        }
+
+        styles = getSampleStyleSheet()
+        base_style = ParagraphStyle(
+            'DocxBase',
+            parent=styles['Normal'],
+            fontName='Times-Roman',
+            fontSize=12,
+            leading=15,
+            spaceAfter=6,
+        )
+
+        doc = Document(BytesIO(docx_bytes))
+        buffer = BytesIO()
+        pdf = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=2 * cm,
+            rightMargin=2 * cm,
+            topMargin=2 * cm,
+            bottomMargin=2 * cm,
+        )
+        flowables = []
+
+        for block in iter_block_items(doc):
+            if isinstance(block, DocxParagraph):
+                paragraph_text = ''.join(run_to_markup(run) for run in block.runs).strip()
+                if not paragraph_text:
+                    flowables.append(Spacer(1, 8))
+                    continue
+                style = ParagraphStyle(
+                    'DocxParagraph',
+                    parent=base_style,
+                    alignment=alignment_map.get(block.alignment, TA_LEFT),
+                )
+                flowables.append(Paragraph(paragraph_text, style))
+            elif isinstance(block, DocxTable):
+                table_data = []
+                for row in block.rows:
+                    row_cells = []
+                    for cell in row.cells:
+                        cell_text = html_lib.escape(cell.text or '').replace('\n', '<br/>')
+                        row_cells.append(Paragraph(cell_text, base_style))
+                    table_data.append(row_cells)
+                if table_data:
+                    table = Table(table_data, hAlign='LEFT')
+                    table.setStyle(TableStyle([
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ]))
+                    flowables.append(table)
+                    flowables.append(Spacer(1, 8))
+
+        if not flowables:
+            return None
+
+        pdf.build(flowables)
+        buffer.seek(0)
+        return buffer.read()
+    except Exception as exc:
+        logger.error("Erro ao converter DOCX para PDF (reportlab): %s", exc, exc_info=True)
         return None
 
 
@@ -1219,21 +1320,8 @@ def generate_monitoria_petition(request, processo_id=None):
         monitoria_info = {}
         pdf_url = ''
         docx_url = ''
-
-        # Sempre salva o DOCX, mesmo se o PDF falhar (para não bloquear o usuário)
-        try:
-            docx_name = f"{base_filename}.docx"
-            docx_file = ContentFile(docx_bytes)
-            arquivo_docx = ProcessoArquivo(
-                processo=processo,
-                nome=docx_name,
-                enviado_por=request.user if request.user.is_authenticated else None,
-            )
-            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-            docx_url = arquivo_docx.arquivo.url
-        except Exception as exc:
-            logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
-            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+        arquivo_pdf = None
+        arquivo_docx = None
 
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
@@ -1249,6 +1337,21 @@ def generate_monitoria_petition(request, processo_id=None):
             except Exception as exc:
                 logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
                 pdf_bytes = None  # para marcar como pendente
+
+        if not pdf_bytes:
+            try:
+                docx_name = f"{base_filename}.docx"
+                docx_file = ContentFile(docx_bytes)
+                arquivo_docx = ProcessoArquivo(
+                    processo=processo,
+                    nome=docx_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+                docx_url = arquivo_docx.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
+                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
 
         monitoria_info = {
             "ok": bool(pdf_bytes),
@@ -1267,10 +1370,12 @@ def generate_monitoria_petition(request, processo_id=None):
             usuario=request.user if request.user.is_authenticated else None
         )
         # Usa o arquivo PDF se existir, senão usa o DOCX para obter o dest_path
-        if pdf_bytes and 'arquivo_pdf' in dir():
+        if pdf_bytes and arquivo_pdf:
             dest_path = os.path.dirname(arquivo_pdf.arquivo.name or '')
-        else:
+        elif arquivo_docx:
             dest_path = os.path.dirname(arquivo_docx.arquivo.name or '')
+        else:
+            dest_path = ''
 
         response_payload = {
             "status": "success",
@@ -1340,20 +1445,6 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         docx_url = ''
         pdf_url = ''
 
-        try:
-            docx_name = f"{base_filename}.docx"
-            docx_file = ContentFile(docx_bytes)
-            arquivo_docx = ProcessoArquivo(
-                processo=processo,
-                nome=docx_name,
-                enviado_por=request.user if request.user.is_authenticated else None,
-            )
-            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-            docx_url = arquivo_docx.arquivo.url
-        except Exception as exc:
-            logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
-            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
-
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
             pdf_file = ContentFile(pdf_bytes)
@@ -1368,6 +1459,21 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
             except Exception as exc:
                 logger.error("Erro ao salvar PDF da cobrança judicial: %s", exc, exc_info=True)
                 pdf_bytes = None
+
+        if not pdf_bytes:
+            try:
+                docx_name = f"{base_filename}.docx"
+                docx_file = ContentFile(docx_bytes)
+                arquivo_docx = ProcessoArquivo(
+                    processo=processo,
+                    nome=docx_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+                docx_url = arquivo_docx.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
+                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de cobrança não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
@@ -1443,20 +1549,6 @@ def generate_habilitacao_petition(request, processo_id=None):
         docx_url = ''
         pdf_url = ''
 
-        try:
-            docx_name = f"{base_filename}.docx"
-            docx_file = ContentFile(docx_bytes)
-            arquivo_docx = ProcessoArquivo(
-                processo=processo,
-                nome=docx_name,
-                enviado_por=request.user if request.user.is_authenticated else None,
-            )
-            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-            docx_url = arquivo_docx.arquivo.url
-        except Exception as exc:
-            logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
-            return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
-
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
             pdf_file = ContentFile(pdf_bytes)
@@ -1471,6 +1563,21 @@ def generate_habilitacao_petition(request, processo_id=None):
             except Exception as exc:
                 logger.error("Erro ao salvar PDF da habilitação: %s", exc, exc_info=True)
                 pdf_bytes = None
+
+        if not pdf_bytes:
+            try:
+                docx_name = f"{base_filename}.docx"
+                docx_file = ContentFile(docx_bytes)
+                arquivo_docx = ProcessoArquivo(
+                    processo=processo,
+                    nome=docx_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+                docx_url = arquivo_docx.arquivo.url
+            except Exception as exc:
+                logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
+                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de habilitação não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
@@ -1712,17 +1819,8 @@ def convert_docx_to_pdf_download(request, arquivo_id):
             status=500
         )
 
-    # Salva o PDF gerado
+    # Retorna o PDF para download (sem salvar em Arquivos)
     pdf_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.pdf'
-    pdf_file = ContentFile(pdf_bytes)
-    novo_arquivo_pdf = ProcessoArquivo(
-        processo=arquivo.processo,
-        nome=pdf_filename,
-        enviado_por=request.user if request.user.is_authenticated else None,
-    )
-    novo_arquivo_pdf.arquivo.save(pdf_filename, pdf_file, save=True)
-
-    # Retorna o PDF para download
     return FileResponse(
         BytesIO(pdf_bytes),
         as_attachment=True,
@@ -1833,17 +1931,8 @@ def convert_pdf_to_docx_download(request, arquivo_id):
             status=500
         )
 
-    # Salva o DOCX gerado
+    # Retorna o DOCX para download (sem salvar em Arquivos)
     docx_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.docx'
-    docx_file = ContentFile(docx_bytes)
-    novo_arquivo_docx = ProcessoArquivo(
-        processo=arquivo.processo,
-        nome=docx_filename,
-        enviado_por=request.user if request.user.is_authenticated else None,
-    )
-    novo_arquivo_docx.arquivo.save(docx_filename, docx_file, save=True)
-
-    # Retorna o DOCX para download
     return FileResponse(
         BytesIO(docx_bytes),
         as_attachment=True,
