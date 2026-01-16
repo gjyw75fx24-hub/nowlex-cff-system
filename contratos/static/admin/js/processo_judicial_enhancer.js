@@ -1885,6 +1885,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 excluirBtn.click();
             }
         });
+        const andamentosGroup = document.getElementById('andamentos-group');
+        const submitRow = excluirBtn.closest('.submit-row');
+        if (andamentosGroup && submitRow) {
+            const updateVisibility = () => {
+                submitRow.style.display = andamentosGroup.classList.contains('active') ? '' : 'none';
+            };
+            updateVisibility();
+            const tabsContainer = document.querySelector('.inline-group-tabs');
+            if (tabsContainer) {
+                tabsContainer.addEventListener('click', (event) => {
+                    const target = event.target;
+                    if (target && target.tagName === 'BUTTON') {
+                        window.requestAnimationFrame(updateVisibility);
+                    }
+                });
+            }
+            const observer = new MutationObserver(updateVisibility);
+            observer.observe(andamentosGroup, { attributes: true, attributeFilter: ['class'] });
+        }
     }
 
     // Máscara e formatação CNJ no input principal
@@ -1913,8 +1932,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (form) {
+        let lastSubmitButton = null;
         form.addEventListener('submit', () => {
             deduplicateInlineAndamentos();
+        });
+        form.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const button = target.closest('input[type="submit"], button[type="submit"]');
+            if (!button || !form.contains(button)) return;
+            lastSubmitButton = button;
+        }, { capture: true });
+        form.addEventListener('submit', (event) => {
+            const submitter = event.submitter && form.contains(event.submitter)
+                ? event.submitter
+                : lastSubmitButton;
+            if (!submitter) return;
+            const activeButton = submitter.closest('input[type="submit"], button[type="submit"]');
+            if (!activeButton) return;
+            const originalLabel = activeButton.tagName === 'INPUT'
+                ? activeButton.value
+                : activeButton.textContent;
+            activeButton.dataset.originalLabel = originalLabel;
+            if (activeButton.tagName === 'INPUT') {
+                activeButton.value = 'Salvando...';
+            } else {
+                activeButton.textContent = 'Salvando...';
+            }
+        }, { capture: true });
+        const continueButtons = form.querySelectorAll('input[name="_continue"], button[name="_continue"]');
+        continueButtons.forEach((button) => {
+            button.style.display = 'none';
         });
     }
 
