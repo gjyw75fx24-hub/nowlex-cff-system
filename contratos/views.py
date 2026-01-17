@@ -478,6 +478,36 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 
 
 def _convert_docx_to_pdf_bytes(docx_bytes):
+    """
+    Converte DOCX para PDF.
+    Prioriza Gotenberg (fidelidade alta sem LibreOffice local).
+    Depois tenta LibreOffice local, se existir.
+    """
+    def _convert_with_gotenberg():
+        gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
+        if not gotenberg_url:
+            return None
+        try:
+            endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
+            files = {
+                "files": (
+                    "document.docx",
+                    docx_bytes,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            }
+            response = requests.post(endpoint, files=files, timeout=90)
+            if response.status_code == 200 and response.content:
+                return response.content
+            logger.error(
+                "Falha no Gotenberg: status=%s body=%s",
+                response.status_code,
+                response.text[:500],
+            )
+        except requests.RequestException as exc:
+            logger.error("Erro ao chamar Gotenberg: %s", exc)
+        return None
+
     def _find_soffice():
         candidates = [
             "soffice",
@@ -489,6 +519,10 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
             if shutil.which(candidate):
                 return candidate
         return None
+
+    gotenberg_pdf = _convert_with_gotenberg()
+    if gotenberg_pdf:
+        return gotenberg_pdf
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -27,6 +27,8 @@ services:
         value: ".onrender.com"
       - key: CSRF_TRUSTED_ORIGINS
         value: "https://nowlex-erp-mini.onrender.com"
+      - key: GOTENBERG_URL
+        value: "https://nowlex-gotenberg.onrender.com"
       - key: PYTHON_VERSION
         value: "3.11.9"
       # Adicione suas chaves de API aqui (configure manualmente no dashboard)
@@ -40,3 +42,10 @@ services:
       #   sync: false
       # - key: END_API_KEY
       #   sync: false
+  - type: web
+    name: nowlex-gotenberg
+    runtime: docker
+    plan: free
+    region: oregon
+    image:
+      url: gotenberg/gotenberg:8
