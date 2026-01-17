@@ -477,10 +477,36 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 def _convert_docx_to_pdf_bytes(docx_bytes):
     """
     Converte DOCX para PDF.
-    Tenta primeiro usar LibreOffice (melhor qualidade).
+    Prioriza Gotenberg (fidelidade alta sem LibreOffice local).
+    Depois tenta LibreOffice local, se existir.
     Se não disponível, usa mammoth + xhtml2pdf (100% Python).
     Como último recurso, usa reportlab direto do DOCX (texto/tabelas).
     """
+    def _convert_with_gotenberg():
+        gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
+        if not gotenberg_url:
+            return None
+        try:
+            endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
+            files = {
+                "files": (
+                    "document.docx",
+                    docx_bytes,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            }
+            response = requests.post(endpoint, files=files, timeout=90)
+            if response.status_code == 200 and response.content:
+                return response.content
+            logger.error(
+                "Falha no Gotenberg: status=%s body=%s",
+                response.status_code,
+                response.text[:500],
+            )
+        except requests.RequestException as exc:
+            logger.error("Erro ao chamar Gotenberg: %s", exc)
+        return None
+
     def _find_soffice():
         candidates = [
             "soffice",
@@ -493,7 +519,11 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
                 return candidate
         return None
 
-    # Tenta LibreOffice primeiro (melhor qualidade)
+    gotenberg_pdf = _convert_with_gotenberg()
+    if gotenberg_pdf:
+        return gotenberg_pdf
+
+    # Tenta LibreOffice local
     soffice_cmd = _find_soffice()
     if soffice_cmd:
         try:
@@ -518,11 +548,10 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
                 result = subprocess.run(cmd, capture_output=True, timeout=90)
                 if result.returncode == 0 and pdf_path.exists():
                     return pdf_path.read_bytes()
-                else:
-                    logger.warning(
-                        "LibreOffice falhou, tentando fallback: rc=%s",
-                        result.returncode,
-                    )
+                logger.warning(
+                    "LibreOffice falhou, tentando fallback: rc=%s",
+                    result.returncode,
+                )
         except Exception as exc:
             logger.warning("Erro com LibreOffice, tentando fallback: %s", exc)
 
