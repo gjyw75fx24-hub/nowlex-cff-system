@@ -223,6 +223,33 @@ def _bold_keywords_in_document(document, keywords):
                 run.font.name = 'Times New Roman'
 
 
+def _replace_placeholder_in_paragraph(paragraph, placeholder, value):
+    if not placeholder:
+        return
+    replacement = str(value)
+    replaced = False
+    for run in paragraph.runs:
+        if placeholder in run.text:
+            run.text = run.text.replace(placeholder, replacement)
+            replaced = True
+    if not replaced and placeholder in paragraph.text:
+        # Fallback for placeholders split across runs; may lose run-level styling.
+        paragraph.text = paragraph.text.replace(placeholder, replacement)
+
+
+def _replace_placeholders_in_paragraph(paragraph, data):
+    if not paragraph or not data:
+        return
+    if '[E]/[H]' in paragraph.text:
+        _replace_placeholder_in_paragraph(
+            paragraph,
+            '[E]/[H]',
+            f"{data.get('E_FORO', '')}/{data.get('H_FORO', '')}",
+        )
+    for key, value in data.items():
+        _replace_placeholder_in_paragraph(paragraph, f'[{key}]', value)
+
+
 def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
     if not pattern or replacement is None:
         return
@@ -414,19 +441,13 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
             pass
 
     for p in document.paragraphs:
-        for key, value in dados.items():
-            if key == 'E_FORO' and '[E]/[H]' in p.text:
-                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-            p.text = p.text.replace(f'[{key}]', str(value))
+        _replace_placeholders_in_paragraph(p, dados)
 
     for table in document.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    for key, value in dados.items():
-                        if key == 'E_FORO' and '[E]/[H]' in p.text:
-                            p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-                        p.text = p.text.replace(f'[{key}]', str(value))
+                    _replace_placeholders_in_paragraph(p, dados)
 
     _apply_placeholder_styles(document)
     _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
