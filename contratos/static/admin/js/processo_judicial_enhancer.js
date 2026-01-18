@@ -790,7 +790,7 @@ document.addEventListener('DOMContentLoaded', function() {
             text.textContent = entryData.description || '';
             entry.appendChild(text);
             const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
-            if (entryData.originalDate && entryData.originalDate !== currentDate) {
+            if (entryData.originalDate) {
                 const original = document.createElement('span');
                 original.className = 'agenda-panel__details-original';
                 original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
