@@ -695,7 +695,15 @@ document.addEventListener('DOMContentLoaded', function() {
             processo_id: item.processo_id,
             responsavel: item.responsavel || null,
         };
-        applyOriginFromMap(entry);
+        const hasApiOrigin = Boolean(originalRaw);
+        if (hasApiOrigin) {
+            const key = getOriginKey(entry);
+            if (key) {
+                entryOrigins.set(key, originalDate);
+            }
+        } else {
+            applyOriginFromMap(entry);
+        }
         rememberOrigin(entry);
         return entry;
     };
