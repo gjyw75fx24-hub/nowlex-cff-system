@@ -1305,6 +1305,10 @@ a.historylink {
     color: #6a748a;
     padding: 2px 0 0;
     margin-bottom: 0;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
 }
 .agenda-panel__day {
     border: 1px solid #dfe3ec;
