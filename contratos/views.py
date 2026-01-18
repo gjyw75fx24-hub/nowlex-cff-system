@@ -1419,6 +1419,20 @@ def generate_monitoria_petition(request, processo_id=None):
         arquivo_pdf = None
         arquivo_docx = None
 
+        try:
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
+                processo=processo,
+                nome=docx_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
+        except Exception as exc:
+            logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
+            docx_url = ''
+
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
             pdf_file = ContentFile(pdf_bytes)
@@ -1434,20 +1448,8 @@ def generate_monitoria_petition(request, processo_id=None):
                 logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
                 pdf_bytes = None  # para marcar como pendente
 
-        if not pdf_bytes:
-            try:
-                docx_name = f"{base_filename}.docx"
-                docx_file = ContentFile(docx_bytes)
-                arquivo_docx = ProcessoArquivo(
-                    processo=processo,
-                    nome=docx_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-                docx_url = arquivo_docx.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
-                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+        if not pdf_bytes and not docx_url:
+            return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
 
         monitoria_info = {
             "ok": bool(pdf_bytes),
@@ -1541,6 +1543,21 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         docx_url = ''
         pdf_url = ''
 
+        docx_saved = False
+        try:
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
+                processo=processo,
+                nome=docx_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
+            docx_saved = True
+        except Exception as exc:
+            logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
+
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
             pdf_file = ContentFile(pdf_bytes)
@@ -1555,21 +1572,8 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
             except Exception as exc:
                 logger.error("Erro ao salvar PDF da cobrança judicial: %s", exc, exc_info=True)
                 pdf_bytes = None
-
-        if not pdf_bytes:
-            try:
-                docx_name = f"{base_filename}.docx"
-                docx_file = ContentFile(docx_bytes)
-                arquivo_docx = ProcessoArquivo(
-                    processo=processo,
-                    nome=docx_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-                docx_url = arquivo_docx.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
-                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+        if not pdf_bytes and not docx_saved:
+            return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de cobrança não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
@@ -1645,6 +1649,21 @@ def generate_habilitacao_petition(request, processo_id=None):
         docx_url = ''
         pdf_url = ''
 
+        docx_saved = False
+        try:
+            docx_name = f"{base_filename}.docx"
+            docx_file = ContentFile(docx_bytes)
+            arquivo_docx = ProcessoArquivo(
+                processo=processo,
+                nome=docx_name,
+                enviado_por=request.user if request.user.is_authenticated else None,
+            )
+            arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
+            docx_url = arquivo_docx.arquivo.url
+            docx_saved = True
+        except Exception as exc:
+            logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
+
         if pdf_bytes:
             pdf_name = f"{base_filename}.pdf"
             pdf_file = ContentFile(pdf_bytes)
@@ -1659,21 +1678,8 @@ def generate_habilitacao_petition(request, processo_id=None):
             except Exception as exc:
                 logger.error("Erro ao salvar PDF da habilitação: %s", exc, exc_info=True)
                 pdf_bytes = None
-
-        if not pdf_bytes:
-            try:
-                docx_name = f"{base_filename}.docx"
-                docx_file = ContentFile(docx_bytes)
-                arquivo_docx = ProcessoArquivo(
-                    processo=processo,
-                    nome=docx_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_docx.arquivo.save(docx_name, docx_file, save=True)
-                docx_url = arquivo_docx.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
-                return HttpResponse("Falha ao salvar o DOCX gerado nos Arquivos.", status=500)
+        if not pdf_bytes and not docx_saved:
+            return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de habilitação não encontrado: %s", fe)
         return HttpResponse(str(fe), status=500)
