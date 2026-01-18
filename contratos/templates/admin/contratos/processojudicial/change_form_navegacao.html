@@ -467,6 +467,13 @@ document.addEventListener('DOMContentLoaded', function() {
       return normalized + suffix;
     };
 
+    const getRowArquivoId = (row) => {
+      if (!row) return null;
+      const idInput = row.querySelector('input[name$="-id"]');
+      const rawId = idInput ? idInput.value : '';
+      return rawId ? rawId : null;
+    };
+
     const createBaseBadge = (baseCheckbox) => {
       const wrapper = document.createElement('label');
       wrapper.className = 'monitoria-checkbox-wrapper';
@@ -740,8 +747,13 @@ document.addEventListener('DOMContentLoaded', function() {
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
       leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
       if (isMonitoriaRow(row)) {
-        const pdfHref = swapFileExtension(link.href, '\\.docx', '.pdf');
-        const docHref = swapFileExtension(link.href, '\\.pdf', '.docx');
+        const arquivoId = getRowArquivoId(row);
+        const pdfHref = arquivoId
+          ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/`
+          : swapFileExtension(link.href, '\\.docx', '.pdf');
+        const docHref = arquivoId
+          ? `/contratos/arquivo/${arquivoId}/convert-to-docx/`
+          : swapFileExtension(link.href, '\\.pdf', '.docx');
         leftGroup.appendChild(createButton('PDF', pdfHref, { download: true }));
         leftGroup.appendChild(createButton('DOC', docHref, { download: true }));
         attachBaseBadge(row, leftGroup);
