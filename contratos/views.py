@@ -21,6 +21,7 @@ from urllib.parse import quote
 from contratos.data.decision_tree_config import DECISION_TREE_CONFIG # <--- Nova importação
 import copy # Para cópia profunda do dicionário
 import json
+import time
 import tempfile
 from pathlib import Path
 import subprocess
@@ -553,25 +554,27 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
     def _convert_with_gotenberg():
         if not gotenberg_url:
             return None
-        try:
-            endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
-            files = {
-                "files": (
-                    "document.docx",
-                    docx_bytes,
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-            }
-            response = requests.post(endpoint, files=files, timeout=90)
-            if response.status_code == 200 and response.content:
-                return response.content
-            logger.error(
-                "Falha no Gotenberg: status=%s body=%s",
-                response.status_code,
-                response.text[:500],
+        endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
+        files = {
+            "files": (
+                "document.docx",
+                docx_bytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
-        except requests.RequestException as exc:
-            logger.error("Erro ao chamar Gotenberg: %s", exc)
+        }
+        for attempt in range(3):
+            try:
+                response = requests.post(endpoint, files=files, timeout=180)
+                if response.status_code == 200 and response.content:
+                    return response.content
+                logger.error(
+                    "Falha no Gotenberg: status=%s body=%s",
+                    response.status_code,
+                    response.text[:500],
+                )
+            except requests.RequestException as exc:
+                logger.error("Erro ao chamar Gotenberg (tentativa %s): %s", attempt + 1, exc)
+            time.sleep(1 + attempt)
         return None
 
     if gotenberg_url:
