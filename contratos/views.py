@@ -549,8 +549,8 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
     Se não disponível, usa mammoth + xhtml2pdf (100% Python).
     Como último recurso, usa reportlab direto do DOCX (texto/tabelas).
     """
+    gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
     def _convert_with_gotenberg():
-        gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
         if not gotenberg_url:
             return None
         try:
@@ -573,6 +573,9 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
         except requests.RequestException as exc:
             logger.error("Erro ao chamar Gotenberg: %s", exc)
         return None
+
+    if gotenberg_url:
+        return _convert_with_gotenberg()
 
     def _find_soffice():
         candidates = [

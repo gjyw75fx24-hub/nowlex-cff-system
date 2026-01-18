@@ -443,6 +443,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       const openInNewTab = Boolean(opts.openInNewTab);
       if (openInNewTab) {
+        btn.dataset.skipPreview = '1';
         btn.addEventListener('click', function(ev) {
           ev.preventDefault();
           window.open(href, '_blank');
@@ -745,9 +746,11 @@ document.addEventListener('DOMContentLoaded', function() {
       const isProtocolRowEntry = isProtocolRow(row);
       const isZipFile = /\.zip$/i.test(link.href);
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
-      leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
+      const arquivoId = getRowArquivoId(row);
+      const visualizarHref = arquivoId ? `/contratos/arquivo/${arquivoId}/view/` : link.href;
+      const visualizarOpen = isMonitoriaRow(row) && !isZipFile;
+      leftGroup.appendChild(createButton('Visualizar', visualizarHref, visualizarOpen ? { openInNewTab: true } : visualizarOpts));
       if (isMonitoriaRow(row)) {
-        const arquivoId = getRowArquivoId(row);
         const pdfHref = arquivoId
           ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/`
           : swapFileExtension(link.href, '\\.docx', '.pdf');
