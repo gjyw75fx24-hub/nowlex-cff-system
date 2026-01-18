@@ -456,6 +456,17 @@ document.addEventListener('DOMContentLoaded', function() {
       return isMonitoriaBaseName(text);
     };
 
+    const swapFileExtension = (href, fromExt, toExt) => {
+      if (!href) return href;
+      const hashIndex = href.indexOf('#');
+      const queryIndex = href.indexOf('?');
+      const cutIndex = (hashIndex === -1) ? queryIndex : (queryIndex === -1 ? hashIndex : Math.min(hashIndex, queryIndex));
+      const base = cutIndex === -1 ? href : href.slice(0, cutIndex);
+      const suffix = cutIndex === -1 ? '' : href.slice(cutIndex);
+      const normalized = base.replace(new RegExp(`${fromExt}$`, 'i'), toExt);
+      return normalized + suffix;
+    };
+
     const createBaseBadge = (baseCheckbox) => {
       const wrapper = document.createElement('label');
       wrapper.className = 'monitoria-checkbox-wrapper';
@@ -729,8 +740,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
       leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
       if (isMonitoriaRow(row)) {
-        const pdfHref = link.href.replace(/\.docx$/i, '.pdf');
-        const docHref = link.href.replace(/\.pdf$/i, '.docx');
+        const pdfHref = swapFileExtension(link.href, '\\.docx', '.pdf');
+        const docHref = swapFileExtension(link.href, '\\.pdf', '.docx');
         leftGroup.appendChild(createButton('PDF', pdfHref, { download: true }));
         leftGroup.appendChild(createButton('DOC', docHref, { download: true }));
         attachBaseBadge(row, leftGroup);
