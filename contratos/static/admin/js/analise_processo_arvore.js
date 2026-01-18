@@ -151,7 +151,7 @@
                 pointer-events: none;
             }
             .cff-countdown-bubble small {
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: 500;
                 opacity: 0.9;
             }
@@ -4453,6 +4453,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             $('#id_gerar_cobranca_btn')
                         .prop('disabled', true)
                         .text('Gerando cobrança...');
+                    startCountdown(5);
                 },
                 success: function (data) {
                 const successLines = [];
@@ -4460,7 +4461,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     if (data.cobranca.ok) {
                         successLines.push('Cobrança Judicial OK - Salvo em Arquivos');
                     } else {
-                        successLines.push('Cobrança Judicial gerada (PDF não gerado; DOCX disponível).');
+                        successLines.push('Cobrança Judicial gerada - Salva em Arquivos');
                     }
                 } else if (data && data.message) {
                     successLines.push(data.message);
@@ -4500,6 +4501,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     console.error('Erro na geração da cobrança judicial:', status, error, xhr);
                 },
                 complete: function () {
+                    stopCountdown();
                     $('#id_gerar_cobranca_btn')
                         .prop('disabled', false)
                         .text('Petição Cobrança Judicial (PDF)');
@@ -4530,6 +4532,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     $('#id_gerar_habilitacao_btn')
                         .prop('disabled', true)
                         .text('Gerando habilitação...');
+                    startCountdown(5);
                 },
                 success: function (data) {
                     const lines = [];
@@ -4537,7 +4540,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                         if (data.habilitacao.ok) {
                             lines.push('Habilitação OK - Salvo em Arquivos');
                         } else {
-                            lines.push('Habilitação gerada (PDF não gerado; DOCX disponível).');
+                            lines.push('Habilitação gerada - Salva em Arquivos');
                         }
                     } else if (data && data.message) {
                         lines.push(data.message);
@@ -4564,6 +4567,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     console.error('Erro na geração da habilitação:', status, error, xhr);
                 },
                 complete: function () {
+                    stopCountdown();
                     $('#id_gerar_habilitacao_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição de Habilitação (PDF)');

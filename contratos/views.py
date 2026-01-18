@@ -1464,7 +1464,7 @@ def generate_monitoria_petition(request, processo_id=None):
 
         response_payload = {
             "status": "success",
-            "message": "Petição gerada (PDF não gerado; DOCX disponível).",
+            "message": "Petição gerada - Salva em Arquivos.",
             "monitoria": monitoria_info,
             "extrato": extrato_result,
             "dest_path": dest_path,
@@ -1569,7 +1569,7 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
 
     response_payload = {
         "status": "success",
-        "message": "Petição de cobrança gerada (PDF não gerado; DOCX disponível).",
+        "message": "Petição de cobrança gerada - Salva em Arquivos.",
         "cobranca": cobranca_info,
         "extrato": extrato_result,
     }
@@ -1651,7 +1651,7 @@ def generate_habilitacao_petition(request, processo_id=None):
 
     return JsonResponse({
         "status": "success",
-        "message": "Petição de habilitação gerada (PDF não gerado; DOCX disponível).",
+        "message": "Petição de habilitação gerada - Salva em Arquivos.",
         "habilitacao": habilitacao_info,
     })
 
