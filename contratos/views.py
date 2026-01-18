@@ -223,31 +223,81 @@ def _bold_keywords_in_document(document, keywords):
                 run.font.name = 'Times New Roman'
 
 
-def _replace_placeholder_in_paragraph(paragraph, placeholder, value):
+def _replace_placeholder_across_runs(paragraph, placeholder, replacement):
     if not placeholder:
-        return
-    replacement = str(value)
-    replaced = False
-    for run in paragraph.runs:
-        if placeholder in run.text:
-            run.text = run.text.replace(placeholder, replacement)
-            replaced = True
-    if not replaced and placeholder in paragraph.text:
-        # Fallback for placeholders split across runs; may lose run-level styling.
-        paragraph.text = paragraph.text.replace(placeholder, replacement)
+        return False
+    replacement = str(replacement)
+    runs = list(paragraph.runs)
+    if not runs:
+        return False
+    full_text = ''.join(run.text for run in runs)
+    if placeholder not in full_text:
+        return False
+
+    while True:
+        full_text = ''.join(run.text for run in runs)
+        start = full_text.find(placeholder)
+        if start == -1:
+            break
+        end = start + len(placeholder)
+
+        current_index = 0
+        start_run_idx = None
+        start_offset = 0
+        end_run_idx = None
+        end_offset = 0
+        for idx, run in enumerate(runs):
+            run_len = len(run.text)
+            if start_run_idx is None and current_index + run_len >= start:
+                start_run_idx = idx
+                start_offset = start - current_index
+            if current_index + run_len >= end:
+                end_run_idx = idx
+                end_offset = end - current_index
+                break
+            current_index += run_len
+
+        if start_run_idx is None or end_run_idx is None:
+            break
+
+        if start_run_idx == end_run_idx:
+            run = runs[start_run_idx]
+            run.text = (
+                run.text[:start_offset]
+                + replacement
+                + run.text[end_offset:]
+            )
+        else:
+            start_run = runs[start_run_idx]
+            end_run = runs[end_run_idx]
+            start_run.text = (
+                start_run.text[:start_offset]
+                + replacement
+                + end_run.text[end_offset:]
+            )
+            for idx in range(start_run_idx + 1, end_run_idx + 1):
+                runs[idx].text = ''
+    return True
 
 
 def _replace_placeholders_in_paragraph(paragraph, data):
     if not paragraph or not data:
         return
     if '[E]/[H]' in paragraph.text:
-        _replace_placeholder_in_paragraph(
+        _replace_placeholder_across_runs(
             paragraph,
             '[E]/[H]',
             f"{data.get('E_FORO', '')}/{data.get('H_FORO', '')}",
         )
     for key, value in data.items():
-        _replace_placeholder_in_paragraph(paragraph, f'[{key}]', value)
+        _replace_placeholder_across_runs(paragraph, f'[{key}]', value)
+
+
+def _replace_placeholders_in_container(container, data):
+    if not container or not data:
+        return
+    for paragraph in _iter_container_paragraphs(container):
+        _replace_placeholders_in_paragraph(paragraph, data)
 
 
 def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
@@ -440,14 +490,10 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
         except Exception:
             pass
 
-    for p in document.paragraphs:
-        _replace_placeholders_in_paragraph(p, dados)
-
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    _replace_placeholders_in_paragraph(p, dados)
+    _replace_placeholders_in_container(document, dados)
+    for section in document.sections:
+        _replace_placeholders_in_container(section.header, dados)
+        _replace_placeholders_in_container(section.footer, dados)
 
     _apply_placeholder_styles(document)
     _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
