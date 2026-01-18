@@ -4,15 +4,6 @@
 {% block extrahead %}
 {{ block.super }}
 <link rel="stylesheet" href="{% static 'admin/css/documento_modelo_peticoes.css' %}">
-<!-- Mammoth.js para visualização de DOCX -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-<!-- PDF.js para visualização de PDF -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-  if (window.pdfjsLib) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-</script>
 <script>
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
@@ -330,24 +321,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (e.target === modal) closeModal();
   });
 
-  // Função para escapar HTML e prevenir XSS
-  function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  function renderFile(href, fileName, arquivoId) {
+  function renderFile(href) {
     if (!href) return;
-    // Suporta URLs com query params (S3 assinadas): arquivo.pdf?X-Amz-...
-    const urlPath = href.split('?')[0];
-    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(urlPath);
-    const isPdf = /\.pdf$/i.test(urlPath);
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
+    const isPdf = /\.pdf$/i.test(href);
     if (!isImage && !isPdf) return;
-
-    const displayName = fileName || urlPath.split('/').pop() || 'Documento';
-    const safeDisplayName = escapeHtml(displayName);
 
     if (currentObjectUrl) {
       URL.revokeObjectURL(currentObjectUrl);
@@ -355,126 +333,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (isImage) {
-      content.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px; align-items:center;">
-          <h3 style="margin:0; color:#333; font-size:1rem;">${safeDisplayName}</h3>
-          <img src="${href}" alt="Pré-visualização" style="max-width:100%; max-height:75vh; display:block;">
-        </div>`;
+      content.innerHTML = `<img src="${href}" alt="Pré-visualização" style="max-width:100%; max-height:80vh; display:block; margin:0 auto;">`;
       modal.style.display = 'flex';
       return;
     }
 
-    // Para PDF, usa proxy do Django e PDF.js para renderizar
-    if (!arquivoId) {
-      // Sem arquivoId, abre em nova aba
-      window.open(href, '_blank');
-      return;
-    }
-
-    const proxyUrl = `/contratos/arquivo/${arquivoId}/view/`;
-
-    // Mostra loading
     content.innerHTML = `<p style="color:#555; text-align:center;">Carregando PDF...</p>`;
-    modal.style.display = 'flex';
-
-    // Usa PDF.js para renderizar
-    if (typeof pdfjsLib === 'undefined') {
-      console.error('PDF.js não carregado');
-      window.open(href, '_blank');
-      closeModal();
-      return;
-    }
-
-    // Carrega o PDF via proxy
-    const loadingTask = pdfjsLib.getDocument(proxyUrl);
-    loadingTask.promise.then(function(pdf) {
-      console.log('PDF carregado, páginas:', pdf.numPages);
-
-      // Cria container com scroll para múltiplas páginas
+    fetch(href).then(res => {
+      if (!res.ok) throw new Error('Falha ao carregar PDF');
+      return res.blob();
+    }).then(blob => {
+      currentObjectUrl = URL.createObjectURL(blob);
       content.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; width:85vw; max-width:1000px;">
-          <h3 style="margin:0; color:#333; font-size:1rem;">${safeDisplayName}</h3>
-          <div id="pdf-container" style="width:100%; height:80vh; overflow-y:auto; background:#525659; padding:10px; border-radius:4px;"></div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
+          <iframe src="${currentObjectUrl}" title="Pré-visualização PDF" style="width:80vw; height:80vh; border:none;" loading="lazy"></iframe>
         </div>`;
-
-      const container = document.getElementById('pdf-container');
-      const scale = 1.5;
-
-      // Renderiza todas as páginas
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        pdf.getPage(pageNum).then(function(page) {
-          const viewport = page.getViewport({ scale: scale });
-
-          const canvas = document.createElement('canvas');
-          canvas.style.display = 'block';
-          canvas.style.margin = '0 auto 10px auto';
-          canvas.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          container.appendChild(canvas);
-
-          const context = canvas.getContext('2d');
-          page.render({
-            canvasContext: context,
-            viewport: viewport
-          });
-        });
-      }
-    }).catch(function(err) {
-      console.error('Erro ao carregar PDF com PDF.js:', err);
+    }).catch(() => {
       content.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px; align-items:center;">
-          <p style="color:#c00;">Não foi possível carregar o PDF.</p>
-          <p style="color:#666;">${safeDisplayName}</p>
-          <a href="${href}" target="_blank" class="button" style="background:#417690; color:#fff; padding:8px 16px;">Abrir em nova aba</a>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
+          <p style="color:#c00;">Não foi possível pré-visualizar o PDF.</p>
         </div>`;
     });
-  }
-
-  function renderDocx(href, fileName, arquivoId) {
-    if (!href) return;
-    const urlPath = href.split('?')[0];
-    const displayName = fileName || urlPath.split('/').pop() || 'Documento';
-    const safeDisplayName = escapeHtml(displayName);
-
-    content.innerHTML = `<p style="color:#555; text-align:center;">Carregando documento...</p>`;
     modal.style.display = 'flex';
-
-    // Usa proxy do Django para evitar CORS do S3
-    const fetchUrl = arquivoId ? `/contratos/arquivo/${arquivoId}/view/` : href;
-
-    fetch(fetchUrl)
-      .then(res => {
-        if (!res.ok) throw new Error('Falha ao carregar DOCX');
-        return res.arrayBuffer();
-      })
-      .then(arrayBuffer => {
-        return mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
-      })
-      .then(result => {
-        content.innerHTML = `
-          <div style="width:85vw; max-width:1200px; max-height:85vh; overflow:auto; background:#fff; padding:20px; border-radius:8px;">
-            <h3 style="margin:0 0 15px 0; color:#333; font-size:1rem; border-bottom:1px solid #eee; padding-bottom:10px;">${safeDisplayName}</h3>
-            <style>
-              .docx-preview { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; color: #000; }
-              .docx-preview p { margin: 0 0 10px 0; }
-              .docx-preview table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-              .docx-preview td, .docx-preview th { border: 1px solid #ccc; padding: 8px; }
-              .docx-preview img { max-width: 100%; height: auto; }
-            </style>
-            <div class="docx-preview">${result.value}</div>
-          </div>`;
-      })
-      .catch(err => {
-        console.error('Erro ao renderizar DOCX:', err);
-        content.innerHTML = `
-          <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
-            <p style="color:#c00;">Não foi possível pré-visualizar o documento DOCX.</p>
-            <p style="color:#666; font-size:0.9rem;">${safeDisplayName}</p>
-            <a href="${href}" target="_blank" class="button" style="background:#417690; color:#fff; padding:8px 16px;">Baixar arquivo</a>
-          </div>`;
-      });
   }
 
   function showZipPreview(href, label) {
@@ -494,26 +374,30 @@ document.addEventListener('DOMContentLoaded', function() {
   document.body.addEventListener('click', function(e) {
     const link = e.target.closest('a');
     if (!link) return;
+    if (link.dataset.skipPreview === '1' || link.hasAttribute('download')) return;
     const href = link.getAttribute('href') || '';
-    // Apenas links de arquivo da pasta do processo (suporta local /media/ e S3)
-    if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href) && !/s3\..*\.amazonaws\.com.*processos\//.test(href) && !/documentos_modelo\//.test(href)) return;
+    // Apenas links de arquivo da pasta do processo
+    if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
     // Extensões suportadas (imagens, PDFs; DOCX tenta abrir o PDF-irmão, senão alerta)
-    // Suporta URLs com query params (S3 assinadas): arquivo.pdf?X-Amz-...
-    const urlPath = href.split('?')[0];
-    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(urlPath);
-    const isPdf = /\.pdf$/i.test(urlPath);
-    const isDocx = /\.docx$/i.test(urlPath);
-    const isZip = /\.zip$/i.test(urlPath);
+    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
+    const isPdf = /\.pdf$/i.test(href);
+    const isDocx = /\.docx$/i.test(href);
+    const isZip = /\.zip$/i.test(href);
     if (!isImage && !isPdf && !isDocx && !isZip) return;
 
-    // Obtém o nome do arquivo do data attribute ou da linha da tabela
-    const fileName = link.dataset.fileName || (link.closest('tr') ? getRowFileNameText(link.closest('tr')) : null) || urlPath.split('/').pop();
-    // Obtém o ID do arquivo para usar o proxy
-    const arquivoId = link.dataset.arquivoId || null;
-
     if (isDocx) {
-      e.preventDefault();
-      renderDocx(href, fileName, arquivoId);
+      const pdfHref = href.replace(/\.docx$/i, '.pdf');
+      fetch(pdfHref, { method: 'HEAD' })
+        .then(res => {
+          if (res.ok) {
+            renderFile(pdfHref);
+          } else {
+            alert('Pré-visualização disponível apenas em PDF. Gere/aguarde o PDF na aba Arquivos.');
+          }
+        })
+        .catch(() => {
+          alert('Pré-visualização disponível apenas em PDF. Gere/aguarde o PDF na aba Arquivos.');
+        });
       return;
     }
 
@@ -521,7 +405,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const wantsPreview = link.dataset.zipPreview === '1';
       if (wantsPreview) {
         e.preventDefault();
-        showZipPreview(href, fileName);
+        showZipPreview(href, link.closest('tr') ? getRowFileNameText(link.closest('tr')) : null);
         return;
       }
       return;
@@ -529,8 +413,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (isImage || isPdf) {
       e.preventDefault();
-      console.log('renderFile chamado com:', { href, fileName, arquivoId });
-      renderFile(href, fileName, arquivoId);
+      renderFile(href);
     }
   }, true);
 
@@ -539,11 +422,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
     if (!arquivosGroup) return;
 
-      const createButton = (text, href, opts = {}) => {
-        const btn = document.createElement('a');
-        btn.href = href;
-        btn.textContent = text;
-        btn.className = 'button';
+    const createButton = (text, href, opts = {}) => {
+      const btn = document.createElement('a');
+      btn.href = href;
+      btn.textContent = text;
+      btn.className = 'button';
         btn.style.padding = '4px 7px';
         btn.style.background = '#555';
         btn.style.color = '#fff';
@@ -552,13 +435,14 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.style.fontWeight = '400';
         btn.style.fontSize = '0.85em';
         if (opts.preview) {
-          btn.dataset.zipPreview = '1';
-        }
-        if (opts.download) {
-          btn.setAttribute('download', '');
-        }
-        const openInNewTab = Boolean(opts.openInNewTab);
-        if (opts.download || openInNewTab) {
+        btn.dataset.zipPreview = '1';
+      }
+      if (opts.download) {
+        btn.setAttribute('download', '');
+        btn.dataset.skipPreview = '1';
+      }
+      const openInNewTab = Boolean(opts.openInNewTab);
+      if (openInNewTab) {
         btn.addEventListener('click', function(ev) {
           ev.preventDefault();
           window.open(href, '_blank');
@@ -684,53 +568,24 @@ document.addEventListener('DOMContentLoaded', function() {
           }
         });
       }
-
-      // Cria controle de enviar/alterar arquivo
       const modifyRow = document.createElement('div');
       modifyRow.className = 'documento-peticoes-modify-row';
       const label = document.createElement('span');
-      label.textContent = hasFileLink ? 'Alterar:' : 'Enviar:';
+      label.textContent = hasFileLink ? 'Modificar:' : 'Procurar:';
       label.style.fontWeight = '600';
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'button button-secondary';
-      button.textContent = hasFileLink ? 'Escolher novo arquivo...' : 'Escolher arquivo...';
-
-      // Span para mostrar nome do arquivo selecionado
-      const selectedFileName = document.createElement('span');
-      selectedFileName.className = 'selected-file-name';
-      selectedFileName.style.marginLeft = '8px';
-      selectedFileName.style.color = '#417690';
-      selectedFileName.style.fontStyle = 'italic';
-
+      button.textContent = 'Procurar...';
       button.addEventListener('click', (event) => {
         event.preventDefault();
-        fileInput.click();
-      });
-
-      // Listener para quando arquivo é selecionado
-      fileInput.addEventListener('change', () => {
-        if (fileInput.files && fileInput.files.length > 0) {
-          const newFileName = fileInput.files[0].name;
-          selectedFileName.textContent = newFileName;
-          // Atualiza o label para indicar que tem alteração pendente
-          label.textContent = 'Novo arquivo:';
-          label.style.color = '#e67e22';
-        } else {
-          selectedFileName.textContent = '';
-          label.textContent = hasFileLink ? 'Alterar:' : 'Enviar:';
-          label.style.color = '';
+        if (fileInput) {
+          fileInput.click();
         }
       });
-
       modifyRow.appendChild(label);
       modifyRow.appendChild(button);
-      modifyRow.appendChild(selectedFileName);
-
-      // Se tem arquivo no S3, só mostra opção de alterar (não obrigatório)
-      // Se não tem arquivo, mostra para enviar
-      nomeCell.appendChild(modifyRow)
-
+      nomeCell.appendChild(modifyRow);
       renderUploaderLine(row, nomeCell);
       if (fileUpload) {
         fileUpload.style.display = 'none';
@@ -841,7 +696,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!arquivoCell) {
         return;
       }
-      const link = arquivoCell.querySelector('a[href*="/media/"], a[href*="processos/"], a[href*="s3."], a[href*="amazonaws.com"]');
+      const link = arquivoCell.querySelector('a[href*="/media/"], a[href*="processos/"]');
       setupModifyControl(row, arquivoCell, Boolean(link));
       if (!link) {
         return;
@@ -870,165 +725,17 @@ document.addEventListener('DOMContentLoaded', function() {
       leftGroup.style.flexWrap = 'wrap';
       leftGroup.style.gap = '6px';
       const isProtocolRowEntry = isProtocolRow(row);
-      const linkPath = link.href.split('?')[0];
-      const isZipFile = /\.zip$/i.test(linkPath);
+      const isZipFile = /\.zip$/i.test(link.href);
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
-
-      // Obtém o nome do arquivo para exibir no modal
-      const fileName = getRowFileNameText(row) || linkPath.split('/').pop() || 'Documento';
-
-      // Detecta a extensão real do arquivo
-      const isPdfFile = /\.pdf$/i.test(linkPath);
-      const isDocxFile = /\.docx$/i.test(linkPath);
-
-      // Cria URLs para PDF e DOCX baseadas no link original
-      const baseUrl = linkPath.replace(/\.(pdf|docx)$/i, '');
-      const queryParams = link.href.includes('?') ? link.href.substring(link.href.indexOf('?')) : '';
-      const pdfUrl = baseUrl + '.pdf' + queryParams;
-      const docxUrl = baseUrl + '.docx' + queryParams;
-
-      // Tenta obter o ID do arquivo do inline form
-      const getArquivoId = () => {
-        // Busca qualquer input cujo name termine com -id e tenha valor numérico
-        const allInputs = row.querySelectorAll('input');
-        for (const inp of allInputs) {
-          const name = inp.name || '';
-          const value = inp.value || '';
-          // Padrão: arquivos-0-id, processoarquivo_set-0-id, etc.
-          if (name.endsWith('-id') && /^\d+$/.test(value)) {
-            return value;
-          }
-        }
-        // Fallback: data attribute
-        if (row.dataset.arquivoId) {
-          return row.dataset.arquivoId;
-        }
-        return null;
-      };
-      const arquivoId = getArquivoId();
-
-      // Botão Visualizar - identifica o tipo e exibe corretamente
-      const visualizarBtn = createButton('Visualizar', link.href, visualizarOpts);
-      visualizarBtn.dataset.fileName = fileName;
-      visualizarBtn.dataset.fileType = isPdfFile ? 'pdf' : (isDocxFile ? 'docx' : 'other');
-      if (arquivoId) {
-        visualizarBtn.dataset.arquivoId = arquivoId;
-      }
-      leftGroup.appendChild(visualizarBtn);
-
-      // SEMPRE mostra ambos os botões (PDF e DOC) para todos os arquivos
-      // Se o formato não existe, converte on-demand
-      if (isPdfFile || isDocxFile) {
-        // Container para os botões PDF e DOC (mantém ordem: PDF, DOC)
-        const formatBtnsContainer = document.createElement('span');
-        formatBtnsContainer.className = 'format-buttons-container';
-        formatBtnsContainer.style.display = 'inline-flex';
-        formatBtnsContainer.style.gap = '6px';
-
-        // URLs para conversão via backend
-        const convertToPdfUrl = arquivoId ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/` : null;
-        const convertToDocxUrl = arquivoId ? `/contratos/arquivo/${arquivoId}/convert-to-docx/` : null;
-
-        // Botão PDF - sempre disponível
-        const pdfBtn = document.createElement('a');
-        pdfBtn.textContent = 'PDF';
-        pdfBtn.className = 'button';
-        pdfBtn.style.padding = '4px 7px';
-        pdfBtn.style.background = '#555';
-        pdfBtn.style.color = '#fff';
-        pdfBtn.style.border = '1px solid #444';
-        pdfBtn.style.boxShadow = 'none';
-        pdfBtn.style.fontWeight = '400';
-        pdfBtn.style.fontSize = '0.85em';
-        pdfBtn.style.cursor = 'pointer';
-        pdfBtn.dataset.formatType = 'pdf';
-
-        if (isPdfFile) {
-          // Arquivo já é PDF, baixa direto via proxy
-          pdfBtn.href = '#';
-          pdfBtn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            // Usa o convert-to-pdf que retorna o PDF direto se já for PDF
-            if (convertToPdfUrl) {
-              window.location.href = convertToPdfUrl;
-            } else {
-              window.open(pdfUrl, '_blank');
-            }
-          });
-        } else if (isDocxFile) {
-          // Arquivo é DOCX, converte para PDF
-          pdfBtn.href = '#';
-          pdfBtn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            if (!convertToPdfUrl) {
-              alert('Não foi possível converter. ID do arquivo não encontrado.');
-              return;
-            }
-            pdfBtn.textContent = 'Convertendo...';
-            pdfBtn.style.pointerEvents = 'none';
-            // Abre a URL de conversão que faz download do PDF
-            window.location.href = convertToPdfUrl;
-            setTimeout(() => {
-              pdfBtn.textContent = 'PDF';
-              pdfBtn.style.pointerEvents = 'auto';
-            }, 2000);
-          });
-        }
-        formatBtnsContainer.appendChild(pdfBtn);
-
-        // Botão DOC - sempre disponível
-        const docBtn = document.createElement('a');
-        docBtn.textContent = 'DOC';
-        docBtn.className = 'button';
-        docBtn.style.padding = '4px 7px';
-        docBtn.style.background = '#555';
-        docBtn.style.color = '#fff';
-        docBtn.style.border = '1px solid #444';
-        docBtn.style.boxShadow = 'none';
-        docBtn.style.fontWeight = '400';
-        docBtn.style.fontSize = '0.85em';
-        docBtn.style.cursor = 'pointer';
-        docBtn.dataset.formatType = 'docx';
-
-        if (isDocxFile) {
-          // Arquivo já é DOCX, baixa direto via proxy
-          docBtn.href = '#';
-          docBtn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            // Usa o convert-to-docx que retorna o DOCX direto se já for DOCX
-            if (convertToDocxUrl) {
-              window.location.href = convertToDocxUrl;
-            } else {
-              window.open(docxUrl, '_blank');
-            }
-          });
-        } else if (isPdfFile) {
-          // Arquivo é PDF, converte para DOCX
-          docBtn.href = '#';
-          docBtn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            if (!convertToDocxUrl) {
-              alert('Não foi possível converter. ID do arquivo não encontrado.');
-              return;
-            }
-            docBtn.textContent = 'Convertendo...';
-            docBtn.style.pointerEvents = 'none';
-            // Abre a URL de conversão que faz download do DOCX
-            window.location.href = convertToDocxUrl;
-            setTimeout(() => {
-              docBtn.textContent = 'DOC';
-              docBtn.style.pointerEvents = 'auto';
-            }, 2000);
-          });
-        }
-        formatBtnsContainer.appendChild(docBtn);
-
-        leftGroup.appendChild(formatBtnsContainer);
-
-        // Badge "Base" apenas para arquivos de Monitória
-        if (isMonitoriaRow(row)) {
-          attachBaseBadge(row, leftGroup);
-        }
+      leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
+      if (isMonitoriaRow(row)) {
+        const pdfHref = link.href.replace(/\.docx$/i, '.pdf');
+        const docHref = link.href.replace(/\.pdf$/i, '.docx');
+        leftGroup.appendChild(createButton('PDF', pdfHref, { download: true }));
+        leftGroup.appendChild(createButton('DOC', docHref, { download: true }));
+        attachBaseBadge(row, leftGroup);
+      } else {
+        leftGroup.appendChild(createButton('Baixar', link.href, { download: true }));
       }
 
       const rightGroup = document.createElement('div');
