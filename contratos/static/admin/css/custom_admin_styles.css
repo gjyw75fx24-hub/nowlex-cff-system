@@ -1008,7 +1008,7 @@ a.historylink {
 .agenda-panel__body {
     flex: 1;
     padding: 0 24px;
-    overflow: auto;
+    overflow: hidden;
 }
 .agenda-panel__calendar-wrapper {
     display: flex;
@@ -1062,6 +1062,9 @@ a.historylink {
     column-gap: 4px;
     row-gap: 4px;
     margin-top: 0;
+    max-height: 58vh;
+    overflow-y: auto;
+    align-content: start;
 }
 .agenda-panel__calendar-grid-wrapper {
     position: relative;
