@@ -747,7 +747,9 @@ document.addEventListener('DOMContentLoaded', function() {
       const isZipFile = /\.zip$/i.test(link.href);
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
       const arquivoId = getRowArquivoId(row);
-      const visualizarHref = arquivoId ? `/contratos/arquivo/${arquivoId}/view/` : link.href;
+      const visualizarHref = arquivoId
+        ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/?inline=1`
+        : link.href;
       const visualizarOpen = isMonitoriaRow(row) && !isZipFile;
       leftGroup.appendChild(createButton('Visualizar', visualizarHref, visualizarOpen ? { openInNewTab: true } : visualizarOpts));
       if (isMonitoriaRow(row)) {
