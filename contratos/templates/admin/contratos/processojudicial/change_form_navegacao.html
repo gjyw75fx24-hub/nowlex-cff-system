@@ -374,6 +374,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.body.addEventListener('click', function(e) {
     const link = e.target.closest('a');
     if (!link) return;
+    if (link.dataset.skipPreview === '1' || link.hasAttribute('download')) return;
     const href = link.getAttribute('href') || '';
     // Apenas links de arquivo da pasta do processo
     if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
@@ -421,11 +422,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const arquivosGroup = document.querySelector('#arquivos-group') || document.querySelector('#processoarquivo_set-group');
     if (!arquivosGroup) return;
 
-      const createButton = (text, href, opts = {}) => {
-        const btn = document.createElement('a');
-        btn.href = href;
-        btn.textContent = text;
-        btn.className = 'button';
+    const createButton = (text, href, opts = {}) => {
+      const btn = document.createElement('a');
+      btn.href = href;
+      btn.textContent = text;
+      btn.className = 'button';
         btn.style.padding = '4px 7px';
         btn.style.background = '#555';
         btn.style.color = '#fff';
@@ -434,13 +435,14 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.style.fontWeight = '400';
         btn.style.fontSize = '0.85em';
         if (opts.preview) {
-          btn.dataset.zipPreview = '1';
-        }
-        if (opts.download) {
-          btn.setAttribute('download', '');
-        }
-        const openInNewTab = Boolean(opts.openInNewTab);
-        if (opts.download || openInNewTab) {
+        btn.dataset.zipPreview = '1';
+      }
+      if (opts.download) {
+        btn.setAttribute('download', '');
+        btn.dataset.skipPreview = '1';
+      }
+      const openInNewTab = Boolean(opts.openInNewTab);
+      if (openInNewTab) {
         btn.addEventListener('click', function(ev) {
           ev.preventDefault();
           window.open(href, '_blank');
@@ -727,8 +729,10 @@ document.addEventListener('DOMContentLoaded', function() {
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
       leftGroup.appendChild(createButton('Visualizar', link.href, visualizarOpts));
       if (isMonitoriaRow(row)) {
-        leftGroup.appendChild(createButton('PDF', link.href, { download: true }));
-        leftGroup.appendChild(createButton('DOC', link.href, { download: true }));
+        const pdfHref = link.href.replace(/\.docx$/i, '.pdf');
+        const docHref = link.href.replace(/\.pdf$/i, '.docx');
+        leftGroup.appendChild(createButton('PDF', pdfHref, { download: true }));
+        leftGroup.appendChild(createButton('DOC', docHref, { download: true }));
         attachBaseBadge(row, leftGroup);
       } else {
         leftGroup.appendChild(createButton('Baixar', link.href, { download: true }));
