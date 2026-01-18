@@ -1,8 +1,12 @@
 import io
+import logging
 import os
 import re
+import time
 import unicodedata
 import zipfile
+
+import requests
 
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -16,6 +20,9 @@ from ..models import (
 
 class PreviewError(Exception):
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_preview(tipo_id, arquivo_base_id):
@@ -73,11 +80,38 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
             existing_ids.add(arquivo_id)
 
     zip_buffer = io.BytesIO()
+    base_file = assets['base_file']
+    files = assets['files']
     with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
         for entry in files_to_zip:
             entry_name = _determine_zip_entry_name(entry)
             try:
-                with entry['arquivo'].arquivo.open('rb') as fh:
+                raw_bytes = entry.get('force_bytes')
+                if raw_bytes is not None:
+                    zip_file.writestr(entry_name, raw_bytes)
+                    continue
+                arquivo = entry.get('arquivo')
+                if (
+                    arquivo
+                    and base_file
+                    and arquivo.id == base_file.id
+                    and (arquivo.arquivo.name or '').lower().endswith('.docx')
+                ):
+                    pdf_bytes = _convert_docx_to_pdf_bytes_for_zip(arquivo)
+                    if pdf_bytes:
+                        pdf_name = _swap_extension(entry_name, '.pdf')
+                        zip_file.writestr(pdf_name, pdf_bytes)
+                        entry['force_name'] = pdf_name
+                        entry['force_bytes'] = pdf_bytes
+                        continue
+                    fallback_pdf = _find_matching_pdf(arquivo, files)
+                    if fallback_pdf:
+                        with fallback_pdf.arquivo.open('rb') as fh:
+                            pdf_name = _swap_extension(entry_name, '.pdf')
+                            zip_file.writestr(pdf_name, fh.read())
+                        entry['force_name'] = pdf_name
+                        continue
+                with arquivo.arquivo.open('rb') as fh:
                     zip_file.writestr(entry_name, fh.read())
             except Exception:
                 continue
@@ -160,6 +194,7 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
         'tipo': tipo,
         'processo': processo,
         'base_file': base_file,
+        'files': files,
         'contracts': contratos,
         'zip_name': zip_name,
         'missing': missing,
@@ -215,8 +250,70 @@ def _entry_id(obj):
 
 
 def _get_entry_name(entry):
+    force_name = entry.get('force_name')
+    if force_name:
+        return force_name
     arquivo = entry.get('arquivo')
     return _get_file_display_name(arquivo)
+
+
+def _swap_extension(name, new_ext):
+    base, _ext = os.path.splitext(name or '')
+    return f"{base}{new_ext}"
+
+
+def _find_matching_pdf(docx_file, files):
+    if not docx_file:
+        return None
+    base_name = (docx_file.nome or os.path.basename(docx_file.arquivo.name or '')).rsplit('.', 1)[0]
+    base_norm = _normalize_text(base_name)
+    candidates = []
+    for arquivo in files:
+        if not arquivo or not (arquivo.arquivo.name or '').lower().endswith('.pdf'):
+            continue
+        name_norm = _normalize_text(arquivo.nome or arquivo.arquivo.name or '')
+        if base_norm and base_norm not in name_norm:
+            continue
+        timestamp = arquivo.criado_em.timestamp() if arquivo.criado_em else 0
+        candidates.append((arquivo, timestamp))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: -item[1])
+    return candidates[0][0]
+
+
+def _convert_docx_to_pdf_bytes_for_zip(arquivo):
+    gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
+    if not gotenberg_url:
+        return None
+    try:
+        arquivo.arquivo.open('rb')
+        docx_bytes = arquivo.arquivo.read()
+        arquivo.arquivo.close()
+    except Exception:
+        return None
+    endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
+    files = {
+        "files": (
+            "document.docx",
+            docx_bytes,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    }
+    for attempt in range(2):
+        try:
+            response = requests.post(endpoint, files=files, timeout=180)
+            if response.status_code == 200 and response.content:
+                return response.content
+            logger.error(
+                "Falha no Gotenberg (zip): status=%s body=%s",
+                response.status_code,
+                response.text[:300],
+            )
+        except requests.RequestException as exc:
+            logger.error("Erro ao chamar Gotenberg (zip) tentativa %s: %s", attempt + 1, exc)
+        time.sleep(1 + attempt)
+    return None
 
 
 def _find_optional_annexes(files, used_ids):
@@ -480,6 +577,9 @@ def _primeiros_nomes_passivo(processo):
 
 
 def _determine_zip_entry_name(entry):
+    force_name = entry.get('force_name')
+    if force_name:
+        return force_name
     arquivo = entry['arquivo']
     label = entry.get('label')
     base = label or arquivo.nome or os.path.basename(arquivo.arquivo.name)
