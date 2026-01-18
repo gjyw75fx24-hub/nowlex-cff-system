@@ -1411,10 +1411,8 @@ def generate_monitoria_petition(request, processo_id=None):
     try:
         docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
         base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
-        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
 
         monitoria_info = {}
-        pdf_url = ''
         docx_url = ''
         arquivo_pdf = None
         arquivo_docx = None
@@ -1433,28 +1431,13 @@ def generate_monitoria_petition(request, processo_id=None):
             logger.error("Erro ao salvar DOCX da monitória: %s", exc, exc_info=True)
             docx_url = ''
 
-        if pdf_bytes:
-            pdf_name = f"{base_filename}.pdf"
-            pdf_file = ContentFile(pdf_bytes)
-            try:
-                arquivo_pdf = ProcessoArquivo(
-                    processo=processo,
-                    nome=pdf_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-                pdf_url = arquivo_pdf.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar PDF da monitória: %s", exc, exc_info=True)
-                pdf_bytes = None  # para marcar como pendente
-
-        if not pdf_bytes and not docx_url:
+        if not docx_url:
             return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
 
         monitoria_info = {
-            "ok": bool(pdf_bytes),
-            "pdf_url": pdf_url,
-            "pdf_pending": not bool(pdf_bytes),
+            "ok": False,
+            "pdf_url": '',
+            "pdf_pending": True,
             "docx_download_url": docx_url or request.build_absolute_uri(
                 reverse('contratos:generate_monitoria_docx', kwargs={'processo_id': processo_id_int})
             ),
@@ -1468,16 +1451,14 @@ def generate_monitoria_petition(request, processo_id=None):
             usuario=request.user if request.user.is_authenticated else None
         )
         # Usa o arquivo PDF se existir, senão usa o DOCX para obter o dest_path
-        if pdf_bytes and arquivo_pdf:
-            dest_path = os.path.dirname(arquivo_pdf.arquivo.name or '')
-        elif arquivo_docx:
+        if arquivo_docx:
             dest_path = os.path.dirname(arquivo_docx.arquivo.name or '')
         else:
             dest_path = ''
 
         response_payload = {
             "status": "success",
-            "message": "Petição gerada (PDF salvo em Arquivos)." if monitoria_info["ok"] else "Petição gerada (PDF não gerado; DOCX disponível).",
+            "message": "Petição gerada (PDF não gerado; DOCX disponível).",
             "monitoria": monitoria_info,
             "extrato": extrato_result,
             "dest_path": dest_path,
@@ -1539,9 +1520,7 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
     try:
         docx_bytes = _build_cobranca_docx_bytes(processo, polo_passivo, contratos_lista)
         base_filename = _build_cobranca_base_filename(polo_passivo, contratos_lista)
-        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
         docx_url = ''
-        pdf_url = ''
 
         docx_saved = False
         try:
@@ -1558,21 +1537,7 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
         except Exception as exc:
             logger.error("Erro ao salvar DOCX da cobrança judicial: %s", exc, exc_info=True)
 
-        if pdf_bytes:
-            pdf_name = f"{base_filename}.pdf"
-            pdf_file = ContentFile(pdf_bytes)
-            try:
-                arquivo_pdf = ProcessoArquivo(
-                    processo=processo,
-                    nome=pdf_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-                pdf_url = arquivo_pdf.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar PDF da cobrança judicial: %s", exc, exc_info=True)
-                pdf_bytes = None
-        if not pdf_bytes and not docx_saved:
+        if not docx_saved:
             return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de cobrança não encontrado: %s", fe)
@@ -1590,15 +1555,15 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
     )
 
     cobranca_info = {
-        "ok": bool(pdf_bytes),
-        "pdf_url": pdf_url,
-        "pdf_pending": not bool(pdf_bytes),
+        "ok": False,
+        "pdf_url": '',
+        "pdf_pending": True,
         "docx_url": docx_url,
     }
 
     response_payload = {
         "status": "success",
-        "message": "Petição de cobrança gerada (PDF salvo em Arquivos)." if cobranca_info["ok"] else "Petição de cobrança gerada (PDF não gerado; DOCX disponível).",
+        "message": "Petição de cobrança gerada (PDF não gerado; DOCX disponível).",
         "cobranca": cobranca_info,
         "extrato": extrato_result,
     }
@@ -1644,10 +1609,8 @@ def generate_habilitacao_petition(request, processo_id=None):
 
     try:
         docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo)
-        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
         base_filename = _build_habilitacao_base_filename(polo_passivo, processo)
         docx_url = ''
-        pdf_url = ''
 
         docx_saved = False
         try:
@@ -1664,21 +1627,7 @@ def generate_habilitacao_petition(request, processo_id=None):
         except Exception as exc:
             logger.error("Erro ao salvar DOCX da habilitação: %s", exc, exc_info=True)
 
-        if pdf_bytes:
-            pdf_name = f"{base_filename}.pdf"
-            pdf_file = ContentFile(pdf_bytes)
-            try:
-                arquivo_pdf = ProcessoArquivo(
-                    processo=processo,
-                    nome=pdf_name,
-                    enviado_por=request.user if request.user.is_authenticated else None,
-                )
-                arquivo_pdf.arquivo.save(pdf_name, pdf_file, save=True)
-                pdf_url = arquivo_pdf.arquivo.url
-            except Exception as exc:
-                logger.error("Erro ao salvar PDF da habilitação: %s", exc, exc_info=True)
-                pdf_bytes = None
-        if not pdf_bytes and not docx_saved:
+        if not docx_saved:
             return HttpResponse("Falha ao salvar o DOCX/PDF gerado nos Arquivos.", status=500)
     except FileNotFoundError as fe:
         logger.error("Template de habilitação não encontrado: %s", fe)
@@ -1688,15 +1637,15 @@ def generate_habilitacao_petition(request, processo_id=None):
         return HttpResponse(f"Erro ao gerar a petição de habilitação: {exc}", status=500)
 
     habilitacao_info = {
-        "ok": bool(pdf_bytes),
-        "pdf_url": pdf_url,
-        "pdf_pending": not bool(pdf_bytes),
+        "ok": False,
+        "pdf_url": '',
+        "pdf_pending": True,
         "docx_url": docx_url,
     }
 
     return JsonResponse({
         "status": "success",
-        "message": "Petição de habilitação gerada (PDF salvo em Arquivos)." if habilitacao_info["ok"] else "Petição de habilitação gerada (PDF não gerado; DOCX disponível).",
+        "message": "Petição de habilitação gerada (PDF não gerado; DOCX disponível).",
         "habilitacao": habilitacao_info,
     })
 
