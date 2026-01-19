@@ -1902,11 +1902,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valuation por Contratos</span>'))
     def valor_causa_display(self, obj):
-        valor = sum((c.valor_causa or Decimal('0.00')) for c in obj.contratos.all())
-        if valor == Decimal('0.00'):
+        valor = obj.contratos.aggregate(total=Coalesce(models.Sum('valor_causa'), Decimal('0.00')))['total']
+        if not valor or valor == Decimal('0.00'):
             return "-"
-        formatted = format_decimal_brl(valor)
-        return formatted
+        return format_decimal_brl(valor)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
