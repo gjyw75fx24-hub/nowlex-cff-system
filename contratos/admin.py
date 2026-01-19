@@ -1492,6 +1492,15 @@ class ContratoForm(forms.ModelForm):
         js = ('contratos/js/contrato_money_mask.js',)
 
 
+class ProcessoJudicialForm(forms.ModelForm):
+    class Meta:
+        model = ProcessoJudicial
+        fields = "__all__"
+        widgets = {
+            'valor_causa': forms.TextInput(attrs={'class': 'vTextField money-mask'})
+        }
+
+
 class ContratoInline(admin.StackedInline):
     form = ContratoForm
     model = Contrato
@@ -1786,6 +1795,7 @@ class ObitoFilter(admin.SimpleListFilter):
 
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
+    form = ProcessoJudicialForm
     readonly_fields = ('valor_causa_display',)
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
