@@ -310,9 +310,18 @@ def _convert_docx_to_pdf_bytes_for_zip(arquivo):
                 timeout=120
             )
             if response.status_code == 200 and response.content:
-                logger.info("ZIP: Gotenberg conversão bem-sucedida (PDF: %d bytes)", len(response.content))
-                return response.content
-            logger.warning("ZIP: Gotenberg falhou: status=%s", response.status_code)
+                pdf_size = len(response.content)
+                logger.info("ZIP: Gotenberg conversão bem-sucedida (PDF: %d bytes)", pdf_size)
+
+                # Valida se é um PDF válido
+                if response.content[:5] == b'%PDF-' and pdf_size > 1000:
+                    return response.content
+                else:
+                    logger.warning("ZIP: PDF inválido ou muito pequeno (%d bytes)", pdf_size)
+            else:
+                logger.warning("ZIP: Gotenberg falhou: status=%s", response.status_code)
+        except requests.Timeout:
+            logger.warning("ZIP: Gotenberg timeout após 120s")
         except Exception as exc:
             logger.warning("ZIP: Erro ao usar Gotenberg: %s", exc)
 

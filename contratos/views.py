@@ -565,9 +565,22 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
                 timeout=120
             )
             if response.status_code == 200 and response.content:
-                logger.info("Gotenberg: conversão bem-sucedida (PDF: %d bytes)", len(response.content))
-                return response.content
-            logger.warning("Gotenberg falhou: status=%s", response.status_code)
+                pdf_size = len(response.content)
+                logger.info("Gotenberg: conversão bem-sucedida (PDF: %d bytes)", pdf_size)
+
+                # Valida se é um PDF válido (começa com %PDF-)
+                if response.content[:5] == b'%PDF-':
+                    # Verifica se não está muito pequeno (possível erro)
+                    if pdf_size > 1000:  # PDFs válidos geralmente têm mais de 1KB
+                        return response.content
+                    else:
+                        logger.warning("Gotenberg: PDF muito pequeno (%d bytes), pode estar corrompido", pdf_size)
+                else:
+                    logger.warning("Gotenberg: Conteúdo retornado não é um PDF válido")
+            else:
+                logger.warning("Gotenberg falhou: status=%s", response.status_code)
+        except requests.Timeout:
+            logger.warning("Gotenberg timeout após 120s")
         except Exception as exc:
             logger.warning("Erro ao usar Gotenberg: %s", exc)
         return None
@@ -1803,6 +1816,10 @@ def proxy_arquivo_view(request, arquivo_id):
         response['Content-Length'] = len(file_content)
         response['X-Content-Type-Options'] = 'nosniff'
         response['Cache-Control'] = 'private, max-age=3600'
+        # Headers CORS para permitir PDF.js carregar o PDF
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Range'
         return response
 
     except Exception as exc:
@@ -1861,6 +1878,10 @@ def convert_docx_to_pdf_download(request, arquivo_id):
                 response['Content-Length'] = len(pdf_content)
                 response['X-Content-Type-Options'] = 'nosniff'
                 response['Cache-Control'] = 'private, max-age=3600'
+                # Headers CORS para permitir PDF.js carregar o PDF
+                response['Access-Control-Allow-Origin'] = '*'
+                response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+                response['Access-Control-Allow-Headers'] = 'Range'
                 return response
         except Exception as exc:
             logger.error("Erro ao acessar PDF: %s", exc, exc_info=True)
@@ -1902,6 +1923,10 @@ def convert_docx_to_pdf_download(request, arquivo_id):
                 response['Content-Length'] = len(pdf_content)
                 response['X-Content-Type-Options'] = 'nosniff'
                 response['Cache-Control'] = 'private, max-age=3600'
+                # Headers CORS para permitir PDF.js carregar o PDF
+                response['Access-Control-Allow-Origin'] = '*'
+                response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+                response['Access-Control-Allow-Headers'] = 'Range'
                 return response
         except Exception:
             pass  # Se falhar, tenta converter
@@ -1944,6 +1969,10 @@ def convert_docx_to_pdf_download(request, arquivo_id):
         response['Content-Length'] = len(pdf_bytes)
         response['X-Content-Type-Options'] = 'nosniff'
         response['Cache-Control'] = 'private, max-age=3600'
+        # Headers CORS para permitir PDF.js carregar o PDF
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Range'
         return response
 
 
