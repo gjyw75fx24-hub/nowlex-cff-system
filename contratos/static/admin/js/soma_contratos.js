@@ -6,9 +6,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function parseCurrency(value) {
         if (!value) return 0;
-        // Garante que seja uma string, substitui a vírgula por ponto para o parseFloat, e remove tudo que não for dígito ou ponto.
-        const cleanedValue = String(value).replace(',', '.').replace(/[^\d.]/g, '');
-        return parseFloat(cleanedValue) || 0;
+        let sanitized = String(value).replace(/[^\d,.-]/g, '');
+        const hasComma = sanitized.indexOf(',') >= 0;
+        const hasDot = sanitized.indexOf('.') >= 0;
+        if (hasComma && hasDot) {
+            sanitized = sanitized.replace(/\./g, '').replace(',', '.');
+        } else if (hasComma) {
+            sanitized = sanitized.replace(',', '.');
+        }
+        return parseFloat(sanitized) || 0;
     }
 
     function formatCurrency(value) {
