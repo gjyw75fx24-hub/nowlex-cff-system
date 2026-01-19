@@ -1020,6 +1020,23 @@ a.historylink {
     justify-content: space-between;
     align-items: center;
 }
+.agenda-panel__month-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.agenda-panel__year-label {
+    display: none;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(17, 88, 161, 0.12);
+    color: #1d3a5a;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.agenda-panel__year-label--visible {
+    display: inline-flex;
+}
 .agenda-panel__month-title {
     font-size: 20px;
     font-weight: 700;
@@ -1104,11 +1121,17 @@ a.historylink {
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     gap: 12px;
     padding: 14px;
+    padding-bottom: 80px;
     grid-auto-rows: auto;
     column-gap: 12px;
     row-gap: 12px;
     border-radius: 12px;
     background: #fff;
+    grid-template-rows: none;
+    max-height: calc((90vh - 230px) * 0.8);
+    overflow-y: auto;
+    scroll-padding-bottom: 80px;
+    align-content: flex-start;
 }
 .agenda-panel__user-card {
     border: 1px solid #dfe3ed;

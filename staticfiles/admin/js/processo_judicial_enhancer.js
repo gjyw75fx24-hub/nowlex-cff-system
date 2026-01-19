@@ -877,7 +877,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="agenda-panel__body">
                     <div class="agenda-panel__calendar-wrapper">
                         <div class="agenda-panel__calendar-header">
+                        <div class="agenda-panel__month-heading">
                             <strong class="agenda-panel__month-title">Janeiro 2025</strong>
+                            <span class="agenda-panel__year-label" aria-live="polite"></span>
+                        </div>
                             <div class="agenda-panel__month-switches">
                                 <button type="button">Jan</button>
                                 <button type="button">Fev</button>
@@ -933,6 +936,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const prevNavBtn = overlay.querySelector('[data-direction="prev"]');
         const nextNavBtn = overlay.querySelector('[data-direction="next"]');
         const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
+        const monthYearEl = overlay.querySelector('.agenda-panel__year-label');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const detailTitleWrapper = overlay.querySelector('.agenda-panel__details-title');
@@ -1166,11 +1170,18 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.preserveView = false;
         };
         const updateMonthTitle = () => {
+            if (!monthTitleEl) return;
+            const yearText = `${calendarState.year || new Date().getFullYear()}`;
             if (calendarState.view === 'users') {
                 monthTitleEl.textContent = 'Usuários';
-                return;
+                monthYearEl?.classList.add('agenda-panel__year-label--visible');
+            } else {
+                monthTitleEl.textContent = getMonthLabel(calendarState);
+                monthYearEl?.classList.remove('agenda-panel__year-label--visible');
             }
-            monthTitleEl.textContent = getMonthLabel(calendarState);
+            if (monthYearEl) {
+                monthYearEl.textContent = yearText;
+            }
         };
         const renderUserSelectionGrid = () => {
             calendarGridEl.innerHTML = '';
