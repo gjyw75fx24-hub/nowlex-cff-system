@@ -1507,6 +1507,17 @@ class ProcessoJudicialForm(forms.ModelForm):
             'valor_causa': forms.TextInput(attrs={'class': 'vTextField money-mask'})
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        value = self.initial.get('valor_causa')
+        if value is None and self.instance.pk:
+            value = getattr(self.instance, 'valor_causa', None)
+        if value not in (None, ''):
+            formatted = format_decimal_brl(value)
+            if formatted.startswith('R$'):
+                formatted = formatted[2:].strip()
+            self.initial['valor_causa'] = formatted
+
 
 class ContratoInline(admin.StackedInline):
     form = ContratoForm
