@@ -545,21 +545,38 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 def _convert_docx_to_pdf_bytes(docx_bytes):
     """
     Converte DOCX para PDF.
-    Prioriza LibreOffice local (soffice/libreoffice).
-    Se não disponível, usa mammoth + xhtml2pdf (100% Python).
-    Como último recurso, usa reportlab direto do DOCX (texto/tabelas).
-    NOTA: Gotenberg foi desabilitado em favor do LibreOffice local.
+    Prioriza Gotenberg (serviço com LibreOffice embutido).
+    Se não disponível, tenta LibreOffice local (soffice/libreoffice).
+    Como fallback, usa mammoth + xhtml2pdf (100% Python).
+    Último recurso: reportlab direto do DOCX (texto/tabelas).
     """
-    # Gotenberg desabilitado - usando LibreOffice local
-    gotenberg_url = ""  # Forçado para vazio
+    # Tenta Gotenberg primeiro (serviço Docker com LibreOffice)
+    gotenberg_url = getattr(settings, 'GOTENBERG_URL', os.environ.get('GOTENBERG_URL', ''))
 
     def _convert_with_gotenberg():
-        # Desabilitado - não usar Gotenberg
+        if not gotenberg_url:
+            return None
+        try:
+            logger.info("Tentando conversão via Gotenberg: %s", gotenberg_url)
+            files = {'files': ('document.docx', docx_bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+            response = requests.post(
+                f"{gotenberg_url}/forms/libreoffice/convert",
+                files=files,
+                timeout=120
+            )
+            if response.status_code == 200 and response.content:
+                logger.info("Gotenberg: conversão bem-sucedida (PDF: %d bytes)", len(response.content))
+                return response.content
+            logger.warning("Gotenberg falhou: status=%s", response.status_code)
+        except Exception as exc:
+            logger.warning("Erro ao usar Gotenberg: %s", exc)
         return None
 
-    # Pula Gotenberg e vai direto para LibreOffice
-    # if gotenberg_url:
-    #     return _convert_with_gotenberg()
+    # Tenta Gotenberg primeiro
+    if gotenberg_url:
+        gotenberg_pdf = _convert_with_gotenberg()
+        if gotenberg_pdf:
+            return gotenberg_pdf
 
     def _find_soffice():
         # Lista expandida de localizações possíveis do LibreOffice

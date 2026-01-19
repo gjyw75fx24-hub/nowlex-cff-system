@@ -284,10 +284,10 @@ def _find_matching_pdf(docx_file, files):
 
 def _convert_docx_to_pdf_bytes_for_zip(arquivo):
     """
-    Converte DOCX para PDF usando LibreOffice local.
-    Gotenberg foi desabilitado em favor do LibreOffice.
+    Converte DOCX para PDF.
+    Prioriza Gotenberg (serviço com LibreOffice embutido).
+    Se não disponível, tenta LibreOffice local.
     """
-    # Gotenberg desabilitado - usando LibreOffice local
     try:
         arquivo.arquivo.open('rb')
         docx_bytes = arquivo.arquivo.read()
@@ -295,7 +295,28 @@ def _convert_docx_to_pdf_bytes_for_zip(arquivo):
     except Exception:
         return None
 
-    # Tenta LibreOffice diretamente
+    # Tenta Gotenberg primeiro (serviço Docker com LibreOffice)
+    from django.conf import settings
+    import os
+    gotenberg_url = getattr(settings, 'GOTENBERG_URL', os.environ.get('GOTENBERG_URL', ''))
+
+    if gotenberg_url:
+        try:
+            logger.info("ZIP: Tentando conversão via Gotenberg: %s", gotenberg_url)
+            files = {'files': ('document.docx', docx_bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+            response = requests.post(
+                f"{gotenberg_url}/forms/libreoffice/convert",
+                files=files,
+                timeout=120
+            )
+            if response.status_code == 200 and response.content:
+                logger.info("ZIP: Gotenberg conversão bem-sucedida (PDF: %d bytes)", len(response.content))
+                return response.content
+            logger.warning("ZIP: Gotenberg falhou: status=%s", response.status_code)
+        except Exception as exc:
+            logger.warning("ZIP: Erro ao usar Gotenberg: %s", exc)
+
+    # Tenta LibreOffice local como fallback
     import shutil
     import subprocess
     import tempfile

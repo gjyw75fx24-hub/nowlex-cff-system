@@ -6,41 +6,16 @@ set -o errexit  # Sai em caso de erro
 echo "=== Verificando instalação do LibreOffice ==="
 # Verifica se LibreOffice foi instalado via Aptfile
 if command -v soffice &> /dev/null; then
-    echo "✓ LibreOffice encontrado via Aptfile: $(which soffice)"
+    echo "✓ LibreOffice encontrado: $(which soffice)"
     soffice --version
 elif command -v libreoffice &> /dev/null; then
-    echo "✓ LibreOffice encontrado via Aptfile: $(which libreoffice)"
+    echo "✓ LibreOffice encontrado: $(which libreoffice)"
     libreoffice --version
 else
-    echo "⚠️  LibreOffice NÃO encontrado via Aptfile!"
-    echo "Tentando instalar manualmente (plano Standard)..."
-
-    # Atualiza lista de pacotes
-    sudo apt-get update -qq
-
-    # Instala LibreOffice (pode levar alguns minutos)
-    echo "Instalando LibreOffice e dependências..."
-    sudo apt-get install -y -qq \
-        libreoffice \
-        libreoffice-writer \
-        libreoffice-core \
-        libreoffice-common \
-        default-jre-headless \
-        > /dev/null 2>&1
-
-    # Verifica novamente
-    if command -v soffice &> /dev/null; then
-        echo "✓ LibreOffice instalado com sucesso: $(which soffice)"
-        soffice --version
-    elif command -v libreoffice &> /dev/null; then
-        echo "✓ LibreOffice instalado com sucesso: $(which libreoffice)"
-        libreoffice --version
-    else
-        echo "❌ ERRO: Falha ao instalar LibreOffice"
-        echo "Verificando localizações alternativas..."
-        find /usr -name "*soffice*" 2>/dev/null || echo "Não encontrado"
-        echo "A conversão de PDF usará fallback Python (formatação limitada)"
-    fi
+    echo "⚠️  LibreOffice NÃO encontrado!"
+    echo "NOTA: Aptfile não está sendo processado pelo Render."
+    echo "Solução: Use o serviço Gotenberg (já configurado no render.yaml)"
+    echo "A conversão de PDF usará o Gotenberg em https://nowlex-gotenberg.onrender.com"
 fi
 
 echo ""
