@@ -1911,7 +1911,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == 'valor_causa':
             css = formfield.widget.attrs.get('class', '')
-            formfield.widget.attrs['class'] = (css + ' money-mask').strip()
+            classes = (css + ' money-mask').strip()
+            formfield.widget = forms.TextInput(attrs={'class': classes})
         return formfield
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
