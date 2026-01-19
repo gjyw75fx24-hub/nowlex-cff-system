@@ -59,15 +59,10 @@ O Render detecta automaticamente o Aptfile na raiz do projeto. Verifique se:
 - O nome é exatamente `Aptfile` (case-sensitive)
 - Não tem extensão (.txt, etc)
 
-### Opção 2: Instalar manualmente no build.sh
-Se o Aptfile não funcionar, adicione ao `build.sh`:
-```bash
-# Instalar LibreOffice manualmente
-apt-get update
-apt-get install -y libreoffice libreoffice-writer libreoffice-core
-```
+### Opção 2: Instalação Manual (IMPLEMENTADO)
+O `build.sh` agora tenta instalar o LibreOffice automaticamente se o Aptfile não funcionar.
 
-**NOTA**: No plano Free do Render, pode não ter permissões para apt-get. Neste caso, o Aptfile é a única opção.
+**NOTA**: No plano Standard do Render, você tem permissões sudo para instalar pacotes. O script agora faz isso automaticamente.
 
 ### Opção 3: Usar Gotenberg (alternativa)
 Se LibreOffice continuar não funcionando, considere usar Gotenberg (serviço Docker separado) como estava configurado anteriormente.
