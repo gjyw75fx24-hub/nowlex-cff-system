@@ -1817,7 +1817,8 @@ def convert_docx_to_pdf_download(request, arquivo_id):
     is_docx = arquivo_path.lower().endswith('.docx')
     is_pdf = arquivo_path.lower().endswith('.pdf')
 
-    inline = request.GET.get('inline') == '1'
+    # Por padrão visualiza inline, só baixa se passar ?download=1
+    download = request.GET.get('download') == '1'
     if is_pdf:
         # Já é PDF, retorna direto
         try:
@@ -1825,7 +1826,7 @@ def convert_docx_to_pdf_download(request, arquivo_id):
             filename = (arquivo.nome or os.path.basename(arquivo_path)).replace('_', ' ')
             return FileResponse(
                 arquivo.arquivo,
-                as_attachment=not inline,
+                as_attachment=download,
                 filename=filename,
                 content_type='application/pdf'
             )
@@ -1853,7 +1854,7 @@ def convert_docx_to_pdf_download(request, arquivo_id):
             filename = (existing_pdf.nome or os.path.basename(existing_pdf.arquivo.name)).replace('_', ' ')
             return FileResponse(
                 existing_pdf.arquivo,
-                as_attachment=not inline,
+                as_attachment=download,
                 filename=filename,
                 content_type='application/pdf'
             )
@@ -1877,11 +1878,11 @@ def convert_docx_to_pdf_download(request, arquivo_id):
             status=500
         )
 
-    # Retorna o PDF para download (sem salvar em Arquivos)
+    # Retorna o PDF para visualização ou download
     pdf_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.pdf'
     return FileResponse(
         BytesIO(pdf_bytes),
-        as_attachment=not inline,
+        as_attachment=download,
         filename=pdf_filename.replace('_', ' '),
         content_type='application/pdf'
     )
