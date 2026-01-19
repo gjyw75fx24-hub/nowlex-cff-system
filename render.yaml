@@ -49,3 +49,5 @@ services:
     region: oregon
     image:
       url: gotenberg/gotenberg:8
+    dockerCommand: gotenberg --api-port=10000 --api-timeout=180s --api-timeout-error-http-code=504
+    healthCheckPath: /health
