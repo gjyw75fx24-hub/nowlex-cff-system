@@ -222,6 +222,26 @@ class Parte(models.Model):
     class Meta:
         ordering = ['tipo_polo', 'id']
 
+
+class Herdeiro(models.Model):
+    cpf_falecido = models.CharField(max_length=20, db_index=True, verbose_name="CPF falecido")
+    nome_completo = models.CharField(max_length=255, verbose_name="Nome completo")
+    cpf = models.CharField(max_length=20, blank=True, null=True, verbose_name="CPF")
+    rg = models.CharField(max_length=20, blank=True, null=True, verbose_name="RG")
+    grau_parentesco = models.CharField(max_length=80, blank=True, null=True, verbose_name="Grau de parentesco")
+    herdeiro_citado = models.BooleanField(default=False, verbose_name="Herdeiro citado")
+    endereco = models.TextField(blank=True, null=True, verbose_name="Endereço")
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+
+    class Meta:
+        verbose_name = "Herdeiro"
+        verbose_name_plural = "Herdeiros"
+        ordering = ['-herdeiro_citado', 'id']
+
+    def __str__(self):
+        return self.nome_completo
+
 class Advogado(models.Model):
     parte = models.ForeignKey(Parte, on_delete=models.CASCADE, related_name='advogados')
     nome = models.CharField(max_length=255, verbose_name="Nome")

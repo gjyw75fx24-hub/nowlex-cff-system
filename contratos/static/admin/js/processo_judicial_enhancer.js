@@ -146,8 +146,11 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
         overlay.style.borderRadius = '8px';
         overlay.style.padding = '16px 24px';
-        overlay.style.zIndex = 2000;
+        overlay.style.zIndex = 2200;
         overlay.style.minWidth = '280px';
+        overlay.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
 
         const titleEl = document.createElement('div');
         titleEl.style.fontWeight = 'bold';
@@ -170,7 +173,10 @@ document.addEventListener('DOMContentLoaded', function() {
         button.style.padding = '6px 12px';
         button.style.borderRadius = '4px';
         button.style.cursor = 'pointer';
-        button.addEventListener('click', () => overlay.remove());
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            overlay.remove();
+        });
         overlay.appendChild(button);
 
         document.body.appendChild(overlay);
@@ -2018,6 +2024,432 @@ document.addEventListener('DOMContentLoaded', function() {
         card.classList.add('info-card-floating');
     };
     makeInfoCardSticky();
+
+    const normalizeCpf = (value) => (value || '').replace(/\D/g, '');
+    const parseEnderecoString = (value) => {
+        const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
+        if (!value) return output;
+        const getPart = (letter) => {
+            const re = new RegExp(`${letter}:\\s*([\\s\\S]*?)(?=\\s*-\\s*[A-H]:|$)`, 'i');
+            const match = value.match(re);
+            return match ? match[1].trim() : '';
+        };
+        Object.keys(output).forEach((key) => {
+            output[key] = getPart(key);
+        });
+        return output;
+    };
+    const buildEnderecoString = (parts) => {
+        const fields = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        return fields.map((field) => `${field}: ${parts[field] || ''}`).join(' - ');
+    };
+    const createEnderecoWidget = (idPrefix, initialValue = '') => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'herdeiros-endereco';
+        wrapper.innerHTML = `
+            <textarea class="herdeiros-endereco-raw" id="${idPrefix}_raw" style="display:none;"></textarea>
+            <div class="endereco-fields-grid">
+                <div class="form-group">
+                    <label for="${idPrefix}_A">A (Rua ou Av)</label>
+                    <input type="text" id="${idPrefix}_A" data-part="A">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_B">B (Número)</label>
+                    <input type="text" id="${idPrefix}_B" data-part="B">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_C">C (Complemento)</label>
+                    <input type="text" id="${idPrefix}_C" data-part="C">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_D">D (Bairro)</label>
+                    <input type="text" id="${idPrefix}_D" data-part="D">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_E">E (Cidade)</label>
+                    <input type="text" id="${idPrefix}_E" data-part="E">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_F">F (Estado)</label>
+                    <input type="text" id="${idPrefix}_F" data-part="F">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_G">G (CEP)</label>
+                    <input type="text" id="${idPrefix}_G" data-part="G" maxlength="9">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_H">H (UF)</label>
+                    <input type="text" id="${idPrefix}_H" data-part="H" maxlength="2">
+                </div>
+            </div>
+        `;
+        const rawTextarea = wrapper.querySelector('.herdeiros-endereco-raw');
+        const inputs = Array.from(wrapper.querySelectorAll('input[data-part]'));
+        const populate = (value) => {
+            const parts = parseEnderecoString(value);
+            inputs.forEach((input) => {
+                input.value = parts[input.dataset.part] || '';
+            });
+            rawTextarea.value = buildEnderecoString(parts);
+        };
+        const updateRaw = () => {
+            const parts = {};
+            inputs.forEach((input) => {
+                parts[input.dataset.part] = input.value || '';
+            });
+            rawTextarea.value = buildEnderecoString(parts);
+        };
+        inputs.forEach((input) => {
+            input.addEventListener('input', updateRaw);
+        });
+        const cepInput = wrapper.querySelector('input[data-part="G"]');
+        if (cepInput) {
+            cepInput.addEventListener('input', (event) => {
+                let cep = event.target.value.replace(/\D/g, '').substring(0, 8);
+                if (cep.length > 5) {
+                    cep = cep.replace(/^(\d{5})(\d)/, '$1-$2');
+                }
+                event.target.value = cep;
+            });
+        }
+        populate(initialValue);
+        return wrapper;
+    };
+    const formatCpfValue = (rawValue) => {
+        const digits = (rawValue || '').replace(/\D/g, '').slice(0, 11);
+        if (digits.length !== 11) {
+            return digits;
+        }
+        return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    };
+    const attachCpfMaskAndCopy = (input) => {
+        if (!input || input.dataset.cpfBound === 'true') return;
+        input.dataset.cpfBound = 'true';
+        const applyMask = () => {
+            const formatted = formatCpfValue(input.value);
+            input.value = formatted;
+        };
+        input.addEventListener('input', applyMask);
+        input.addEventListener('blur', applyMask);
+        input.addEventListener('click', () => {
+            const digitsOnly = (input.value || '').replace(/\D/g, '');
+            if (digitsOnly.length !== 11) {
+                return;
+            }
+            navigator.clipboard.writeText(digitsOnly).then(() => {
+                input.title = 'CPF copiado sem formatação';
+                input.classList.add('cpf-copy-field');
+                input.classList.add('copied');
+                setTimeout(() => {
+                    input.classList.remove('copied');
+                }, 1200);
+            }).catch(() => {});
+        });
+        applyMask();
+    };
+    const herdeirosCache = new Map();
+    const fetchHerdeiros = (cpf) => {
+        const normalized = normalizeCpf(cpf);
+        if (!normalized) {
+            return Promise.resolve({ cpf_falecido: '', herdeiros: [] });
+        }
+        if (herdeirosCache.has(normalized)) {
+            return herdeirosCache.get(normalized);
+        }
+        const promise = fetch(`/api/herdeiros/?cpf_falecido=${encodeURIComponent(normalized)}`)
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('Falha ao buscar herdeiros.');
+                }
+                return response.json();
+            })
+            .catch((error) => {
+                herdeirosCache.delete(normalized);
+                throw error;
+            });
+        herdeirosCache.set(normalized, promise);
+        return promise;
+    };
+    const updateHerdeirosBadge = (card, hasEntries) => {
+        if (!card) return;
+        const trigger = card.querySelector('.herdeiros-trigger');
+        if (!trigger) return;
+        trigger.classList.toggle('has-herdeiros', hasEntries);
+    };
+    const buildHerdeirosModal = () => {
+        let modal = document.getElementById('herdeiros-modal');
+        if (modal) return modal;
+        modal = document.createElement('div');
+        modal.id = 'herdeiros-modal';
+        modal.className = 'herdeiros-modal';
+        modal.setAttribute('aria-hidden', 'true');
+        modal.innerHTML = `
+            <div class="herdeiros-modal__panel" role="dialog" aria-modal="true">
+                <div class="herdeiros-modal__header">
+                    <span>Herdeiros cadastrados</span>
+                    <button type="button" class="herdeiros-modal__close" aria-label="Fechar">×</button>
+                </div>
+                <div class="herdeiros-modal__body">
+                    <div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>
+                </div>
+                <div class="herdeiros-modal__footer">
+                    <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                    <button type="button" class="herdeiros-modal__save">Salvar herdeiros</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.setAttribute('aria-hidden', 'true');
+            }
+        });
+        modal.querySelector('.herdeiros-modal__close').addEventListener('click', () => {
+            modal.setAttribute('aria-hidden', 'true');
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && modal.getAttribute('aria-hidden') !== 'true') {
+                modal.setAttribute('aria-hidden', 'true');
+            }
+        });
+        return modal;
+    };
+    const renderHerdeiroEntry = (data = {}, index = 0) => {
+        const entry = document.createElement('div');
+        entry.className = 'herdeiros-entry';
+        entry.dataset.index = `${index}`;
+        entry.innerHTML = `
+            <div class="herdeiros-entry__row">
+                <label>Nome completo
+                    <input type="text" name="nome_completo">
+                </label>
+                <label>CPF
+                    <input type="text" name="cpf">
+                </label>
+                <label>RG
+                    <input type="text" name="rg">
+                </label>
+                <label>Grau de parentesco
+                    <input type="text" name="grau_parentesco">
+                </label>
+            </div>
+            <div class="herdeiros-entry__actions">
+                <label class="herdeiros-entry__citado">
+                    <input type="checkbox" name="herdeiro_citado">
+                    Herdeiro citado
+                </label>
+                <button type="button" class="herdeiros-entry__remove">Remover</button>
+            </div>
+        `;
+        const setValue = (name, value) => {
+            const input = entry.querySelector(`input[name="${name}"]`);
+            if (input) {
+                input.value = value || '';
+            }
+        };
+        setValue('nome_completo', data.nome_completo);
+        setValue('cpf', data.cpf);
+        setValue('rg', data.rg);
+        setValue('grau_parentesco', data.grau_parentesco);
+        const citadoInput = entry.querySelector('input[name="herdeiro_citado"]');
+        if (citadoInput) {
+            citadoInput.checked = !!data.herdeiro_citado;
+        }
+        const enderecoWrapper = createEnderecoWidget(`herdeiros_endereco_${Date.now()}_${index}`, data.endereco || '');
+        entry.appendChild(enderecoWrapper);
+        const cpfInput = entry.querySelector('input[name="cpf"]');
+        attachCpfMaskAndCopy(cpfInput);
+        return entry;
+    };
+    const collectHerdeirosFromModal = (modal) => {
+        const entries = [];
+        modal.querySelectorAll('.herdeiros-entry').forEach((entryEl) => {
+            const nome = entryEl.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
+            const cpf = entryEl.querySelector('input[name="cpf"]')?.value?.trim() || '';
+            const rg = entryEl.querySelector('input[name="rg"]')?.value?.trim() || '';
+            const grau = entryEl.querySelector('input[name="grau_parentesco"]')?.value?.trim() || '';
+            const citado = !!entryEl.querySelector('input[name="herdeiro_citado"]')?.checked;
+            const endereco = entryEl.querySelector('.herdeiros-endereco-raw')?.value || '';
+            if (!nome && !cpf && !rg && !grau && !endereco) {
+                return;
+            }
+            entries.push({
+                nome_completo: nome,
+                cpf,
+                rg,
+                grau_parentesco: grau,
+                herdeiro_citado: citado,
+                endereco,
+            });
+        });
+        return entries;
+    };
+    const renderHerdeirosModal = (modal, herdeiros = []) => {
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (!body) return;
+        body.innerHTML = '';
+        if (!herdeiros.length) {
+            body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+            return;
+        }
+        herdeiros.forEach((herdeiro, index) => {
+            const entry = renderHerdeiroEntry(herdeiro, index);
+            body.appendChild(entry);
+        });
+        body.querySelectorAll('input[name="herdeiro_citado"]').forEach((checkbox) => {
+            checkbox.addEventListener('change', (event) => {
+                if (!event.target.checked) return;
+                body.querySelectorAll('input[name="herdeiro_citado"]').forEach((other) => {
+                    if (other !== event.target) {
+                        other.checked = false;
+                    }
+                });
+            });
+        });
+        body.querySelectorAll('.herdeiros-entry__remove').forEach((button) => {
+            button.addEventListener('click', () => {
+                button.closest('.herdeiros-entry')?.remove();
+                if (!body.querySelector('.herdeiros-entry')) {
+                    body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+                }
+            });
+        });
+    };
+    const openHerdeirosModal = (card) => {
+        const cpfRaw = card?.dataset?.parteCpf || '';
+        const cpf = normalizeCpf(cpfRaw);
+        if (!cpf) {
+            createSystemAlert('CFF System', 'CPF do falecido não encontrado para cadastrar herdeiros.');
+            return;
+        }
+        const modal = buildHerdeirosModal();
+        modal.dataset.cpf = cpf;
+        if (card?.dataset?.parteId) {
+            modal.dataset.parteId = card.dataset.parteId;
+        }
+        modal.setAttribute('aria-hidden', 'false');
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (body) {
+            body.innerHTML = '<div class="herdeiros-empty">Carregando herdeiros...</div>';
+        }
+        fetchHerdeiros(cpf)
+            .then((data) => {
+                renderHerdeirosModal(modal, data.herdeiros || []);
+            })
+            .catch(() => {
+                if (body) {
+                    body.innerHTML = '<div class="herdeiros-empty">Não foi possível carregar os herdeiros.</div>';
+                }
+            });
+    };
+    const setupHerdeirosModalActions = () => {
+        const modal = buildHerdeirosModal();
+        const addButton = modal.querySelector('.herdeiros-modal__add');
+        const saveButton = modal.querySelector('.herdeiros-modal__save');
+        const body = modal.querySelector('.herdeiros-modal__body');
+        const isHerdeiroFilled = (entry) => {
+            if (!entry) return false;
+            const nome = entry.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
+            const cpf = entry.querySelector('input[name="cpf"]')?.value?.trim() || '';
+            const rg = entry.querySelector('input[name="rg"]')?.value?.trim() || '';
+            const grau = entry.querySelector('input[name="grau_parentesco"]')?.value?.trim() || '';
+            const enderecoRaw = entry.querySelector('.herdeiros-endereco-raw')?.value || '';
+            const enderecoParts = parseEnderecoString(enderecoRaw);
+            const enderecoHasValue = Object.values(enderecoParts).some((value) => (value || '').trim());
+            return Boolean(nome || cpf || rg || grau || enderecoHasValue);
+        };
+        if (addButton) {
+            addButton.addEventListener('click', () => {
+                if (!body) return;
+                const entries = Array.from(body.querySelectorAll('.herdeiros-entry'));
+                const lastEntry = entries[entries.length - 1];
+                if (lastEntry && !isHerdeiroFilled(lastEntry)) {
+                    createSystemAlert('CFF System', 'Preencha o herdeiro atual antes de adicionar outro.');
+                    lastEntry.querySelector('input[name="nome_completo"]')?.focus();
+                    return;
+                }
+                const entry = renderHerdeiroEntry({}, body.querySelectorAll('.herdeiros-entry').length);
+                if (body.querySelector('.herdeiros-empty')) {
+                    body.innerHTML = '';
+                }
+                body.appendChild(entry);
+                entry.querySelectorAll('input[name="herdeiro_citado"]').forEach((checkbox) => {
+                    checkbox.addEventListener('change', (event) => {
+                        if (!event.target.checked) return;
+                        body.querySelectorAll('input[name="herdeiro_citado"]').forEach((other) => {
+                            if (other !== event.target) {
+                                other.checked = false;
+                            }
+                        });
+                    });
+                });
+                entry.querySelector('.herdeiros-entry__remove')?.addEventListener('click', () => {
+                    entry.remove();
+                    if (!body.querySelector('.herdeiros-entry')) {
+                        body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+                    }
+                });
+            });
+        }
+        if (saveButton) {
+            saveButton.addEventListener('click', () => {
+                const cpf = modal.dataset.cpf;
+                const herdeiros = collectHerdeirosFromModal(modal);
+                if (!cpf) {
+                    createSystemAlert('CFF System', 'CPF do falecido não encontrado para salvar herdeiros.');
+                    return;
+                }
+                saveButton.disabled = true;
+                fetch('/api/herdeiros/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken || '',
+                    },
+                    body: JSON.stringify({ cpf_falecido: cpf, herdeiros }),
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Falha ao salvar herdeiros.');
+                        }
+                        return response.json();
+                    })
+                    .then((data) => {
+                        modal.setAttribute('aria-hidden', 'true');
+                        herdeirosCache.set(cpf, Promise.resolve(data));
+                        const card = modal.dataset.parteId
+                            ? document.querySelector(`.info-card[data-parte-id="${modal.dataset.parteId}"]`)
+                            : null;
+                        updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        createSystemAlert('CFF System', 'Herdeiros salvos com sucesso.');
+                    })
+                    .catch(() => {
+                        createSystemAlert('CFF System', 'Não foi possível salvar os herdeiros.');
+                    })
+                    .finally(() => {
+                        saveButton.disabled = false;
+                    });
+            });
+        }
+    };
+    setupHerdeirosModalActions();
+    document.querySelectorAll('.info-card').forEach((card) => {
+        const hasObito = card.dataset.obito === '1';
+        const trigger = card.querySelector('.herdeiros-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', () => openHerdeirosModal(card));
+        }
+        if (hasObito && card.dataset.parteCpf) {
+            const cpf = normalizeCpf(card.dataset.parteCpf);
+            if (cpf) {
+                fetchHerdeiros(cpf)
+                    .then((data) => {
+                        updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                    })
+                    .catch(() => {});
+            }
+        }
+    });
 
     const repositionHistoryLink = () => {
         const historyLink = document.querySelector('#content-main .object-tools li .historylink');

@@ -13,6 +13,7 @@ urlpatterns = [
     path('agenda/tarefa/<int:pk>/update-date/', views.AgendaTarefaUpdateDateAPIView.as_view(), name='agenda_tarefa_update_date'),
     path('agenda/prazo/<int:pk>/update-date/', views.AgendaPrazoUpdateDateAPIView.as_view(), name='agenda_prazo_update_date'),
     path('listas-de-tarefas/', views.ListaDeTarefasAPIView.as_view(), name='listadetarefas_list_create'),
+    path('herdeiros/', views.HerdeiroAPIView.as_view(), name='herdeiros'),
     
     # URL para o botão de busca de dados online de processo
     path('buscar-dados-escavador/<str:numero_cnj>/', views.BuscarDadosEscavadorView.as_view(), name='buscar_dados_escavador'),

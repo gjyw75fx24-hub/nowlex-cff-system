@@ -3,11 +3,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.models import User
-from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas
+from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas, Herdeiro
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
 from django.db.models import Q, Count
 from django.urls import reverse
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 
 # Imports adicionados para as novas views
 import requests
@@ -191,6 +192,72 @@ class AgendaUsersAPIView(APIView):
         )
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data)
+
+class HerdeiroAPIView(APIView):
+    """
+    API para listar e salvar herdeiros vinculados ao CPF com óbito.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _serialize(self, herdeiros):
+        return [
+            {
+                'id': herdeiro.id,
+                'nome_completo': herdeiro.nome_completo,
+                'cpf': herdeiro.cpf,
+                'rg': herdeiro.rg,
+                'grau_parentesco': herdeiro.grau_parentesco,
+                'herdeiro_citado': herdeiro.herdeiro_citado,
+                'endereco': herdeiro.endereco,
+            }
+            for herdeiro in herdeiros
+        ]
+
+    def get(self, request):
+        cpf_raw = (request.query_params.get('cpf_falecido') or '').strip()
+        if not cpf_raw:
+            return Response({'error': 'cpf_falecido é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        cpf = re.sub(r'\\D', '', cpf_raw)
+        if not cpf:
+            return Response({'error': 'cpf_falecido inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        herdeiros = Herdeiro.objects.filter(cpf_falecido=cpf).order_by('-herdeiro_citado', 'id')
+        return Response({'cpf_falecido': cpf, 'herdeiros': self._serialize(herdeiros)})
+
+    def post(self, request):
+        cpf_raw = (request.data.get('cpf_falecido') or '').strip()
+        if not cpf_raw:
+            return Response({'error': 'cpf_falecido é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        cpf = re.sub(r'\\D', '', cpf_raw)
+        if not cpf:
+            return Response({'error': 'cpf_falecido inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        incoming = request.data.get('herdeiros', [])
+        if not isinstance(incoming, list):
+            return Response({'error': 'herdeiros deve ser uma lista'}, status=status.HTTP_400_BAD_REQUEST)
+
+        Herdeiro.objects.filter(cpf_falecido=cpf).delete()
+        cited_set = False
+        for item in incoming:
+            nome = (item.get('nome_completo') or '').strip()
+            cpf_herdeiro = (item.get('cpf') or '').strip()
+            rg = (item.get('rg') or '').strip()
+            grau = (item.get('grau_parentesco') or '').strip()
+            endereco = (item.get('endereco') or '').strip()
+            if not any([nome, cpf_herdeiro, rg, grau, endereco]):
+                continue
+            citado = bool(item.get('herdeiro_citado')) and not cited_set
+            if citado:
+                cited_set = True
+            Herdeiro.objects.create(
+                cpf_falecido=cpf,
+                nome_completo=nome,
+                cpf=cpf_herdeiro or None,
+                rg=rg or None,
+                grau_parentesco=grau or None,
+                herdeiro_citado=citado,
+                endereco=endereco or None,
+            )
+        herdeiros = Herdeiro.objects.filter(cpf_falecido=cpf).order_by('-herdeiro_citado', 'id')
+        return Response({'cpf_falecido': cpf, 'herdeiros': self._serialize(herdeiros)})
 
 class AgendaTarefaUpdateDateAPIView(APIView):
     """

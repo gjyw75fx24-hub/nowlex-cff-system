@@ -63,6 +63,38 @@
         width: 20px;
         height: auto;
     }
+    .herdeiros-trigger {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        background: transparent;
+        padding: 0;
+        margin-left: 2px;
+        cursor: pointer;
+        position: relative;
+    }
+    .herdeiros-trigger img {
+        width: 20px;
+        height: 20px;
+        display: block;
+    }
+    .herdeiros-check {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #0d6efd;
+        color: #fff;
+        font-size: 9px;
+        line-height: 1;
+        box-shadow: 0 0 0 2px #f8f8f8;
+    }
     .info-card-dead .parte-nome {
         background: #000;
         color: #fff;
@@ -70,6 +102,12 @@
         border-radius: 4px;
     }
     .info-card-dead .parte-luto-ribbon {
+        display: inline-flex;
+    }
+    .info-card-dead .herdeiros-trigger {
+        display: inline-flex;
+    }
+    .herdeiros-trigger.has-herdeiros .herdeiros-check {
         display: inline-flex;
     }
     .info-card-body .contrato-item {
@@ -128,12 +166,151 @@
         font-size: 1.1em;
         margin-right: 3px;
     }
+    .herdeiros-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 2100;
+    }
+    .herdeiros-modal[aria-hidden="true"] {
+        display: none;
+    }
+    .herdeiros-modal__panel {
+        background: #fff;
+        border-radius: 12px;
+        width: min(860px, 95vw);
+        max-height: 85vh;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
+        display: flex;
+        flex-direction: column;
+    }
+    .herdeiros-modal__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e5e7eb;
+        font-weight: 600;
+    }
+    .herdeiros-modal__body {
+        padding: 16px 20px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .herdeiros-entry {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 12px 14px;
+        background: #f8fafc;
+        display: grid;
+        gap: 10px;
+    }
+    .herdeiros-entry__row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+        align-items: end;
+    }
+    .herdeiros-entry label {
+        font-size: 12px;
+        color: #475569;
+        display: grid;
+        gap: 4px;
+    }
+    .herdeiros-entry input[type="text"] {
+        border: 1px solid #cbd5f5;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+    }
+    .herdeiros-entry__actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+    }
+    .herdeiros-entry__remove {
+        border: none;
+        background: #fee2e2;
+        color: #b91c1c;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+    .herdeiros-entry__citado {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #1f2937;
+    }
+    .herdeiros-modal__footer {
+        padding: 14px 20px;
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .herdeiros-modal__add {
+        border: none;
+        background: #0d6efd;
+        color: #fff;
+        border-radius: 999px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .herdeiros-modal__save {
+        border: none;
+        background: #16a34a;
+        color: #fff;
+        border-radius: 8px;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .herdeiros-modal__close {
+        border: none;
+        background: transparent;
+        font-size: 20px;
+        cursor: pointer;
+    }
+    .herdeiros-endereco {
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        padding: 10px;
+    }
+    .herdeiros-endereco .endereco-fields-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+    }
+    .herdeiros-endereco .form-group label {
+        font-size: 11px;
+        color: #64748b;
+    }
+    .herdeiros-empty {
+        text-align: center;
+        color: #6b7280;
+        font-size: 13px;
+    }
 </style>
 
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-obito="{{ parte.obito|yesno:'1,0' }}">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">
@@ -141,6 +318,10 @@
                             <span class="parte-luto-ribbon" aria-hidden="true">
                                 <img src="{% static 'admin/img/fita-preta.png' %}" alt="Fita preta de luto">
                             </span>
+                            <button type="button" class="herdeiros-trigger" aria-label="Cadastrar herdeiros" title="Cadastrar herdeiros">
+                                <img src="{% static 'admin/img/herdeiros.svg' %}" alt="Herdeiros">
+                                <span class="herdeiros-check" aria-hidden="true">✓</span>
+                            </button>
                         </div>
                         <div class="viabilidade-pill" tabindex="0" role="button" data-target="id_viabilidade">
                             <span class="viabilidade-label">Viabilidade</span>
