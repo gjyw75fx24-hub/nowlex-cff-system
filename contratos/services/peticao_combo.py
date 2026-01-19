@@ -283,36 +283,70 @@ def _find_matching_pdf(docx_file, files):
 
 
 def _convert_docx_to_pdf_bytes_for_zip(arquivo):
-    gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
-    if not gotenberg_url:
-        return None
+    """
+    Converte DOCX para PDF usando LibreOffice local.
+    Gotenberg foi desabilitado em favor do LibreOffice.
+    """
+    # Gotenberg desabilitado - usando LibreOffice local
     try:
         arquivo.arquivo.open('rb')
         docx_bytes = arquivo.arquivo.read()
         arquivo.arquivo.close()
     except Exception:
         return None
-    endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
-    files = {
-        "files": (
-            "document.docx",
-            docx_bytes,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-    }
-    for attempt in range(2):
-        try:
-            response = requests.post(endpoint, files=files, timeout=180)
-            if response.status_code == 200 and response.content:
-                return response.content
+
+    # Tenta LibreOffice diretamente
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    def _find_soffice():
+        candidates = [
+            "soffice",
+            "/usr/bin/soffice",
+            "libreoffice",
+            "/usr/bin/libreoffice",
+        ]
+        for candidate in candidates:
+            if shutil.which(candidate):
+                return candidate
+        return None
+
+    soffice_cmd = _find_soffice()
+    if not soffice_cmd:
+        logger.warning("LibreOffice não encontrado para conversão do ZIP")
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            docx_path = tmpdir_path / "input.docx"
+            pdf_path = tmpdir_path / "input.pdf"
+            docx_path.write_bytes(docx_bytes)
+            cmd = [
+                soffice_cmd,
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--norestore",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf:writer_pdf_Export",
+                "--outdir",
+                str(tmpdir_path),
+                str(docx_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=90)
+            if result.returncode == 0 and pdf_path.exists():
+                return pdf_path.read_bytes()
             logger.error(
-                "Falha no Gotenberg (zip): status=%s body=%s",
-                response.status_code,
-                response.text[:300],
+                "LibreOffice falhou na conversão do ZIP: rc=%s",
+                result.returncode,
             )
-        except requests.RequestException as exc:
-            logger.error("Erro ao chamar Gotenberg (zip) tentativa %s: %s", attempt + 1, exc)
-        time.sleep(1 + attempt)
+    except Exception as exc:
+        logger.error("Erro ao converter DOCX para PDF (ZIP): %s", exc)
+
     return None
 
 

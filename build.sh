@@ -3,6 +3,10 @@
 
 set -o errexit  # Sai em caso de erro
 
+# NOTA IMPORTANTE: LibreOffice é instalado automaticamente pelo Render
+# através do arquivo Aptfile na raiz do projeto (detectado automaticamente).
+# Não é necessário instalar manualmente aqui.
+
 # Instalar dependências Python
 pip install -r requirements.txt
 

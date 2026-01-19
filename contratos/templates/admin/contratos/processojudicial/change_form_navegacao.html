@@ -4,7 +4,13 @@
 {% block extrahead %}
 {{ block.super }}
 <link rel="stylesheet" href="{% static 'admin/css/documento_modelo_peticoes.css' %}">
+<!-- PDF.js para renderização de PDFs em canvas -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
+// Configuração do PDF.js
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 window.__tipos_peticao_preview_url = "{{ tipos_peticao_preview_url|default:'' }}";
@@ -321,11 +327,25 @@ document.addEventListener('DOMContentLoaded', function() {
     if (e.target === modal) closeModal();
   });
 
+  // Variáveis globais para o visualizador PDF
+  let pdfDoc = null;
+  let pageNum = 1;
+  let pageRendering = false;
+  let pageNumPending = null;
+  let scale = 1.5;
+  let canvas = null;
+  let ctx = null;
+
   function renderFile(href) {
+    console.log('[DEBUG] renderFile chamado com href:', href);
     if (!href) return;
     const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
-    const isPdf = /\.pdf$/i.test(href);
-    if (!isImage && !isPdf) return;
+    const isPdf = /\.pdf$/i.test(href) || /\/convert-to-pdf\/?/.test(href);
+    console.log('[DEBUG] isImage:', isImage, 'isPdf:', isPdf);
+    if (!isImage && !isPdf) {
+      console.log('[DEBUG] Arquivo não é imagem nem PDF, abortando');
+      return;
+    }
 
     if (currentObjectUrl) {
       URL.revokeObjectURL(currentObjectUrl);
@@ -338,23 +358,119 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    content.innerHTML = `<p style="color:#555; text-align:center;">Carregando PDF...</p>`;
+    // Renderiza PDF usando PDF.js e canvas
+    content.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px; align-items:center; width:80vw;">
+        <p style="color:#555; text-align:center; margin:0;">Carregando PDF...</p>
+      </div>`;
+    modal.style.display = 'flex';
+    console.log('[DEBUG] Modal aberto, fazendo fetch do PDF...');
+
     fetch(href).then(res => {
-      if (!res.ok) throw new Error('Falha ao carregar PDF');
-      return res.blob();
-    }).then(blob => {
-      currentObjectUrl = URL.createObjectURL(blob);
+      console.log('[DEBUG] Fetch resposta:', res.status, res.statusText);
+      if (!res.ok) throw new Error('Falha ao carregar PDF: ' + res.status);
+      return res.arrayBuffer();
+    }).then(arrayBuffer => {
+      console.log('[DEBUG] ArrayBuffer recebido, tamanho:', arrayBuffer.byteLength);
+      return pdfjsLib.getDocument({data: arrayBuffer}).promise;
+    }).then(pdf => {
+      console.log('[DEBUG] PDF carregado, páginas:', pdf.numPages);
+      pdfDoc = pdf;
+      pageNum = 1;
+
+      // Cria estrutura HTML com canvas e controles
       content.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
-          <iframe src="${currentObjectUrl}" title="Pré-visualização PDF" style="width:80vw; height:80vh; border:none;" loading="lazy"></iframe>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:center; width:80vw;">
+          <div style="background:#f5f5f5; padding:8px; border-radius:4px; display:flex; gap:12px; align-items:center;">
+            <button id="pdf-prev" class="button" style="padding:6px 12px;">← Anterior</button>
+            <span id="pdf-page-info" style="font-size:0.95em; color:#333;">Página <span id="pdf-page-num">1</span> de <span id="pdf-page-count">${pdf.numPages}</span></span>
+            <button id="pdf-next" class="button" style="padding:6px 12px;">Próxima →</button>
+            <button id="pdf-zoom-out" class="button" style="padding:6px 12px; margin-left:12px;">-</button>
+            <span style="font-size:0.9em; color:#666;">Zoom: <span id="pdf-zoom-level">150</span>%</span>
+            <button id="pdf-zoom-in" class="button" style="padding:6px 12px;">+</button>
+          </div>
+          <div style="overflow:auto; max-height:75vh; border:1px solid #ddd; background:#fff;">
+            <canvas id="pdf-canvas"></canvas>
+          </div>
         </div>`;
-    }).catch(() => {
+
+      canvas = document.getElementById('pdf-canvas');
+      ctx = canvas.getContext('2d');
+
+      // Eventos dos botões
+      document.getElementById('pdf-prev').addEventListener('click', () => {
+        if (pageNum <= 1) return;
+        pageNum--;
+        queueRenderPage(pageNum);
+      });
+
+      document.getElementById('pdf-next').addEventListener('click', () => {
+        if (pageNum >= pdf.numPages) return;
+        pageNum++;
+        queueRenderPage(pageNum);
+      });
+
+      document.getElementById('pdf-zoom-in').addEventListener('click', () => {
+        scale = Math.min(scale + 0.25, 3.0);
+        document.getElementById('pdf-zoom-level').textContent = Math.round(scale * 100);
+        queueRenderPage(pageNum);
+      });
+
+      document.getElementById('pdf-zoom-out').addEventListener('click', () => {
+        scale = Math.max(scale - 0.25, 0.5);
+        document.getElementById('pdf-zoom-level').textContent = Math.round(scale * 100);
+        queueRenderPage(pageNum);
+      });
+
+      // Renderiza primeira página
+      renderPage(pageNum);
+
+    }).catch((err) => {
+      console.error('[DEBUG] Erro ao carregar PDF:', err);
       content.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center;">
           <p style="color:#c00;">Não foi possível pré-visualizar o PDF.</p>
+          <p style="color:#999; font-size:0.9em;">${err.message}</p>
         </div>`;
     });
-    modal.style.display = 'flex';
+  }
+
+  function renderPage(num) {
+    pageRendering = true;
+    pdfDoc.getPage(num).then(page => {
+      const viewport = page.getViewport({scale: scale});
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+      };
+
+      const renderTask = page.render(renderContext);
+      renderTask.promise.then(() => {
+        pageRendering = false;
+        if (pageNumPending !== null) {
+          renderPage(pageNumPending);
+          pageNumPending = null;
+        }
+        document.getElementById('pdf-page-num').textContent = num;
+
+        // Atualiza estado dos botões
+        const prevBtn = document.getElementById('pdf-prev');
+        const nextBtn = document.getElementById('pdf-next');
+        if (prevBtn) prevBtn.disabled = (num <= 1);
+        if (nextBtn) nextBtn.disabled = (num >= pdfDoc.numPages);
+      });
+    });
+  }
+
+  function queueRenderPage(num) {
+    if (pageRendering) {
+      pageNumPending = num;
+    } else {
+      renderPage(num);
+    }
   }
 
   function showZipPreview(href, label) {
@@ -376,6 +492,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!link) return;
     if (link.dataset.skipPreview === '1' || link.hasAttribute('download')) return;
     const href = link.getAttribute('href') || '';
+
+    // Suporta visualização de PDFs convertidos via /convert-to-pdf/
+    if (/\/contratos\/arquivo\/\d+\/convert-to-pdf\/?(\?.*)?$/.test(href) && !/download=1/.test(href)) {
+      console.log('[DEBUG] Interceptado link convert-to-pdf:', href);
+      e.preventDefault();
+      console.log('[DEBUG] Chamando renderFile...');
+      renderFile(href);
+      return;
+    }
+
     // Apenas links de arquivo da pasta do processo
     if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
     // Extensões suportadas (imagens, PDFs; DOCX tenta abrir o PDF-irmão, senão alerta)
@@ -748,13 +874,14 @@ document.addEventListener('DOMContentLoaded', function() {
       const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
       const arquivoId = getRowArquivoId(row);
       const visualizarHref = arquivoId
-        ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/?inline=1`
+        ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/`
         : link.href;
-      const visualizarOpen = isMonitoriaRow(row) && !isZipFile;
-      leftGroup.appendChild(createButton('Visualizar', visualizarHref, visualizarOpen ? { openInNewTab: true } : visualizarOpts));
+      // Para monitória, usa o proxy_arquivo_view para visualização inline
+      const visualizarOpts2 = isMonitoriaRow(row) && !isZipFile ? { openInNewTab: false } : visualizarOpts;
+      leftGroup.appendChild(createButton('Visualizar', visualizarHref, visualizarOpts2));
       if (isMonitoriaRow(row)) {
         const pdfHref = arquivoId
-          ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/`
+          ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/?download=1`
           : swapFileExtension(link.href, '\\.docx', '.pdf');
         const docHref = arquivoId
           ? `/contratos/arquivo/${arquivoId}/convert-to-docx/`

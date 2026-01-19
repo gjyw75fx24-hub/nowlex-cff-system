@@ -545,40 +545,21 @@ def _build_habilitacao_base_filename(polo_passivo, processo):
 def _convert_docx_to_pdf_bytes(docx_bytes):
     """
     Converte DOCX para PDF.
-    Prioriza Gotenberg (fidelidade alta sem LibreOffice local).
-    Depois tenta LibreOffice local, se existir.
+    Prioriza LibreOffice local (soffice/libreoffice).
     Se não disponível, usa mammoth + xhtml2pdf (100% Python).
     Como último recurso, usa reportlab direto do DOCX (texto/tabelas).
+    NOTA: Gotenberg foi desabilitado em favor do LibreOffice local.
     """
-    gotenberg_url = os.getenv("GOTENBERG_URL", "").strip()
+    # Gotenberg desabilitado - usando LibreOffice local
+    gotenberg_url = ""  # Forçado para vazio
+
     def _convert_with_gotenberg():
-        if not gotenberg_url:
-            return None
-        endpoint = gotenberg_url.rstrip("/") + "/forms/libreoffice/convert"
-        files = {
-            "files": (
-                "document.docx",
-                docx_bytes,
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-        }
-        for attempt in range(3):
-            try:
-                response = requests.post(endpoint, files=files, timeout=180)
-                if response.status_code == 200 and response.content:
-                    return response.content
-                logger.error(
-                    "Falha no Gotenberg: status=%s body=%s",
-                    response.status_code,
-                    response.text[:500],
-                )
-            except requests.RequestException as exc:
-                logger.error("Erro ao chamar Gotenberg (tentativa %s): %s", attempt + 1, exc)
-            time.sleep(1 + attempt)
+        # Desabilitado - não usar Gotenberg
         return None
 
-    if gotenberg_url:
-        return _convert_with_gotenberg()
+    # Pula Gotenberg e vai direto para LibreOffice
+    # if gotenberg_url:
+    #     return _convert_with_gotenberg()
 
     def _find_soffice():
         candidates = [
@@ -599,6 +580,7 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
     # Tenta LibreOffice local
     soffice_cmd = _find_soffice()
     if soffice_cmd:
+        logger.info("LibreOffice encontrado em: %s", soffice_cmd)
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
@@ -618,15 +600,21 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
                     str(tmpdir_path),
                     str(docx_path),
                 ]
+                logger.info("Executando LibreOffice: %s", ' '.join(cmd))
                 result = subprocess.run(cmd, capture_output=True, timeout=90)
                 if result.returncode == 0 and pdf_path.exists():
+                    logger.info("LibreOffice: conversão bem-sucedida")
                     return pdf_path.read_bytes()
                 logger.warning(
-                    "LibreOffice falhou, tentando fallback: rc=%s",
+                    "LibreOffice falhou, tentando fallback: rc=%s stdout=%s stderr=%s",
                     result.returncode,
+                    result.stdout.decode('utf-8', errors='ignore')[:200],
+                    result.stderr.decode('utf-8', errors='ignore')[:200],
                 )
         except Exception as exc:
-            logger.warning("Erro com LibreOffice, tentando fallback: %s", exc)
+            logger.warning("Erro com LibreOffice, tentando fallback: %s", exc, exc_info=True)
+    else:
+        logger.warning("LibreOffice não encontrado, usando fallback Python")
 
     # Fallback: mammoth + xhtml2pdf (100% Python, sem dependências externas)
     try:
@@ -1804,14 +1792,19 @@ def convert_docx_to_pdf_download(request, arquivo_id):
     Converte um arquivo DOCX existente para PDF on-demand e retorna o download.
     Se o PDF correspondente já existe, retorna ele diretamente.
     """
+    logger.info("convert_docx_to_pdf_download chamado: arquivo_id=%s", arquivo_id)
     try:
         arquivo = get_object_or_404(ProcessoArquivo, pk=arquivo_id)
     except ProcessoArquivo.DoesNotExist:
+        logger.error("Arquivo %s não encontrado", arquivo_id)
         return HttpResponse("Arquivo não encontrado.", status=404)
 
     arquivo_path = arquivo.arquivo.name if arquivo.arquivo else ''
     if not arquivo_path:
+        logger.error("Arquivo %s sem conteúdo", arquivo_id)
         return HttpResponse("Arquivo sem conteúdo.", status=404)
+
+    logger.info("Arquivo path: %s", arquivo_path)
 
     # Verifica se é um DOCX
     is_docx = arquivo_path.lower().endswith('.docx')
@@ -1823,16 +1816,30 @@ def convert_docx_to_pdf_download(request, arquivo_id):
         # Já é PDF, retorna direto
         try:
             arquivo.arquivo.open('rb')
+            pdf_content = arquivo.arquivo.read()
+            arquivo.arquivo.close()
+
             filename = (arquivo.nome or os.path.basename(arquivo_path)).replace('_', ' ')
-            return FileResponse(
-                arquivo.arquivo,
-                as_attachment=download,
-                filename=filename,
-                content_type='application/pdf'
-            )
+
+            if download:
+                # Força download
+                return FileResponse(
+                    BytesIO(pdf_content),
+                    as_attachment=True,
+                    filename=filename,
+                    content_type='application/pdf'
+                )
+            else:
+                # Visualiza inline (sem filename para evitar download)
+                response = HttpResponse(pdf_content, content_type='application/pdf')
+                response['Content-Disposition'] = 'inline'
+                response['Content-Length'] = len(pdf_content)
+                response['X-Content-Type-Options'] = 'nosniff'
+                response['Cache-Control'] = 'private, max-age=3600'
+                return response
         except Exception as exc:
-            logger.error("Erro ao baixar PDF: %s", exc, exc_info=True)
-            return HttpResponse("Erro ao baixar PDF.", status=500)
+            logger.error("Erro ao acessar PDF: %s", exc, exc_info=True)
+            return HttpResponse("Erro ao acessar PDF.", status=500)
 
     if not is_docx:
         return HttpResponse("Arquivo não é DOCX nem PDF.", status=400)
@@ -1851,13 +1858,26 @@ def convert_docx_to_pdf_download(request, arquivo_id):
     if existing_pdf and existing_pdf.arquivo:
         try:
             existing_pdf.arquivo.open('rb')
+            pdf_content = existing_pdf.arquivo.read()
+            existing_pdf.arquivo.close()
+
             filename = (existing_pdf.nome or os.path.basename(existing_pdf.arquivo.name)).replace('_', ' ')
-            return FileResponse(
-                existing_pdf.arquivo,
-                as_attachment=download,
-                filename=filename,
-                content_type='application/pdf'
-            )
+
+            if download:
+                return FileResponse(
+                    BytesIO(pdf_content),
+                    as_attachment=True,
+                    filename=filename,
+                    content_type='application/pdf'
+                )
+            else:
+                # Visualiza inline
+                response = HttpResponse(pdf_content, content_type='application/pdf')
+                response['Content-Disposition'] = 'inline'
+                response['Content-Length'] = len(pdf_content)
+                response['X-Content-Type-Options'] = 'nosniff'
+                response['Cache-Control'] = 'private, max-age=3600'
+                return response
         except Exception:
             pass  # Se falhar, tenta converter
 
@@ -1870,22 +1890,36 @@ def convert_docx_to_pdf_download(request, arquivo_id):
         logger.error("Erro ao ler DOCX para conversão: %s", exc, exc_info=True)
         return HttpResponse("Erro ao ler arquivo DOCX.", status=500)
 
+    logger.info("Iniciando conversão DOCX para PDF (tamanho: %d bytes)", len(docx_bytes))
     pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
     if not pdf_bytes:
+        logger.error("Conversão falhou: pdf_bytes é None ou vazio")
         return HttpResponse(
             "Não foi possível converter o DOCX para PDF. "
             "O conversor não está disponível no servidor.",
             status=500
         )
 
+    logger.info("Conversão bem-sucedida: PDF com %d bytes", len(pdf_bytes))
+
     # Retorna o PDF para visualização ou download
     pdf_filename = (arquivo.nome or os.path.basename(arquivo_path)).rsplit('.', 1)[0] + '.pdf'
-    return FileResponse(
-        BytesIO(pdf_bytes),
-        as_attachment=download,
-        filename=pdf_filename.replace('_', ' '),
-        content_type='application/pdf'
-    )
+
+    if download:
+        return FileResponse(
+            BytesIO(pdf_bytes),
+            as_attachment=True,
+            filename=pdf_filename.replace('_', ' '),
+            content_type='application/pdf'
+        )
+    else:
+        # Visualiza inline
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = 'inline'
+        response['Content-Length'] = len(pdf_bytes)
+        response['X-Content-Type-Options'] = 'nosniff'
+        response['Cache-Control'] = 'private, max-age=3600'
+        return response
 
 
 def _convert_pdf_to_docx_bytes(pdf_bytes):
