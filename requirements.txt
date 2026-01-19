@@ -1,5 +1,6 @@
 annotated-types==0.7.0 ; python_version >= "3.11" and python_version < "4.0"
 anyio==4.12.0 ; python_version >= "3.11" and python_version < "4.0"
+argon2-cffi==23.1.0 ; python_version >= "3.11" and python_version < "4.0"
 appscript==1.4.0 ; python_version >= "3.11" and python_version < "4.0" and sys_platform == "darwin"
 asgiref==3.9.1 ; python_version >= "3.11" and python_version < "4.0"
 cachetools==6.2.2 ; python_version >= "3.11" and python_version < "4.0"
