@@ -1404,35 +1404,81 @@ class AdvogadoPassivoInline(admin.StackedInline):
         return formfield
 
 
+
+def normalize_decimal_string(value):
+    if value is None:
+        return ''
+    normalized = str(value).strip()
+    if not normalized:
+        return ''
+    normalized = normalized.replace('\u00A0', '')
+    normalized = normalized.replace('R$', '')
+    normalized = normalized.replace(' ', '')
+    has_comma = ',' in normalized
+    has_dot = '.' in normalized
+    if has_comma and has_dot:
+        normalized = normalized.replace('.', '')
+        normalized = normalized.replace(',', '.')
+    elif has_comma:
+        normalized = normalized.replace(',', '.')
+    return normalized
+
+
+class MoneyDecimalField(forms.DecimalField):
+    def to_python(self, value):
+        normalized = normalize_decimal_string(value)
+        return super().to_python(normalized)
+
+
+def format_decimal_brl(value):
+    if value in (None, ''):
+        return ''
+    try:
+        decimal_value = Decimal(value)
+    except (InvalidOperation, TypeError):
+        return ''
+    quantized = decimal_value.quantize(Decimal('0.01'))
+    formatted = f"{quantized:,.2f}"
+    formatted = formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f"R$ {formatted}"
+
+
 class ContratoForm(forms.ModelForm):
     class Meta:
         model = Contrato
         fields = "__all__"
 
-    valor_total_devido = forms.DecimalField(
+    valor_total_devido = MoneyDecimalField(
         required=False,
         decimal_places=2,
         max_digits=14,
-        widget=forms.TextInput(attrs={'class': 'vTextField'})
+        widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
     )
-    valor_causa = forms.DecimalField(
+    valor_causa = MoneyDecimalField(
         required=False,
         decimal_places=2,
         max_digits=14,
-        widget=forms.TextInput(attrs={'class': 'vTextField'})
+        widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field_name in ('valor_total_devido', 'valor_causa'):
+            prefixed_name = self.add_prefix(field_name)
+            if self.data and self.data.get(prefixed_name):
+                continue
+            value = getattr(self.instance, field_name, None)
+            formatted = format_decimal_brl(value)
+            if formatted:
+                self.initial[field_name] = formatted
 
     def _clean_decimal(self, field_name):
         raw = self.data.get(self.add_prefix(field_name), '')
-        if raw is None:
+        normalized = normalize_decimal_string(raw)
+        if not normalized:
             return None
-        raw = str(raw).strip()
-        if raw == '':
-            return None
-        if ',' in raw:
-            raw = raw.replace('.', '').replace(',', '.')
         try:
-            return Decimal(raw)
+            return Decimal(normalized)
         except InvalidOperation:
             raise forms.ValidationError("Informe um número válido.")
 
@@ -1441,6 +1487,9 @@ class ContratoForm(forms.ModelForm):
 
     def clean_valor_causa(self):
         return self._clean_decimal('valor_causa')
+
+    class Media:
+        js = ('contratos/js/contrato_money_mask.js',)
 
 
 class ContratoInline(admin.StackedInline):
