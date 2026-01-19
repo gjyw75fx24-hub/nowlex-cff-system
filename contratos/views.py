@@ -562,15 +562,23 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
     #     return _convert_with_gotenberg()
 
     def _find_soffice():
+        # Lista expandida de localizações possíveis do LibreOffice
         candidates = [
             "soffice",
             "/usr/bin/soffice",
             "libreoffice",
             "/usr/bin/libreoffice",
+            "/opt/libreoffice/program/soffice",
+            "/usr/lib/libreoffice/program/soffice",
+            "/snap/bin/libreoffice",
         ]
         for candidate in candidates:
             if shutil.which(candidate):
+                logger.info("LibreOffice encontrado em: %s", candidate)
                 return candidate
+        # Log de diagnóstico se não encontrar
+        logger.error("LibreOffice não encontrado. Tentou: %s", ", ".join(candidates))
+        logger.error("PATH atual: %s", os.environ.get('PATH', 'N/A'))
         return None
 
     gotenberg_pdf = _convert_with_gotenberg()

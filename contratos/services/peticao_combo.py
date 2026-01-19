@@ -302,15 +302,22 @@ def _convert_docx_to_pdf_bytes_for_zip(arquivo):
     from pathlib import Path
 
     def _find_soffice():
+        # Lista expandida de localizações possíveis do LibreOffice
         candidates = [
             "soffice",
             "/usr/bin/soffice",
             "libreoffice",
             "/usr/bin/libreoffice",
+            "/opt/libreoffice/program/soffice",
+            "/usr/lib/libreoffice/program/soffice",
+            "/snap/bin/libreoffice",
         ]
         for candidate in candidates:
             if shutil.which(candidate):
+                logger.info("LibreOffice encontrado em: %s", candidate)
                 return candidate
+        # Log de diagnóstico se não encontrar
+        logger.error("LibreOffice não encontrado em ZIP. Tentou: %s", ", ".join(candidates))
         return None
 
     soffice_cmd = _find_soffice()

@@ -3,15 +3,32 @@
 
 set -o errexit  # Sai em caso de erro
 
-# NOTA IMPORTANTE: LibreOffice é instalado automaticamente pelo Render
-# através do arquivo Aptfile na raiz do projeto (detectado automaticamente).
-# Não é necessário instalar manualmente aqui.
+echo "=== Verificando instalação do LibreOffice ==="
+# Verifica se LibreOffice foi instalado via Aptfile
+if command -v soffice &> /dev/null; then
+    echo "✓ LibreOffice encontrado: $(which soffice)"
+    soffice --version
+elif command -v libreoffice &> /dev/null; then
+    echo "✓ LibreOffice encontrado: $(which libreoffice)"
+    libreoffice --version
+else
+    echo "⚠️  AVISO: LibreOffice NÃO encontrado!"
+    echo "Verificando se está instalado em caminhos alternativos..."
+    find /opt -name "soffice" 2>/dev/null || echo "Não encontrado em /opt"
+    find /usr -name "soffice" 2>/dev/null || echo "Não encontrado em /usr"
+fi
 
-# Instalar dependências Python
+echo ""
+echo "=== Instalando dependências Python ==="
 pip install -r requirements.txt
 
-# Coletar arquivos estáticos
+echo ""
+echo "=== Coletando arquivos estáticos ==="
 python manage.py collectstatic --no-input
 
-# Executar migrações do banco de dados
+echo ""
+echo "=== Executando migrações do banco de dados ==="
 python manage.py migrate
+
+echo ""
+echo "=== Build concluído com sucesso ==="
