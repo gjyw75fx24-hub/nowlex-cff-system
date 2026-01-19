@@ -1787,6 +1787,8 @@ class ObitoFilter(admin.SimpleListFilter):
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ('valor_causa_display',)
+    class Media:
+        js = ('contratos/js/contrato_money_mask.js',)
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
     list_display_links = ("cnj_with_valor",)
     BASE_LIST_FILTERS = [
@@ -1900,11 +1902,18 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valuation por Contratos</span>'))
     def valor_causa_display(self, obj):
-        valor = obj.contratos.aggregate(total=models.Sum('valor_causa'))['total'] or Decimal('0.00')
+        valor = sum((c.valor_causa or Decimal('0.00')) for c in obj.contratos.all())
         if valor == Decimal('0.00'):
             return "-"
-        formatted = f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        formatted = format_decimal_brl(valor)
         return formatted
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'valor_causa':
+            css = formfield.widget.attrs.get('class', '')
+            formfield.widget.attrs['class'] = (css + ' money-mask').strip()
+        return formfield
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
