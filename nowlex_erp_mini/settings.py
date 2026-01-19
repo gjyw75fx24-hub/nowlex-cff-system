@@ -159,6 +159,9 @@ ESCAVADOR_API_TOKEN = os.getenv("ESCAVADOR_API_TOKEN")
 JUDICIAL_API_KEY = os.getenv("JUDICIAL_API_KEY")
 NOWLEX_JUDICIAL_API_KEY = os.getenv("NOWLEX_JUDICIAL_API_KEY")
 
+# Gotenberg - Serviço de conversão de documentos (DOCX -> PDF)
+GOTENBERG_URL = os.getenv("GOTENBERG_URL", "")
+
 # Arquivos enviados (uploads)
 # Configuração do AWS S3 para armazenamento de arquivos
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
