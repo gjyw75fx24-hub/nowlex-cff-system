@@ -1493,6 +1493,13 @@ class ContratoForm(forms.ModelForm):
 
 
 class ProcessoJudicialForm(forms.ModelForm):
+    valor_causa = MoneyDecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
+    )
+
     class Meta:
         model = ProcessoJudicial
         fields = "__all__"
