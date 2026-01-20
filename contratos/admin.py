@@ -1139,11 +1139,17 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         queryset = queryset.annotate(
             primeira_prescricao=models.Min('contratos__data_prescricao'),
         )
-        # Ignora contratos já prescritos por padrão (controlado pelo checkbox complementar)
+        # Ignora processos com todos os contratos prescritos enquanto o checkbox não está ativo
+        today = timezone.now().date()
         if self.value() != "incluir":
-            today = timezone.now().date()
-            queryset = queryset.filter(
-                models.Q(primeira_prescricao__gte=today) | models.Q(primeira_prescricao__isnull=True)
+            nao_prescrito_q = (
+                models.Q(contratos__data_prescricao__gte=today) |
+                models.Q(contratos__data_prescricao__isnull=True)
+            )
+            queryset = queryset.annotate(
+                contratos_nao_prescritos=Count('contratos', filter=nao_prescrito_q)
+            ).filter(
+                contratos_nao_prescritos__gt=0
             )
         # Converte a diferença para segundos para usar ABS numérico (evita ABS de interval no Postgres)
         queryset = queryset.annotate(
