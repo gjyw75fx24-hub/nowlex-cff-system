@@ -3,7 +3,15 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.models import User
-from ..models import ProcessoJudicial, Tarefa, Prazo, ListaDeTarefas, Herdeiro
+from ..models import (
+    AnaliseProcesso,
+    Contrato,
+    Herdeiro,
+    ListaDeTarefas,
+    ProcessoJudicial,
+    Prazo,
+    Tarefa,
+)
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
 from django.db.models import Q, Count
 from django.urls import reverse
@@ -111,11 +119,133 @@ class AgendaGeralAPIView(APIView):
                 raw_origin = raw_origin.isoformat()
             item['original_date'] = (raw_origin or '')[:10]
 
+        supervision_entries = self._get_supervision_entries(show_completed, request)
         agenda_items = sorted(
-            tarefas_data + prazos_data,
+            tarefas_data + prazos_data + supervision_entries,
             key=lambda x: x.get('date') or ''
         )
         return Response(agenda_items)
+
+    def _serialize_user(self, user):
+        if not user or not getattr(user, 'is_authenticated', False):
+            return None
+        return {
+            'id': user.id,
+            'username': user.username,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'pending_tasks': 0,
+            'pending_prazos': 0,
+            'completed_tasks': 0,
+            'completed_prazos': 0,
+        }
+
+    def _get_supervision_entries(self, show_completed, request):
+        pending_statuses = {'pendente'}
+        completed_statuses = {'aprovado', 'reprovado'}
+        target_statuses = completed_statuses if show_completed else pending_statuses
+
+        cards_data = []
+        contract_ids = set()
+        seen_keys = set()
+
+        for analise in AnaliseProcesso.objects.select_related('processo_judicial', 'updated_by'):
+            respostas = analise.respostas or {}
+            for source in ('saved_processos_vinculados', 'processos_vinculados'):
+                raw_cards = respostas.get(source) or []
+                if not isinstance(raw_cards, list):
+                    continue
+                for idx, card in enumerate(raw_cards):
+                    if not isinstance(card, dict):
+                        continue
+                    if not card.get('supervisionado'):
+                        continue
+                    status = (card.get('supervisor_status') or 'pendente').lower()
+                    if status not in target_statuses:
+                        continue
+                    contract_values = card.get('contratos')
+                    if not isinstance(contract_values, (list, tuple)):
+                        contract_values = []
+                    if not contract_values:
+                        tipo_respostas = card.get('tipo_de_acao_respostas') or {}
+                        if isinstance(tipo_respostas, dict):
+                            contract_values = tipo_respostas.get('contratos_para_monitoria') or []
+                    parsed_ids = set()
+                    for raw_contract in contract_values or []:
+                        try:
+                            parsed_ids.add(int(raw_contract))
+                        except (TypeError, ValueError):
+                            continue
+                    if not parsed_ids:
+                        continue
+                    key = (
+                        analise.pk,
+                        source,
+                        idx,
+                        status,
+                        tuple(sorted(parsed_ids)),
+                    )
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    contract_ids.update(parsed_ids)
+                    cards_data.append({
+                        'analise': analise,
+                        'card': card,
+                        'contract_ids': parsed_ids,
+                        'source': source,
+                        'index': idx,
+                        'status': status,
+                    })
+
+        if not cards_data:
+            return []
+
+        contracts = Contrato.objects.filter(id__in=contract_ids).only('id', 'numero_contrato', 'data_prescricao')
+        contract_map = {contract.id: contract for contract in contracts}
+
+        entries = []
+        for card_info in cards_data:
+            valid_contracts = [
+                contract_map.get(cid)
+                for cid in card_info['contract_ids']
+                if contract_map.get(cid)
+            ]
+            valid_contracts = [c for c in valid_contracts if c.data_prescricao]
+            if not valid_contracts:
+                continue
+            prescricao_date = min(c.data_prescricao for c in valid_contracts if c.data_prescricao)
+            if not prescricao_date:
+                continue
+            analise = card_info['analise']
+            processo = analise.processo_judicial
+            cnj_label = (
+                card_info['card'].get('cnj') or
+                (processo.cnj if processo else '') or
+                'CNJ não informado'
+            )
+            contrato_labels = [
+                c.numero_contrato or f"ID {c.pk}"
+                for c in valid_contracts
+            ]
+            detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
+            responsavel_user = analise.updated_by if analise.updated_by else request.user
+            responsavel = self._serialize_user(responsavel_user)
+            entries.append({
+                'type': 'S',
+                'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
+                'label': 'S',
+                'description': detail_text,
+                'detail': detail_text,
+                'date': prescricao_date.isoformat(),
+                'original_date': prescricao_date.isoformat(),
+                'prescricao_date': prescricao_date.isoformat(),
+                'admin_url': reverse('admin:contratos_processojudicial_change', args=[processo.pk]) if processo else '',
+                'processo_id': processo.pk if processo else None,
+                'responsavel': responsavel,
+            })
+
+        return entries
 
 class TarefaCreateAPIView(generics.CreateAPIView):
     """

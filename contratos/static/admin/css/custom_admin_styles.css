@@ -1398,6 +1398,10 @@ a.historylink {
 .agenda-panel__day-tag[data-type="P"] {
     color: #a63a5c;
 }
+.agenda-panel__day-tag[data-type="S"] {
+    color: #a76b00;
+    background: #fff7da;
+}
 .agenda-panel__details {
     display: flex;
     flex-direction: column;

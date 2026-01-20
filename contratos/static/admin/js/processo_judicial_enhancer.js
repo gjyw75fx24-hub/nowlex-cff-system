@@ -475,14 +475,51 @@ document.addEventListener('DOMContentLoaded', function() {
     let updateAgendaEntryDate = () => {};
     let moveAgendaEntries = () => {};
 
+    const getTypeKey = (type) => {
+        if (type === 'P') return 'tasksP';
+        if (type === 'S') return 'tasksS';
+        return 'tasksT';
+    };
+
+    const getTypePrefix = (type) => {
+        if (type === 'P') return 'Prazo';
+        if (type === 'S') return 'Supervisão';
+        return 'Tarefa';
+    };
+
+    const getPrescricaoLimit = (entry) => {
+        const raw = entry?.prescricao_date;
+        if (!raw) return null;
+        return parseDateInputValue(raw);
+    };
+
+    const isSupervisionDropAllowedForEntry = (entry, targetDayInfo) => {
+        if (!entry || entry.type !== 'S') {
+            return true;
+        }
+        const limit = getPrescricaoLimit(entry);
+        if (!limit) {
+            return true;
+        }
+        const targetDate = new Date(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
+        const limitDate = new Date(limit.year, limit.monthIndex, limit.day);
+        return targetDate < limitDate;
+    };
+
+    const showSupervisionLimitViolation = (entry) => {
+        if (!entry?.prescricao_date) return;
+        const limitLabel = formatDateLabel(entry.prescricao_date) || entry.prescricao_date;
+        createSystemAlert('Agenda Geral', `S não pode ser movido após ${limitLabel}.`);
+    };
+
     const normalizeEntryMetadata = (dayInfo, type) => {
-        const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+        const taskKey = getTypeKey(type);
+        const list = dayInfo[taskKey];
         if (!list) return;
         list.forEach((entry, index) => {
-            const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
+            const prefix = getTypePrefix(type);
             entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            // Reordena sempre de forma sequencial por tipo e dia (já filtrado por usuário, se ativo)
-            entry.label = `${index + 1}`;
+            entry.label = type === 'S' ? 'S' : `${index + 1}`;
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
@@ -497,6 +534,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: index + 1,
                 tasksT: [],
                 tasksP: [],
+                tasksS: [],
                 monthIndex,
                 year,
             };
@@ -610,8 +648,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const mergeEntriesByBackend = (primary = [], secondary = []) => {
         const map = new Map();
         const add = (entry, prefer = false) => {
-            const typeKey = entry.type === 'P' ? 'p' : 't';
-            const key = entry.backendId ? `b-${typeKey}-${entry.backendId}` : `i-${entry.id}`;
+            const normalizedType = entry.type === 'P' ? 'p' : entry.type === 'S' ? 's' : 't';
+            const key = entry.backendId ? `b-${normalizedType}-${entry.backendId}` : `i-${entry.id}`;
             if (!prefer && map.has(key)) return;
             map.set(key, entry);
         };
@@ -627,12 +665,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const common = { monthIndex: day.monthIndex, year: day.year, day: day.day };
                 day.tasksT.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'T' }));
                 day.tasksP.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'P' }));
+                day.tasksS.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'S' }));
             });
         });
         return rebuilt;
     };
     const persistEntryDate = (entryData, targetDayInfo) => {
         if (!entryData?.backendId || !targetDayInfo) return;
+        if (entryData.type === 'S') return;
         const payloadDate = formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
         const isTask = entryData.type === 'T';
         const url = isTask
@@ -660,9 +700,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const days = getMonthData(entry.monthIndex, entry.year);
             const dayInfo = days[entry.day - 1];
             if (!dayInfo) return;
-            const entryType = entry.type === 'P' ? 'P' : 'T';
+            const entryType = entry.type === 'P'
+                ? 'P'
+                : entry.type === 'S'
+                    ? 'S'
+                    : 'T';
             entry.type = entryType;
-            const targetList = entryType === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+            const targetList = dayInfo[getTypeKey(entryType)];
             targetList.push(entry);
             normalizeEntryMetadata(dayInfo, entry.type);
         });
@@ -676,7 +720,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const normalizeApiEntry = (item) => {
         if (!item) return null;
-        const type = item.type === 'P' ? 'P' : 'T';
+        const type = item.type === 'P'
+            ? 'P'
+            : item.type === 'S'
+                ? 'S'
+                : 'T';
         const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
         if (!parsed) return null;
         const originalRaw = item.original_date || item.data_origem || item.data_limite_origem;
@@ -688,9 +736,17 @@ document.addEventListener('DOMContentLoaded', function() {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
             backendId: item.id || null,
-            label: item.id ? `${item.id}` : `${parsed.day}`,
-            description: type === 'T' ? (item.descricao || '') : (item.title || item.titulo || ''),
-            detail: item.observacoes || '',
+            label: item.label || (
+                type === 'S'
+                    ? 'S'
+                    : (item.id ? `${item.id}` : `${parsed.day}`)
+            ),
+            description: item.description
+                || item.descricao
+                || item.title
+                || item.titulo
+                || '',
+            detail: item.detail || item.observacoes || '',
             priority: type === 'T' ? (item.prioridade || '') : '',
             originalDay: originalParsed ? originalParsed.day : parsed.day,
             originalDate,
@@ -700,6 +756,7 @@ document.addEventListener('DOMContentLoaded', function() {
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
             responsavel: item.responsavel || null,
+            prescricao_date: item.prescricao_date || null,
         };
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
@@ -845,7 +902,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         const isCompletedMode = Boolean(state?.showCompleted);
         gridElement.innerHTML = '';
-        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
+        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
         setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
@@ -902,7 +959,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
             const currentDate = formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
-            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP]
+            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP, ...dayInfo.tasksS]
                 .some(entry => entry.originalDate && entry.originalDate !== currentDate);
             if (showHistory && hasHistory) {
                 dayCell.classList.add('agenda-panel__day--history');
@@ -933,22 +990,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 if (!isCompletedMode) {
                     tag.addEventListener('dragstart', (event) => {
+                        const listKey = getTypeKey(type);
+                        const entriesForDrag = dayInfo[listKey] || [];
+                        const payloadEntries = entriesForDrag.map(entry => {
+                            entry.type = entry.type || type;
+                            return {
+                                id: entry.id,
+                                backendId: entry.backendId,
+                                type: entry.type,
+                                prescricao_date: entry.prescricao_date || null,
+                                day: entry.day,
+                                monthIndex: entry.monthIndex,
+                                year: entry.year,
+                            };
+                        });
                         const payload = {
                             source: 'calendar',
                             day: dayInfo.day,
                             monthIndex: dayInfo.monthIndex,
                             year: dayInfo.year,
                             type,
-                            entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
-                                id: entry.id,
-                                backendId: entry.backendId,
-                                type: entry.type || type,
-                            })),
+                            entries: payloadEntries,
                         };
-                        dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
-                            entry.type = entry.type || type;
-                        });
-                        // Usa drag image só da sigla selecionada para não carregar as duas
                         const clone = tag.cloneNode(true);
                         clone.style.position = 'absolute';
                         clone.style.top = '-999px';
@@ -964,8 +1027,12 @@ document.addEventListener('DOMContentLoaded', function() {
             };
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
+            renderTag('S', dayInfo.tasksS);
             dayCell.addEventListener('click', () => {
-                if (dayInfo.tasksT.length) {
+                if (dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    recordActiveDay(dayInfo, 'S');
+                } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
@@ -997,13 +1064,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (!parsed || parsed.day === dayInfo.day) return;
-                    const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
+                    const typeKey = getTypeKey(parsed.type);
                     const sourceMonth = getMonthData(parsed.monthIndex ?? effectiveState.monthIndex, parsed.year || effectiveState.year || new Date().getFullYear());
                     const sourceDay = sourceMonth.find(d => d.day === parsed.day);
                     if (!sourceDay) {
                         return;
                     }
                     if (parsed.source === 'detail') {
+                        if (!isSupervisionDropAllowedForEntry(parsed.entry, dayInfo)) {
+                            showSupervisionLimitViolation(parsed.entry);
+                            return;
+                        }
                         const sourceList = sourceDay[typeKey];
                         const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
                         if (entryIndex === -1) return;
@@ -1016,11 +1087,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else if (parsed.source === 'calendar') {
                         const transferred = sourceDay[typeKey];
                         if (!transferred.length) return;
+                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
+                        const blocked = entriesPayload.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
+                        if (blocked) {
+                            showSupervisionLimitViolation(blocked);
+                            return;
+                        }
                         dayInfo[typeKey].push(...transferred);
                         sourceDay[typeKey] = [];
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
                         entriesPayload.forEach(entry => persistEntryDate(entry, dayInfo));
                         moveAgendaEntries(entriesPayload, dayInfo);
                     }
@@ -1047,10 +1123,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isActiveDay) {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
-                if (preferredType === 'T' && dayInfo.tasksT.length) {
+                if (preferredType === 'S' && dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                } else if (preferredType === 'T' && dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
                     populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                } else if (dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
@@ -1121,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <div class="agenda-panel__details-list">
                                     <p class="agenda-panel__details-title">Eventos do dia</p>
                                     <div class="agenda-panel__details-list-inner">
-                                        <p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>
+                                        <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
                                 <div class="agenda-panel__details-card">

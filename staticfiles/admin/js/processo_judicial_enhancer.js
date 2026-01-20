@@ -146,8 +146,11 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
         overlay.style.borderRadius = '8px';
         overlay.style.padding = '16px 24px';
-        overlay.style.zIndex = 2000;
+        overlay.style.zIndex = 2200;
         overlay.style.minWidth = '280px';
+        overlay.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
 
         const titleEl = document.createElement('div');
         titleEl.style.fontWeight = 'bold';
@@ -170,7 +173,10 @@ document.addEventListener('DOMContentLoaded', function() {
         button.style.padding = '6px 12px';
         button.style.borderRadius = '4px';
         button.style.cursor = 'pointer';
-        button.addEventListener('click', () => overlay.remove());
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            overlay.remove();
+        });
         overlay.appendChild(button);
 
         document.body.appendChild(overlay);
@@ -226,6 +232,155 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     insertAgendaSidebarPlaceholder();
 
+    const insertMinhasAcoesLink = () => {
+        const navSidebar = document.getElementById('nav-sidebar');
+        if (!navSidebar) return;
+        const usersLink = Array.from(navSidebar.querySelectorAll('a'))
+            .find((link) => link.textContent.trim() === 'Usuários');
+        const userRow = usersLink?.closest('tr');
+        if (!userRow || userRow.nextElementSibling?.classList.contains('minhas-acoes-row')) {
+            return;
+        }
+        const row = document.createElement('tr');
+        row.className = 'minhas-acoes-row';
+        const th = document.createElement('th');
+        th.scope = 'row';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'minhas-acoes-trigger';
+        button.textContent = 'Minhas ações';
+        th.appendChild(button);
+        const td = document.createElement('td');
+        row.append(th, td);
+        userRow.parentNode.insertBefore(row, userRow.nextSibling);
+        button.addEventListener('click', () => toggleMinhasAcoesPanel());
+    };
+
+    const removeViewSiteLink = () => {
+        const userTools = document.getElementById('user-tools');
+        if (!userTools) return;
+        const link = Array.from(userTools.querySelectorAll('a'))
+            .find((anchor) => anchor.textContent.trim().toLowerCase() === 'ver o site'
+                || anchor.textContent.trim().toLowerCase() === 'view site');
+        if (!link) return;
+        const previous = link.previousSibling;
+        const next = link.nextSibling;
+        link.remove();
+        if (previous && previous.nodeType === Node.TEXT_NODE && previous.textContent.includes('/')) {
+            previous.remove();
+        } else if (next && next.nodeType === Node.TEXT_NODE && next.textContent.includes('/')) {
+            next.remove();
+        }
+    };
+
+    const createMinhasAcoesPanel = () => {
+        if (document.querySelector('.minhas-acoes-panel')) {
+            return document.querySelector('.minhas-acoes-panel');
+        }
+        const panel = document.createElement('aside');
+        panel.className = 'minhas-acoes-panel';
+        panel.innerHTML = `
+            <div class="minhas-acoes-panel__header">
+                <strong>Minhas ações</strong>
+                <button type="button" class="minhas-acoes-panel__close" aria-label="Fechar">×</button>
+            </div>
+            <div class="minhas-acoes-panel__body">
+                <p class="minhas-acoes-panel__loading">Carregando ações...</p>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        panel.querySelector('.minhas-acoes-panel__close').addEventListener('click', () => {
+            panel.classList.remove('minhas-acoes-panel--open');
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                panel.classList.remove('minhas-acoes-panel--open');
+            }
+        });
+        return panel;
+    };
+
+    const renderMinhasAcoes = (panel, items) => {
+        const body = panel.querySelector('.minhas-acoes-panel__body');
+        if (!body) return;
+        if (!items.length) {
+            body.innerHTML = '<p class="minhas-acoes-panel__empty">Nenhuma ação recente.</p>';
+            return;
+        }
+        const list = document.createElement('div');
+        list.className = 'minhas-acoes-panel__list';
+        items.forEach((item) => {
+            const entry = document.createElement(item.change_url ? 'a' : 'div');
+            entry.className = 'minhas-acoes-panel__item';
+            if (item.change_url) {
+                entry.href = item.change_url;
+                entry.target = '_blank';
+                entry.rel = 'noopener noreferrer';
+            }
+            const title = document.createElement('span');
+            title.className = 'minhas-acoes-panel__item-title';
+            title.textContent = item.object_repr || 'Registro';
+            const meta = document.createElement('span');
+            meta.className = 'minhas-acoes-panel__item-meta';
+            const typeLabel = item.content_type ? `${item.content_type} · ` : '';
+            meta.textContent = `${typeLabel}${item.action_time_display || ''}`;
+            entry.append(title, meta);
+            if (item.change_message) {
+                const desc = document.createElement('span');
+                desc.className = 'minhas-acoes-panel__item-desc';
+                desc.textContent = item.change_message;
+                entry.appendChild(desc);
+            }
+            list.appendChild(entry);
+        });
+        body.innerHTML = '';
+        body.appendChild(list);
+    };
+
+    const loadMinhasAcoes = (panel) => {
+        const body = panel.querySelector('.minhas-acoes-panel__body');
+        if (body) {
+            body.innerHTML = '<p class="minhas-acoes-panel__loading">Carregando ações...</p>';
+        }
+        fetch('/admin/minhas-acoes/')
+            .then((response) => response.json())
+            .then((data) => {
+                renderMinhasAcoes(panel, Array.isArray(data.items) ? data.items : []);
+            })
+            .catch(() => {
+                if (body) {
+                    body.innerHTML = '<p class="minhas-acoes-panel__empty">Não foi possível carregar as ações.</p>';
+                }
+            });
+    };
+
+    const positionMinhasAcoesPanel = (panel, trigger) => {
+        if (!panel || !trigger) return;
+        const rect = trigger.getBoundingClientRect();
+        const sidebar = document.getElementById('nav-sidebar');
+        const sidebarRect = sidebar?.getBoundingClientRect();
+        const left = (sidebarRect ? sidebarRect.left : rect.left) - 6;
+        panel.style.left = `${Math.max(0, left)}px`;
+        panel.style.top = `${rect.bottom + 6}px`;
+        panel.style.right = 'auto';
+        const maxLeft = window.innerWidth - panel.offsetWidth - 12;
+        if (panel.offsetWidth && left > maxLeft) {
+            panel.style.left = `${Math.max(0, maxLeft)}px`;
+        }
+    };
+
+    const toggleMinhasAcoesPanel = () => {
+        const panel = createMinhasAcoesPanel();
+        panel.classList.toggle('minhas-acoes-panel--open');
+        if (panel.classList.contains('minhas-acoes-panel--open')) {
+            positionMinhasAcoesPanel(panel, document.querySelector('.minhas-acoes-trigger'));
+            loadMinhasAcoes(panel);
+        }
+    };
+
+    insertMinhasAcoesLink();
+    removeViewSiteLink();
+
     const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
     const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const getMonthLabel = (state) => {
@@ -238,9 +393,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return `${monthName} ${year}`;
     };
     const clampWeekOffset = (offset, state) => {
-        const data = getMonthData(state.monthIndex, state.year || new Date().getFullYear());
-        const maxOffset = Math.max(0, data.length - 7);
-        return Math.max(0, Math.min(offset, maxOffset));
+        const grid = buildMonthGrid(state.monthIndex, state.year || new Date().getFullYear());
+        const maxOffset = Math.max(0, grid.length - 7);
+        const normalized = Math.max(0, Math.min(offset, maxOffset));
+        return normalized - (normalized % 7);
     };
 
     const parseDateInputValue = (value) => {
@@ -278,6 +434,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = String(day).padStart(2, '0');
         return `${y}-${m}-${d}`;
     };
+    const formatDateLabel = (isoDate) => {
+        if (!isoDate) return '';
+        const parsed = new Date(isoDate);
+        if (Number.isNaN(parsed.getTime())) {
+            return isoDate;
+        }
+        return parsed.toLocaleDateString('pt-BR');
+    };
     const entryOrigins = new Map();
     const getOriginKey = (entry) => {
         if (!entry) return null;
@@ -288,30 +452,78 @@ document.addEventListener('DOMContentLoaded', function() {
         const key = getOriginKey(entry);
         if (!key) return;
         if (!entryOrigins.has(key)) {
-            entryOrigins.set(key, entry.originalDay || entry.day);
+            const originDate = entry.originalDate || formatDateIso(entry.year, entry.monthIndex, entry.day);
+            entryOrigins.set(key, originDate || entry.originalDay || entry.day);
         }
     };
     const applyOriginFromMap = (entry) => {
         const key = getOriginKey(entry);
         if (!key) return;
         if (entryOrigins.has(key)) {
-            entry.originalDay = entryOrigins.get(key);
+            const storedOrigin = entryOrigins.get(key);
+            if (typeof storedOrigin === 'string' && storedOrigin.includes('-')) {
+                entry.originalDate = storedOrigin;
+                const parsed = parseDateInputValue(storedOrigin);
+                if (parsed) {
+                    entry.originalDay = parsed.day;
+                }
+            } else {
+                entry.originalDay = storedOrigin;
+            }
         }
     };
     let updateAgendaEntryDate = () => {};
     let moveAgendaEntries = () => {};
 
+    const getTypeKey = (type) => {
+        if (type === 'P') return 'tasksP';
+        if (type === 'S') return 'tasksS';
+        return 'tasksT';
+    };
+
+    const getTypePrefix = (type) => {
+        if (type === 'P') return 'Prazo';
+        if (type === 'S') return 'Supervisão';
+        return 'Tarefa';
+    };
+
+    const getPrescricaoLimit = (entry) => {
+        const raw = entry?.prescricao_date;
+        if (!raw) return null;
+        return parseDateInputValue(raw);
+    };
+
+    const isSupervisionDropAllowedForEntry = (entry, targetDayInfo) => {
+        if (!entry || entry.type !== 'S') {
+            return true;
+        }
+        const limit = getPrescricaoLimit(entry);
+        if (!limit) {
+            return true;
+        }
+        const targetDate = new Date(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
+        const limitDate = new Date(limit.year, limit.monthIndex, limit.day);
+        return targetDate < limitDate;
+    };
+
+    const showSupervisionLimitViolation = (entry) => {
+        if (!entry?.prescricao_date) return;
+        const limitLabel = formatDateLabel(entry.prescricao_date) || entry.prescricao_date;
+        createSystemAlert('Agenda Geral', `S não pode ser movido após ${limitLabel}.`);
+    };
+
     const normalizeEntryMetadata = (dayInfo, type) => {
-        const list = type === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+        const taskKey = getTypeKey(type);
+        const list = dayInfo[taskKey];
         if (!list) return;
         list.forEach((entry, index) => {
-            const prefix = type === 'T' ? 'Tarefa' : 'Prazo';
+            const prefix = getTypePrefix(type);
             entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            // Reordena sempre de forma sequencial por tipo e dia (já filtrado por usuário, se ativo)
-            entry.label = `${index + 1}`;
+            entry.label = type === 'S' ? 'S' : `${index + 1}`;
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
+            entry.originalDate = entry.originalDate || formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
         });
     };
 
@@ -322,6 +534,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 day: index + 1,
                 tasksT: [],
                 tasksP: [],
+                tasksS: [],
                 monthIndex,
                 year,
             };
@@ -337,6 +550,14 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarMonths[key] = createCalendarDays(monthIndex, year);
         }
         return calendarMonths[key];
+    };
+    const buildMonthGrid = (monthIndex, year = new Date().getFullYear()) => {
+        const days = getMonthData(monthIndex, year);
+        const firstWeekday = new Date(year, monthIndex, 1).getDay();
+        const leading = Array(firstWeekday).fill(null);
+        const total = leading.length + days.length;
+        const trailing = (7 - (total % 7)) % 7;
+        return [...leading, ...days, ...Array(trailing).fill(null)];
     };
 
     const processMatch = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
@@ -358,6 +579,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const descInput = row.querySelector('input[id$="-descricao"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const priorityInput = row.querySelector('select[id$="-prioridade"]') || row.querySelector('input[id$="-prioridade"]');
+            const responsavelInput = row.querySelector('select[id$="-responsavel"]') || row.querySelector('input[id$="-responsavel"]');
             const parsedDate = parseDateInputValue(dateInput?.value);
             if (!parsedDate) return;
             const idInput = row.querySelector('input[id$="-id"]');
@@ -375,6 +597,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
+                responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
             rememberOrigin(entry);
             appendEntry(entry);
@@ -391,6 +614,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const titleInput = row.querySelector('input[id$="-titulo"]');
             const obsInput = row.querySelector('textarea[id$="-observacoes"]') || row.querySelector('input[id$="-observacoes"]');
             const idInput = row.querySelector('input[id$="-id"]');
+            const responsavelInput = row.querySelector('select[id$="-responsavel"]') || row.querySelector('input[id$="-responsavel"]');
             const entry = {
                 type: 'P',
                 id: idInput?.value ? `p-${idInput.value}` : `p-${index + 1}-${parsedDate.day}`,
@@ -404,6 +628,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: parsedDate.year,
                 admin_url: currentProcessId ? `/admin/contratos/processojudicial/${currentProcessId}/change/` : '',
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
+                responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
             rememberOrigin(entry);
             appendEntry(entry);
@@ -423,8 +648,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const mergeEntriesByBackend = (primary = [], secondary = []) => {
         const map = new Map();
         const add = (entry, prefer = false) => {
-            const typeKey = entry.type === 'P' ? 'p' : 't';
-            const key = entry.backendId ? `b-${typeKey}-${entry.backendId}` : `i-${entry.id}`;
+            const normalizedType = entry.type === 'P' ? 'p' : entry.type === 'S' ? 's' : 't';
+            const key = entry.backendId ? `b-${normalizedType}-${entry.backendId}` : `i-${entry.id}`;
             if (!prefer && map.has(key)) return;
             map.set(key, entry);
         };
@@ -440,12 +665,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const common = { monthIndex: day.monthIndex, year: day.year, day: day.day };
                 day.tasksT.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'T' }));
                 day.tasksP.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'P' }));
+                day.tasksS.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'S' }));
             });
         });
         return rebuilt;
     };
     const persistEntryDate = (entryData, targetDayInfo) => {
         if (!entryData?.backendId || !targetDayInfo) return;
+        if (entryData.type === 'S') return;
         const payloadDate = formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
         const isTask = entryData.type === 'T';
         const url = isTask
@@ -473,9 +700,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const days = getMonthData(entry.monthIndex, entry.year);
             const dayInfo = days[entry.day - 1];
             if (!dayInfo) return;
-            const entryType = entry.type === 'P' ? 'P' : 'T';
+            const entryType = entry.type === 'P'
+                ? 'P'
+                : entry.type === 'S'
+                    ? 'S'
+                    : 'T';
             entry.type = entryType;
-            const targetList = entryType === 'T' ? dayInfo.tasksT : dayInfo.tasksP;
+            const targetList = dayInfo[getTypeKey(entryType)];
             targetList.push(entry);
             normalizeEntryMetadata(dayInfo, entry.type);
         });
@@ -489,25 +720,53 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const normalizeApiEntry = (item) => {
         if (!item) return null;
-        const type = item.type === 'P' ? 'P' : 'T';
+        const type = item.type === 'P'
+            ? 'P'
+            : item.type === 'S'
+                ? 'S'
+                : 'T';
         const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
         if (!parsed) return null;
+        const originalRaw = item.original_date || item.data_origem || item.data_limite_origem;
+        const originalParsed = parseDateInputValue(originalRaw);
+        const originalDate = originalParsed
+            ? formatDateIso(originalParsed.year, originalParsed.monthIndex, originalParsed.day)
+            : formatDateIso(parsed.year, parsed.monthIndex, parsed.day);
         const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
             backendId: item.id || null,
-            label: item.id ? `${item.id}` : `${parsed.day}`,
-            description: type === 'T' ? (item.descricao || '') : (item.title || item.titulo || ''),
-            detail: item.observacoes || '',
+            label: item.label || (
+                type === 'S'
+                    ? 'S'
+                    : (item.id ? `${item.id}` : `${parsed.day}`)
+            ),
+            description: item.description
+                || item.descricao
+                || item.title
+                || item.titulo
+                || '',
+            detail: item.detail || item.observacoes || '',
             priority: type === 'T' ? (item.prioridade || '') : '',
-            originalDay: parsed.day,
+            originalDay: originalParsed ? originalParsed.day : parsed.day,
+            originalDate,
             day: parsed.day,
             monthIndex: parsed.monthIndex,
             year: parsed.year,
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
+            responsavel: item.responsavel || null,
+            prescricao_date: item.prescricao_date || null,
         };
-        applyOriginFromMap(entry);
+        const hasApiOrigin = Boolean(originalRaw);
+        if (hasApiOrigin) {
+            const key = getOriginKey(entry);
+            if (key) {
+                entryOrigins.set(key, originalDate);
+            }
+        } else {
+            applyOriginFromMap(entry);
+        }
         rememberOrigin(entry);
         return entry;
     };
@@ -593,10 +852,11 @@ document.addEventListener('DOMContentLoaded', function() {
             text.className = 'agenda-panel__details-item-text';
             text.textContent = entryData.description || '';
             entry.appendChild(text);
-            if (entryData.originalDay && entryData.originalDay !== dayData.day) {
+            const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
+            if (entryData.originalDate) {
                 const original = document.createElement('span');
                 original.className = 'agenda-panel__details-original';
-                original.textContent = `Origem: ${entryData.originalDay}`;
+                original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
                 entry.appendChild(original);
             }
             entry.addEventListener('click', () => {
@@ -642,7 +902,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         const isCompletedMode = Boolean(state?.showCompleted);
         gridElement.innerHTML = '';
-        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
+        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
         setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
@@ -667,10 +927,10 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = weekday;
             gridElement.appendChild(label);
         });
-        const sampleCalendarDays = getMonthData(effectiveState.monthIndex, effectiveState.year || new Date().getFullYear());
+        const calendarGrid = buildMonthGrid(effectiveState.monthIndex, effectiveState.year || new Date().getFullYear());
         const baseDays = effectiveState.mode === 'weekly'
-            ? sampleCalendarDays.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
-            : sampleCalendarDays;
+            ? calendarGrid.slice(effectiveState.weekOffset, effectiveState.weekOffset + 7)
+            : calendarGrid;
         const filler = effectiveState.mode === 'weekly'
             ? Math.max(0, 7 - baseDays.length)
             : 0;
@@ -698,7 +958,9 @@ document.addEventListener('DOMContentLoaded', function() {
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
-            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP].some(entry => entry.originalDay && entry.originalDay !== dayInfo.day);
+            const currentDate = formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
+            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP, ...dayInfo.tasksS]
+                .some(entry => entry.originalDate && entry.originalDate !== currentDate);
             if (showHistory && hasHistory) {
                 dayCell.classList.add('agenda-panel__day--history');
             } else {
@@ -728,21 +990,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 if (!isCompletedMode) {
                     tag.addEventListener('dragstart', (event) => {
+                        const listKey = getTypeKey(type);
+                        const entriesForDrag = dayInfo[listKey] || [];
+                        const payloadEntries = entriesForDrag.map(entry => {
+                            entry.type = entry.type || type;
+                            return {
+                                id: entry.id,
+                                backendId: entry.backendId,
+                                type: entry.type,
+                                prescricao_date: entry.prescricao_date || null,
+                                day: entry.day,
+                                monthIndex: entry.monthIndex,
+                                year: entry.year,
+                            };
+                        });
                         const payload = {
                             source: 'calendar',
                             day: dayInfo.day,
                             monthIndex: dayInfo.monthIndex,
                             year: dayInfo.year,
                             type,
-                            entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
-                                id: entry.id,
-                                backendId: entry.backendId,
-                                type: entry.type || type,
-                            })),
+                            entries: payloadEntries,
                         };
-                        dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
-                            entry.type = entry.type || type;
-                        });
                         const clone = tag.cloneNode(true);
                         clone.style.position = 'absolute';
                         clone.style.top = '-999px';
@@ -758,8 +1027,12 @@ document.addEventListener('DOMContentLoaded', function() {
             };
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
+            renderTag('S', dayInfo.tasksS);
             dayCell.addEventListener('click', () => {
-                if (dayInfo.tasksT.length) {
+                if (dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    recordActiveDay(dayInfo, 'S');
+                } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
@@ -791,13 +1064,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (!parsed || parsed.day === dayInfo.day) return;
-                    const typeKey = parsed.type === 'T' ? 'tasksT' : 'tasksP';
+                    const typeKey = getTypeKey(parsed.type);
                     const sourceMonth = getMonthData(parsed.monthIndex ?? effectiveState.monthIndex, parsed.year || effectiveState.year || new Date().getFullYear());
                     const sourceDay = sourceMonth.find(d => d.day === parsed.day);
                     if (!sourceDay) {
                         return;
                     }
                     if (parsed.source === 'detail') {
+                        if (!isSupervisionDropAllowedForEntry(parsed.entry, dayInfo)) {
+                            showSupervisionLimitViolation(parsed.entry);
+                            return;
+                        }
                         const sourceList = sourceDay[typeKey];
                         const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
                         if (entryIndex === -1) return;
@@ -810,11 +1087,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else if (parsed.source === 'calendar') {
                         const transferred = sourceDay[typeKey];
                         if (!transferred.length) return;
+                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
+                        const blocked = entriesPayload.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
+                        if (blocked) {
+                            showSupervisionLimitViolation(blocked);
+                            return;
+                        }
                         dayInfo[typeKey].push(...transferred);
                         sourceDay[typeKey] = [];
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
                         entriesPayload.forEach(entry => persistEntryDate(entry, dayInfo));
                         moveAgendaEntries(entriesPayload, dayInfo);
                     }
@@ -841,10 +1123,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isActiveDay) {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
-                if (preferredType === 'T' && dayInfo.tasksT.length) {
+                if (preferredType === 'S' && dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                } else if (preferredType === 'T' && dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
                     populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                } else if (dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
@@ -915,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <div class="agenda-panel__details-list">
                                     <p class="agenda-panel__details-title">Eventos do dia</p>
                                     <div class="agenda-panel__details-list-inner">
-                                        <p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>
+                                        <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
                                 <div class="agenda-panel__details-card">
@@ -1076,8 +1363,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const matchesBackend = key && backendSet.has(key);
                 const matchesId = idSet.has(item.id);
                 if (matchesBackend || matchesId) {
-                    const newOrigin = item.originalDay || targetDayInfo.day;
-                    rememberOrigin({ backendId: item.backendId, originalDay: newOrigin, day: newOrigin });
+                    const newOrigin = item.originalDate || formatDateIso(item.year, item.monthIndex, item.day);
+                    rememberOrigin({
+                        backendId: item.backendId,
+                        originalDate: newOrigin,
+                        year: item.year,
+                        monthIndex: item.monthIndex,
+                        day: item.day,
+                    });
                     return {
                         ...item,
                         day: targetDayInfo.day,
@@ -1225,12 +1518,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const initials = document.createElement('span');
                 initials.className = 'agenda-panel__user-card-initials';
                 initials.textContent = getUserInitials(user);
-                const name = document.createElement('span');
-                name.className = 'agenda-panel__user-card-name';
-                name.textContent = formatUserLabel(user);
                 const username = document.createElement('span');
                 username.className = 'agenda-panel__user-card-username';
-                username.textContent = user.username;
+                username.textContent = user.username || formatUserLabel(user);
                 const counters = document.createElement('div');
                 counters.className = 'agenda-panel__user-card-counts';
                 counters.style.fontSize = '11px';
@@ -1240,7 +1530,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const prazoCount = isCompletedMode ? (user.completed_prazos || 0) : (user.pending_prazos || 0);
                 const label = isCompletedMode ? 'Concluídos' : 'Pendentes';
                 counters.textContent = `${label} — T ${taskCount} · P ${prazoCount}`;
-                card.append(initials, name, username, counters);
+                card.append(initials, username, counters);
                 card.addEventListener('click', () => {
                     calendarState.activeUser = user;
                     calendarState.view = 'calendar';
@@ -1706,6 +1996,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 excluirBtn.click();
             }
         });
+        const andamentosGroup = document.getElementById('andamentos-group');
+        const submitRow = excluirBtn.closest('.submit-row');
+        if (andamentosGroup && submitRow) {
+            const updateVisibility = () => {
+                submitRow.style.display = andamentosGroup.classList.contains('active') ? '' : 'none';
+            };
+            updateVisibility();
+            const tabsContainer = document.querySelector('.inline-group-tabs');
+            if (tabsContainer) {
+                tabsContainer.addEventListener('click', (event) => {
+                    const target = event.target;
+                    if (target && target.tagName === 'BUTTON') {
+                        window.requestAnimationFrame(updateVisibility);
+                    }
+                });
+            }
+            const observer = new MutationObserver(updateVisibility);
+            observer.observe(andamentosGroup, { attributes: true, attributeFilter: ['class'] });
+        }
     }
 
     // Máscara e formatação CNJ no input principal
@@ -1734,8 +2043,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (form) {
+        let lastSubmitButton = null;
         form.addEventListener('submit', () => {
             deduplicateInlineAndamentos();
+        });
+        form.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            const button = target.closest('input[type="submit"], button[type="submit"]');
+            if (!button || !form.contains(button)) return;
+            lastSubmitButton = button;
+        }, { capture: true });
+        form.addEventListener('submit', (event) => {
+            const submitter = event.submitter && form.contains(event.submitter)
+                ? event.submitter
+                : lastSubmitButton;
+            if (!submitter) return;
+            const activeButton = submitter.closest('input[type="submit"], button[type="submit"]');
+            if (!activeButton) return;
+            const originalLabel = activeButton.tagName === 'INPUT'
+                ? activeButton.value
+                : activeButton.textContent;
+            activeButton.dataset.originalLabel = originalLabel;
+            if (activeButton.tagName === 'INPUT') {
+                activeButton.value = 'Salvando...';
+            } else {
+                activeButton.textContent = 'Salvando...';
+            }
+        }, { capture: true });
+        const continueButtons = form.querySelectorAll('input[name="_continue"], button[name="_continue"]');
+        continueButtons.forEach((button) => {
+            button.style.display = 'none';
         });
     }
 
@@ -1783,6 +2121,432 @@ document.addEventListener('DOMContentLoaded', function() {
         card.classList.add('info-card-floating');
     };
     makeInfoCardSticky();
+
+    const normalizeCpf = (value) => (value || '').replace(/\D/g, '');
+    const parseEnderecoString = (value) => {
+        const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
+        if (!value) return output;
+        const getPart = (letter) => {
+            const re = new RegExp(`${letter}:\\s*([\\s\\S]*?)(?=\\s*-\\s*[A-H]:|$)`, 'i');
+            const match = value.match(re);
+            return match ? match[1].trim() : '';
+        };
+        Object.keys(output).forEach((key) => {
+            output[key] = getPart(key);
+        });
+        return output;
+    };
+    const buildEnderecoString = (parts) => {
+        const fields = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        return fields.map((field) => `${field}: ${parts[field] || ''}`).join(' - ');
+    };
+    const createEnderecoWidget = (idPrefix, initialValue = '') => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'herdeiros-endereco';
+        wrapper.innerHTML = `
+            <textarea class="herdeiros-endereco-raw" id="${idPrefix}_raw" style="display:none;"></textarea>
+            <div class="endereco-fields-grid">
+                <div class="form-group">
+                    <label for="${idPrefix}_A">A (Rua ou Av)</label>
+                    <input type="text" id="${idPrefix}_A" data-part="A">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_B">B (Número)</label>
+                    <input type="text" id="${idPrefix}_B" data-part="B">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_C">C (Complemento)</label>
+                    <input type="text" id="${idPrefix}_C" data-part="C">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_D">D (Bairro)</label>
+                    <input type="text" id="${idPrefix}_D" data-part="D">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_E">E (Cidade)</label>
+                    <input type="text" id="${idPrefix}_E" data-part="E">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_F">F (Estado)</label>
+                    <input type="text" id="${idPrefix}_F" data-part="F">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_G">G (CEP)</label>
+                    <input type="text" id="${idPrefix}_G" data-part="G" maxlength="9">
+                </div>
+                <div class="form-group">
+                    <label for="${idPrefix}_H">H (UF)</label>
+                    <input type="text" id="${idPrefix}_H" data-part="H" maxlength="2">
+                </div>
+            </div>
+        `;
+        const rawTextarea = wrapper.querySelector('.herdeiros-endereco-raw');
+        const inputs = Array.from(wrapper.querySelectorAll('input[data-part]'));
+        const populate = (value) => {
+            const parts = parseEnderecoString(value);
+            inputs.forEach((input) => {
+                input.value = parts[input.dataset.part] || '';
+            });
+            rawTextarea.value = buildEnderecoString(parts);
+        };
+        const updateRaw = () => {
+            const parts = {};
+            inputs.forEach((input) => {
+                parts[input.dataset.part] = input.value || '';
+            });
+            rawTextarea.value = buildEnderecoString(parts);
+        };
+        inputs.forEach((input) => {
+            input.addEventListener('input', updateRaw);
+        });
+        const cepInput = wrapper.querySelector('input[data-part="G"]');
+        if (cepInput) {
+            cepInput.addEventListener('input', (event) => {
+                let cep = event.target.value.replace(/\D/g, '').substring(0, 8);
+                if (cep.length > 5) {
+                    cep = cep.replace(/^(\d{5})(\d)/, '$1-$2');
+                }
+                event.target.value = cep;
+            });
+        }
+        populate(initialValue);
+        return wrapper;
+    };
+    const formatCpfValue = (rawValue) => {
+        const digits = (rawValue || '').replace(/\D/g, '').slice(0, 11);
+        if (digits.length !== 11) {
+            return digits;
+        }
+        return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    };
+    const attachCpfMaskAndCopy = (input) => {
+        if (!input || input.dataset.cpfBound === 'true') return;
+        input.dataset.cpfBound = 'true';
+        const applyMask = () => {
+            const formatted = formatCpfValue(input.value);
+            input.value = formatted;
+        };
+        input.addEventListener('input', applyMask);
+        input.addEventListener('blur', applyMask);
+        input.addEventListener('click', () => {
+            const digitsOnly = (input.value || '').replace(/\D/g, '');
+            if (digitsOnly.length !== 11) {
+                return;
+            }
+            navigator.clipboard.writeText(digitsOnly).then(() => {
+                input.title = 'CPF copiado sem formatação';
+                input.classList.add('cpf-copy-field');
+                input.classList.add('copied');
+                setTimeout(() => {
+                    input.classList.remove('copied');
+                }, 1200);
+            }).catch(() => {});
+        });
+        applyMask();
+    };
+    const herdeirosCache = new Map();
+    const fetchHerdeiros = (cpf) => {
+        const normalized = normalizeCpf(cpf);
+        if (!normalized) {
+            return Promise.resolve({ cpf_falecido: '', herdeiros: [] });
+        }
+        if (herdeirosCache.has(normalized)) {
+            return herdeirosCache.get(normalized);
+        }
+        const promise = fetch(`/api/herdeiros/?cpf_falecido=${encodeURIComponent(normalized)}`)
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('Falha ao buscar herdeiros.');
+                }
+                return response.json();
+            })
+            .catch((error) => {
+                herdeirosCache.delete(normalized);
+                throw error;
+            });
+        herdeirosCache.set(normalized, promise);
+        return promise;
+    };
+    const updateHerdeirosBadge = (card, hasEntries) => {
+        if (!card) return;
+        const trigger = card.querySelector('.herdeiros-trigger');
+        if (!trigger) return;
+        trigger.classList.toggle('has-herdeiros', hasEntries);
+    };
+    const buildHerdeirosModal = () => {
+        let modal = document.getElementById('herdeiros-modal');
+        if (modal) return modal;
+        modal = document.createElement('div');
+        modal.id = 'herdeiros-modal';
+        modal.className = 'herdeiros-modal';
+        modal.setAttribute('aria-hidden', 'true');
+        modal.innerHTML = `
+            <div class="herdeiros-modal__panel" role="dialog" aria-modal="true">
+                <div class="herdeiros-modal__header">
+                    <span>Herdeiros cadastrados</span>
+                    <button type="button" class="herdeiros-modal__close" aria-label="Fechar">×</button>
+                </div>
+                <div class="herdeiros-modal__body">
+                    <div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>
+                </div>
+                <div class="herdeiros-modal__footer">
+                    <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                    <button type="button" class="herdeiros-modal__save">Salvar herdeiros</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.setAttribute('aria-hidden', 'true');
+            }
+        });
+        modal.querySelector('.herdeiros-modal__close').addEventListener('click', () => {
+            modal.setAttribute('aria-hidden', 'true');
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && modal.getAttribute('aria-hidden') !== 'true') {
+                modal.setAttribute('aria-hidden', 'true');
+            }
+        });
+        return modal;
+    };
+    const renderHerdeiroEntry = (data = {}, index = 0) => {
+        const entry = document.createElement('div');
+        entry.className = 'herdeiros-entry';
+        entry.dataset.index = `${index}`;
+        entry.innerHTML = `
+            <div class="herdeiros-entry__row">
+                <label>Nome completo
+                    <input type="text" name="nome_completo">
+                </label>
+                <label>CPF
+                    <input type="text" name="cpf">
+                </label>
+                <label>RG
+                    <input type="text" name="rg">
+                </label>
+                <label>Grau de parentesco
+                    <input type="text" name="grau_parentesco">
+                </label>
+            </div>
+            <div class="herdeiros-entry__actions">
+                <label class="herdeiros-entry__citado">
+                    <input type="checkbox" name="herdeiro_citado">
+                    Herdeiro citado
+                </label>
+                <button type="button" class="herdeiros-entry__remove">Remover</button>
+            </div>
+        `;
+        const setValue = (name, value) => {
+            const input = entry.querySelector(`input[name="${name}"]`);
+            if (input) {
+                input.value = value || '';
+            }
+        };
+        setValue('nome_completo', data.nome_completo);
+        setValue('cpf', data.cpf);
+        setValue('rg', data.rg);
+        setValue('grau_parentesco', data.grau_parentesco);
+        const citadoInput = entry.querySelector('input[name="herdeiro_citado"]');
+        if (citadoInput) {
+            citadoInput.checked = !!data.herdeiro_citado;
+        }
+        const enderecoWrapper = createEnderecoWidget(`herdeiros_endereco_${Date.now()}_${index}`, data.endereco || '');
+        entry.appendChild(enderecoWrapper);
+        const cpfInput = entry.querySelector('input[name="cpf"]');
+        attachCpfMaskAndCopy(cpfInput);
+        return entry;
+    };
+    const collectHerdeirosFromModal = (modal) => {
+        const entries = [];
+        modal.querySelectorAll('.herdeiros-entry').forEach((entryEl) => {
+            const nome = entryEl.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
+            const cpf = entryEl.querySelector('input[name="cpf"]')?.value?.trim() || '';
+            const rg = entryEl.querySelector('input[name="rg"]')?.value?.trim() || '';
+            const grau = entryEl.querySelector('input[name="grau_parentesco"]')?.value?.trim() || '';
+            const citado = !!entryEl.querySelector('input[name="herdeiro_citado"]')?.checked;
+            const endereco = entryEl.querySelector('.herdeiros-endereco-raw')?.value || '';
+            if (!nome && !cpf && !rg && !grau && !endereco) {
+                return;
+            }
+            entries.push({
+                nome_completo: nome,
+                cpf,
+                rg,
+                grau_parentesco: grau,
+                herdeiro_citado: citado,
+                endereco,
+            });
+        });
+        return entries;
+    };
+    const renderHerdeirosModal = (modal, herdeiros = []) => {
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (!body) return;
+        body.innerHTML = '';
+        if (!herdeiros.length) {
+            body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+            return;
+        }
+        herdeiros.forEach((herdeiro, index) => {
+            const entry = renderHerdeiroEntry(herdeiro, index);
+            body.appendChild(entry);
+        });
+        body.querySelectorAll('input[name="herdeiro_citado"]').forEach((checkbox) => {
+            checkbox.addEventListener('change', (event) => {
+                if (!event.target.checked) return;
+                body.querySelectorAll('input[name="herdeiro_citado"]').forEach((other) => {
+                    if (other !== event.target) {
+                        other.checked = false;
+                    }
+                });
+            });
+        });
+        body.querySelectorAll('.herdeiros-entry__remove').forEach((button) => {
+            button.addEventListener('click', () => {
+                button.closest('.herdeiros-entry')?.remove();
+                if (!body.querySelector('.herdeiros-entry')) {
+                    body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+                }
+            });
+        });
+    };
+    const openHerdeirosModal = (card) => {
+        const cpfRaw = card?.dataset?.parteCpf || '';
+        const cpf = normalizeCpf(cpfRaw);
+        if (!cpf) {
+            createSystemAlert('CFF System', 'CPF do falecido não encontrado para cadastrar herdeiros.');
+            return;
+        }
+        const modal = buildHerdeirosModal();
+        modal.dataset.cpf = cpf;
+        if (card?.dataset?.parteId) {
+            modal.dataset.parteId = card.dataset.parteId;
+        }
+        modal.setAttribute('aria-hidden', 'false');
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (body) {
+            body.innerHTML = '<div class="herdeiros-empty">Carregando herdeiros...</div>';
+        }
+        fetchHerdeiros(cpf)
+            .then((data) => {
+                renderHerdeirosModal(modal, data.herdeiros || []);
+            })
+            .catch(() => {
+                if (body) {
+                    body.innerHTML = '<div class="herdeiros-empty">Não foi possível carregar os herdeiros.</div>';
+                }
+            });
+    };
+    const setupHerdeirosModalActions = () => {
+        const modal = buildHerdeirosModal();
+        const addButton = modal.querySelector('.herdeiros-modal__add');
+        const saveButton = modal.querySelector('.herdeiros-modal__save');
+        const body = modal.querySelector('.herdeiros-modal__body');
+        const isHerdeiroFilled = (entry) => {
+            if (!entry) return false;
+            const nome = entry.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
+            const cpf = entry.querySelector('input[name="cpf"]')?.value?.trim() || '';
+            const rg = entry.querySelector('input[name="rg"]')?.value?.trim() || '';
+            const grau = entry.querySelector('input[name="grau_parentesco"]')?.value?.trim() || '';
+            const enderecoRaw = entry.querySelector('.herdeiros-endereco-raw')?.value || '';
+            const enderecoParts = parseEnderecoString(enderecoRaw);
+            const enderecoHasValue = Object.values(enderecoParts).some((value) => (value || '').trim());
+            return Boolean(nome || cpf || rg || grau || enderecoHasValue);
+        };
+        if (addButton) {
+            addButton.addEventListener('click', () => {
+                if (!body) return;
+                const entries = Array.from(body.querySelectorAll('.herdeiros-entry'));
+                const lastEntry = entries[entries.length - 1];
+                if (lastEntry && !isHerdeiroFilled(lastEntry)) {
+                    createSystemAlert('CFF System', 'Preencha o herdeiro atual antes de adicionar outro.');
+                    lastEntry.querySelector('input[name="nome_completo"]')?.focus();
+                    return;
+                }
+                const entry = renderHerdeiroEntry({}, body.querySelectorAll('.herdeiros-entry').length);
+                if (body.querySelector('.herdeiros-empty')) {
+                    body.innerHTML = '';
+                }
+                body.appendChild(entry);
+                entry.querySelectorAll('input[name="herdeiro_citado"]').forEach((checkbox) => {
+                    checkbox.addEventListener('change', (event) => {
+                        if (!event.target.checked) return;
+                        body.querySelectorAll('input[name="herdeiro_citado"]').forEach((other) => {
+                            if (other !== event.target) {
+                                other.checked = false;
+                            }
+                        });
+                    });
+                });
+                entry.querySelector('.herdeiros-entry__remove')?.addEventListener('click', () => {
+                    entry.remove();
+                    if (!body.querySelector('.herdeiros-entry')) {
+                        body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
+                    }
+                });
+            });
+        }
+        if (saveButton) {
+            saveButton.addEventListener('click', () => {
+                const cpf = modal.dataset.cpf;
+                const herdeiros = collectHerdeirosFromModal(modal);
+                if (!cpf) {
+                    createSystemAlert('CFF System', 'CPF do falecido não encontrado para salvar herdeiros.');
+                    return;
+                }
+                saveButton.disabled = true;
+                fetch('/api/herdeiros/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken || '',
+                    },
+                    body: JSON.stringify({ cpf_falecido: cpf, herdeiros }),
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('Falha ao salvar herdeiros.');
+                        }
+                        return response.json();
+                    })
+                    .then((data) => {
+                        modal.setAttribute('aria-hidden', 'true');
+                        herdeirosCache.set(cpf, Promise.resolve(data));
+                        const card = modal.dataset.parteId
+                            ? document.querySelector(`.info-card[data-parte-id="${modal.dataset.parteId}"]`)
+                            : null;
+                        updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        createSystemAlert('CFF System', 'Herdeiros salvos com sucesso.');
+                    })
+                    .catch(() => {
+                        createSystemAlert('CFF System', 'Não foi possível salvar os herdeiros.');
+                    })
+                    .finally(() => {
+                        saveButton.disabled = false;
+                    });
+            });
+        }
+    };
+    setupHerdeirosModalActions();
+    document.querySelectorAll('.info-card').forEach((card) => {
+        const hasObito = card.dataset.obito === '1';
+        const trigger = card.querySelector('.herdeiros-trigger');
+        if (trigger) {
+            trigger.addEventListener('click', () => openHerdeirosModal(card));
+        }
+        if (hasObito && card.dataset.parteCpf) {
+            const cpf = normalizeCpf(card.dataset.parteCpf);
+            if (cpf) {
+                fetchHerdeiros(cpf)
+                    .then((data) => {
+                        updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                    })
+                    .catch(() => {});
+            }
+        }
+    });
 
     const repositionHistoryLink = () => {
         const historyLink = document.querySelector('#content-main .object-tools li .historylink');
