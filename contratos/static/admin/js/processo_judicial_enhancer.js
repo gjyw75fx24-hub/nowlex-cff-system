@@ -763,7 +763,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false) => {
         setDetailTitle?.(dayData?.day, type);
         const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
         if (!entries.length) {
@@ -815,22 +815,24 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
-            entry.draggable = true;
-            entry.addEventListener('dragstart', (event) => {
-                event.dataTransfer.setData('text/plain', JSON.stringify({
-                    source: 'detail',
-                    type,
-                    day: dayData.day,
-                    monthIndex: dayData.monthIndex,
-                    year: dayData.year,
-                    entry: {
-                        id: entryData.id,
-                        backendId: entryData.backendId,
+            entry.draggable = !isCompletedMode;
+            if (!isCompletedMode) {
+                entry.addEventListener('dragstart', (event) => {
+                    event.dataTransfer.setData('text/plain', JSON.stringify({
+                        source: 'detail',
                         type,
-                    },
-                }));
-                event.dataTransfer.effectAllowed = 'move';
-            });
+                        day: dayData.day,
+                        monthIndex: dayData.monthIndex,
+                        year: dayData.year,
+                        entry: {
+                            id: entryData.id,
+                            backendId: entryData.backendId,
+                            type,
+                        },
+                    }));
+                    event.dataTransfer.effectAllowed = 'move';
+                });
+            }
             detailList.appendChild(entry);
         });
     };
@@ -841,6 +843,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const todayFallback = new Date();
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
+        const isCompletedMode = Boolean(state?.showCompleted);
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T ou P para ver as tarefas/prazos e detalhes.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -913,7 +916,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
-                tag.draggable = true;
+                tag.draggable = !isCompletedMode;
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -924,47 +927,49 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
-                tag.addEventListener('dragstart', (event) => {
-                    const payload = {
-                        source: 'calendar',
-                        day: dayInfo.day,
-                        monthIndex: dayInfo.monthIndex,
-                        year: dayInfo.year,
-                        type,
-                        entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
-                            id: entry.id,
-                            backendId: entry.backendId,
-                            type: entry.type || type,
-                        })),
-                    };
-                    dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
-                        entry.type = entry.type || type;
+                if (!isCompletedMode) {
+                    tag.addEventListener('dragstart', (event) => {
+                        const payload = {
+                            source: 'calendar',
+                            day: dayInfo.day,
+                            monthIndex: dayInfo.monthIndex,
+                            year: dayInfo.year,
+                            type,
+                            entries: dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].map(entry => ({
+                                id: entry.id,
+                                backendId: entry.backendId,
+                                type: entry.type || type,
+                            })),
+                        };
+                        dayInfo[type === 'T' ? 'tasksT' : 'tasksP'].forEach(entry => {
+                            entry.type = entry.type || type;
+                        });
+                        // Usa drag image só da sigla selecionada para não carregar as duas
+                        const clone = tag.cloneNode(true);
+                        clone.style.position = 'absolute';
+                        clone.style.top = '-999px';
+                        document.body.appendChild(clone);
+                        const rect = clone.getBoundingClientRect();
+                        event.dataTransfer.setDragImage(clone, rect.width / 2, rect.height / 2);
+                        event.dataTransfer.setData('text/plain', JSON.stringify(payload));
+                        event.dataTransfer.effectAllowed = 'move';
+                        setTimeout(() => document.body.removeChild(clone), 0);
                     });
-                    // Usa drag image só da sigla selecionada para não carregar as duas
-                    const clone = tag.cloneNode(true);
-                    clone.style.position = 'absolute';
-                    clone.style.top = '-999px';
-                    document.body.appendChild(clone);
-                    const rect = clone.getBoundingClientRect();
-                    event.dataTransfer.setDragImage(clone, rect.width / 2, rect.height / 2);
-                    event.dataTransfer.setData('text/plain', JSON.stringify(payload));
-                    event.dataTransfer.effectAllowed = 'move';
-                    setTimeout(() => document.body.removeChild(clone), 0);
-                });
+                }
                 tagsWrapper.appendChild(tag);
             };
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             dayCell.addEventListener('click', () => {
                 if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'P');
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
@@ -1043,14 +1048,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
                 if (preferredType === 'T' && dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
                     recordActiveDay(dayInfo, 'P');
                 }
             }
