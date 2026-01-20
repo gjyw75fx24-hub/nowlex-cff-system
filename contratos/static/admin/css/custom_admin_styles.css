@@ -1415,6 +1415,43 @@ a.historylink {
     border: 1px solid #dae3ed;
     min-height: 120px;
 }
+.agenda-panel__details-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+.agenda-panel__details-card-status-btn {
+    border: none;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-weight: 600;
+    font-size: 0.65rem;
+    background: #5361ff;
+    color: #ffffff;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+.agenda-panel__details-card-status-btn:hover {
+    background: #3541d2;
+}
+.agenda-panel__details-card-status-btn.status-pendente {
+    background: #f6c343;
+}
+.agenda-panel__details-card-status-btn.status-aprovado {
+    background: #198754;
+}
+.agenda-panel__details-card-status-btn.status-reprovado {
+    background: #d6336c;
+}
+.agenda-panel__details-card {
+    display: flex;
+    flex-direction: column;
+}
+.agenda-panel__details-card-body {
+    overflow-y: auto;
+    max-height: 200px;
+}
 .agenda-panel__details-title,
 .agenda-panel__details-card-title {
     margin: 0 0 8px;

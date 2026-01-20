@@ -99,6 +99,18 @@ document.addEventListener('DOMContentLoaded', function() {
         return cookieValue;
     }
     const csrftoken = getCookie('csrftoken');
+    const AGENDA_SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
+    const AGENDA_SUPERVISION_STATUS_LABELS = {
+        pendente: 'Pendente de Supervisão',
+        aprovado: 'Aprovado',
+        reprovado: 'Reprovado',
+    };
+    const AGENDA_SUPERVISION_STATUS_CLASSES = {
+        pendente: 'status-pendente',
+        aprovado: 'status-aprovado',
+        reprovado: 'status-reprovado',
+    };
+    const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
 
     function deduplicateInlineAndamentos() {
         const seen = new Set();
@@ -864,8 +876,11 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null) => {
         setDetailTitle?.(dayData?.day, type);
+        if (typeof onEntrySelect === 'function') {
+            onEntrySelect(null, null);
+        }
         const entries = type === 'T'
             ? dayData.tasksT
             : type === 'P'
@@ -969,15 +984,18 @@ document.addEventListener('DOMContentLoaded', function() {
                             item.textContent = line;
                             list.appendChild(item);
                         });
-                        detailCardBody.appendChild(list);
-                    }
-                    if (!detailCardBody.textContent.trim()) {
-                        detailCardBody.textContent = 'Sem observações adicionais.';
-                    }
-                } else {
-                    detailCardBody.textContent = detail || 'Sem observações adicionais.';
+                    detailCardBody.appendChild(list);
                 }
-            });
+                if (!detailCardBody.textContent.trim()) {
+                    detailCardBody.textContent = 'Sem observações adicionais.';
+                }
+            } else {
+                detailCardBody.textContent = detail || 'Sem observações adicionais.';
+            }
+            if (typeof onEntrySelect === 'function') {
+                onEntrySelect(entryData, type, entry);
+            }
+        });
             entry.addEventListener('dblclick', () => {
                 const url = entryData.admin_url || entryData.url;
                 if (url) {
@@ -1010,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle, onEntrySelect = null) => {
         if (!gridElement || !detailList || !detailCardBody) {
             return;
         }
@@ -1021,6 +1039,9 @@ document.addEventListener('DOMContentLoaded', function() {
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
         setDetailTitle?.(null, null);
+        if (typeof onEntrySelect === 'function') {
+            onEntrySelect(null, null);
+        }
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const recordActiveDay = (dayInfo, type) => {
@@ -1101,7 +1122,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
@@ -1144,17 +1165,17 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
-            dayCell.addEventListener('click', () => {
-                if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'S');
-                } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'T');
-                } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'P');
-                } else {
+                dayCell.addEventListener('click', () => {
+                    if (dayInfo.tasksS.length) {
+                        populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'S');
+                    } else if (dayInfo.tasksT.length) {
+                        populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'T');
+                    } else if (dayInfo.tasksP.length) {
+                        populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'P');
+                    } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
                     setDetailTitle?.(dayInfo.day, null);
@@ -1251,19 +1272,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
                 if (preferredType === 'S' && dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (preferredType === 'T' && dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'P');
                 }
             }
@@ -1332,8 +1353,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
-                                <div class="agenda-panel__details-card">
-                                    <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                        <div class="agenda-panel__details-card">
+                                    <div class="agenda-panel__details-card-header">
+                                        <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                                        <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
+                                    </div>
                                     <p class="agenda-panel__details-card-body">Selecione um item para visualizar mais informações.</p>
                                 </div>
                             </div>
@@ -1365,6 +1389,100 @@ document.addEventListener('DOMContentLoaded', function() {
         detailTitleType.className = 'agenda-panel__details-type';
         detailTitleWrapper.textContent = '';
         detailTitleWrapper.append(detailTitleText, detailTitleType);
+        const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
+        let activeSupervisionEntry = null;
+
+        const hideDetailStatusButton = () => {
+            if (!detailStatusButton) return;
+            detailStatusButton.style.display = 'none';
+            detailStatusButton.disabled = false;
+            detailStatusButton.dataset.statusKey = '';
+            detailStatusButton.dataset.analiseId = '';
+            detailStatusButton.dataset.cardSource = '';
+            detailStatusButton.dataset.cardIndex = '';
+        };
+
+        const updateDetailMetaStatusRow = (entryId, label) => {
+            if (!entryId || !label) return;
+            const entryEl = detailList.querySelector(`[data-entry-id="${entryId}"]`);
+            if (!entryEl) return;
+            entryEl.querySelectorAll('.agenda-panel__details-item-meta-row').forEach(row => {
+                const labelEl = row.querySelector('.agenda-panel__details-item-meta-label');
+                if (labelEl && labelEl.textContent.trim().toLowerCase().startsWith('status')) {
+                    const valueEl = row.querySelector('.agenda-panel__details-item-meta-value');
+                    if (valueEl) {
+                        valueEl.textContent = label;
+                    }
+                }
+            });
+        };
+
+        const updateDetailStatusButton = (entryData, type) => {
+            if (!detailStatusButton) return;
+            if (!entryData || type !== 'S') {
+                activeSupervisionEntry = null;
+                hideDetailStatusButton();
+                return;
+            }
+            const statusKey = (entryData.supervisor_status || 'pendente').toLowerCase();
+            const statusLabel = entryData.status_label || AGENDA_SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
+            detailStatusButton.textContent = `Status: ${statusLabel}`;
+            detailStatusButton.dataset.statusKey = statusKey;
+            detailStatusButton.dataset.analiseId = entryData.analise_id || '';
+            detailStatusButton.dataset.cardSource = entryData.card_source || '';
+            detailStatusButton.dataset.cardIndex = entryData.card_index ?? '';
+            const statusClasses = Object.values(AGENDA_SUPERVISION_STATUS_CLASSES);
+            detailStatusButton.classList.remove(...statusClasses);
+            detailStatusButton.classList.add(AGENDA_SUPERVISION_STATUS_CLASSES[statusKey]);
+            detailStatusButton.style.display = 'inline-flex';
+            activeSupervisionEntry = entryData;
+        };
+
+        const handleDetailStatusClick = () => {
+            if (!activeSupervisionEntry || !detailStatusButton) {
+                return;
+            }
+            detailStatusButton.disabled = true;
+            fetch(AGENDA_SUPERVISION_STATUS_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify({
+                    analise_id: activeSupervisionEntry.analise_id,
+                    source: activeSupervisionEntry.card_source,
+                    index: activeSupervisionEntry.card_index,
+                }),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao alterar status');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const newStatus = (data.supervisor_status || 'pendente').toLowerCase();
+                    const newLabel = data.status_label || AGENDA_SUPERVISION_STATUS_LABELS[newStatus] || newStatus;
+                    activeSupervisionEntry.supervisor_status = newStatus;
+                    activeSupervisionEntry.status_label = newLabel;
+                    updateDetailStatusButton(activeSupervisionEntry, 'S');
+                    updateDetailMetaStatusRow(activeSupervisionEntry.id, newLabel);
+                })
+                .catch(() => {
+                    createSystemAlert('Agenda Geral', 'Não foi possível atualizar o status de supervisão.');
+                })
+                .finally(() => {
+                    detailStatusButton.disabled = false;
+                });
+        };
+
+        detailStatusButton?.addEventListener('click', handleDetailStatusClick);
+        hideDetailStatusButton();
+        const handleDetailEntrySelect = (entryData, type) => {
+            updateDetailStatusButton(entryData, type);
+        };
         const setDetailTitle = (dayNumber, type) => {
             const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
             detailTitleText.textContent = base;
@@ -1731,7 +1849,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             applyAgendaEntriesToState();
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle, handleDetailEntrySelect);
             renderSummaryBar(calendarState.lastAppliedEntries || []);
         };
         if (focusToggle) {

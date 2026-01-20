@@ -32,6 +32,22 @@ import json
 from datetime import datetime
 from datetime import date as date_cls, time as time_cls
 
+SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado']
+SUPERVISION_STATUS_LABELS = {
+    'pendente': 'Pendente de Supervisão',
+    'aprovado': 'Aprovado',
+    'reprovado': 'Reprovado',
+}
+
+def get_next_supervision_status(current_status):
+    normalized = (current_status or 'pendente').lower()
+    if normalized not in SUPERVISION_STATUS_SEQUENCE:
+        normalized = 'pendente'
+    current_index = SUPERVISION_STATUS_SEQUENCE.index(normalized)
+    next_index = (current_index + 1) % len(SUPERVISION_STATUS_SEQUENCE)
+    return SUPERVISION_STATUS_SEQUENCE[next_index]
+
+
 class AgendaAPIView(APIView):
     """
     API para buscar todas as tarefas e prazos de um processo.
@@ -129,11 +145,7 @@ class AgendaGeralAPIView(APIView):
         return Response(agenda_items)
 
     def _supervision_status_labels(self):
-        return {
-            'pendente': 'Pendente de Supervisão',
-            'aprovado': 'Aprovado',
-            'reprovado': 'Reprovado',
-        }
+        return SUPERVISION_STATUS_LABELS
 
     def _build_analysis_result_lines(self, card_info):
         status = card_info.get('status', 'pendente')
@@ -297,15 +309,62 @@ class AgendaGeralAPIView(APIView):
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
-                'analysis_lines': self._build_analysis_result_lines(card_info),
-                'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
-                'processo_id': processo.pk if processo else None,
-                'responsavel': responsavel,
-                'expired': not active,
-                'active': active,
-            })
+                    'analysis_lines': self._build_analysis_result_lines(card_info),
+                    'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
+                    'processo_id': processo.pk if processo else None,
+                    'responsavel': responsavel,
+                    'expired': not active,
+                    'active': active,
+                    'analise_id': analise.pk,
+                    'card_source': card_info['source'],
+                    'card_index': card_info['index'],
+                    'supervisor_status': card_info['status'],
+                    'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
+                })
 
         return entries
+
+
+class AgendaSupervisionStatusAPIView(APIView):
+    """
+    Permite alternar o status de supervisão diretamente da Agenda Geral.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        data = request.data or {}
+        analise_id = data.get('analise_id')
+        source = data.get('source')
+        index = data.get('index')
+        if not analise_id or not source or index is None:
+            return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            analise = AnaliseProcesso.objects.get(pk=analise_id)
+        except AnaliseProcesso.DoesNotExist:
+            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        respostas = analise.respostas or {}
+        cards = respostas.get(source)
+        try:
+            entry_index = int(index)
+        except (TypeError, ValueError):
+            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+        card = cards[entry_index]
+        if not isinstance(card, dict):
+            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        current_status = (card.get('supervisor_status') or 'pendente').lower()
+        new_status = get_next_supervision_status(current_status)
+        card['supervisor_status'] = new_status
+        analise.respostas = respostas
+        analise.updated_by = request.user
+        analise.save(update_fields=['respostas', 'updated_by'])
+        return Response({
+            'supervisor_status': new_status,
+            'status_label': SUPERVISION_STATUS_LABELS.get(new_status, new_status.capitalize()),
+        })
 
 class TarefaCreateAPIView(generics.CreateAPIView):
     """

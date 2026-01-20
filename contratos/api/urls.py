@@ -10,6 +10,7 @@ urlpatterns = [
     path('users/', views.UserSearchAPIView.as_view(), name='user_search'),
     path('agenda/users/', views.AgendaUsersAPIView.as_view(), name='agenda_users'),
     path('agenda/geral/', views.AgendaGeralAPIView.as_view(), name='agenda_geral'),
+    path('agenda/supervision/status/', views.AgendaSupervisionStatusAPIView.as_view(), name='agenda_supervision_status'),
     path('agenda/tarefa/<int:pk>/update-date/', views.AgendaTarefaUpdateDateAPIView.as_view(), name='agenda_tarefa_update_date'),
     path('agenda/prazo/<int:pk>/update-date/', views.AgendaPrazoUpdateDateAPIView.as_view(), name='agenda_prazo_update_date'),
     path('listas-de-tarefas/', views.ListaDeTarefasAPIView.as_view(), name='listadetarefas_list_create'),

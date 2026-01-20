@@ -1415,10 +1415,105 @@ a.historylink {
     border: 1px solid #dae3ed;
     min-height: 120px;
 }
+.agenda-panel__details-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+.agenda-panel__details-card-status-btn {
+    border: none;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-weight: 600;
+    font-size: 0.65rem;
+    background: #5361ff;
+    color: #ffffff;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+.agenda-panel__details-card-status-btn:hover {
+    background: #3541d2;
+}
+.agenda-panel__details-card-status-btn.status-pendente {
+    background: #f6c343;
+}
+.agenda-panel__details-card-status-btn.status-aprovado {
+    background: #198754;
+}
+.agenda-panel__details-card-status-btn.status-reprovado {
+    background: #d6336c;
+}
+.agenda-panel__details-card {
+    display: flex;
+    flex-direction: column;
+}
+.agenda-panel__details-card-body {
+    overflow-y: auto;
+    max-height: 200px;
+}
 .agenda-panel__details-title,
 .agenda-panel__details-card-title {
     margin: 0 0 8px;
     font-weight: 700;
+}
+.agenda-panel__details-item-meta {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #4b5563;
+}
+.agenda-panel__details-item-meta-row {
+    display: flex;
+    gap: 4px;
+    align-items: baseline;
+}
+.agenda-panel__details-item-meta-label {
+    font-weight: 600;
+}
+.agenda-panel__details-item-meta-value {
+    flex: 1;
+}
+.agenda-panel__details-item--supervision-expired {
+    opacity: 0.65;
+}
+.agenda-panel__details-card-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: #1f2933;
+}
+.agenda-panel__details-item--supervision {
+    background: #fffdf5;
+    border: 1px solid #f0e2b6;
+    border-radius: 10px;
+    padding: 8px;
+    gap: 6px;
+}
+.agenda-panel__details-item-label {
+    font-size: 12px;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+.agenda-panel__details-item-label--viabilidade {
+    background: #fff7da;
+    color: #a76b00;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+.agenda-panel__details-item-label--viavel {
+    background: #0356b4;
+    color: #fff;
+}
+.agenda-panel__details-item-label--inviavel {
+    background: #9f2b2b;
+    color: #fff;
+}
+.agenda-panel__details-item-label--inconclusivo {
+    background: #825cd8;
+    color: #fff;
 }
 .agenda-panel__details-title {
     display: flex;
@@ -1445,6 +1540,10 @@ a.historylink {
 }
 .agenda-panel__details-type[data-type="P"] {
     color: #a63a5c;
+}
+.agenda-panel__details-type[data-type="S"] {
+    background: #fff7da;
+    color: #a76b00;
 }
 .agenda-panel__focus-toggle {
     display: inline-block;
