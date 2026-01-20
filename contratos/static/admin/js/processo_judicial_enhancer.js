@@ -436,11 +436,43 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const formatDateLabel = (isoDate) => {
         if (!isoDate) return '';
-        const parsed = new Date(isoDate);
-        if (Number.isNaN(parsed.getTime())) {
-            return isoDate;
+        const raw = String(isoDate).trim().split('T')[0];
+        const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) {
+            return raw;
         }
-        return parsed.toLocaleDateString('pt-BR');
+        const [, year, month, day] = match;
+        return `${day}/${month}/${year}`;
+    };
+    const normalizeNumericCurrency = (value) => {
+        if (value === undefined || value === null) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        let normalized = raw.replace(/\u00A0/g, '');
+        normalized = normalized.replace(/R\$/g, '');
+        normalized = normalized.replace(/\s/g, '');
+        const hasComma = normalized.includes(',');
+        const hasDot = normalized.includes('.');
+        if (hasComma && hasDot) {
+            normalized = normalized.replace(/\./g, '');
+            normalized = normalized.replace(',', '.');
+        } else if (hasComma) {
+            normalized = normalized.replace(',', '.');
+        }
+        if (!/[0-9]/.test(normalized)) return null;
+        const parsed = Number(normalized);
+        if (Number.isNaN(parsed)) {
+            return null;
+        }
+        return parsed;
+    };
+    const formatCurrencyBrl = (value) => {
+        const numeric = normalizeNumericCurrency(value);
+        if (numeric === null) return '';
+        return numeric.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+        });
     };
     const entryOrigins = new Map();
     const getOriginKey = (entry) => {
@@ -756,7 +788,19 @@ document.addEventListener('DOMContentLoaded', function() {
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
             responsavel: item.responsavel || null,
+            contract_numbers: Array.isArray(item.contract_numbers)
+                ? item.contract_numbers.filter(Boolean)
+                : [],
+            valor_causa: item.valor_causa ?? null,
+            status_label: item.status_label || '',
+            viabilidade: item.viabilidade || '',
+            viabilidade_label: item.viabilidade_label || '',
+            analysis_lines: Array.isArray(item.analysis_lines)
+                ? item.analysis_lines.filter(line => line !== null && line !== undefined && line !== '')
+                : [],
             prescricao_date: item.prescricao_date || null,
+            expired: Boolean(item.expired),
+            active: Boolean(item.active),
         };
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
@@ -822,7 +866,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false) => {
         setDetailTitle?.(dayData?.day, type);
-        const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
+        const entries = type === 'T'
+            ? dayData.tasksT
+            : type === 'P'
+                ? dayData.tasksP
+                : dayData.tasksS;
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -846,12 +894,56 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const label = document.createElement('span');
             label.className = 'agenda-panel__details-item-label';
-            label.textContent = entryData.label;
+            const isSupervision = type === 'S';
+            if (isSupervision) {
+                const viabilityText = entryData.viabilidade_label || 'Viabilidade';
+                label.textContent = viabilityText;
+                label.classList.add('agenda-panel__details-item-label--viabilidade');
+                const normalized = (entryData.viabilidade || '').toLowerCase();
+                if (normalized) {
+                    label.classList.add(`agenda-panel__details-item-label--${normalized}`);
+                }
+            } else {
+                label.textContent = entryData.label;
+            }
             entry.appendChild(label);
-            const text = document.createElement('span');
-            text.className = 'agenda-panel__details-item-text';
-            text.textContent = entryData.description || '';
-            entry.appendChild(text);
+            if (type !== 'S') {
+                const text = document.createElement('span');
+                text.className = 'agenda-panel__details-item-text';
+                text.textContent = entryData.description || '';
+                entry.appendChild(text);
+            } else {
+                entry.classList.add('agenda-panel__details-item--supervision');
+                const meta = document.createElement('div');
+                meta.className = 'agenda-panel__details-item-meta';
+                const renderMetaRow = (labelText, valueText) => {
+                    if (!valueText) return;
+                    const row = document.createElement('div');
+                    row.className = 'agenda-panel__details-item-meta-row';
+                    const labelEl = document.createElement('span');
+                    labelEl.className = 'agenda-panel__details-item-meta-label';
+                    labelEl.textContent = `${labelText}:`;
+                    const valueEl = document.createElement('span');
+                    valueEl.className = 'agenda-panel__details-item-meta-value';
+                    valueEl.textContent = valueText;
+                    row.append(labelEl, valueEl);
+                    meta.appendChild(row);
+                };
+                if (entryData.contract_numbers && entryData.contract_numbers.length) {
+                    renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
+                }
+                renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
+                if (entryData.status_label) {
+                    renderMetaRow('Status', entryData.status_label);
+                }
+                if (meta.children.length) {
+                    entry.appendChild(meta);
+                }
+                if (entryData.expired) {
+                    entry.classList.add('agenda-panel__details-item--supervision-expired');
+                }
+            }
             const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
             if (entryData.originalDate) {
                 const original = document.createElement('span');
@@ -861,7 +953,30 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
-                detailCardBody.textContent = detail || 'Sem observações adicionais.';
+                detailCardBody.innerHTML = '';
+                if (type === 'S') {
+                    if (detail) {
+                        const paragraph = document.createElement('p');
+                        paragraph.textContent = detail;
+                        detailCardBody.appendChild(paragraph);
+                    }
+                    if (entryData.analysis_lines && entryData.analysis_lines.length) {
+                        const list = document.createElement('ul');
+                        list.className = 'agenda-panel__details-card-list';
+                        entryData.analysis_lines.forEach(line => {
+                            if (!line) return;
+                            const item = document.createElement('li');
+                            item.textContent = line;
+                            list.appendChild(item);
+                        });
+                        detailCardBody.appendChild(list);
+                    }
+                    if (!detailCardBody.textContent.trim()) {
+                        detailCardBody.textContent = 'Sem observações adicionais.';
+                    }
+                } else {
+                    detailCardBody.textContent = detail || 'Sem observações adicionais.';
+                }
             });
             entry.addEventListener('dblclick', () => {
                 const url = entryData.admin_url || entryData.url;
@@ -872,8 +987,9 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
-            entry.draggable = !isCompletedMode;
-            if (!isCompletedMode) {
+            const canDragDetailEntry = !isCompletedMode && !(type === 'S' && entryData.expired);
+            entry.draggable = Boolean(canDragDetailEntry);
+            if (canDragDetailEntry) {
                 entry.addEventListener('dragstart', (event) => {
                     event.dataTransfer.setData('text/plain', JSON.stringify({
                         source: 'detail',
@@ -973,7 +1089,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
-                tag.draggable = !isCompletedMode;
+                const draggableEntries = entries.filter(entry => !(type === 'S' && entry.expired));
+                tag.draggable = !isCompletedMode && Boolean(draggableEntries.length);
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -988,11 +1105,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
-                if (!isCompletedMode) {
+                if (!isCompletedMode && draggableEntries.length) {
                     tag.addEventListener('dragstart', (event) => {
                         const listKey = getTypeKey(type);
-                        const entriesForDrag = dayInfo[listKey] || [];
-                        const payloadEntries = entriesForDrag.map(entry => {
+                        const payloadEntries = draggableEntries.map(entry => {
                             entry.type = entry.type || type;
                             return {
                                 id: entry.id,
@@ -1052,6 +1168,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 state.activeDay.monthIndex === dayInfo.monthIndex &&
                 state.activeDay.year === dayInfo.year;
             const setupDropZone = () => {
+                if (isCompletedMode) {
+                    return;
+                }
                 const handleDrop = (event) => {
                     event.preventDefault();
                     dayCell.classList.remove('agenda-panel__day--drag-over');
@@ -1085,20 +1204,28 @@ document.addEventListener('DOMContentLoaded', function() {
                         persistEntryDate(movedEntry, dayInfo);
                         moveAgendaEntries([movedEntry], dayInfo);
                     } else if (parsed.source === 'calendar') {
-                        const transferred = sourceDay[typeKey];
-                        if (!transferred.length) return;
-                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
+                        const entriesPayload = Array.isArray(parsed.entries) ? parsed.entries.filter(Boolean) : [];
+                        if (!entriesPayload.length) return;
                         const blocked = entriesPayload.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
                         if (blocked) {
                             showSupervisionLimitViolation(blocked);
                             return;
                         }
-                        dayInfo[typeKey].push(...transferred);
-                        sourceDay[typeKey] = [];
+                        const movedEntries = [];
+                        const validPayload = [];
+                        entriesPayload.forEach(payloadEntry => {
+                            const index = sourceDay[typeKey].findIndex(entry => entry.id === payloadEntry.id);
+                            if (index === -1) return;
+                            const [removed] = sourceDay[typeKey].splice(index, 1);
+                            movedEntries.push(removed);
+                            validPayload.push(payloadEntry);
+                        });
+                        if (!movedEntries.length) return;
+                        dayInfo[typeKey].push(...movedEntries);
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        entriesPayload.forEach(entry => persistEntryDate(entry, dayInfo));
-                        moveAgendaEntries(entriesPayload, dayInfo);
+                        validPayload.forEach(entry => persistEntryDate(entry, dayInfo));
+                        moveAgendaEntries(validPayload, dayInfo);
                     }
                     agendaEntries = dedupeEntries(rebuildAgendaEntriesFromCalendar());
                     if (state) {
@@ -1241,7 +1368,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const setDetailTitle = (dayNumber, type) => {
             const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
             detailTitleText.textContent = base;
-            const typeLabel = type === 'T' ? 'Tarefa' : type === 'P' ? 'Prazo' : '';
+            const typeLabel = type === 'T'
+                ? 'Tarefa'
+                : type === 'P'
+                    ? 'Prazo'
+                    : type === 'S'
+                        ? 'Supervisão'
+                        : '';
             detailTitleType.textContent = typeLabel;
             detailTitleType.dataset.type = type || '';
             detailTitleType.style.visibility = typeLabel ? 'visible' : 'hidden';
@@ -1456,17 +1589,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         applyEntriesToCalendar(entriesToApply);
         calendarState.lastAppliedEntries = entriesToApply;
-        if (!calendarState.preserveView && entriesToApply.length) {
-            const first = entriesToApply
-                .slice()
-                .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
-            if (first) {
-                    calendarState.monthIndex = first.monthIndex;
-                    calendarState.year = first.year;
+        if (!calendarState.preserveView) {
+            if (entriesToApply.length) {
+                const focusEntries = entriesToApply.filter(entry => !(entry.type === 'S' && entry.expired));
+                if (focusEntries.length) {
+                    const first = focusEntries
+                        .slice()
+                        .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+                    if (first) {
+                        calendarState.monthIndex = first.monthIndex;
+                        calendarState.year = first.year;
+                    }
+                } else {
+                    const todayFallback = new Date();
+                    calendarState.monthIndex = todayFallback.getMonth();
+                    calendarState.year = todayFallback.getFullYear();
                 }
+            } else {
+                const todayFallback = new Date();
+                calendarState.monthIndex = todayFallback.getMonth();
+                calendarState.year = todayFallback.getFullYear();
             }
-            calendarState.preserveView = false;
-        };
+        }
+        calendarState.preserveView = false;
+    };
         const updateMonthTitle = () => {
             if (!monthTitleEl) return;
             const yearText = `${calendarState.year || new Date().getFullYear()}`;
@@ -2838,11 +2984,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (tribunalInput) tribunalInput.value = processo.tribunal || '';
             
             // CORRIGIDO: Agora espera o valor numérico do backend.
-            if (valorCausaInput && processo.valor_causa) {
-                // O Django DecimalField espera um ponto como separador decimal, não vírgula.
-                valorCausaInput.value = processo.valor_causa;
-            } else if (valorCausaInput) {
-                valorCausaInput.value = '0.00';
+            if (valorCausaInput) {
+                const formattedValorCausa = formatCurrencyBrl(processo.valor_causa);
+                valorCausaInput.value = formattedValorCausa || '';
             }
 
             if (ufInput && !ufInput.value) ufInput.value = processo.uf || '';

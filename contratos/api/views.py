@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -126,6 +128,43 @@ class AgendaGeralAPIView(APIView):
         )
         return Response(agenda_items)
 
+    def _supervision_status_labels(self):
+        return {
+            'pendente': 'Pendente de Supervisão',
+            'aprovado': 'Aprovado',
+            'reprovado': 'Reprovado',
+        }
+
+    def _build_analysis_result_lines(self, card_info):
+        status = card_info.get('status', 'pendente')
+        labels = self._supervision_status_labels()
+        lines = [f"Status: {labels.get(status, status.capitalize())}"]
+        responses = (card_info.get('card') or {}).get('tipo_de_acao_respostas') or {}
+        fallback = card_info.get('card') or {}
+        def add_line(key, label):
+            value = responses.get(key)
+            if value in (None, ''):
+                value = fallback.get(key)
+            if value in (None, '', []):
+                return
+            if isinstance(value, (list, tuple)):
+                value = ', '.join(str(item) for item in value if item is not None)
+            lines.append(f"{label}: {value}")
+        add_line('judicializado_pela_massa', 'Judicializado pela massa')
+        add_line('propor_monitoria', 'Propor monitória')
+        add_line('tipo_de_acao', 'Tipo de ação')
+        add_line('julgamento', 'Julgamento')
+        add_line('transitado', 'Transitado')
+        add_line('procedencia', 'Procedência')
+        add_line('repropor_monitoria', 'Repropor monitória')
+        add_line('ativar_botao_monitoria', 'Botão de monitoria')
+        contracts_value = responses.get('contratos_para_monitoria') or fallback.get('contratos_para_monitoria')
+        if contracts_value:
+            if isinstance(contracts_value, (list, tuple)):
+                contracts_value = ', '.join(str(item) for item in contracts_value if item is not None)
+            lines.append(f"Contratos para monitória: {contracts_value}")
+        return lines
+
     def _serialize_user(self, user):
         if not user or not getattr(user, 'is_authenticated', False):
             return None
@@ -144,6 +183,12 @@ class AgendaGeralAPIView(APIView):
         pending_statuses = {'pendente'}
         completed_statuses = {'aprovado', 'reprovado'}
         target_statuses = completed_statuses if show_completed else pending_statuses
+
+        viability_labels = {
+            ProcessoJudicial.VIABILIDADE_VIAVEL: 'Viável',
+            ProcessoJudicial.VIABILIDADE_INVIAVEL: 'Inviável',
+            ProcessoJudicial.VIABILIDADE_INCONCLUSIVO: 'Inconclusivo',
+        }
 
         cards_data = []
         contract_ids = set()
@@ -201,8 +246,9 @@ class AgendaGeralAPIView(APIView):
         if not cards_data:
             return []
 
-        contracts = Contrato.objects.filter(id__in=contract_ids).only('id', 'numero_contrato', 'data_prescricao')
+        contracts = Contrato.objects.filter(id__in=contract_ids).only('id', 'numero_contrato', 'valor_causa', 'data_prescricao')
         contract_map = {contract.id: contract for contract in contracts}
+        today = timezone.localdate()
 
         entries = []
         for card_info in cards_data:
@@ -229,8 +275,14 @@ class AgendaGeralAPIView(APIView):
                 for c in valid_contracts
             ]
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
+            valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
+            valor_total_causa = float(valor_total_causa)
             responsavel_user = analise.updated_by if analise.updated_by else request.user
             responsavel = self._serialize_user(responsavel_user)
+            active = prescricao_date >= today
+            status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
+            viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
+            viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
             entries.append({
                 'type': 'S',
                 'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
@@ -240,9 +292,17 @@ class AgendaGeralAPIView(APIView):
                 'date': prescricao_date.isoformat(),
                 'original_date': prescricao_date.isoformat(),
                 'prescricao_date': prescricao_date.isoformat(),
-                'admin_url': reverse('admin:contratos_processojudicial_change', args=[processo.pk]) if processo else '',
+                'contract_numbers': contrato_labels,
+                'valor_causa': valor_total_causa,
+                'status_label': status_label,
+                'viabilidade': viabilidade_value,
+                'viabilidade_label': viabilidade_label,
+                'analysis_lines': self._build_analysis_result_lines(card_info),
+                'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
                 'processo_id': processo.pk if processo else None,
                 'responsavel': responsavel,
+                'expired': not active,
+                'active': active,
             })
 
         return entries
