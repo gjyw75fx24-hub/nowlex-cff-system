@@ -500,6 +500,19 @@ admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
 
+_original_app_index = admin.site.app_index
+
+def _app_index_redirect(request, app_label, extra_context=None):
+    if app_label == "contratos":
+        redirect_url = (
+            reverse("admin:contratos_processojudicial_changelist")
+            + "?ord_prescricao=incluir&ord_ultima_edicao=recente"
+        )
+        return HttpResponseRedirect(redirect_url)
+    return _original_app_index(request, app_label, extra_context=extra_context)
+
+admin.site.app_index = _app_index_redirect
+
 def configuracao_analise_view(request):
     context = admin.site.each_context(request)
     context.update({
@@ -548,8 +561,8 @@ admin.site.get_urls = _get_admin_urls
 
 _original_get_app_list = admin.site.get_app_list
 
-def _get_app_list(request):
-    app_list = _original_get_app_list(request)
+def _get_app_list(request, app_label=None):
+    app_list = _original_get_app_list(request, app_label)
     for app in app_list:
         if app.get("app_label") != "contratos":
             continue
