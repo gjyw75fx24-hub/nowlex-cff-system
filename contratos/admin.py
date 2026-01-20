@@ -1514,8 +1514,6 @@ class ProcessoJudicialForm(forms.ModelForm):
             value = getattr(self.instance, 'valor_causa', None)
         if value not in (None, ''):
             formatted = format_decimal_brl(value)
-            if formatted.startswith('R$'):
-                formatted = formatted[2:].strip()
             self.initial['valor_causa'] = formatted
 
 
