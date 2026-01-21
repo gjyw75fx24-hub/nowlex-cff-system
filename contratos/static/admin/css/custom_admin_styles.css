@@ -137,7 +137,7 @@
 
 .checagem-question {
     display: grid;
-    grid-template-columns: 30px minmax(90px, 0.35fr) minmax(80px, 0.25fr);
+    grid-template-columns: 30px minmax(90px, 0.3fr) minmax(0, 0.65fr);
     row-gap: 12px;
     column-gap: 28px;
     align-items: center;
@@ -193,6 +193,7 @@
     flex-direction: column;
     gap: 6px;
     max-width: 100%;
+    position: relative;
 }
 
 .checagem-question-label {
@@ -204,10 +205,26 @@
     background: #fff;
 }
 
+.checagem-link-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .checagem-link-editor {
     display: none;
     gap: 6px;
     align-items: center;
+    position: absolute;
+    left: 0;
+    top: calc(100% + 6px);
+    width: 280px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 10px 30px rgba(15, 58, 118, 0.15);
+    border: 1px solid rgba(15, 58, 118, 0.1);
+    z-index: 2;
 }
 
 .checagem-link-editor.visible {
@@ -221,6 +238,15 @@
     padding: 6px 10px;
     font-size: 0.9rem;
     background: #fff;
+}
+
+.checagem-link-edit-trigger {
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    font-size: 1rem;
+    color: #0f3a60;
+    cursor: pointer;
 }
 
 .checagem-link-edit {
@@ -252,6 +278,7 @@
 
 .checagem-question-right {
     width: 100%;
+    justify-self: stretch;
 }
 
 .checagem-question-notes {
@@ -263,8 +290,8 @@
     font-size: 0.85rem;
     line-height: 1.4;
     background: #fff;
-    min-width: 140px;
-    max-width: 200px;
+    min-width: 0;
+    max-width: calc(100% - 8px);
 }
 
 .checagem-question textarea:focus,
@@ -1983,6 +2010,8 @@ a.historylink {
     padding: 10px 12px;
     border: 1px solid rgba(15, 58, 96, 0.08);
     box-shadow: 0 12px 24px rgba(9, 17, 41, 0.1);
+    grid-template-columns: 30px minmax(90px, 0.25fr) minmax(0, 0.95fr);
+    column-gap: 16px;
 }
 .agenda-checagem-panel .checagem-question-actions {
     gap: 10px;
@@ -1992,7 +2021,10 @@ a.historylink {
     border-radius: 12px;
     font-size: 0.8rem;
     border-color: rgba(15, 58, 96, 0.12);
+    max-width: calc(100% - 12px);
+    justify-self: stretch;
 }
+ .agenda-checagem-panel .checagem-question-right { width:100%; justify-self: stretch;}
 .agenda-checagem-panel .checagem-question-body {
     gap: 4px;
 }
