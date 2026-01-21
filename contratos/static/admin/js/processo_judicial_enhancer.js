@@ -813,6 +813,13 @@ document.addEventListener('DOMContentLoaded', function() {
             prescricao_date: item.prescricao_date || null,
             expired: Boolean(item.expired),
             active: Boolean(item.active),
+            cnj_label: item.cnj_label || item.cnj || '',
+            analise_id: item.analise_id || item.analiseId || null,
+            card_source: item.card_source || item.cardSource || '',
+            card_index: typeof item.card_index !== 'undefined'
+                ? item.card_index
+                : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
+            supervisor_status: item.supervisor_status || item.supervisorStatus || '',
         };
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
@@ -1442,6 +1449,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!activeSupervisionEntry || !detailStatusButton) {
                 return;
             }
+            const payload = {
+                analise_id: activeSupervisionEntry.analise_id,
+                source: activeSupervisionEntry.card_source,
+                index: activeSupervisionEntry.card_index,
+            };
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
+                console.warn('Agenda geral: status change blocked por dados incompletos', payload);
+                return;
+            }
+            console.debug('Agenda geral: status change payload', payload);
             detailStatusButton.disabled = true;
             fetch(AGENDA_SUPERVISION_STATUS_URL, {
                 method: 'POST',
@@ -1450,11 +1467,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrftoken,
                 },
-                body: JSON.stringify({
-                    analise_id: activeSupervisionEntry.analise_id,
-                    source: activeSupervisionEntry.card_source,
-                    index: activeSupervisionEntry.card_index,
-                }),
+                body: JSON.stringify(payload),
             })
                 .then(response => {
                     if (!response.ok) {
@@ -1469,6 +1482,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     activeSupervisionEntry.status_label = newLabel;
                     updateDetailStatusButton(activeSupervisionEntry, 'S');
                     updateDetailMetaStatusRow(activeSupervisionEntry.id, newLabel);
+                    const eventDetail = {
+                        analise_id: activeSupervisionEntry.analise_id,
+                        processo_id: activeSupervisionEntry.processo_id,
+                        cnj: activeSupervisionEntry.cnj_label,
+                        status: newStatus,
+                    };
+                    if (eventDetail.analise_id) {
+                        window.dispatchEvent(new CustomEvent('agenda:supervision-status-changed', { detail: eventDetail }));
+                    }
                 })
                 .catch(() => {
                     createSystemAlert('Agenda Geral', 'Não foi possível atualizar o status de supervisão.');
