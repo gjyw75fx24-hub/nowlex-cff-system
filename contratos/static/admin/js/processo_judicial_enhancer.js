@@ -112,13 +112,6 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
-    const AGENDA_DETAIL_DEFAULT_MESSAGE = 'Selecione um item para visualizar mais informações.';
-    const hideDetailAnalystTag = () => {
-        const analystTag = document.querySelector('.agenda-panel__details-card-analyst-note');
-        if (!analystTag) return;
-        analystTag.textContent = '';
-        analystTag.style.display = 'none';
-    };
 
     function deduplicateInlineAndamentos() {
         const seen = new Set();
@@ -200,32 +193,14 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.appendChild(button);
 
         document.body.appendChild(overlay);
-        const ensureAgendaDetailScrollStyle = () => {
-            if (document.getElementById('agenda-detail-scroll-style')) return;
-            const style = document.createElement('style');
-            style.id = 'agenda-detail-scroll-style';
-            style.textContent = `
-                .agenda-panel__details-card-body[data-agenda-detail-scroll] {
-                    max-height: 320px;
-                    overflow-y: auto;
-                    padding-right: 0.5rem;
-                    scrollbar-width: thin;
-                    scrollbar-color: rgba(95, 95, 95, 0.4) transparent;
-                }
-                .agenda-panel__details-card-body[data-agenda-detail-scroll]::-webkit-scrollbar {
-                    width: 6px;
-                }
-                .agenda-panel__details-card-body[data-agenda-detail-scroll]::-webkit-scrollbar-thumb {
-                    background: rgba(95, 95, 95, 0.35);
-                    border-radius: 3px;
-                }
-            `;
-            document.head.appendChild(style);
-        };
-        ensureAgendaDetailScrollStyle();
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        detailCardBody.style.maxHeight = '320px';
+        detailCardBody.style.display = 'block';
+        detailCardBody.style.overflowY = 'auto';
+        detailCardBody.style.overflowX = 'hidden';
+        detailCardBody.style.paddingRight = '0.5rem';
         renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
     };
 
@@ -937,12 +912,9 @@ document.addEventListener('DOMContentLoaded', function() {
             : type === 'P'
                 ? dayData.tasksP
                 : dayData.tasksS;
-        detailList.innerHTML = '';
-        detailCardBody.textContent = AGENDA_DETAIL_DEFAULT_MESSAGE;
-        hideDetailAnalystTag();
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
-            detailCardBody.textContent = AGENDA_DETAIL_DEFAULT_MESSAGE;
+            detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
             return;
         }
         detailList.innerHTML = '';
@@ -1008,6 +980,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
                 renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                const responsavelName = formatResponsavelName(entryData.responsavel);
+                if (responsavelName) {
+                    renderMetaRow('Analisado por', responsavelName);
+                }
                 renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
                 if (entryData.status_label) {
                     renderMetaRow('Status', entryData.status_label);
@@ -1056,12 +1032,6 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
                 detailCardBody.innerHTML = '';
-                const analystName = type === 'S' ? formatResponsavelName(entryData.responsavel) : '';
-                const detailAnalystTag = document.querySelector('.agenda-panel__details-card-analyst-note');
-                if (detailAnalystTag) {
-                    detailAnalystTag.textContent = analystName ? `Analisado por: ${analystName}` : '';
-                    detailAnalystTag.style.display = analystName ? 'block' : 'none';
-                }
                 if (type === 'S') {
                     if (detail) {
                         const paragraph = document.createElement('p');
@@ -1128,13 +1098,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const todayFallback = new Date();
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         const isCompletedMode = Boolean(state?.showCompleted);
+        const resetDetailCardBody = () => {
+            detailCardBody.innerHTML = '';
+            detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            if (typeof onEntrySelect === 'function') {
+                onEntrySelect(null, null);
+            }
+        };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
-        detailCardBody.textContent = AGENDA_DETAIL_DEFAULT_MESSAGE;
+        resetDetailCardBody();
         setDetailTitle?.(null, null);
-        if (typeof onEntrySelect === 'function') {
-            onEntrySelect(null, null);
-        }
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const recordActiveDay = (dayInfo, type) => {
@@ -1215,6 +1189,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    resetDetailCardBody();
                     populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
@@ -1259,6 +1234,7 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
                 dayCell.addEventListener('click', () => {
+                    resetDetailCardBody();
                     if (dayInfo.tasksS.length) {
                         populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                         recordActiveDay(dayInfo, 'S');
@@ -1270,8 +1246,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         recordActiveDay(dayInfo, 'P');
                     } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
-                    detailCardBody.textContent = AGENDA_DETAIL_DEFAULT_MESSAGE;
-                    hideDetailAnalystTag();
+                    detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
                     setDetailTitle?.(dayInfo.day, null);
                     recordActiveDay(dayInfo, null);
                 }
@@ -1447,24 +1422,22 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
-                        <div class="agenda-panel__details-card">
+                                <div class="agenda-panel__details-card">
                                     <div class="agenda-panel__details-card-header">
                                         <p class="agenda-panel__details-card-title">Descrição detalhada</p>
                                         <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
                                     </div>
-                                    <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>
-                                        Selecione um item para visualizar mais informações.
-                                    </div>
-                                    <div class="agenda-panel__details-card-footer" style="display:flex;flex-direction:column;gap:.35rem;">
-                                        <div class="agenda-panel__details-card-footer-row" style="display:flex;align-items:center;justify-content:flex-end;gap:.5rem;flex-wrap:wrap;">
-                                            <div class="agenda-panel__details-card-barrar" style="display:flex;align-items:center;gap:.5rem;">
+                                    <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
+                                    <div class="agenda-panel__details-card-footer">
+                                        <div class="agenda-panel__details-card-footer-row">
+                                            <div class="agenda-panel__details-card-barrar">
                                                 <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
                                                 <input type="date" class="agenda-panel__details-card-barrar-date">
                                             </div>
-                                            <div class="agenda-panel__details-card-barrado-note" style="display:inline-flex;align-items:center;justify-content:center;padding:.2rem .75rem;background:#e6ecf6;border-radius:999px;font-size:.85rem;color:#4c5568;white-space:nowrap;">&nbsp;</div>
+                                            <span class="agenda-panel__details-card-barrado-note"></span>
                                         </div>
-                                        <div class="agenda-panel__details-card-analyst-row" style="text-align:right;width:100%;">
-                                            <span class="agenda-panel__details-card-analyst-note" style="display:none;font-size:.78rem;color:#5f5f5f;line-height:1.2;"></span>
+                                        <div class="agenda-panel__details-card-analyst">
+                                            <span class="agenda-panel__details-card-analyst-text"></span>
                                         </div>
                                     </div>
                                 </div>
@@ -1502,6 +1475,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailBarrarButton = overlay.querySelector('.agenda-panel__details-card-barrar-btn');
         const detailBarrarDate = overlay.querySelector('.agenda-panel__details-card-barrar-date');
         const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
+        const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
         let persistedSupervisionEntryId = null;
 
@@ -1561,6 +1535,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 detailBarradoNote.textContent = note;
                 detailBarradoNote.style.display = note ? 'block' : 'none';
             }
+        };
+
+        const updateDetailAnalystLabel = (entryData, type) => {
+            if (!detailAnalystText) return;
+            if (!entryData || type !== 'S') {
+                detailAnalystText.textContent = '';
+                detailAnalystText.style.display = 'none';
+                return;
+            }
+            const name = formatResponsavelName(entryData.responsavel);
+            if (!name) {
+                detailAnalystText.textContent = '';
+                detailAnalystText.style.display = 'none';
+                return;
+            }
+            detailAnalystText.textContent = `Analisado por: ${name}`;
+            detailAnalystText.style.display = 'inline-flex';
         };
 
         const updateDetailMetaStatusRow = (entryId, label) => {
@@ -1755,6 +1746,7 @@ document.addEventListener('DOMContentLoaded', function() {
             persistedSupervisionEntryId = entryData?.id || null;
             updateDetailStatusButton(entryData, type);
             updateDetailBarrarControls(entryData, type);
+            updateDetailAnalystLabel(entryData, type);
         };
 
         const restoreActiveDetailControls = () => {

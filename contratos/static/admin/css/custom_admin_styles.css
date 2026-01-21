@@ -1765,6 +1765,7 @@ a.historylink {
     align-items: center;
     gap: 6px;
     flex-wrap: nowrap;
+    flex-shrink: 0;
 }
 .agenda-panel__details-card-barrar-btn {
     border: 1px solid #c6c6c6;
@@ -1796,21 +1797,55 @@ a.historylink {
     border-radius: 6px;
     border: 1px solid #e2e8f0;
     display: none;
+    flex-shrink: 0;
+}
+.agenda-panel__details-card-analyst {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+}
+.agenda-panel__details-card-analyst-text {
+    display: none;
+    font-size: 0.7rem;
+    color: #4b5563;
+    letter-spacing: 0.01em;
 }
 .agenda-panel__details-card-footer {
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column;
+    gap: 0.35rem;
+    align-items: flex-end;
+    margin-top: 12px;
+    width: 100%;
+}
+.agenda-panel__details-card-footer-row {
+    display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 8px;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    width: 100%;
+    flex-wrap: wrap;
 }
 .agenda-panel__details-card {
     display: flex;
     flex-direction: column;
 }
 .agenda-panel__details-card-body {
-    overflow-y: auto;
-    max-height: 200px;
+    overflow-y: scroll;
+    max-height: min(360px, 52vh);
+    padding-right: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 58, 96, 0.35) transparent;
+}
+.agenda-panel__details-card-body::-webkit-scrollbar {
+    width: 6px;
+}
+.agenda-panel__details-card-body::-webkit-scrollbar-thumb {
+    background: rgba(15, 58, 96, 0.35);
+    border-radius: 999px;
+}
+.agenda-panel__details-card-body::-webkit-scrollbar-track {
+    background: transparent;
 }
 .agenda-panel__details-item-title {
     display: flex;

@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
         reprovado: 'status-reprovado',
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
+    const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
 
     function deduplicateInlineAndamentos() {
         const seen = new Set();
@@ -195,6 +196,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
+        detailCardBody.style.maxHeight = '320px';
+        detailCardBody.style.display = 'block';
+        detailCardBody.style.overflowY = 'auto';
+        detailCardBody.style.overflowX = 'hidden';
+        detailCardBody.style.paddingRight = '0.5rem';
         renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
     };
 
@@ -776,18 +782,23 @@ document.addEventListener('DOMContentLoaded', function() {
         const originalDate = originalParsed
             ? formatDateIso(originalParsed.year, originalParsed.monthIndex, originalParsed.day)
             : formatDateIso(parsed.year, parsed.monthIndex, parsed.day);
-        const entry = {
-            type,
-            id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
-            backendId: item.id || null,
-            label: item.label || (
-                type === 'S'
-                    ? 'S'
-                    : (item.id ? `${item.id}` : `${parsed.day}`)
-            ),
-            description: item.description
-                || item.descricao
-                || item.title
+            const entry = {
+                type,
+                id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
+                backendId: item.id || null,
+                label: item.label || (
+                    type === 'S'
+                        ? 'S'
+                        : (item.id ? `${item.id}` : `${parsed.day}`)
+                ),
+                nome: item.nome || item.parte_nome || item.name || '',
+                parte_nome: item.parte_nome || item.nome || item.name || '',
+                cpf: item.cpf || item.parte_cpf || item.documento || '',
+                parte_cpf: item.parte_cpf || item.cpf || item.documento || '',
+                documento: item.documento || item.cpf || item.parte_cpf || '',
+                description: item.description
+                    || item.descricao
+                    || item.title
                 || item.titulo
                 || '',
             detail: item.detail || item.observacoes || '',
@@ -813,6 +824,20 @@ document.addEventListener('DOMContentLoaded', function() {
             prescricao_date: item.prescricao_date || null,
             expired: Boolean(item.expired),
             active: Boolean(item.active),
+            barrado: item.barrado && typeof item.barrado === 'object'
+                ? {
+                    ativo: Boolean(item.barrado.ativo),
+                    inicio: item.barrado.inicio || null,
+                    retorno_em: item.barrado.retorno_em || null,
+                }
+                : { ativo: false, inicio: null, retorno_em: null },
+            cnj_label: item.cnj_label || item.cnj || '',
+            analise_id: item.analise_id || item.analiseId || null,
+            card_source: item.card_source || item.cardSource || '',
+            card_index: typeof item.card_index !== 'undefined'
+                ? item.card_index
+                : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
+            supervisor_status: item.supervisor_status || item.supervisorStatus || '',
         };
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
@@ -845,6 +870,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (setEntriesRef) {
                     setEntriesRef(combined);
                 }
+                restoreActiveEntryReference(combined);
                 let filtered = combined;
                 const activeUserId = calendarStateRef?.activeUser?.id;
                 if (activeUserId) {
@@ -920,8 +946,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 label.textContent = entryData.label;
+                entry.appendChild(label);
             }
-            entry.appendChild(label);
+            console.log('entryData S', entryData.id, entryData.nome, entryData.cpf);
+            const titleRow = buildEntryTitleRow(entryData);
+            if (titleRow) {
+                entry.appendChild(titleRow);
+            }
+            let footer = null;
             if (type !== 'S') {
                 const text = document.createElement('span');
                 text.className = 'agenda-panel__details-item-text';
@@ -948,6 +980,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
                 renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                const responsavelName = formatResponsavelName(entryData.responsavel);
+                if (responsavelName) {
+                    renderMetaRow('Analisado por', responsavelName);
+                }
                 renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
                 if (entryData.status_label) {
                     renderMetaRow('Status', entryData.status_label);
@@ -958,13 +994,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (entryData.expired) {
                     entry.classList.add('agenda-panel__details-item--supervision-expired');
                 }
+                footer = document.createElement('div');
+                footer.className = 'agenda-panel__details-item-footer';
+                const footerGroup = document.createElement('div');
+                footerGroup.className = 'agenda-panel__details-item-footer-group';
+                const actions = document.createElement('div');
+                actions.className = 'agenda-panel__details-item-actions';
+                const checagemButton = document.createElement('button');
+                checagemButton.type = 'button';
+                checagemButton.className = 'agenda-checagem-trigger';
+                checagemButton.innerHTML = `<span class="agenda-checagem-trigger__icon">
+                        <img src="${AGENDA_CHECAGEM_LOGO}" alt="Checagem de Sistemas">
+                    </span>`;
+                checagemButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    openAgendaChecagemPanel(entryData, checagemButton);
+                });
+                actions.appendChild(checagemButton);
+                footerGroup.appendChild(actions);
+                footerGroup.appendChild(label);
+                footer.appendChild(footerGroup);
+                entry.appendChild(footer);
             }
             const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
             if (entryData.originalDate) {
                 const original = document.createElement('span');
-                original.className = 'agenda-panel__details-original';
+                original.className = type === 'S'
+                    ? 'agenda-panel__details-item-origin'
+                    : 'agenda-panel__details-original';
                 original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
-                entry.appendChild(original);
+                if (footer) {
+                    footer.appendChild(original);
+                } else {
+                    entry.appendChild(original);
+                }
             }
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
@@ -1035,13 +1098,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const todayFallback = new Date();
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         const isCompletedMode = Boolean(state?.showCompleted);
+        const resetDetailCardBody = () => {
+            detailCardBody.innerHTML = '';
+            detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            if (typeof onEntrySelect === 'function') {
+                onEntrySelect(null, null);
+            }
+        };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
-        detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+        resetDetailCardBody();
         setDetailTitle?.(null, null);
-        if (typeof onEntrySelect === 'function') {
-            onEntrySelect(null, null);
-        }
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const recordActiveDay = (dayInfo, type) => {
@@ -1122,6 +1189,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
+                    resetDetailCardBody();
                     populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
@@ -1166,6 +1234,7 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
                 dayCell.addEventListener('click', () => {
+                    resetDetailCardBody();
                     if (dayInfo.tasksS.length) {
                         populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                         recordActiveDay(dayInfo, 'S');
@@ -1353,12 +1422,24 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
-                        <div class="agenda-panel__details-card">
+                                <div class="agenda-panel__details-card">
                                     <div class="agenda-panel__details-card-header">
                                         <p class="agenda-panel__details-card-title">Descrição detalhada</p>
                                         <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
                                     </div>
-                                    <p class="agenda-panel__details-card-body">Selecione um item para visualizar mais informações.</p>
+                                    <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
+                                    <div class="agenda-panel__details-card-footer">
+                                        <div class="agenda-panel__details-card-footer-row">
+                                            <div class="agenda-panel__details-card-barrar">
+                                                <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
+                                                <input type="date" class="agenda-panel__details-card-barrar-date">
+                                            </div>
+                                            <span class="agenda-panel__details-card-barrado-note"></span>
+                                        </div>
+                                        <div class="agenda-panel__details-card-analyst">
+                                            <span class="agenda-panel__details-card-analyst-text"></span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1390,7 +1471,13 @@ document.addEventListener('DOMContentLoaded', function() {
         detailTitleWrapper.textContent = '';
         detailTitleWrapper.append(detailTitleText, detailTitleType);
         const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
+        const detailBarrarGroup = overlay.querySelector('.agenda-panel__details-card-barrar');
+        const detailBarrarButton = overlay.querySelector('.agenda-panel__details-card-barrar-btn');
+        const detailBarrarDate = overlay.querySelector('.agenda-panel__details-card-barrar-date');
+        const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
+        const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
+        let persistedSupervisionEntryId = null;
 
         const hideDetailStatusButton = () => {
             if (!detailStatusButton) return;
@@ -1400,6 +1487,71 @@ document.addEventListener('DOMContentLoaded', function() {
             detailStatusButton.dataset.analiseId = '';
             detailStatusButton.dataset.cardSource = '';
             detailStatusButton.dataset.cardIndex = '';
+        };
+
+        const buildBarradoNote = (barrado) => {
+            if (!barrado || !barrado.inicio) return '';
+            const inicio = formatDateLabel(barrado.inicio) || barrado.inicio;
+            const retorno = barrado.retorno_em
+                ? (formatDateLabel(barrado.retorno_em) || barrado.retorno_em)
+                : 'sem data definida';
+            return `Barrado de ${inicio} a ${retorno}`;
+        };
+
+        const hideBarrarControls = () => {
+            if (!detailBarrarGroup) return;
+            detailBarrarGroup.style.display = 'none';
+            if (detailBarrarButton) {
+                detailBarrarButton.disabled = false;
+                detailBarrarButton.textContent = 'Barrar';
+            }
+            if (detailBarrarDate) {
+                detailBarrarDate.value = '';
+                detailBarrarDate.disabled = false;
+            }
+            if (detailBarradoNote) {
+                detailBarradoNote.textContent = '';
+                detailBarradoNote.style.display = 'none';
+            }
+        };
+
+        const updateDetailBarrarControls = (entryData, type) => {
+            if (!detailBarrarGroup || !detailBarrarButton) {
+                return;
+            }
+            if (!entryData || type !== 'S') {
+                hideBarrarControls();
+                return;
+            }
+            const barrado = entryData.barrado || { ativo: false, inicio: null, retorno_em: null };
+            detailBarrarGroup.style.display = 'flex';
+            detailBarrarButton.textContent = barrado.ativo ? 'Desbloquear' : 'Barrar';
+            if (detailBarrarDate) {
+                detailBarrarDate.value = barrado.retorno_em || '';
+                detailBarrarDate.disabled = false;
+            }
+            if (detailBarradoNote) {
+                const note = buildBarradoNote(barrado);
+                detailBarradoNote.textContent = note;
+                detailBarradoNote.style.display = note ? 'block' : 'none';
+            }
+        };
+
+        const updateDetailAnalystLabel = (entryData, type) => {
+            if (!detailAnalystText) return;
+            if (!entryData || type !== 'S') {
+                detailAnalystText.textContent = '';
+                detailAnalystText.style.display = 'none';
+                return;
+            }
+            const name = formatResponsavelName(entryData.responsavel);
+            if (!name) {
+                detailAnalystText.textContent = '';
+                detailAnalystText.style.display = 'none';
+                return;
+            }
+            detailAnalystText.textContent = `Analisado por: ${name}`;
+            detailAnalystText.style.display = 'inline-flex';
         };
 
         const updateDetailMetaStatusRow = (entryId, label) => {
@@ -1448,7 +1600,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 index: activeSupervisionEntry.card_index,
             };
             if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
-                createSystemAlert('Agenda Geral', 'Não há dados suficientes para atualizar o status.');
+                console.warn('Agenda geral: status change blocked por dados incompletos', payload);
                 return;
             }
             console.debug('Agenda geral: status change payload', payload);
@@ -1493,10 +1645,123 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         };
 
+        const sendBarradoUpdate = (payload) => {
+            if (!payload) return;
+            if (detailBarrarButton) {
+                detailBarrarButton.disabled = true;
+            }
+            if (detailBarrarDate) {
+                detailBarrarDate.disabled = true;
+            }
+            fetch(AGENDA_SUPERVISION_BARRADO_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify(payload),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao alterar barrado');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const newBarrado = data.barrado || {};
+                    if (activeSupervisionEntry) {
+                        activeSupervisionEntry.barrado = {
+                            ativo: Boolean(newBarrado.ativo),
+                            inicio: newBarrado.inicio || null,
+                            retorno_em: newBarrado.retorno_em || null,
+                        };
+                        updateDetailBarrarControls(activeSupervisionEntry, 'S');
+                        const eventDetail = {
+                            analise_id: activeSupervisionEntry.analise_id,
+                            processo_id: activeSupervisionEntry.processo_id,
+                            cnj: activeSupervisionEntry.cnj_label,
+                            barrado: { ...activeSupervisionEntry.barrado },
+                        };
+                        if (eventDetail.analise_id) {
+                            window.dispatchEvent(new CustomEvent('agenda:supervision-barrado-changed', { detail: eventDetail }));
+                        }
+                    }
+                })
+                .catch(() => {
+                    createSystemAlert('Agenda Geral', 'Não foi possível atualizar o bloqueio da supervisão.');
+                })
+                .finally(() => {
+                    if (detailBarrarButton) {
+                        detailBarrarButton.disabled = false;
+                    }
+                    if (detailBarrarDate) {
+                        detailBarrarDate.disabled = false;
+                    }
+                });
+        };
+
+        const buildCommonBarradoPayload = () => {
+            if (!activeSupervisionEntry) return null;
+            const payload = {
+                analise_id: activeSupervisionEntry.analise_id,
+                source: activeSupervisionEntry.card_source,
+                index: activeSupervisionEntry.card_index,
+            };
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
+                return null;
+            }
+            return payload;
+        };
+
+        const handleBarrarToggleClick = () => {
+            if (!detailBarrarButton) return;
+            const payload = buildCommonBarradoPayload();
+            if (!payload) {
+                console.warn('Agenda geral: barrado change blocked por dados incompletos', payload);
+                return;
+            }
+            const isActive = Boolean(activeSupervisionEntry?.barrado?.ativo);
+            payload.toggle_active = !isActive;
+            sendBarradoUpdate(payload);
+        };
+
+        const handleBarrarDateChange = () => {
+            if (!detailBarrarDate) return;
+            const payload = buildCommonBarradoPayload();
+            if (!payload) {
+                console.warn('Agenda geral: barrado change blocked por dados incompletos', payload);
+                return;
+            }
+            payload.retorno_em = detailBarrarDate.value || null;
+            sendBarradoUpdate(payload);
+        };
+
+        detailBarrarButton?.addEventListener('click', handleBarrarToggleClick);
+        detailBarrarDate?.addEventListener('change', handleBarrarDateChange);
         detailStatusButton?.addEventListener('click', handleDetailStatusClick);
         hideDetailStatusButton();
+        hideBarrarControls();
         const handleDetailEntrySelect = (entryData, type) => {
+            persistedSupervisionEntryId = entryData?.id || null;
             updateDetailStatusButton(entryData, type);
+            updateDetailBarrarControls(entryData, type);
+            updateDetailAnalystLabel(entryData, type);
+        };
+
+        const restoreActiveDetailControls = () => {
+            if (!activeSupervisionEntry) return;
+            updateDetailStatusButton(activeSupervisionEntry, 'S');
+            updateDetailBarrarControls(activeSupervisionEntry, 'S');
+        };
+
+        const restoreActiveEntryReference = (entries) => {
+            if (!persistedSupervisionEntryId) return;
+            const collection = Array.isArray(entries) ? entries : agendaEntries;
+            const restored = collection.find(item => item && item.id === persistedSupervisionEntryId);
+            if (restored) {
+                activeSupervisionEntry = restored;
+            }
         };
         const setDetailTitle = (dayNumber, type) => {
             const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
@@ -1881,12 +2146,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
             const preferApiOnly = calendarState.showCompleted || false;
-            hydrateAgendaFromApi(inline, calendarState, () => {
-                applyAgendaEntriesToState();
-                renderCalendar();
-                if (refreshButton) {
-                    refreshButton.disabled = false;
-                }
+        hydrateAgendaFromApi(inline, calendarState, () => {
+            applyAgendaEntriesToState();
+            renderCalendar();
+            restoreActiveDetailControls();
+            if (refreshButton) {
+                refreshButton.disabled = false;
+            }
             }, (combined) => {
                 agendaEntries = combined;
             }, preferApiOnly);
@@ -2402,6 +2668,25 @@ document.addEventListener('DOMContentLoaded', function() {
     makeInfoCardSticky();
 
     const normalizeCpf = (value) => (value || '').replace(/\D/g, '');
+    const formatResponsavelName = (responsavel) => {
+        if (!responsavel) return '';
+        const { first_name, last_name, username } = responsavel;
+        const names = [first_name, last_name].filter(Boolean);
+        return names.join(' ') || username || '';
+    };
+    const getParteInfoFromCard = (processoId) => {
+        if (!processoId) return {};
+        const selector = `.info-card[data-processo-id="${processoId}"]`;
+        const card = document.querySelector(selector);
+        if (!card) return {};
+        const nameEl = card.querySelector('.parte-nome');
+        const documentoEl = card.querySelector('.parte-documento');
+        const name = nameEl ? nameEl.textContent.trim() : '';
+        const cpfFromDataset = card.dataset.parteCpf || '';
+        const cpfText = documentoEl ? documentoEl.textContent.trim() : '';
+        const cpf = cpfFromDataset || cpfText;
+        return { name, cpf };
+    };
     const parseEnderecoString = (value) => {
         const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
         if (!value) return output;
@@ -2523,6 +2808,47 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         applyMask();
     };
+    
+    function buildEntryTitleRow(entryData) {
+        if (!entryData) return null;
+        const cardMeta = entryData.processo_id ? getParteInfoFromCard(entryData.processo_id) : {};
+        const name = entryData.nome || entryData.name || entryData.parte_nome || cardMeta.name || '';
+        const cpfCandidates = [
+            entryData.cpf,
+            entryData.parte_cpf,
+            entryData.documento,
+            entryData.cpf_falecido,
+            entryData.cpf_representante,
+            cardMeta.cpf,
+        ];
+        const cpfRaw = cpfCandidates.find(Boolean) || '';
+        const normalizedCpf = normalizeCpf(cpfRaw);
+        if (!name && !normalizedCpf) {
+            return null;
+        }
+        const row = document.createElement('div');
+        row.className = 'agenda-panel__details-item-title';
+        if (name) {
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'agenda-panel__details-item-title-name';
+            nameSpan.textContent = name;
+            row.appendChild(nameSpan);
+        }
+        if (normalizedCpf) {
+            const cpfSpan = document.createElement('span');
+            cpfSpan.className = 'agenda-panel__details-item-title-cpf';
+            cpfSpan.textContent = `CPF: ${formatCpfValue(normalizedCpf)}`;
+            cpfSpan.setAttribute('title', 'Clique para copiar o CPF sem formatação');
+            cpfSpan.addEventListener('click', () => {
+                navigator.clipboard?.writeText(normalizedCpf)?.then(() => {
+                    cpfSpan.classList.add('copied');
+                    setTimeout(() => cpfSpan.classList.remove('copied'), 1000);
+                }).catch(() => {});
+            });
+            row.appendChild(cpfSpan);
+        }
+        return row;
+    }
     const herdeirosCache = new Map();
     const fetchHerdeiros = (cpf) => {
         const normalized = normalizeCpf(cpf);
@@ -3247,6 +3573,501 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
 
     // --- Configuração para novas inlines adicionadas dinamicamente ---
+    const CHECAGEM_STORAGE_KEY = 'checagem_de_sistemas_state_v1';
+const CHECAGEM_SECTIONS = [
+        {
+            title: 'Litispendência',
+            questions: [
+                { key: 'juridico_isj', label: 'JURÍDICO ISJ' },
+                { key: 'judicase', label: 'JUDICASE' },
+                { key: 'jusbr', label: 'JUS.BR' },
+            ],
+        },
+        {
+            title: 'Óbito',
+            questions: [
+                { key: 'nowlex', label: 'NOWLEX' },
+                { key: 'censec', label: 'CENSEC' },
+                { key: 'qualificacao_herdeiros', label: 'QUALIFICAÇÃO HERDEIROS' },
+                { key: 'cert_obt', label: 'CERT OBT' },
+        ],
+    },
+    {
+        title: 'Adv. Analista',
+        questions: [
+            { key: 'google', label: 'GOOGLE' },
+            { key: 'transparencia', label: 'TRANSPARÊNCIA' },
+            { key: 'cargo', label: 'CARGO' },
+        ],
+    },
+];
+const AGENDA_CHECAGEM_LINK_ICON = '/static/images/Link_Logo.png';
+const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
+
+    const normalizeLinkValue = (value) => {
+        const trimmed = (value || '').trim();
+        if (!trimmed) {
+            return '';
+        }
+        if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+            return trimmed;
+        }
+        return `https://${trimmed}`;
+    };
+
+    const resolveChecagemStorageKey = ({ processoId, cardId }) => {
+        if (processoId) {
+            return `processo-${processoId}`;
+        }
+        if (cardId) {
+            return `${cardId}`;
+        }
+        return 'global';
+    };
+
+    const readChecagemStorage = () => {
+        try {
+            const raw = localStorage.getItem(CHECAGEM_STORAGE_KEY);
+            if (raw) {
+                return JSON.parse(raw);
+            }
+        } catch (error) {
+            console.warn('Não foi possível ler o estado da checagem:', error);
+        }
+        return { cards: {} };
+    };
+
+    const writeChecagemStorage = (state) => {
+        try {
+            localStorage.setItem(CHECAGEM_STORAGE_KEY, JSON.stringify(state));
+        } catch (error) {
+            console.warn('Não foi possível salvar o estado da checagem:', error);
+        }
+    };
+
+    const persistChecagemQuestion = (storageKey, questionKey, updates) => {
+        const state = readChecagemStorage();
+        const cardKey = storageKey || 'global';
+        state.cards = state.cards || {};
+        if (!state.cards[cardKey]) {
+            state.cards[cardKey] = { questions: {} };
+        }
+        const cardState = state.cards[cardKey];
+        cardState.questions = cardState.questions || {};
+        cardState.questions[questionKey] = {
+            ...(cardState.questions[questionKey] || {}),
+            ...updates,
+        };
+        writeChecagemStorage(state);
+        return cardState.questions[questionKey];
+    };
+
+    const getCachedQuestion = (storageKey, questionKey) => {
+        const state = readChecagemStorage();
+        const cardKey = storageKey || 'global';
+        const cardState = (state.cards || {})[cardKey] || {};
+        return (cardState.questions || {})[questionKey] || {};
+    };
+
+    const ensureModal = (() => {
+        let overlay = null;
+        let keyHandlerAttached = false;
+
+        return () => {
+            if (overlay) {
+                return overlay;
+            }
+            overlay = document.createElement('div');
+            overlay.id = 'checagem-modal-overlay';
+            overlay.className = 'checagem-modal-overlay';
+            overlay.setAttribute('aria-hidden', 'true');
+            overlay.innerHTML = `
+                <div class="checagem-modal" role="dialog" aria-modal="true">
+                    <div class="checagem-modal__header">
+                        <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
+                        <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
+                    </div>
+                    <div class="checagem-modal__body">
+                        <div class="checagem-modal__questions"></div>
+                    </div>
+                    <div class="checagem-modal__footer">
+                        <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) {
+                    closeChecagemModal();
+                }
+            });
+            overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    closeChecagemModal();
+                });
+            });
+            if (!keyHandlerAttached) {
+                document.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape' && overlay.getAttribute('aria-hidden') === 'false') {
+                        closeChecagemModal();
+                    }
+                });
+                keyHandlerAttached = true;
+            }
+            return overlay;
+        };
+    })();
+
+    const updateLinkIndicatorText = (indicator, hasLink, link) => {
+        if (!indicator) {
+            return;
+        }
+        if (hasLink) {
+            indicator.textContent = 'Link salvo (clique no botão ao lado)';
+            indicator.title = link || '';
+        } else {
+            indicator.textContent = 'Sem link cadastrado';
+            indicator.title = 'Utilize o lápis para registrar um link externo';
+        }
+    };
+
+    const buildQuestionRow = (storageKey, question, linkIcon) => {
+        const questionData = { ...getCachedQuestion(storageKey, question.key) };
+        const labelValue = questionData.label || question.label;
+
+        const row = document.createElement('div');
+        row.className = 'checagem-question';
+        row.dataset.questionKey = question.key;
+
+        const linkWrapper = document.createElement('div');
+        linkWrapper.className = 'checagem-question-actions';
+        const confirmButton = document.createElement('button');
+        confirmButton.type = 'button';
+        confirmButton.className = 'checagem-confirm-toggle';
+        confirmButton.setAttribute('aria-label', `Confirmar acesso a ${labelValue}`);
+        confirmButton.dataset.confirmed = questionData.confirmed ? '1' : '0';
+        confirmButton.innerHTML = '<span></span>';
+        const linkButton = document.createElement('button');
+        linkButton.type = 'button';
+        linkButton.className = 'checagem-link-button';
+        linkButton.setAttribute('aria-label', `Abrir link para ${labelValue}`);
+        linkButton.innerHTML = `<img src="${linkIcon}" alt="Link externo">`;
+        linkWrapper.append(confirmButton, linkButton);
+
+        const questionBody = document.createElement('div');
+        questionBody.className = 'checagem-question-body';
+
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.className = 'checagem-question-label';
+        labelInput.value = labelValue;
+        labelInput.setAttribute('aria-label', `Título da questão ${labelValue}`);
+
+        const indicator = document.createElement('span');
+        indicator.className = 'checagem-link-indicator';
+        updateLinkIndicatorText(
+            indicator,
+            Boolean(questionData.link),
+            questionData.link
+        );
+
+        const editTrigger = document.createElement('button');
+        editTrigger.type = 'button';
+        editTrigger.className = 'checagem-link-edit-trigger';
+        editTrigger.setAttribute('title', 'Editar link');
+        editTrigger.innerHTML = '✏️';
+
+        const editorWrapper = document.createElement('div');
+        editorWrapper.className = 'checagem-link-editor';
+        const urlInput = document.createElement('input');
+        urlInput.type = 'url';
+        urlInput.placeholder = 'Cole ou atualize o link';
+        urlInput.value = questionData.link || '';
+        urlInput.setAttribute('aria-label', `Link externo para ${labelValue}`);
+
+        editorWrapper.append(urlInput);
+
+        const linkRow = document.createElement('div');
+        linkRow.className = 'checagem-link-row';
+        linkRow.append(indicator, editTrigger);
+        questionBody.append(labelInput, linkRow, editorWrapper);
+
+        const notesWrapper = document.createElement('div');
+        notesWrapper.className = 'checagem-question-right';
+        const notesTextarea = document.createElement('textarea');
+        notesTextarea.className = 'checagem-question-notes';
+        notesTextarea.placeholder = '';
+        notesTextarea.value = questionData.notes || '';
+        notesTextarea.setAttribute('aria-label', `Anotações para ${labelValue}`);
+        notesWrapper.appendChild(notesTextarea);
+
+        const toggleEditor = () => {
+            editorWrapper.classList.toggle('visible');
+            if (editorWrapper.classList.contains('visible')) {
+                urlInput.focus();
+            }
+        };
+
+        editTrigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleEditor();
+        });
+
+        linkButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            const freshData = getCachedQuestion(storageKey, question.key);
+            if (freshData.link) {
+                window.open(freshData.link, '_blank');
+                return;
+            }
+            toggleEditor();
+        });
+
+        const persistAndRefresh = (partial) => {
+            let updated = persistChecagemQuestion(storageKey, question.key, partial);
+            if (!updated) {
+                updated = getCachedQuestion(storageKey, question.key);
+            }
+            updateLinkIndicatorText(indicator, Boolean(updated.link), updated.link);
+            return updated;
+        };
+
+        const toggleConfirm = () => {
+            const current = Boolean(questionData.confirmed);
+            const updated = persistAndRefresh({ confirmed: !current });
+            questionData.confirmed = Boolean(updated.confirmed);
+            confirmButton.dataset.confirmed = questionData.confirmed ? '1' : '0';
+        };
+
+        confirmButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleConfirm();
+        });
+
+        labelInput.addEventListener('input', () => {
+            persistAndRefresh({ label: labelInput.value });
+        });
+
+        notesTextarea.addEventListener('input', () => {
+            persistAndRefresh({ notes: notesTextarea.value });
+        });
+
+        const syncLinkValue = () => {
+            const normalized = normalizeLinkValue(urlInput.value);
+            const updated = persistAndRefresh({ link: normalized });
+            if (normalized) {
+                urlInput.value = updated.link;
+            }
+        };
+
+        urlInput.addEventListener('change', syncLinkValue);
+        urlInput.addEventListener('blur', syncLinkValue);
+        urlInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                urlInput.blur();
+            }
+        });
+
+        row.append(linkWrapper, questionBody, notesWrapper);
+        return row;
+    };
+
+    const renderChecagemModal = (cardContext, linkIcon) => {
+        const overlay = ensureModal();
+        const title = overlay.querySelector('.checagem-modal__title');
+        const pool = overlay.querySelector('.checagem-modal__questions');
+        title.textContent = 'Checagem de Sistemas';
+        pool.innerHTML = '';
+        const storageKey = resolveChecagemStorageKey(cardContext);
+        CHECAGEM_SECTIONS.forEach((section) => {
+            const sectionBlock = document.createElement('section');
+            sectionBlock.className = 'checagem-section';
+            const heading = document.createElement('div');
+            heading.className = 'checagem-section-title';
+            heading.textContent = section.title;
+            sectionBlock.appendChild(heading);
+        const questionsWrapper = document.createElement('div');
+        questionsWrapper.className = 'checagem-questions';
+        section.questions.forEach((question) => {
+            questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
+        });
+        sectionBlock.appendChild(questionsWrapper);
+        pool.appendChild(sectionBlock);
+    });
+    };
+
+    const openChecagemModal = (card, trigger) => {
+        const overlay = ensureModal();
+        const cardId = card?.dataset?.parteId || 'global';
+        const processoId = card?.dataset?.processoId;
+        const cardName = card?.querySelector('.parte-nome')?.textContent?.trim() || '';
+        const linkIcon =
+            document
+                .querySelector('.checagem-sistemas-trigger')
+                ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
+        renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
+        overlay.setAttribute('aria-hidden', 'false');
+    };
+
+    const closeChecagemModal = () => {
+        const overlay = document.getElementById('checagem-modal-overlay');
+        if (overlay) {
+            overlay.setAttribute('aria-hidden', 'true');
+        }
+    };
+
+    const agendaChecagemPanelState = {
+        panel: null,
+        body: null,
+        subtitle: null,
+        badge: null,
+        visible: false,
+        triggerElement: null,
+        listenersInit: false,
+    };
+
+    const ensureAgendaChecagemPanel = () => {
+        if (agendaChecagemPanelState.panel) {
+            return agendaChecagemPanelState.panel;
+        }
+        const panel = document.createElement('div');
+        panel.className = 'agenda-checagem-panel';
+        panel.setAttribute('aria-hidden', 'true');
+        panel.innerHTML = `
+            <div class="agenda-checagem-panel__card">
+                <div class="agenda-checagem-panel__header">
+                    <div>
+                        <span class="agenda-checagem-panel__badge">Notações</span>
+                        <p class="agenda-checagem-panel__title">Checagem de Sistemas</p>
+                        <p class="agenda-checagem-panel__subtitle"></p>
+                    </div>
+                    <button type="button" class="agenda-checagem-panel__close" aria-label="Fechar painel">×</button>
+                </div>
+                <div class="agenda-checagem-panel__body"></div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        agendaChecagemPanelState.panel = panel;
+        agendaChecagemPanelState.body = panel.querySelector('.agenda-checagem-panel__body');
+        agendaChecagemPanelState.subtitle = panel.querySelector('.agenda-checagem-panel__subtitle');
+        agendaChecagemPanelState.badge = panel.querySelector('.agenda-checagem-panel__badge');
+        const closeButton = panel.querySelector('.agenda-checagem-panel__close');
+        closeButton.addEventListener('click', () => closeAgendaChecagemPanel());
+        panel.addEventListener('click', (event) => event.stopPropagation());
+        if (!agendaChecagemPanelState.listenersInit) {
+            document.addEventListener('keydown', (event) => {
+                if (agendaChecagemPanelState.visible && event.key === 'Escape') {
+                    closeAgendaChecagemPanel();
+                }
+            });
+            agendaChecagemPanelState.listenersInit = true;
+        }
+        return panel;
+    };
+
+    const renderAgendaChecagemPanelContent = (cardContext, linkIcon) => {
+        const panel = ensureAgendaChecagemPanel();
+        if (!panel) {
+            return;
+        }
+        const subtitleText = (cardContext?.cardName || '').trim();
+        agendaChecagemPanelState.subtitle.textContent = subtitleText.length > 1 ? subtitleText : '';
+        const body = agendaChecagemPanelState.body;
+        body.innerHTML = '';
+        const storageKey = resolveChecagemStorageKey(cardContext || {});
+        CHECAGEM_SECTIONS.forEach((section) => {
+            const sectionBlock = document.createElement('section');
+            sectionBlock.className = 'checagem-section agenda-checagem-panel__section';
+            const heading = document.createElement('div');
+            heading.className = 'checagem-section-title agenda-checagem-panel__section-title';
+            heading.textContent = section.title;
+            sectionBlock.appendChild(heading);
+            const questionsWrapper = document.createElement('div');
+            questionsWrapper.className = 'checagem-questions';
+            section.questions.forEach((question) => {
+                questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
+            });
+            sectionBlock.appendChild(questionsWrapper);
+            body.appendChild(sectionBlock);
+        });
+    };
+
+    const positionAgendaChecagemPanel = (panel, trigger) => {
+        if (!panel || !trigger) {
+            return;
+        }
+        panel.style.visibility = 'hidden';
+        panel.style.left = '0px';
+        panel.style.top = '0px';
+        const panelRect = panel.getBoundingClientRect();
+        const triggerRect = trigger.getBoundingClientRect();
+        let left = triggerRect.left - panelRect.width - 12;
+        if (left < 12) {
+            left = 12;
+        }
+        if (left + panelRect.width > window.innerWidth - 12) {
+            left = Math.max(12, window.innerWidth - panelRect.width - 12);
+        }
+        let top = triggerRect.top + triggerRect.height + 8;
+        const maxTop = window.innerHeight - panelRect.height - 12;
+        if (top > maxTop) {
+            top = Math.max(12, maxTop);
+        }
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.style.visibility = 'visible';
+    };
+
+    const openAgendaChecagemPanel = (entryData, trigger) => {
+        if (!entryData || !trigger) {
+            return;
+        }
+        closeAgendaChecagemPanel();
+        const cardId = entryData.backendId
+            ? `agenda-supervision-${entryData.backendId}`
+            : `agenda-supervision-${entryData.processo_id || 'global'}`;
+        const cardName = entryData.label || entryData.viabilidade_label || '';
+        const cardContext = {
+            cardId,
+            processoId: entryData.processo_id,
+            cardName,
+        };
+        renderAgendaChecagemPanelContent(cardContext, AGENDA_CHECAGEM_LINK_ICON);
+        const panel = ensureAgendaChecagemPanel();
+        if (!panel) {
+            return;
+        }
+        positionAgendaChecagemPanel(panel, trigger);
+        panel.classList.add('agenda-checagem-panel--visible');
+        panel.setAttribute('aria-hidden', 'false');
+        agendaChecagemPanelState.visible = true;
+        agendaChecagemPanelState.triggerElement = trigger;
+    };
+
+    const closeAgendaChecagemPanel = () => {
+        const panel = agendaChecagemPanelState.panel;
+        if (!panel) {
+            return;
+        }
+        panel.classList.remove('agenda-checagem-panel--visible');
+        panel.setAttribute('aria-hidden', 'true');
+        panel.style.visibility = 'hidden';
+        agendaChecagemPanelState.visible = false;
+        agendaChecagemPanelState.triggerElement = null;
+    };
+
+    document.body.addEventListener('click', (event) => {
+        const trigger = event.target.closest('.checagem-sistemas-trigger');
+        if (!trigger) {
+            return;
+        }
+        event.preventDefault();
+        const card = trigger.closest('.info-card');
+        openChecagemModal(card, trigger);
+    });
+
     if (typeof jQuery !== 'undefined') {
         jQuery(document).on('formset:added', function(event, $row, formsetName) {
             // Verifica se a nova linha pertence ao formset 'partes_processuais'
