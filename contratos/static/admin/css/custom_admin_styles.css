@@ -1328,6 +1328,7 @@ a.historylink {
     overflow-x: hidden;
     max-height: calc(90vh - 160px);
     min-height: 0;
+    scrollbar-gutter: stable;
 }
 .agenda-panel__calendar-wrapper {
     display: flex;
