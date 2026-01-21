@@ -975,6 +975,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
                 renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                const responsavelName = formatResponsavelName(entryData.responsavel);
+                if (responsavelName) {
+                    renderMetaRow('Analisado por', responsavelName);
+                }
                 renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
                 if (entryData.status_label) {
                     renderMetaRow('Status', entryData.status_label);
@@ -2629,6 +2633,12 @@ document.addEventListener('DOMContentLoaded', function() {
     makeInfoCardSticky();
 
     const normalizeCpf = (value) => (value || '').replace(/\D/g, '');
+    const formatResponsavelName = (responsavel) => {
+        if (!responsavel) return '';
+        const { first_name, last_name, username } = responsavel;
+        const names = [first_name, last_name].filter(Boolean);
+        return names.join(' ') || username || '';
+    };
     const getParteInfoFromCard = (processoId) => {
         if (!processoId) return {};
         const selector = `.info-card[data-processo-id="${processoId}"]`;
