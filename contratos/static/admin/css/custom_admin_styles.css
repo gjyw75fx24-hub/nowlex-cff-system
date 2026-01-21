@@ -1326,8 +1326,6 @@ a.historylink {
     padding: 0 24px;
     overflow: hidden;
     max-height: calc(90vh - 160px);
-    min-height: 0;
-    scrollbar-gutter: stable;
 }
 .agenda-panel__calendar-wrapper {
     display: flex;
@@ -1384,8 +1382,6 @@ a.historylink {
     display: grid;
     grid-template-columns: 3fr 2fr;
     gap: 16px;
-    align-items: start;
-    align-content: start;
 }
 .agenda-panel__calendar-grid {
     display: grid;
@@ -1727,7 +1723,7 @@ a.historylink {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 58vh;
+    max-height: calc(90vh - 200px);
     overflow-y: auto;
     padding-right: 4px;
 }
