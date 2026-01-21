@@ -1385,6 +1385,8 @@ a.historylink {
     display: grid;
     grid-template-columns: 3fr 2fr;
     gap: 16px;
+    align-items: start;
+    align-content: start;
 }
 .agenda-panel__calendar-grid {
     display: grid;
