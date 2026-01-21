@@ -14,6 +14,288 @@
     border-radius: 12px;
 }
 
+.info-card-header-right-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.checagem-sistemas-trigger {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    padding: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.checagem-sistemas-trigger:hover {
+    border-color: #0d6efd;
+    transform: translateY(-1px);
+}
+
+.checagem-sistemas-trigger img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+
+.checagem-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 20, 42, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2300;
+    padding: 16px;
+}
+
+.checagem-modal-overlay[aria-hidden="true"] {
+    pointer-events: none;
+    opacity: 0;
+}
+
+.checagem-modal {
+    background: #fff;
+    border: 1px solid rgba(15, 58, 118, 0.12);
+    border-radius: 24px;
+    width: 598px;
+    max-width: 620px;
+    max-height: 84vh;
+    overflow: hidden;
+    box-shadow: 0 26px 55px rgba(15, 58, 118, 0.25);
+    display: flex;
+    flex-direction: column;
+    font-size: 0.92rem;
+    position: relative;
+    font-family: 'Inter', 'Roboto', system-ui, sans-serif;
+}
+
+.checagem-modal__header {
+    padding: 20px 22px 12px;
+    border-bottom: 1px solid rgba(15, 58, 118, 0.15);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fbfdff;
+}
+
+.checagem-modal__header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f3a60;
+}
+
+.checagem-modal__close {
+    border: none;
+    background: transparent;
+    font-size: 20px;
+    color: rgba(15, 58, 118, 0.65);
+    cursor: pointer;
+}
+
+.checagem-modal__body {
+    padding: 12px 0 14px;
+    overflow-y: auto;
+    max-height: 74vh;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.checagem-section {
+    margin: 0 12px;
+    padding: 16px 18px 18px;
+    border-radius: 18px;
+    background: #eef3fb;
+    border: 1px solid rgba(15, 58, 118, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.checagem-section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #4b5c7f;
+}
+
+.checagem-questions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.checagem-question {
+    display: grid;
+    grid-template-columns: 36px minmax(140px, 0.55fr) minmax(120px, 0.4fr);
+    gap: 18px;
+    align-items: center;
+    justify-items: stretch;
+    grid-auto-rows: auto;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(15, 58, 118, 0.12);
+}
+
+.checagem-question:last-child {
+    border-bottom: none;
+}
+
+.checagem-question-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.checagem-confirm-toggle {
+    border: 1px solid rgba(15, 58, 118, 0.25);
+    border-radius: 999px;
+    width: 28px;
+    height: 28px;
+    background: #fff;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.checagem-confirm-toggle span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: transparent;
+    transition: background 0.2s ease;
+}
+
+.checagem-confirm-toggle[data-confirmed="1"] {
+    border-color: #0f78f7;
+    background: rgba(15, 120, 247, 0.12);
+}
+
+.checagem-confirm-toggle[data-confirmed="1"] span {
+    background: #0f78f7;
+}
+
+.checagem-question-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 100%;
+}
+
+.checagem-question-label {
+    width: 100%;
+    border: 1px solid rgba(15, 58, 118, 0.16);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+    background: #fff;
+}
+
+.checagem-link-editor {
+    display: none;
+    gap: 6px;
+    align-items: center;
+}
+
+.checagem-link-editor.visible {
+    display: flex;
+}
+
+.checagem-link-editor input {
+    flex: 1;
+    border: 1px solid rgba(15, 58, 118, 0.16);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.checagem-link-edit {
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    cursor: pointer;
+    font-size: 0.92rem;
+    color: #0f3a60;
+}
+
+.checagem-link-button {
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+}
+
+.checagem-link-button img {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+}
+
+.checagem-link-indicator {
+    font-size: 0.75rem;
+    color: #5b6c8a;
+}
+
+.checagem-question-right {
+    width: 100%;
+}
+
+.checagem-question-notes {
+    width: 100%;
+    min-height: 74px;
+    border: 1px solid rgba(15, 58, 118, 0.12);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    background: #fff;
+    min-width: 140px;
+    max-width: 200px;
+}
+
+.checagem-question textarea:focus,
+.checagem-link-editor input:focus,
+.checagem-question-label:focus {
+    outline: 2px solid rgba(15, 58, 118, 0.4);
+    outline-offset: 1px;
+}
+
+.checagem-modal__footer {
+    padding: 10px 14px;
+    border-top: 1px solid rgba(15, 58, 118, 0.08);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.checagem-footer-hint {
+    font-size: 0.75rem;
+    color: #5b6c8a;
+}
+@media (max-width: 900px) {
+    .checagem-question {
+        grid-template-columns: 54px 1fr;
+    }
+
+    .checagem-question-right {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+}
+
 
 /* Estiliza cada bloco de andamento (inline) para parecer um "card" ou "entrada de diário" */
 .dynamic-andamento {
@@ -1508,6 +1790,7 @@ a.historylink {
     gap: 4px;
     font-size: 12px;
     color: #4b5563;
+    flex: 1;
 }
 .agenda-panel__details-item-meta-row {
     display: flex;
@@ -1534,6 +1817,35 @@ a.historylink {
     border-radius: 10px;
     padding: 8px;
     gap: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+.agenda-panel__details-item--supervision .agenda-panel__details-item-actions {
+    width: auto;
+    align-self: flex-start;
+    margin-top: 0;
+    gap: 2px;
+}
+.agenda-panel__details-item-footer {
+    width: 100%;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: space-between;
+}
+.agenda-panel__details-item-footer-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+}
+.agenda-panel__details-item-origin {
+    font-size: 10px;
+    color: #3c4564;
+    margin-left: auto;
 }
 .agenda-panel__details-item-label {
     font-size: 12px;
@@ -1546,6 +1858,10 @@ a.historylink {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.02em;
+    font-size: 10px;
+    padding: 1px 6px;
+    transform: scale(0.85);
+    transform-origin: left center;
 }
 .agenda-panel__details-item-label--viavel {
     background: #0356b4;
@@ -1558,6 +1874,136 @@ a.historylink {
 .agenda-panel__details-item-label--inconclusivo {
     background: #825cd8;
     color: #fff;
+}
+.agenda-panel__details-item-actions {
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    justify-content: flex-start;
+}
+.agenda-checagem-trigger {
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+    transform: translateY(-5%);
+}
+.agenda-checagem-trigger__icon {
+    width: 27px;
+    height: 27px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.agenda-checagem-trigger__icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.agenda-checagem-panel {
+    position: fixed;
+    z-index: 2400;
+    width: min(360px, 85vw);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.agenda-checagem-panel--visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.agenda-checagem-panel__card {
+    background: #fffdf6;
+    border-radius: 20px;
+    padding: 18px 20px;
+    border: 1px solid rgba(15, 58, 96, 0.15);
+    box-shadow: 0 20px 32px rgba(6, 20, 48, 0.35);
+}
+.agenda-checagem-panel__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    gap: 16px;
+}
+.agenda-checagem-panel__badge {
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #a76b00;
+}
+.agenda-checagem-panel__title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f3a60;
+}
+.agenda-checagem-panel__subtitle {
+    margin: 2px 0 0;
+    font-size: 0.8125rem;
+    color: #5b6c8a;
+}
+.agenda-checagem-panel__close {
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    color: #5b6c8a;
+    cursor: pointer;
+    line-height: 1;
+}
+.agenda-checagem-panel__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: min(70vh, 640px);
+    overflow-y: auto;
+}
+.agenda-checagem-panel__section {
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.agenda-checagem-panel__section-title {
+    margin-bottom: 8px;
+    color: #2a3c66;
+}
+.agenda-checagem-panel .checagem-question {
+    background: #fff;
+    border-radius: 16px;
+    padding: 10px 12px;
+    border: 1px solid rgba(15, 58, 96, 0.08);
+    box-shadow: 0 12px 24px rgba(9, 17, 41, 0.1);
+}
+.agenda-checagem-panel .checagem-question-actions {
+    gap: 10px;
+}
+.agenda-checagem-panel .checagem-question-notes {
+    min-height: 64px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    border-color: rgba(15, 58, 96, 0.12);
+}
+.agenda-checagem-panel .checagem-question-body {
+    gap: 4px;
+}
+.agenda-checagem-panel .checagem-question-label {
+    font-size: 0.85rem;
+}
+.agenda-checagem-panel .checagem-link-editor {
+    flex-direction: column;
+    align-items: stretch;
+}
+.agenda-checagem-panel .checagem-link-editor input {
+    font-size: 0.78rem;
 }
 .agenda-panel__details-title {
     display: flex;

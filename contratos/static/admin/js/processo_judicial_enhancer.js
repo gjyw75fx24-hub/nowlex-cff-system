@@ -936,8 +936,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 label.textContent = entryData.label;
+                entry.appendChild(label);
             }
-            entry.appendChild(label);
+            let footer = null;
             if (type !== 'S') {
                 const text = document.createElement('span');
                 text.className = 'agenda-panel__details-item-text';
@@ -974,13 +975,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (entryData.expired) {
                     entry.classList.add('agenda-panel__details-item--supervision-expired');
                 }
+                footer = document.createElement('div');
+                footer.className = 'agenda-panel__details-item-footer';
+                const footerGroup = document.createElement('div');
+                footerGroup.className = 'agenda-panel__details-item-footer-group';
+                const actions = document.createElement('div');
+                actions.className = 'agenda-panel__details-item-actions';
+                const checagemButton = document.createElement('button');
+                checagemButton.type = 'button';
+                checagemButton.className = 'agenda-checagem-trigger';
+                checagemButton.innerHTML = `<span class="agenda-checagem-trigger__icon">
+                        <img src="${AGENDA_CHECAGEM_LOGO}" alt="Checagem de Sistemas">
+                    </span>`;
+                checagemButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    openAgendaChecagemPanel(entryData, checagemButton);
+                });
+                actions.appendChild(checagemButton);
+                footerGroup.appendChild(actions);
+                footerGroup.appendChild(label);
+                footer.appendChild(footerGroup);
+                entry.appendChild(footer);
             }
             const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
             if (entryData.originalDate) {
                 const original = document.createElement('span');
-                original.className = 'agenda-panel__details-original';
+                original.className = type === 'S'
+                    ? 'agenda-panel__details-item-origin'
+                    : 'agenda-panel__details-original';
                 original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
-                entry.appendChild(original);
+                if (footer) {
+                    footer.appendChild(original);
+                } else {
+                    entry.appendChild(original);
+                }
             }
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
@@ -3437,7 +3465,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Configuração para novas inlines adicionadas dinamicamente ---
     const CHECAGEM_STORAGE_KEY = 'checagem_de_sistemas_state_v1';
-    const CHECAGEM_SECTIONS = [
+const CHECAGEM_SECTIONS = [
         {
             title: 'Litispendência',
             questions: [
@@ -3453,17 +3481,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 { key: 'censec', label: 'CENSEC' },
                 { key: 'qualificacao_herdeiros', label: 'QUALIFICAÇÃO HERDEIROS' },
                 { key: 'cert_obt', label: 'CERT OBT' },
-            ],
-        },
-        {
-            title: 'Adv. Analista',
-            questions: [
-                { key: 'google', label: 'GOOGLE' },
-                { key: 'transparencia', label: 'TRANSPARÊNCIA' },
-                { key: 'cargo', label: 'CARGO' },
-            ],
-        },
-    ];
+        ],
+    },
+    {
+        title: 'Adv. Analista',
+        questions: [
+            { key: 'google', label: 'GOOGLE' },
+            { key: 'transparencia', label: 'TRANSPARÊNCIA' },
+            { key: 'cargo', label: 'CARGO' },
+        ],
+    },
+];
+const AGENDA_CHECAGEM_LINK_ICON = '/static/images/Link_Logo.png';
+const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
     const normalizeLinkValue = (value) => {
         const trimmed = (value || '').trim();
@@ -3762,6 +3792,155 @@ document.addEventListener('DOMContentLoaded', function() {
         if (overlay) {
             overlay.setAttribute('aria-hidden', 'true');
         }
+    };
+
+    const agendaChecagemPanelState = {
+        panel: null,
+        body: null,
+        subtitle: null,
+        badge: null,
+        visible: false,
+        triggerElement: null,
+        listenersInit: false,
+    };
+
+    const handleAgendaChecagemOutsideClick = (event) => {
+        if (!agendaChecagemPanelState.visible) {
+            return;
+        }
+        const panel = agendaChecagemPanelState.panel;
+        if (panel && panel.contains(event.target)) {
+            return;
+        }
+        const trigger = agendaChecagemPanelState.triggerElement;
+        if (trigger && trigger.contains(event.target)) {
+            return;
+        }
+        closeAgendaChecagemPanel();
+    };
+
+    const ensureAgendaChecagemPanel = () => {
+        if (agendaChecagemPanelState.panel) {
+            return agendaChecagemPanelState.panel;
+        }
+        const panel = document.createElement('div');
+        panel.className = 'agenda-checagem-panel';
+        panel.setAttribute('aria-hidden', 'true');
+        panel.innerHTML = `
+            <div class="agenda-checagem-panel__card">
+                <div class="agenda-checagem-panel__header">
+                    <div>
+                        <span class="agenda-checagem-panel__badge">Notações</span>
+                        <p class="agenda-checagem-panel__title">Checagem de Sistemas</p>
+                        <p class="agenda-checagem-panel__subtitle"></p>
+                    </div>
+                    <button type="button" class="agenda-checagem-panel__close" aria-label="Fechar painel">×</button>
+                </div>
+                <div class="agenda-checagem-panel__body"></div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        agendaChecagemPanelState.panel = panel;
+        agendaChecagemPanelState.body = panel.querySelector('.agenda-checagem-panel__body');
+        agendaChecagemPanelState.subtitle = panel.querySelector('.agenda-checagem-panel__subtitle');
+        agendaChecagemPanelState.badge = panel.querySelector('.agenda-checagem-panel__badge');
+        const closeButton = panel.querySelector('.agenda-checagem-panel__close');
+        closeButton.addEventListener('click', () => closeAgendaChecagemPanel());
+        panel.addEventListener('click', (event) => event.stopPropagation());
+        if (!agendaChecagemPanelState.listenersInit) {
+            document.addEventListener('mousedown', handleAgendaChecagemOutsideClick);
+            document.addEventListener('keydown', (event) => {
+                if (agendaChecagemPanelState.visible && event.key === 'Escape') {
+                    closeAgendaChecagemPanel();
+                }
+            });
+            agendaChecagemPanelState.listenersInit = true;
+        }
+        return panel;
+    };
+
+    const renderAgendaChecagemPanelContent = (cardId, cardName, linkIcon) => {
+        const panel = ensureAgendaChecagemPanel();
+        if (!panel) {
+            return;
+        }
+        agendaChecagemPanelState.subtitle.textContent = cardName || '';
+        const body = agendaChecagemPanelState.body;
+        body.innerHTML = '';
+        CHECAGEM_SECTIONS.forEach((section) => {
+            const sectionBlock = document.createElement('section');
+            sectionBlock.className = 'checagem-section agenda-checagem-panel__section';
+            const heading = document.createElement('div');
+            heading.className = 'checagem-section-title agenda-checagem-panel__section-title';
+            heading.textContent = section.title;
+            sectionBlock.appendChild(heading);
+            const questionsWrapper = document.createElement('div');
+            questionsWrapper.className = 'checagem-questions';
+            section.questions.forEach((question) => {
+                questionsWrapper.appendChild(buildQuestionRow(cardId, question, linkIcon));
+            });
+            sectionBlock.appendChild(questionsWrapper);
+            body.appendChild(sectionBlock);
+        });
+    };
+
+    const positionAgendaChecagemPanel = (panel, trigger) => {
+        if (!panel || !trigger) {
+            return;
+        }
+        panel.style.visibility = 'hidden';
+        panel.style.left = '0px';
+        panel.style.top = '0px';
+        const panelRect = panel.getBoundingClientRect();
+        const triggerRect = trigger.getBoundingClientRect();
+        let left = triggerRect.left - panelRect.width - 12;
+        if (left < 12) {
+            left = 12;
+        }
+        if (left + panelRect.width > window.innerWidth - 12) {
+            left = Math.max(12, window.innerWidth - panelRect.width - 12);
+        }
+        let top = triggerRect.top + triggerRect.height + 8;
+        const maxTop = window.innerHeight - panelRect.height - 12;
+        if (top > maxTop) {
+            top = Math.max(12, maxTop);
+        }
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.style.visibility = 'visible';
+    };
+
+    const openAgendaChecagemPanel = (entryData, trigger) => {
+        if (!entryData || !trigger) {
+            return;
+        }
+        closeAgendaChecagemPanel();
+        const cardId = entryData.backendId
+            ? `agenda-supervision-${entryData.backendId}`
+            : `agenda-supervision-${entryData.processo_id || 'global'}`;
+        const cardName = entryData.label || entryData.viabilidade_label || '';
+        renderAgendaChecagemPanelContent(cardId, cardName, AGENDA_CHECAGEM_LINK_ICON);
+        const panel = ensureAgendaChecagemPanel();
+        if (!panel) {
+            return;
+        }
+        positionAgendaChecagemPanel(panel, trigger);
+        panel.classList.add('agenda-checagem-panel--visible');
+        panel.setAttribute('aria-hidden', 'false');
+        agendaChecagemPanelState.visible = true;
+        agendaChecagemPanelState.triggerElement = trigger;
+    };
+
+    const closeAgendaChecagemPanel = () => {
+        const panel = agendaChecagemPanelState.panel;
+        if (!panel) {
+            return;
+        }
+        panel.classList.remove('agenda-checagem-panel--visible');
+        panel.setAttribute('aria-hidden', 'true');
+        panel.style.visibility = 'hidden';
+        agendaChecagemPanelState.visible = false;
+        agendaChecagemPanelState.triggerElement = null;
     };
 
     document.body.addEventListener('click', (event) => {
