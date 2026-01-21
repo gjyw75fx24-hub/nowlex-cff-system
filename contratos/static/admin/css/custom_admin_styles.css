@@ -1328,15 +1328,11 @@ a.historylink {
     max-height: calc(90vh - 160px);
     min-height: 0;
     scrollbar-gutter: stable;
-    display: flex;
-    flex-direction: column;
 }
 .agenda-panel__calendar-wrapper {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    flex: 1;
-    min-height: 0;
 }
 .agenda-panel__calendar-header {
     display: flex;
@@ -1390,8 +1386,6 @@ a.historylink {
     gap: 16px;
     align-items: start;
     align-content: start;
-    min-height: 0;
-    height: 100%;
 }
 .agenda-panel__calendar-grid {
     display: grid;
@@ -1409,15 +1403,11 @@ a.historylink {
     max-height: 58vh;
     overflow-y: auto;
     align-content: start;
-    flex: 1;
-    min-height: 0;
 }
 .agenda-panel__calendar-grid-wrapper {
     position: relative;
     display: flex;
     align-items: center;
-    flex: 1;
-    min-height: 0;
 }
 .agenda-panel__calendar-nav {
     position: absolute;
@@ -1737,10 +1727,8 @@ a.historylink {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    flex: 1;
+    max-height: 58vh;
     overflow-y: auto;
-    max-height: 100%;
-    min-height: 0;
     padding-right: 4px;
 }
 .agenda-panel__details-list,
