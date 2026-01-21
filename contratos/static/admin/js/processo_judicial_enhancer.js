@@ -3436,6 +3436,344 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
 
     // --- Configuração para novas inlines adicionadas dinamicamente ---
+    const CHECAGEM_STORAGE_KEY = 'checagem_de_sistemas_state_v1';
+    const CHECAGEM_SECTIONS = [
+        {
+            title: 'Litispendência',
+            questions: [
+                { key: 'juridico_isj', label: 'JURÍDICO ISJ' },
+                { key: 'judicase', label: 'JUDICASE' },
+                { key: 'jusbr', label: 'JUS.BR' },
+            ],
+        },
+        {
+            title: 'Óbito',
+            questions: [
+                { key: 'nowlex', label: 'NOWLEX' },
+                { key: 'censec', label: 'CENSEC' },
+                { key: 'qualificacao_herdeiros', label: 'QUALIFICAÇÃO HERDEIROS' },
+                { key: 'cert_obt', label: 'CERT OBT' },
+            ],
+        },
+        {
+            title: 'Adv. Analista',
+            questions: [
+                { key: 'google', label: 'GOOGLE' },
+                { key: 'transparencia', label: 'TRANSPARÊNCIA' },
+                { key: 'cargo', label: 'CARGO' },
+            ],
+        },
+    ];
+
+    const normalizeLinkValue = (value) => {
+        const trimmed = (value || '').trim();
+        if (!trimmed) {
+            return '';
+        }
+        if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+            return trimmed;
+        }
+        return `https://${trimmed}`;
+    };
+
+    const readChecagemStorage = () => {
+        try {
+            const raw = localStorage.getItem(CHECAGEM_STORAGE_KEY);
+            if (raw) {
+                return JSON.parse(raw);
+            }
+        } catch (error) {
+            console.warn('Não foi possível ler o estado da checagem:', error);
+        }
+        return { cards: {} };
+    };
+
+    const writeChecagemStorage = (state) => {
+        try {
+            localStorage.setItem(CHECAGEM_STORAGE_KEY, JSON.stringify(state));
+        } catch (error) {
+            console.warn('Não foi possível salvar o estado da checagem:', error);
+        }
+    };
+
+    const persistChecagemQuestion = (cardId, questionKey, updates) => {
+        const state = readChecagemStorage();
+        const cardKey = cardId || 'global';
+        state.cards = state.cards || {};
+        if (!state.cards[cardKey]) {
+            state.cards[cardKey] = { questions: {} };
+        }
+        const cardState = state.cards[cardKey];
+        cardState.questions = cardState.questions || {};
+        cardState.questions[questionKey] = {
+            ...(cardState.questions[questionKey] || {}),
+            ...updates,
+        };
+        writeChecagemStorage(state);
+        return cardState.questions[questionKey];
+    };
+
+    const getCachedQuestion = (cardId, questionKey) => {
+        const state = readChecagemStorage();
+        const cardKey = cardId || 'global';
+        const cardState = (state.cards || {})[cardKey] || {};
+        return (cardState.questions || {})[questionKey] || {};
+    };
+
+    const ensureModal = (() => {
+        let overlay = null;
+        let keyHandlerAttached = false;
+
+        return () => {
+            if (overlay) {
+                return overlay;
+            }
+            overlay = document.createElement('div');
+            overlay.id = 'checagem-modal-overlay';
+            overlay.className = 'checagem-modal-overlay';
+            overlay.setAttribute('aria-hidden', 'true');
+            overlay.innerHTML = `
+                <div class="checagem-modal" role="dialog" aria-modal="true">
+                    <div class="checagem-modal__header">
+                        <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
+                        <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
+                    </div>
+                    <div class="checagem-modal__body">
+                        <div class="checagem-modal__questions"></div>
+                    </div>
+                    <div class="checagem-modal__footer">
+                        <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) {
+                    closeChecagemModal();
+                }
+            });
+            overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    closeChecagemModal();
+                });
+            });
+            if (!keyHandlerAttached) {
+                document.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape' && overlay.getAttribute('aria-hidden') === 'false') {
+                        closeChecagemModal();
+                    }
+                });
+                keyHandlerAttached = true;
+            }
+            return overlay;
+        };
+    })();
+
+    const updateLinkIndicatorText = (indicator, hasLink, link) => {
+        if (!indicator) {
+            return;
+        }
+        if (hasLink) {
+            indicator.textContent = 'Link salvo (clique no botão ao lado)';
+            indicator.title = link || '';
+        } else {
+            indicator.textContent = 'Sem link cadastrado';
+            indicator.title = 'Utilize o lápis para registrar um link externo';
+        }
+    };
+
+    const buildQuestionRow = (cardId, question, linkIcon) => {
+        const questionData = { ...getCachedQuestion(cardId, question.key) };
+        const labelValue = questionData.label || question.label;
+
+        const row = document.createElement('div');
+        row.className = 'checagem-question';
+        row.dataset.questionKey = question.key;
+
+        const linkWrapper = document.createElement('div');
+        linkWrapper.className = 'checagem-question-actions';
+        const confirmButton = document.createElement('button');
+        confirmButton.type = 'button';
+        confirmButton.className = 'checagem-confirm-toggle';
+        confirmButton.setAttribute('aria-label', `Confirmar acesso a ${labelValue}`);
+        confirmButton.dataset.confirmed = questionData.confirmed ? '1' : '0';
+        confirmButton.innerHTML = '<span></span>';
+        const linkButton = document.createElement('button');
+        linkButton.type = 'button';
+        linkButton.className = 'checagem-link-button';
+        linkButton.setAttribute('aria-label', `Abrir link para ${labelValue}`);
+        linkButton.innerHTML = `<img src="${linkIcon}" alt="Link externo">`;
+        linkWrapper.append(confirmButton, linkButton);
+
+        const questionBody = document.createElement('div');
+        questionBody.className = 'checagem-question-body';
+
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.className = 'checagem-question-label';
+        labelInput.value = labelValue;
+        labelInput.setAttribute('aria-label', `Título da questão ${labelValue}`);
+
+        const indicator = document.createElement('span');
+        indicator.className = 'checagem-link-indicator';
+        updateLinkIndicatorText(
+            indicator,
+            Boolean(questionData.link),
+            questionData.link
+        );
+
+        const editorWrapper = document.createElement('div');
+        editorWrapper.className = 'checagem-link-editor';
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'checagem-link-edit';
+        editButton.textContent = '✏️';
+        editButton.setAttribute('title', 'Editar link');
+
+        const urlInput = document.createElement('input');
+        urlInput.type = 'url';
+        urlInput.placeholder = 'Cole ou atualize o link';
+        urlInput.value = questionData.link || '';
+        urlInput.setAttribute('aria-label', `Link externo para ${labelValue}`);
+
+        editorWrapper.append(editButton, urlInput);
+
+        questionBody.append(labelInput, indicator, editorWrapper);
+
+        const notesWrapper = document.createElement('div');
+        notesWrapper.className = 'checagem-question-right';
+        const notesTextarea = document.createElement('textarea');
+        notesTextarea.className = 'checagem-question-notes';
+        notesTextarea.placeholder = '';
+        notesTextarea.value = questionData.notes || '';
+        notesTextarea.setAttribute('aria-label', `Anotações para ${labelValue}`);
+        notesWrapper.appendChild(notesTextarea);
+
+        const toggleEditor = () => {
+            editorWrapper.classList.toggle('visible');
+            if (editorWrapper.classList.contains('visible')) {
+                urlInput.focus();
+            }
+        };
+
+        editButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleEditor();
+        });
+
+        linkButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            const freshData = getCachedQuestion(cardId, question.key);
+            if (freshData.link) {
+                window.open(freshData.link, '_blank');
+                return;
+            }
+            toggleEditor();
+        });
+
+        const persistAndRefresh = (partial) => {
+            let updated = persistChecagemQuestion(cardId, question.key, partial);
+            if (!updated) {
+                updated = getCachedQuestion(cardId, question.key);
+            }
+            updateLinkIndicatorText(indicator, Boolean(updated.link), updated.link);
+            return updated;
+        };
+
+        const toggleConfirm = () => {
+            const current = Boolean(questionData.confirmed);
+            const updated = persistAndRefresh({ confirmed: !current });
+            questionData.confirmed = Boolean(updated.confirmed);
+            confirmButton.dataset.confirmed = questionData.confirmed ? '1' : '0';
+        };
+
+        confirmButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleConfirm();
+        });
+
+        labelInput.addEventListener('input', () => {
+            persistAndRefresh({ label: labelInput.value });
+        });
+
+        notesTextarea.addEventListener('input', () => {
+            persistAndRefresh({ notes: notesTextarea.value });
+        });
+
+        const syncLinkValue = () => {
+            const normalized = normalizeLinkValue(urlInput.value);
+            const updated = persistAndRefresh({ link: normalized });
+            if (normalized) {
+                urlInput.value = updated.link;
+            }
+        };
+
+        urlInput.addEventListener('change', syncLinkValue);
+        urlInput.addEventListener('blur', syncLinkValue);
+        urlInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                urlInput.blur();
+            }
+        });
+
+        row.append(linkWrapper, questionBody, notesWrapper);
+        return row;
+    };
+
+    const renderChecagemModal = (cardId, cardName, linkIcon) => {
+        const overlay = ensureModal();
+        const title = overlay.querySelector('.checagem-modal__title');
+        const pool = overlay.querySelector('.checagem-modal__questions');
+        title.textContent = 'Checagem de Sistemas';
+        pool.innerHTML = '';
+        CHECAGEM_SECTIONS.forEach((section) => {
+            const sectionBlock = document.createElement('section');
+            sectionBlock.className = 'checagem-section';
+            const heading = document.createElement('div');
+            heading.className = 'checagem-section-title';
+            heading.textContent = section.title;
+            sectionBlock.appendChild(heading);
+        const questionsWrapper = document.createElement('div');
+        questionsWrapper.className = 'checagem-questions';
+        section.questions.forEach((question) => {
+            questionsWrapper.appendChild(buildQuestionRow(cardId, question, linkIcon));
+        });
+        sectionBlock.appendChild(questionsWrapper);
+        pool.appendChild(sectionBlock);
+    });
+    };
+
+    const openChecagemModal = (card, trigger) => {
+        const overlay = ensureModal();
+        const cardId = card?.dataset?.parteId || 'global';
+        const cardName = card?.querySelector('.parte-nome')?.textContent?.trim() || '';
+        const linkIcon =
+            document
+                .querySelector('.checagem-sistemas-trigger')
+                ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
+        renderChecagemModal(cardId, cardName, linkIcon);
+        overlay.setAttribute('aria-hidden', 'false');
+    };
+
+    const closeChecagemModal = () => {
+        const overlay = document.getElementById('checagem-modal-overlay');
+        if (overlay) {
+            overlay.setAttribute('aria-hidden', 'true');
+        }
+    };
+
+    document.body.addEventListener('click', (event) => {
+        const trigger = event.target.closest('.checagem-sistemas-trigger');
+        if (!trigger) {
+            return;
+        }
+        event.preventDefault();
+        const card = trigger.closest('.info-card');
+        openChecagemModal(card, trigger);
+    });
+
     if (typeof jQuery !== 'undefined') {
         jQuery(document).on('formset:added', function(event, $row, formsetName) {
             // Verifica se a nova linha pertence ao formset 'partes_processuais'
