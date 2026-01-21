@@ -946,6 +946,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 entry.appendChild(text);
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
+                const titleRow = buildSupervisionTitleRow(entryData);
+                if (titleRow) {
+                    entry.appendChild(titleRow);
+                }
                 const meta = document.createElement('div');
                 meta.className = 'agenda-panel__details-item-meta';
                 const renderMetaRow = (labelText, valueText) => {
@@ -2619,6 +2623,19 @@ document.addEventListener('DOMContentLoaded', function() {
     makeInfoCardSticky();
 
     const normalizeCpf = (value) => (value || '').replace(/\D/g, '');
+    const getParteInfoFromCard = (processoId) => {
+        if (!processoId) return {};
+        const selector = `.info-card[data-processo-id="${processoId}"]`;
+        const card = document.querySelector(selector);
+        if (!card) return {};
+        const nameEl = card.querySelector('.parte-nome');
+        const documentoEl = card.querySelector('.parte-documento');
+        const name = nameEl ? nameEl.textContent.trim() : '';
+        const cpfFromDataset = card.dataset.parteCpf || '';
+        const cpfText = documentoEl ? documentoEl.textContent.trim() : '';
+        const cpf = cpfFromDataset || cpfText;
+        return { name, cpf };
+    };
     const parseEnderecoString = (value) => {
         const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
         if (!value) return output;
@@ -2740,6 +2757,47 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         applyMask();
     };
+    
+    function buildSupervisionTitleRow(entryData) {
+        if (!entryData) return null;
+        const cardMeta = entryData.processo_id ? getParteInfoFromCard(entryData.processo_id) : {};
+        const name = entryData.nome || entryData.name || entryData.parte_nome || cardMeta.name || '';
+        const cpfCandidates = [
+            entryData.cpf,
+            entryData.parte_cpf,
+            entryData.documento,
+            entryData.cpf_falecido,
+            entryData.cpf_representante,
+            cardMeta.cpf,
+        ];
+        const cpfRaw = cpfCandidates.find(Boolean) || '';
+        const normalizedCpf = normalizeCpf(cpfRaw);
+        if (!name && !normalizedCpf) {
+            return null;
+        }
+        const row = document.createElement('div');
+        row.className = 'agenda-panel__details-item-title';
+        if (name) {
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'agenda-panel__details-item-title-name';
+            nameSpan.textContent = name;
+            row.appendChild(nameSpan);
+        }
+        if (normalizedCpf) {
+            const cpfSpan = document.createElement('span');
+            cpfSpan.className = 'agenda-panel__details-item-title-cpf';
+            cpfSpan.textContent = `CPF: ${formatCpfValue(normalizedCpf)}`;
+            cpfSpan.setAttribute('title', 'Clique para copiar o CPF sem formatação');
+            cpfSpan.addEventListener('click', () => {
+                navigator.clipboard?.writeText(normalizedCpf)?.then(() => {
+                    cpfSpan.classList.add('copied');
+                    setTimeout(() => cpfSpan.classList.remove('copied'), 1000);
+                }).catch(() => {});
+            });
+            row.appendChild(cpfSpan);
+        }
+        return row;
+    }
     const herdeirosCache = new Map();
     const fetchHerdeiros = (cpf) => {
         const normalized = normalizeCpf(cpf);
