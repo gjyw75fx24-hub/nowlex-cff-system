@@ -231,6 +231,12 @@
     display: flex;
 }
 
+.checagem-link-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .checagem-link-editor input {
     flex: 1;
     border: 1px solid rgba(15, 58, 118, 0.16);

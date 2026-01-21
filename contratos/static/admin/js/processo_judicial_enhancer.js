@@ -3663,23 +3663,27 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             questionData.link
         );
 
+        const editTrigger = document.createElement('button');
+        editTrigger.type = 'button';
+        editTrigger.className = 'checagem-link-edit-trigger';
+        editTrigger.setAttribute('title', 'Editar link');
+        editTrigger.innerHTML = '✏️';
+
         const editorWrapper = document.createElement('div');
         editorWrapper.className = 'checagem-link-editor';
-        const editButton = document.createElement('button');
-        editButton.type = 'button';
-        editButton.className = 'checagem-link-edit';
-        editButton.textContent = '✏️';
-        editButton.setAttribute('title', 'Editar link');
-
         const urlInput = document.createElement('input');
         urlInput.type = 'url';
         urlInput.placeholder = 'Cole ou atualize o link';
         urlInput.value = questionData.link || '';
         urlInput.setAttribute('aria-label', `Link externo para ${labelValue}`);
 
-        editorWrapper.append(editButton, urlInput);
+        editorWrapper.append(urlInput);
 
-        questionBody.append(labelInput, indicator, editorWrapper);
+        const linkRow = document.createElement('div');
+        linkRow.className = 'checagem-link-row';
+        linkRow.append(indicator, editTrigger);
+
+        questionBody.append(labelInput, linkRow, editorWrapper);
 
         const notesWrapper = document.createElement('div');
         notesWrapper.className = 'checagem-question-right';
@@ -3697,7 +3701,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             }
         };
 
-        editButton.addEventListener('click', (event) => {
+        editTrigger.addEventListener('click', (event) => {
             event.preventDefault();
             toggleEditor();
         });
