@@ -1327,6 +1327,7 @@ a.historylink {
     overflow-y: auto;
     overflow-x: hidden;
     max-height: calc(90vh - 160px);
+    min-height: 0;
 }
 .agenda-panel__calendar-wrapper {
     display: flex;
