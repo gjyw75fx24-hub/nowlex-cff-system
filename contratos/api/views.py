@@ -147,29 +147,136 @@ class AgendaGeralAPIView(APIView):
     def _supervision_status_labels(self):
         return SUPERVISION_STATUS_LABELS
 
-    def _build_analysis_result_lines(self, card_info):
+    def _build_analysis_result_lines(self, card_info, contract_lookup=None):
         status = card_info.get('status', 'pendente')
         labels = self._supervision_status_labels()
         lines = [f"Status: {labels.get(status, status.capitalize())}"]
-        responses = (card_info.get('card') or {}).get('tipo_de_acao_respostas') or {}
-        fallback = card_info.get('card') or {}
-        def add_line(key, label):
-            value = responses.get(key)
-            if value in (None, ''):
-                value = fallback.get(key)
-            if value in (None, '', []):
-                return
+        card = card_info.get('card') or {}
+        responses = card.get('tipo_de_acao_respostas') or {}
+        if not isinstance(responses, dict):
+            responses = {}
+        fallback = card
+        contract_lookup = contract_lookup or {}
+        response_labels = {
+            'judicializado_pela_massa': 'Judicializado pela massa',
+            'tipo_de_acao': 'Tipo de ação',
+            'julgamento': 'Julgamento',
+            'transitado': 'Transitado',
+            'procedencia': 'Procedência',
+            'data_de_transito': 'Data de trânsito',
+            'cumprimento_de_sentenca': 'Cumprimento de sentença',
+            'propor_monitoria': 'Propor monitória',
+            'repropor_monitoria': 'Repropor monitória',
+            'contratos_para_monitoria': 'Contratos para monitória',
+            'ativar_botao_monitoria': 'Botão de monitória',
+        }
+        ordered_fields = [
+            'judicializado_pela_massa',
+            'tipo_de_acao',
+            'julgamento',
+            'transitado',
+            'procedencia',
+            'data_de_transito',
+            'cumprimento_de_sentenca',
+            'propor_monitoria',
+            'contratos_para_monitoria',
+            'repropor_monitoria',
+            'ativar_botao_monitoria',
+        ]
+
+        def value_is_empty(value):
+            if value is None or value == '':
+                return True
+            if isinstance(value, (list, tuple)) and not value:
+                return True
+            return False
+
+        def format_simple_value(value):
+            if value is None or value == '':
+                return None
+            if isinstance(value, bool):
+                return 'Sim' if value else 'Não'
+            if isinstance(value, (int, float, Decimal)):
+                return str(value)
+            if isinstance(value, (datetime, date_cls, time_cls)):
+                try:
+                    return value.isoformat()
+                except Exception:
+                    return str(value)
+            if isinstance(value, dict):
+                try:
+                    return json.dumps(value, ensure_ascii=False)
+                except Exception:
+                    return str(value)
+            return str(value)
+
+        def resolve_contract_label(item):
+            candidate_id = None
+            raw_candidate = None
+            if isinstance(item, dict):
+                raw_candidate = item.get('id') or item.get('pk')
+            else:
+                raw_candidate = item
+            try:
+                candidate_id = int(raw_candidate)
+            except (TypeError, ValueError):
+                candidate_id = None
+            if contract_lookup and candidate_id is not None:
+                contract = contract_lookup.get(candidate_id)
+                if contract and getattr(contract, 'numero_contrato', None):
+                    return str(contract.numero_contrato)
+            if isinstance(item, dict):
+                label = item.get('numero_contrato')
+                if label:
+                    return str(label)
+            return format_simple_value(item)
+
+        def format_value(key, value):
+            if value_is_empty(value):
+                return None
+            if key == 'contratos_para_monitoria':
+                iter_items = value if isinstance(value, (list, tuple)) else [value]
+                formatted = [
+                    label
+                    for label in (resolve_contract_label(item) for item in iter_items)
+                    if label
+                ]
+                return ', '.join(formatted) if formatted else None
             if isinstance(value, (list, tuple)):
-                value = ', '.join(str(item) for item in value if item is not None)
-            lines.append(f"{label}: {value}")
-        add_line('judicializado_pela_massa', 'Judicializado pela massa')
-        add_line('propor_monitoria', 'Propor monitória')
-        add_line('tipo_de_acao', 'Tipo de ação')
-        add_line('julgamento', 'Julgamento')
-        add_line('transitado', 'Transitado')
-        add_line('procedencia', 'Procedência')
-        add_line('repropor_monitoria', 'Repropor monitória')
-        add_line('ativar_botao_monitoria', 'Botão de monitoria')
+                formatted_items = [
+                    item
+                    for item in (format_simple_value(entry) for entry in value)
+                    if item
+                ]
+                return ', '.join(formatted_items) if formatted_items else None
+            return format_simple_value(value)
+
+        def humanize_label(key):
+            parts = key.split('_') if key else []
+            return ' '.join(part.capitalize() for part in parts if part)
+
+        processed_keys = set()
+
+        def add_line(key, label=None):
+            if not key:
+                return
+            value = responses.get(key)
+            if value_is_empty(value):
+                value = fallback.get(key)
+            formatted = format_value(key, value)
+            if not formatted:
+                return
+            label_text = label or response_labels.get(key) or humanize_label(key)
+            lines.append(f"{label_text}: {formatted}")
+            processed_keys.add(key)
+
+        for field in ordered_fields:
+            add_line(field, response_labels.get(field))
+
+        remaining_keys = sorted(k for k in responses.keys() if k not in processed_keys)
+        for key in remaining_keys:
+            add_line(key)
+
         return lines
 
     def _serialize_user(self, user):
@@ -311,7 +418,7 @@ class AgendaGeralAPIView(APIView):
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
                 'cnj_label': cnj_label,
-                'analysis_lines': self._build_analysis_result_lines(card_info),
+                'analysis_lines': self._build_analysis_result_lines(card_info, contract_map),
                 'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
                 'processo_id': processo.pk if processo else None,
                 'responsavel': responsavel,

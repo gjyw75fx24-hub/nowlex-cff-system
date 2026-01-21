@@ -1831,11 +1831,13 @@ a.historylink {
     flex-direction: column;
 }
 .agenda-panel__details-card-body {
-    overflow-y: scroll;
+    overflow-y: auto;
+    overflow-x: hidden;
     max-height: min(360px, 52vh);
     padding-right: 0.5rem;
     scrollbar-width: thin;
     scrollbar-color: rgba(15, 58, 96, 0.35) transparent;
+    overscroll-behavior: contain;
 }
 .agenda-panel__details-card-body::-webkit-scrollbar {
     width: 6px;
