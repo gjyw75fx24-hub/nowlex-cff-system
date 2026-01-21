@@ -777,18 +777,23 @@ document.addEventListener('DOMContentLoaded', function() {
         const originalDate = originalParsed
             ? formatDateIso(originalParsed.year, originalParsed.monthIndex, originalParsed.day)
             : formatDateIso(parsed.year, parsed.monthIndex, parsed.day);
-        const entry = {
-            type,
-            id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
-            backendId: item.id || null,
-            label: item.label || (
-                type === 'S'
-                    ? 'S'
-                    : (item.id ? `${item.id}` : `${parsed.day}`)
-            ),
-            description: item.description
-                || item.descricao
-                || item.title
+            const entry = {
+                type,
+                id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
+                backendId: item.id || null,
+                label: item.label || (
+                    type === 'S'
+                        ? 'S'
+                        : (item.id ? `${item.id}` : `${parsed.day}`)
+                ),
+                nome: item.nome || item.parte_nome || item.name || '',
+                parte_nome: item.parte_nome || item.nome || item.name || '',
+                cpf: item.cpf || item.parte_cpf || item.documento || '',
+                parte_cpf: item.parte_cpf || item.cpf || item.documento || '',
+                documento: item.documento || item.cpf || item.parte_cpf || '',
+                description: item.description
+                    || item.descricao
+                    || item.title
                 || item.titulo
                 || '',
             detail: item.detail || item.observacoes || '',
@@ -938,6 +943,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 label.textContent = entryData.label;
                 entry.appendChild(label);
             }
+            console.log('entryData S', entryData.id, entryData.nome, entryData.cpf);
             const titleRow = buildEntryTitleRow(entryData);
             if (titleRow) {
                 entry.appendChild(titleRow);

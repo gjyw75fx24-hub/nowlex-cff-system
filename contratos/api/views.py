@@ -277,6 +277,12 @@ class AgendaGeralAPIView(APIView):
                 (processo.cnj if processo else '') or
                 'CNJ não informado'
             )
+            parte_passiva = None
+            if processo:
+                partes_qs = processo.partes_processuais.order_by('tipo_polo', 'id')
+                parte_passiva = partes_qs.filter(tipo_polo='PASSIVO').first() or partes_qs.first()
+            parte_nome = parte_passiva.nome if parte_passiva else ''
+            parte_documento = parte_passiva.documento if parte_passiva else ''
             contrato_labels = [
                 c.numero_contrato or f"ID {c.pk}"
                 for c in valid_contracts
@@ -316,6 +322,11 @@ class AgendaGeralAPIView(APIView):
                 'card_index': card_info['index'],
                 'supervisor_status': card_info['status'],
                 'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
+                'nome': parte_nome,
+                'parte_nome': parte_nome,
+                'cpf': parte_documento,
+                'parte_cpf': parte_documento,
+                'documento': parte_documento,
             })
 
         return entries
