@@ -1324,7 +1324,8 @@ a.historylink {
 .agenda-panel__body {
     flex: 1;
     padding: 0 24px;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     max-height: calc(90vh - 160px);
     min-height: 0;
     scrollbar-gutter: stable;
@@ -1727,9 +1728,6 @@ a.historylink {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 58vh;
-    overflow-y: auto;
-    padding-right: 4px;
 }
 .agenda-panel__details-list,
 .agenda-panel__details-card {
