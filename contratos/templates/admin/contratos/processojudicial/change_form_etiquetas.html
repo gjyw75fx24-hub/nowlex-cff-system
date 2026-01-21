@@ -310,7 +310,7 @@
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">
@@ -328,7 +328,16 @@
                         </div>
                     </div>
                     <div class="info-card-header-right">
-                        <span class="parte-documento">{{ parte.documento }}</span>
+                        <div class="info-card-header-right-row">
+                            <button type="button"
+                                    class="checagem-sistemas-trigger"
+                                    aria-label="Abrir Checagem de Sistemas"
+                                    title="Checar sistemas externos"
+                                    data-link-icon="{% static 'images/Link_Logo.png' %}">
+                                <img src="{% static 'images/Checagem_de_Sistemas_Logo.png' %}" alt="Checagem de Sistemas">
+                            </button>
+                            <span class="parte-documento">{{ parte.documento }}</span>
+                        </div>
                         <button type="button" class="parte-status-toggle" data-status="{{ parte.obito|yesno:'obito,regular' }}" aria-pressed="false">{{ parte.obito|yesno:'Óbito,Regular' }}</button>
                     </div>
                 </div>

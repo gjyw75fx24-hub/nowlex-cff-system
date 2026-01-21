@@ -3506,6 +3506,16 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return `https://${trimmed}`;
     };
 
+    const resolveChecagemStorageKey = ({ processoId, cardId }) => {
+        if (processoId) {
+            return `processo-${processoId}`;
+        }
+        if (cardId) {
+            return `${cardId}`;
+        }
+        return 'global';
+    };
+
     const readChecagemStorage = () => {
         try {
             const raw = localStorage.getItem(CHECAGEM_STORAGE_KEY);
@@ -3526,9 +3536,9 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
     };
 
-    const persistChecagemQuestion = (cardId, questionKey, updates) => {
+    const persistChecagemQuestion = (storageKey, questionKey, updates) => {
         const state = readChecagemStorage();
-        const cardKey = cardId || 'global';
+        const cardKey = storageKey || 'global';
         state.cards = state.cards || {};
         if (!state.cards[cardKey]) {
             state.cards[cardKey] = { questions: {} };
@@ -3543,9 +3553,9 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return cardState.questions[questionKey];
     };
 
-    const getCachedQuestion = (cardId, questionKey) => {
+    const getCachedQuestion = (storageKey, questionKey) => {
         const state = readChecagemStorage();
-        const cardKey = cardId || 'global';
+        const cardKey = storageKey || 'global';
         const cardState = (state.cards || {})[cardKey] || {};
         return (cardState.questions || {})[questionKey] || {};
     };
@@ -3613,8 +3623,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
     };
 
-    const buildQuestionRow = (cardId, question, linkIcon) => {
-        const questionData = { ...getCachedQuestion(cardId, question.key) };
+    const buildQuestionRow = (storageKey, question, linkIcon) => {
+        const questionData = { ...getCachedQuestion(storageKey, question.key) };
         const labelValue = questionData.label || question.label;
 
         const row = document.createElement('div');
@@ -3694,7 +3704,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         linkButton.addEventListener('click', (event) => {
             event.preventDefault();
-            const freshData = getCachedQuestion(cardId, question.key);
+            const freshData = getCachedQuestion(storageKey, question.key);
             if (freshData.link) {
                 window.open(freshData.link, '_blank');
                 return;
@@ -3703,9 +3713,9 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         });
 
         const persistAndRefresh = (partial) => {
-            let updated = persistChecagemQuestion(cardId, question.key, partial);
+            let updated = persistChecagemQuestion(storageKey, question.key, partial);
             if (!updated) {
-                updated = getCachedQuestion(cardId, question.key);
+                updated = getCachedQuestion(storageKey, question.key);
             }
             updateLinkIndicatorText(indicator, Boolean(updated.link), updated.link);
             return updated;
@@ -3752,12 +3762,13 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return row;
     };
 
-    const renderChecagemModal = (cardId, cardName, linkIcon) => {
+    const renderChecagemModal = (cardContext, linkIcon) => {
         const overlay = ensureModal();
         const title = overlay.querySelector('.checagem-modal__title');
         const pool = overlay.querySelector('.checagem-modal__questions');
         title.textContent = 'Checagem de Sistemas';
         pool.innerHTML = '';
+        const storageKey = resolveChecagemStorageKey(cardContext);
         CHECAGEM_SECTIONS.forEach((section) => {
             const sectionBlock = document.createElement('section');
             sectionBlock.className = 'checagem-section';
@@ -3768,7 +3779,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         const questionsWrapper = document.createElement('div');
         questionsWrapper.className = 'checagem-questions';
         section.questions.forEach((question) => {
-            questionsWrapper.appendChild(buildQuestionRow(cardId, question, linkIcon));
+            questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
         });
         sectionBlock.appendChild(questionsWrapper);
         pool.appendChild(sectionBlock);
@@ -3778,12 +3789,13 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
     const openChecagemModal = (card, trigger) => {
         const overlay = ensureModal();
         const cardId = card?.dataset?.parteId || 'global';
+        const processoId = card?.dataset?.processoId;
         const cardName = card?.querySelector('.parte-nome')?.textContent?.trim() || '';
         const linkIcon =
             document
                 .querySelector('.checagem-sistemas-trigger')
                 ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
-        renderChecagemModal(cardId, cardName, linkIcon);
+        renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
         overlay.setAttribute('aria-hidden', 'false');
     };
 
@@ -3802,21 +3814,6 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         visible: false,
         triggerElement: null,
         listenersInit: false,
-    };
-
-    const handleAgendaChecagemOutsideClick = (event) => {
-        if (!agendaChecagemPanelState.visible) {
-            return;
-        }
-        const panel = agendaChecagemPanelState.panel;
-        if (panel && panel.contains(event.target)) {
-            return;
-        }
-        const trigger = agendaChecagemPanelState.triggerElement;
-        if (trigger && trigger.contains(event.target)) {
-            return;
-        }
-        closeAgendaChecagemPanel();
     };
 
     const ensureAgendaChecagemPanel = () => {
@@ -3848,7 +3845,6 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         closeButton.addEventListener('click', () => closeAgendaChecagemPanel());
         panel.addEventListener('click', (event) => event.stopPropagation());
         if (!agendaChecagemPanelState.listenersInit) {
-            document.addEventListener('mousedown', handleAgendaChecagemOutsideClick);
             document.addEventListener('keydown', (event) => {
                 if (agendaChecagemPanelState.visible && event.key === 'Escape') {
                     closeAgendaChecagemPanel();
@@ -3859,14 +3855,16 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return panel;
     };
 
-    const renderAgendaChecagemPanelContent = (cardId, cardName, linkIcon) => {
+    const renderAgendaChecagemPanelContent = (cardContext, linkIcon) => {
         const panel = ensureAgendaChecagemPanel();
         if (!panel) {
             return;
         }
-        agendaChecagemPanelState.subtitle.textContent = cardName || '';
+        const subtitleText = (cardContext?.cardName || '').trim();
+        agendaChecagemPanelState.subtitle.textContent = subtitleText.length > 1 ? subtitleText : '';
         const body = agendaChecagemPanelState.body;
         body.innerHTML = '';
+        const storageKey = resolveChecagemStorageKey(cardContext || {});
         CHECAGEM_SECTIONS.forEach((section) => {
             const sectionBlock = document.createElement('section');
             sectionBlock.className = 'checagem-section agenda-checagem-panel__section';
@@ -3877,7 +3875,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             const questionsWrapper = document.createElement('div');
             questionsWrapper.className = 'checagem-questions';
             section.questions.forEach((question) => {
-                questionsWrapper.appendChild(buildQuestionRow(cardId, question, linkIcon));
+                questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
             });
             sectionBlock.appendChild(questionsWrapper);
             body.appendChild(sectionBlock);
@@ -3919,7 +3917,12 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             ? `agenda-supervision-${entryData.backendId}`
             : `agenda-supervision-${entryData.processo_id || 'global'}`;
         const cardName = entryData.label || entryData.viabilidade_label || '';
-        renderAgendaChecagemPanelContent(cardId, cardName, AGENDA_CHECAGEM_LINK_ICON);
+        const cardContext = {
+            cardId,
+            processoId: entryData.processo_id,
+            cardName,
+        };
+        renderAgendaChecagemPanelContent(cardContext, AGENDA_CHECAGEM_LINK_ICON);
         const panel = ensureAgendaChecagemPanel();
         if (!panel) {
             return;
