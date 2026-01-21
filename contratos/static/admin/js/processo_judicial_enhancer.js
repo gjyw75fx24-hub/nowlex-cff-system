@@ -938,6 +938,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 label.textContent = entryData.label;
                 entry.appendChild(label);
             }
+            const titleRow = buildEntryTitleRow(entryData);
+            if (titleRow) {
+                entry.appendChild(titleRow);
+            }
             let footer = null;
             if (type !== 'S') {
                 const text = document.createElement('span');
@@ -946,10 +950,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 entry.appendChild(text);
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
-                const titleRow = buildSupervisionTitleRow(entryData);
-                if (titleRow) {
-                    entry.appendChild(titleRow);
-                }
                 const meta = document.createElement('div');
                 meta.className = 'agenda-panel__details-item-meta';
                 const renderMetaRow = (labelText, valueText) => {
@@ -2758,7 +2758,7 @@ document.addEventListener('DOMContentLoaded', function() {
         applyMask();
     };
     
-    function buildSupervisionTitleRow(entryData) {
+    function buildEntryTitleRow(entryData) {
         if (!entryData) return null;
         const cardMeta = entryData.processo_id ? getParteInfoFromCard(entryData.processo_id) : {};
         const name = entryData.nome || entryData.name || entryData.parte_nome || cardMeta.name || '';
