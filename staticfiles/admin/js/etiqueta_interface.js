@@ -1,11 +1,31 @@
-'use strict';
-(function($) {
-    $(document).ready(function() {
+function waitForJQuery() {
+    const resolveJQuery = () => {
+        if (window.django && window.django.jQuery) {
+            return window.django.jQuery;
+        }
+        if (window.jQuery) {
+            return window.jQuery;
+        }
+        if (window.$) {
+            return window.$;
+        }
+        return null;
+    };
+
+    const $ = resolveJQuery();
+    if (!$) {
+        setTimeout(waitForJQuery, 50);
+        return;
+    }
+
+    'use strict';
+    (function($) {
+        $(document).ready(function() {
         // --- Configuração Inicial ---
         const processoId = window.location.pathname.split('/').filter(Boolean)[3];
-        if (!processoId || isNaN(parseInt(processoId))) return;
+        const memoryHasProcess = processoId && !isNaN(parseInt(processoId));
 
-        const etiquetasUrl = `/admin/contratos/processojudicial/${processoId}/etiquetas/`;
+        const etiquetasUrl = memoryHasProcess ? `/admin/contratos/processojudicial/${processoId}/etiquetas/` : null;
         const criarEtiquetaUrl = `/admin/contratos/processojudicial/etiquetas/criar/`;
 
         // --- Seletores de Elementos ---
@@ -130,6 +150,7 @@
         }
 
         function fetchData() {
+            if (!etiquetasUrl) return;
             $.get(etiquetasUrl, function(data) {
                 todasEtiquetas = data.todas_etiquetas;
                 etiquetasProcesso = data.etiquetas_processo;
@@ -139,6 +160,7 @@
         }
 
         function handleEtiquetaChange(etiquetaId, action) {
+            if (!etiquetasUrl) return;
             $.ajax({
                 url: etiquetasUrl,
                 type: 'POST',
@@ -226,7 +248,8 @@
             }
         }
 
-        addNewEtiquetaBtn.on('click', function() {
+        const openCreateEtiquetaBtn = $('#open-create-etiqueta-btn');
+        function showCreateEtiquetaModal() {
             createEtiquetaError.hide();
             newEtiquetaNameInput.val('');
             newEtiquetaNameInput.css({
@@ -245,7 +268,15 @@
             } else {
                 setupAndShow();
             }
-        });
+        }
+
+        addNewEtiquetaBtn.on('click', showCreateEtiquetaModal);
+        if (openCreateEtiquetaBtn.length) {
+            openCreateEtiquetaBtn.on('click', function(e) {
+                e.preventDefault();
+                showCreateEtiquetaModal();
+            });
+        }
 
         newEtiquetaNameInput.on('keyup', updatePreview);
 
@@ -264,12 +295,16 @@
                     data: JSON.stringify({ 'nome': nome, 'cor_fundo': cor_fundo, 'cor_fonte': cor_fonte }),
                     contentType: 'application/json',
                     beforeSend: xhr => xhr.setRequestHeader("X-CSRFToken", csrftoken),
-                    success: response => {
-                        if(response.status === 'created') {
-                            createModal.hide();
+                success: response => {
+                    if(response.status === 'created') {
+                        createModal.hide();
+                        if (memoryHasProcess) {
                             fetchData();
+                        } else {
+                            window.location.reload();
                         }
-                    },
+                    }
+                },
                     error: response => {
                         createEtiquetaError.text(response.responseJSON.message || 'Ocorreu um erro.').show();
                     }
@@ -277,6 +312,10 @@
             }
         });
 
-        fetchData();
+        if (etiquetasUrl) {
+            fetchData();
+        }
     });
-})(django.jQuery);
+})($);
+}
+waitForJQuery();

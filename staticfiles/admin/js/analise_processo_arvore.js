@@ -151,7 +151,7 @@
                 pointer-events: none;
             }
             .cff-countdown-bubble small {
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: 500;
                 opacity: 0.9;
             }
@@ -1106,6 +1106,55 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             userResponses[SAVED_PROCESSOS_KEY].push(cardData);
         }
 
+        function syncEditingCardWithCurrentResponses() {
+            if (
+                !Number.isFinite(userResponses._editing_card_index) ||
+                userResponses._editing_card_index < 0 ||
+                !Array.isArray(userResponses.processos_vinculados) ||
+                userResponses.processos_vinculados.length === 0
+            ) {
+                return null;
+            }
+            const card = userResponses.processos_vinculados[0];
+            if (!card) {
+                return null;
+            }
+            const monitoriaIds = Array.from(
+                new Set(
+                    (userResponses.contratos_para_monitoria || [])
+                        .map(id => String(id).trim())
+                        .filter(Boolean)
+                )
+            );
+            card.contratos = monitoriaIds.slice();
+            card.tipo_de_acao_respostas = card.tipo_de_acao_respostas || {};
+            card.tipo_de_acao_respostas.contratos_para_monitoria = monitoriaIds.slice();
+            const syncKeys = [
+                'judicializado_pela_massa',
+                'propor_monitoria',
+                'tipo_de_acao',
+                'julgamento',
+                'transitado',
+                'procedencia',
+                'repropor_monitoria',
+                'ativar_botao_monitoria'
+            ];
+            syncKeys.forEach(key => {
+                if (Object.prototype.hasOwnProperty.call(userResponses, key)) {
+                    card.tipo_de_acao_respostas[key] = deepClone(userResponses[key]);
+                }
+            });
+            const supervisionado = Boolean(userResponses.supervisionado_nao_judicializado);
+            const status = userResponses.supervisor_status_nao_judicializado || 'pendente';
+            card.supervisionado = supervisionado;
+            card.supervisor_status = status;
+            card.awaiting_supervision_confirm = Boolean(userResponses.awaiting_supervision_confirm);
+            if (userResponses.barrado_nao_judicializado) {
+                card.barrado = deepClone(userResponses.barrado_nao_judicializado);
+            }
+            return card;
+        }
+
         function storeActiveAnalysisAsProcessCard() {
             ensureUserResponsesShape();
             const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
@@ -1115,6 +1164,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     ? Number(userResponses._editing_card_index)
                     : null;
 
+            if (editingIndex !== null) {
+                syncEditingCardWithCurrentResponses();
+            }
             let snapshot = buildSnapshotFromProcessosVinculados();
             if (!snapshot) {
                 snapshot = captureActiveAnalysisSnapshot();
@@ -1830,7 +1882,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
         window.addEventListener('beforeunload', flushPendingSave);
 
-        function saveResponses() {
+        function saveResponses(options = {}) {
             if (autoSaveTimer) {
                 clearTimeout(autoSaveTimer);
                 autoSaveTimer = null;
@@ -1860,7 +1912,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 "DEBUG A_P_A: saveResponses - TextArea contém:",
                 $responseField.val()
             );
-            displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
+            if (!options.skipRender) {
+                displayFormattedResponses(); // Isso vai recriar o botão, então o listener precisa ser global
+            }
             updateContractStars();
             updateGenerateButtonState();
             persistLocalResponses();
@@ -2039,12 +2093,11 @@ function formatCnjDigits(raw) {
                 return [];
             }
         const mentionType = options.mentionType || 'cnj';
-            const normalizedTarget = String(cnj || '').trim();
-            const mentionLabelRaw = String(options.mentionLabel || '').trim();
-            const mentionLabelNormalized = mentionLabelRaw ? mentionLabelRaw.toLowerCase() : '';
-            const normalizedCnjDigits =
-                mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
-
+        const normalizedTarget = String(cnj || '').trim();
+        const mentionLabelRaw = String(options.mentionLabel || '').trim();
+        const mentionLabelNormalized = mentionLabelRaw ? mentionLabelRaw.toLowerCase() : '';
+        const normalizedCnjDigits =
+            mentionType === 'cnj' && normalizedTarget ? normalizedTarget.replace(/\D/g, '') : '';
             const entries = splitNotebookEntries(rawNotes);
 
             function parseRawEntry(entryRaw) {
@@ -2357,10 +2410,11 @@ function formatCnjDigits(raw) {
             const observationTarget = isNonJudicial
                 ? (processo.nj_label || cnjVinculado)
                 : cnjVinculado;
+
             const observationEntries = getObservationEntriesForCnj(
                 observationTarget,
                 contractsReferenced,
-                { mentionType, mentionLabel: observationTarget }
+                { mentionType }
             );
 
             return {
@@ -2481,7 +2535,7 @@ function formatCnjDigits(raw) {
                 const value = $textArea.val().trim();
                 processo.supervisor_observacoes = value;
                 processo.supervisor_observacoes_autor = value ? currentSupervisorUsername : '';
-                saveResponses();
+                saveResponses({ skipRender: true });
             };
 
             $textArea.on('input', () => {
@@ -2784,6 +2838,15 @@ function formatCnjDigits(raw) {
                     $editBtn.attr('data-cnj', snapshot.cnj || '');
                     $editBtn.attr('data-visual-index', String(cardIndex));
                     $deleteBtn.on('click', function () {
+                        const tryMarkDeletion = (card) => {
+                            if (card && card.nj_label && isCardNonJudicialized(card)) {
+                                markNjObservationAsDeleted(card.nj_label);
+                            }
+                        };
+                        const targetCard = Array.isArray(userResponses.processos_vinculados)
+                            ? userResponses.processos_vinculados[cardIndex]
+                            : null;
+                        tryMarkDeletion(targetCard);
                         if (Array.isArray(userResponses.processos_vinculados)) {
                             userResponses.processos_vinculados.splice(cardIndex, 1);
                         }
@@ -2791,8 +2854,10 @@ function formatCnjDigits(raw) {
                         const attrIndex = $(this).attr('data-card-index');
                         const targetIndex = attrIndex ? Number(attrIndex) : null;
                         if (Number.isFinite(targetIndex) && savedCards[targetIndex]) {
+                            tryMarkDeletion(savedCards[targetIndex]);
                             savedCards.splice(targetIndex, 1);
                         } else if (savedCards[cardIndex]) {
+                            tryMarkDeletion(savedCards[cardIndex]);
                             savedCards.splice(cardIndex, 1);
                         }
                         if (Array.isArray(userResponses.selected_analysis_cards)) {
@@ -2968,6 +3033,18 @@ function formatCnjDigits(raw) {
                 updateConcludeButton();
             };
 
+            const handleAgendaStatusEvent = (event) => {
+                const detail = event?.detail;
+                if (!detail) return;
+                const matchesProcessoId = detail.processo_id && String(detail.processo_id) === String(processo.processo_id);
+                const matchesCnj = detail.cnj && String(detail.cnj).trim() === String(getProcessoCnjLabel(processo)).trim();
+                if (matchesProcessoId || matchesCnj) {
+                    processo.supervisor_status = detail.status || 'pendente';
+                    updateStatusButton();
+                }
+            };
+            window.addEventListener('agenda:supervision-status-changed', handleAgendaStatusEvent);
+
             const updateBarradoControls = () => {
                 const { barrado } = processo;
                 const hasInicio = Boolean(barrado.inicio);
@@ -3056,6 +3133,10 @@ function formatCnjDigits(raw) {
                 updateConcludeButton();
                 saveResponses();
                 renderSupervisionPanel();
+            });
+
+            $footer.on('remove', () => {
+                window.removeEventListener('agenda:supervision-status-changed', handleAgendaStatusEvent);
             });
 
             return $footer;
@@ -4009,9 +4090,17 @@ function formatCnjDigits(raw) {
         }
 
         function mentionNaoJudInNotas(text) {
-            if (typeof window.openNotebookWithMention === 'function') {
-                window.openNotebookWithMention(text || '');
+            if (typeof window.openNotebookWithMention !== 'function') {
+                return;
             }
+            const trimmed = String(text || '').trim();
+            if (!trimmed) {
+                return;
+            }
+            const existing = getNotebookText() || '';
+            const needsSeparator = existing && !existing.endsWith('\n');
+            const separator = needsSeparator ? '\n' : '';
+            window.openNotebookWithMention(`${separator}${trimmed}`);
         }
 
         function isNaoJudicializadoActive() {
@@ -4292,21 +4381,17 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     }
                 const successLines = [];
                 if (data && data.monitoria) {
-                    if (data.monitoria.ok) {
-                        successLines.push('Monitória OK');
-                    } else {
-                        successLines.push(`Monitória: Erro${data.monitoria.error ? ` - ${data.monitoria.error}` : ''}`);
-                    }
+                    successLines.push('Monitória: Gerada Corretamente - Salva em Arquivos');
                 }
                 if (data && data.extrato) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
                     } else {
-                        const message = data.extrato.error || 'Erro desconhecido';
+                        const messageRaw = data.extrato.error || 'Erro desconhecido';
+                        const message = messageRaw.replace(/\.?\s*Não é possível emitir o extrato da titularidade\.?/i, '');
                         successLines.push(`Extrato de titularidade: Não gerado - ${message}`);
                     }
                 }
-                successLines.push('Petição da Monitória salva com sucesso em Arquivos');
                 const handleReload = () => {
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
@@ -4369,7 +4454,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
+            const url = `/contratos/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
 
             $.ajax({
                 url: url,
@@ -4384,17 +4469,34 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             $('#id_gerar_cobranca_btn')
                         .prop('disabled', true)
                         .text('Gerando cobrança...');
+                    startCountdown(5);
                 },
                 success: function (data) {
-                const successLines = ['Cobrança Judicial OK'];
+                const successLines = [];
+                if (data && data.cobranca) {
+                    if (data.cobranca.ok) {
+                        successLines.push('Cobrança Judicial OK - Salvo em Arquivos');
+                    } else {
+                        successLines.push('Cobrança Judicial gerada - Salva em Arquivos');
+                    }
+                } else if (data && data.message) {
+                    successLines.push(data.message);
+                } else {
+                    successLines.push('Cobrança Judicial OK - Salvo em Arquivos');
+                }
                 if (data && data.extrato) {
                     if (data.extrato.ok) {
                         successLines.push('Extrato de titularidade OK');
                     } else {
-                        successLines.push(`Extrato de titularidade: Erro${data.extrato.error ? ` - ${data.extrato.error}` : ''}`);
+                        const rawMessage = data.extrato.error || '';
+                        const cleaned = rawMessage
+                            .replace(/\.?\s*Não é possível emitir o extrato da titularidade\.?/i, '')
+                            .replace(/^NowLex/i, 'A NowLex')
+                            .trim();
+                        const finalMessage = cleaned || 'A NowLex não possui o cadastro do contrato solicitado';
+                        successLines.push(`Extrato de titularidade: Não gerado - ${finalMessage}.`);
                     }
                 }
-                successLines.push('Salvos em Arquivos');
                 const handleReload = () => {
                     if ('scrollRestoration' in history) {
                         history.scrollRestoration = 'manual';
@@ -4415,6 +4517,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     console.error('Erro na geração da cobrança judicial:', status, error, xhr);
                 },
                 complete: function () {
+                    stopCountdown();
                     $('#id_gerar_cobranca_btn')
                         .prop('disabled', false)
                         .text('Petição Cobrança Judicial (PDF)');
@@ -4445,9 +4548,21 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     $('#id_gerar_habilitacao_btn')
                         .prop('disabled', true)
                         .text('Gerando habilitação...');
+                    startCountdown(5);
                 },
                 success: function (data) {
-                    const lines = ['Habilitação OK', 'Salvos em Arquivos'];
+                    const lines = [];
+                    if (data && data.habilitacao) {
+                        if (data.habilitacao.ok) {
+                            lines.push('Habilitação OK - Salvo em Arquivos');
+                        } else {
+                            lines.push('Habilitação gerada - Salva em Arquivos');
+                        }
+                    } else if (data && data.message) {
+                        lines.push(data.message);
+                    } else {
+                        lines.push('Habilitação OK - Salvo em Arquivos');
+                    }
                     const handleReload = () => {
                         if ('scrollRestoration' in history) {
                             history.scrollRestoration = 'manual';
@@ -4468,6 +4583,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     console.error('Erro na geração da habilitação:', status, error, xhr);
                 },
                 complete: function () {
+                    stopCountdown();
                     $('#id_gerar_habilitacao_btn')
                         .prop('disabled', false)
                         .text('Gerar Petição de Habilitação (PDF)');

@@ -170,11 +170,6 @@ class AgendaGeralAPIView(APIView):
         add_line('procedencia', 'Procedência')
         add_line('repropor_monitoria', 'Repropor monitória')
         add_line('ativar_botao_monitoria', 'Botão de monitoria')
-        contracts_value = responses.get('contratos_para_monitoria') or fallback.get('contratos_para_monitoria')
-        if contracts_value:
-            if isinstance(contracts_value, (list, tuple)):
-                contracts_value = ', '.join(str(item) for item in contracts_value if item is not None)
-            lines.append(f"Contratos para monitória: {contracts_value}")
         return lines
 
     def _serialize_user(self, user):
@@ -309,18 +304,19 @@ class AgendaGeralAPIView(APIView):
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
-                    'analysis_lines': self._build_analysis_result_lines(card_info),
-                    'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
-                    'processo_id': processo.pk if processo else None,
-                    'responsavel': responsavel,
-                    'expired': not active,
-                    'active': active,
-                    'analise_id': analise.pk,
-                    'card_source': card_info['source'],
-                    'card_index': card_info['index'],
-                    'supervisor_status': card_info['status'],
-                    'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
-                })
+                'cnj_label': cnj_label,
+                'analysis_lines': self._build_analysis_result_lines(card_info),
+                'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
+                'processo_id': processo.pk if processo else None,
+                'responsavel': responsavel,
+                'expired': not active,
+                'active': active,
+                'analise_id': analise.pk,
+                'card_source': card_info['source'],
+                'card_index': card_info['index'],
+                'supervisor_status': card_info['status'],
+                'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
+            })
 
         return entries
 
@@ -365,6 +361,67 @@ class AgendaSupervisionStatusAPIView(APIView):
             'supervisor_status': new_status,
             'status_label': SUPERVISION_STATUS_LABELS.get(new_status, new_status.capitalize()),
         })
+
+
+class AgendaSupervisionBarradoAPIView(APIView):
+    """
+    Atualiza o estado do bloqueio (barrado) de uma análise diretamente a partir da Agenda Geral.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        data = request.data or {}
+        analise_id = data.get('analise_id')
+        source = data.get('source')
+        index = data.get('index')
+        if not analise_id or not source or index is None:
+            return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            analise = AnaliseProcesso.objects.get(pk=analise_id)
+        except AnaliseProcesso.DoesNotExist:
+            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        respostas = analise.respostas or {}
+        cards = respostas.get(source)
+        try:
+            entry_index = int(index)
+        except (TypeError, ValueError):
+            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+        card = cards[entry_index]
+        if not isinstance(card, dict):
+            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        barrado = card.get('barrado')
+        if not isinstance(barrado, dict):
+            barrado = {}
+        barrado.setdefault('ativo', False)
+        barrado.setdefault('inicio', None)
+        barrado.setdefault('retorno_em', None)
+        toggle_active = data.get('toggle_active')
+        retorno_em = data.get('retorno_em') if 'retorno_em' in data else None
+        today_str = timezone.localdate().isoformat()
+        if toggle_active is not None:
+            ativo_value = bool(toggle_active)
+            barrado['ativo'] = ativo_value
+            if ativo_value and not barrado.get('inicio'):
+                barrado['inicio'] = today_str
+            if not ativo_value:
+                barrado['retorno_em'] = None
+        if 'retorno_em' in data:
+            barrado['retorno_em'] = retorno_em or None
+            if barrado['retorno_em']:
+                barrado['ativo'] = True
+                if not barrado.get('inicio'):
+                    barrado['inicio'] = today_str
+            else:
+                barrado['ativo'] = False
+        card['barrado'] = barrado
+        analise.respostas = respostas
+        analise.updated_by = request.user
+        analise.save(update_fields=['respostas', 'updated_by'])
+        return Response({'barrado': barrado})
 
 class TarefaCreateAPIView(generics.CreateAPIView):
     """

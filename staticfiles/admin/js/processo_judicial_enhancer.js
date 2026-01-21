@@ -99,6 +99,18 @@ document.addEventListener('DOMContentLoaded', function() {
         return cookieValue;
     }
     const csrftoken = getCookie('csrftoken');
+    const AGENDA_SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
+    const AGENDA_SUPERVISION_STATUS_LABELS = {
+        pendente: 'Pendente de Supervisão',
+        aprovado: 'Aprovado',
+        reprovado: 'Reprovado',
+    };
+    const AGENDA_SUPERVISION_STATUS_CLASSES = {
+        pendente: 'status-pendente',
+        aprovado: 'status-aprovado',
+        reprovado: 'status-reprovado',
+    };
+    const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
 
     function deduplicateInlineAndamentos() {
         const seen = new Set();
@@ -436,11 +448,43 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const formatDateLabel = (isoDate) => {
         if (!isoDate) return '';
-        const parsed = new Date(isoDate);
-        if (Number.isNaN(parsed.getTime())) {
-            return isoDate;
+        const raw = String(isoDate).trim().split('T')[0];
+        const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) {
+            return raw;
         }
-        return parsed.toLocaleDateString('pt-BR');
+        const [, year, month, day] = match;
+        return `${day}/${month}/${year}`;
+    };
+    const normalizeNumericCurrency = (value) => {
+        if (value === undefined || value === null) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        let normalized = raw.replace(/\u00A0/g, '');
+        normalized = normalized.replace(/R\$/g, '');
+        normalized = normalized.replace(/\s/g, '');
+        const hasComma = normalized.includes(',');
+        const hasDot = normalized.includes('.');
+        if (hasComma && hasDot) {
+            normalized = normalized.replace(/\./g, '');
+            normalized = normalized.replace(',', '.');
+        } else if (hasComma) {
+            normalized = normalized.replace(',', '.');
+        }
+        if (!/[0-9]/.test(normalized)) return null;
+        const parsed = Number(normalized);
+        if (Number.isNaN(parsed)) {
+            return null;
+        }
+        return parsed;
+    };
+    const formatCurrencyBrl = (value) => {
+        const numeric = normalizeNumericCurrency(value);
+        if (numeric === null) return '';
+        return numeric.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+        });
     };
     const entryOrigins = new Map();
     const getOriginKey = (entry) => {
@@ -756,7 +800,19 @@ document.addEventListener('DOMContentLoaded', function() {
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
             responsavel: item.responsavel || null,
+            contract_numbers: Array.isArray(item.contract_numbers)
+                ? item.contract_numbers.filter(Boolean)
+                : [],
+            valor_causa: item.valor_causa ?? null,
+            status_label: item.status_label || '',
+            viabilidade: item.viabilidade || '',
+            viabilidade_label: item.viabilidade_label || '',
+            analysis_lines: Array.isArray(item.analysis_lines)
+                ? item.analysis_lines.filter(line => line !== null && line !== undefined && line !== '')
+                : [],
             prescricao_date: item.prescricao_date || null,
+            expired: Boolean(item.expired),
+            active: Boolean(item.active),
         };
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
@@ -820,9 +876,16 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null) => {
         setDetailTitle?.(dayData?.day, type);
-        const entries = type === 'T' ? dayData.tasksT : dayData.tasksP;
+        if (typeof onEntrySelect === 'function') {
+            onEntrySelect(null, null);
+        }
+        const entries = type === 'T'
+            ? dayData.tasksT
+            : type === 'P'
+                ? dayData.tasksP
+                : dayData.tasksS;
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -846,12 +909,56 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const label = document.createElement('span');
             label.className = 'agenda-panel__details-item-label';
-            label.textContent = entryData.label;
+            const isSupervision = type === 'S';
+            if (isSupervision) {
+                const viabilityText = entryData.viabilidade_label || 'Viabilidade';
+                label.textContent = viabilityText;
+                label.classList.add('agenda-panel__details-item-label--viabilidade');
+                const normalized = (entryData.viabilidade || '').toLowerCase();
+                if (normalized) {
+                    label.classList.add(`agenda-panel__details-item-label--${normalized}`);
+                }
+            } else {
+                label.textContent = entryData.label;
+            }
             entry.appendChild(label);
-            const text = document.createElement('span');
-            text.className = 'agenda-panel__details-item-text';
-            text.textContent = entryData.description || '';
-            entry.appendChild(text);
+            if (type !== 'S') {
+                const text = document.createElement('span');
+                text.className = 'agenda-panel__details-item-text';
+                text.textContent = entryData.description || '';
+                entry.appendChild(text);
+            } else {
+                entry.classList.add('agenda-panel__details-item--supervision');
+                const meta = document.createElement('div');
+                meta.className = 'agenda-panel__details-item-meta';
+                const renderMetaRow = (labelText, valueText) => {
+                    if (!valueText) return;
+                    const row = document.createElement('div');
+                    row.className = 'agenda-panel__details-item-meta-row';
+                    const labelEl = document.createElement('span');
+                    labelEl.className = 'agenda-panel__details-item-meta-label';
+                    labelEl.textContent = `${labelText}:`;
+                    const valueEl = document.createElement('span');
+                    valueEl.className = 'agenda-panel__details-item-meta-value';
+                    valueEl.textContent = valueText;
+                    row.append(labelEl, valueEl);
+                    meta.appendChild(row);
+                };
+                if (entryData.contract_numbers && entryData.contract_numbers.length) {
+                    renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
+                }
+                renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
+                if (entryData.status_label) {
+                    renderMetaRow('Status', entryData.status_label);
+                }
+                if (meta.children.length) {
+                    entry.appendChild(meta);
+                }
+                if (entryData.expired) {
+                    entry.classList.add('agenda-panel__details-item--supervision-expired');
+                }
+            }
             const currentDate = formatDateIso(dayData.year, dayData.monthIndex, dayData.day);
             if (entryData.originalDate) {
                 const original = document.createElement('span');
@@ -861,8 +968,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             entry.addEventListener('click', () => {
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
+                detailCardBody.innerHTML = '';
+                if (type === 'S') {
+                    if (detail) {
+                        const paragraph = document.createElement('p');
+                        paragraph.textContent = detail;
+                        detailCardBody.appendChild(paragraph);
+                    }
+                    if (entryData.analysis_lines && entryData.analysis_lines.length) {
+                        const list = document.createElement('ul');
+                        list.className = 'agenda-panel__details-card-list';
+                        entryData.analysis_lines.forEach(line => {
+                            if (!line) return;
+                            const item = document.createElement('li');
+                            item.textContent = line;
+                            list.appendChild(item);
+                        });
+                    detailCardBody.appendChild(list);
+                }
+                if (!detailCardBody.textContent.trim()) {
+                    detailCardBody.textContent = 'Sem observações adicionais.';
+                }
+            } else {
                 detailCardBody.textContent = detail || 'Sem observações adicionais.';
-            });
+            }
+            if (typeof onEntrySelect === 'function') {
+                onEntrySelect(entryData, type, entry);
+            }
+        });
             entry.addEventListener('dblclick', () => {
                 const url = entryData.admin_url || entryData.url;
                 if (url) {
@@ -872,8 +1005,9 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
-            entry.draggable = !isCompletedMode;
-            if (!isCompletedMode) {
+            const canDragDetailEntry = !isCompletedMode && !(type === 'S' && entryData.expired);
+            entry.draggable = Boolean(canDragDetailEntry);
+            if (canDragDetailEntry) {
                 entry.addEventListener('dragstart', (event) => {
                     event.dataTransfer.setData('text/plain', JSON.stringify({
                         source: 'detail',
@@ -894,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle, onEntrySelect = null) => {
         if (!gridElement || !detailList || !detailCardBody) {
             return;
         }
@@ -905,6 +1039,9 @@ document.addEventListener('DOMContentLoaded', function() {
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
         detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
         setDetailTitle?.(null, null);
+        if (typeof onEntrySelect === 'function') {
+            onEntrySelect(null, null);
+        }
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
         const recordActiveDay = (dayInfo, type) => {
@@ -973,7 +1110,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
-                tag.draggable = !isCompletedMode;
+                const draggableEntries = entries.filter(entry => !(type === 'S' && entry.expired));
+                tag.draggable = !isCompletedMode && Boolean(draggableEntries.length);
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -984,15 +1122,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.appendChild(count);
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
-                if (!isCompletedMode) {
+                if (!isCompletedMode && draggableEntries.length) {
                     tag.addEventListener('dragstart', (event) => {
                         const listKey = getTypeKey(type);
-                        const entriesForDrag = dayInfo[listKey] || [];
-                        const payloadEntries = entriesForDrag.map(entry => {
+                        const payloadEntries = draggableEntries.map(entry => {
                             entry.type = entry.type || type;
                             return {
                                 id: entry.id,
@@ -1028,17 +1165,17 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
-            dayCell.addEventListener('click', () => {
-                if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'S');
-                } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'T');
-                } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
-                    recordActiveDay(dayInfo, 'P');
-                } else {
+                dayCell.addEventListener('click', () => {
+                    if (dayInfo.tasksS.length) {
+                        populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'S');
+                    } else if (dayInfo.tasksT.length) {
+                        populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'T');
+                    } else if (dayInfo.tasksP.length) {
+                        populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, 'P');
+                    } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
                     setDetailTitle?.(dayInfo.day, null);
@@ -1052,6 +1189,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 state.activeDay.monthIndex === dayInfo.monthIndex &&
                 state.activeDay.year === dayInfo.year;
             const setupDropZone = () => {
+                if (isCompletedMode) {
+                    return;
+                }
                 const handleDrop = (event) => {
                     event.preventDefault();
                     dayCell.classList.remove('agenda-panel__day--drag-over');
@@ -1085,20 +1225,28 @@ document.addEventListener('DOMContentLoaded', function() {
                         persistEntryDate(movedEntry, dayInfo);
                         moveAgendaEntries([movedEntry], dayInfo);
                     } else if (parsed.source === 'calendar') {
-                        const transferred = sourceDay[typeKey];
-                        if (!transferred.length) return;
-                        const entriesPayload = parsed.entries && parsed.entries.length ? parsed.entries : transferred;
+                        const entriesPayload = Array.isArray(parsed.entries) ? parsed.entries.filter(Boolean) : [];
+                        if (!entriesPayload.length) return;
                         const blocked = entriesPayload.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
                         if (blocked) {
                             showSupervisionLimitViolation(blocked);
                             return;
                         }
-                        dayInfo[typeKey].push(...transferred);
-                        sourceDay[typeKey] = [];
+                        const movedEntries = [];
+                        const validPayload = [];
+                        entriesPayload.forEach(payloadEntry => {
+                            const index = sourceDay[typeKey].findIndex(entry => entry.id === payloadEntry.id);
+                            if (index === -1) return;
+                            const [removed] = sourceDay[typeKey].splice(index, 1);
+                            movedEntries.push(removed);
+                            validPayload.push(payloadEntry);
+                        });
+                        if (!movedEntries.length) return;
+                        dayInfo[typeKey].push(...movedEntries);
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        entriesPayload.forEach(entry => persistEntryDate(entry, dayInfo));
-                        moveAgendaEntries(entriesPayload, dayInfo);
+                        validPayload.forEach(entry => persistEntryDate(entry, dayInfo));
+                        moveAgendaEntries(validPayload, dayInfo);
                     }
                     agendaEntries = dedupeEntries(rebuildAgendaEntriesFromCalendar());
                     if (state) {
@@ -1124,19 +1272,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
                 if (preferredType === 'S' && dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (preferredType === 'T' && dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                 } else if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
                     recordActiveDay(dayInfo, 'P');
                 }
             }
@@ -1205,8 +1353,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                     </div>
                                 </div>
-                                <div class="agenda-panel__details-card">
-                                    <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                        <div class="agenda-panel__details-card">
+                                    <div class="agenda-panel__details-card-header">
+                                        <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                                        <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
+                                    </div>
                                     <p class="agenda-panel__details-card-body">Selecione um item para visualizar mais informações.</p>
                                 </div>
                             </div>
@@ -1238,10 +1389,125 @@ document.addEventListener('DOMContentLoaded', function() {
         detailTitleType.className = 'agenda-panel__details-type';
         detailTitleWrapper.textContent = '';
         detailTitleWrapper.append(detailTitleText, detailTitleType);
+        const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
+        let activeSupervisionEntry = null;
+
+        const hideDetailStatusButton = () => {
+            if (!detailStatusButton) return;
+            detailStatusButton.style.display = 'none';
+            detailStatusButton.disabled = false;
+            detailStatusButton.dataset.statusKey = '';
+            detailStatusButton.dataset.analiseId = '';
+            detailStatusButton.dataset.cardSource = '';
+            detailStatusButton.dataset.cardIndex = '';
+        };
+
+        const updateDetailMetaStatusRow = (entryId, label) => {
+            if (!entryId || !label) return;
+            const entryEl = detailList.querySelector(`[data-entry-id="${entryId}"]`);
+            if (!entryEl) return;
+            entryEl.querySelectorAll('.agenda-panel__details-item-meta-row').forEach(row => {
+                const labelEl = row.querySelector('.agenda-panel__details-item-meta-label');
+                if (labelEl && labelEl.textContent.trim().toLowerCase().startsWith('status')) {
+                    const valueEl = row.querySelector('.agenda-panel__details-item-meta-value');
+                    if (valueEl) {
+                        valueEl.textContent = label;
+                    }
+                }
+            });
+        };
+
+        const updateDetailStatusButton = (entryData, type) => {
+            if (!detailStatusButton) return;
+            if (!entryData || type !== 'S') {
+                activeSupervisionEntry = null;
+                hideDetailStatusButton();
+                return;
+            }
+            const statusKey = (entryData.supervisor_status || 'pendente').toLowerCase();
+            const statusLabel = entryData.status_label || AGENDA_SUPERVISION_STATUS_LABELS[statusKey] || statusKey;
+            detailStatusButton.textContent = `Status: ${statusLabel}`;
+            detailStatusButton.dataset.statusKey = statusKey;
+            detailStatusButton.dataset.analiseId = entryData.analise_id || '';
+            detailStatusButton.dataset.cardSource = entryData.card_source || '';
+            detailStatusButton.dataset.cardIndex = entryData.card_index ?? '';
+            const statusClasses = Object.values(AGENDA_SUPERVISION_STATUS_CLASSES);
+            detailStatusButton.classList.remove(...statusClasses);
+            detailStatusButton.classList.add(AGENDA_SUPERVISION_STATUS_CLASSES[statusKey]);
+            detailStatusButton.style.display = 'inline-flex';
+            activeSupervisionEntry = entryData;
+        };
+
+        const handleDetailStatusClick = () => {
+            if (!activeSupervisionEntry || !detailStatusButton) {
+                return;
+            }
+            const payload = {
+                analise_id: activeSupervisionEntry.analise_id,
+                source: activeSupervisionEntry.card_source,
+                index: activeSupervisionEntry.card_index,
+            };
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
+                createSystemAlert('Agenda Geral', 'Não há dados suficientes para atualizar o status.');
+                return;
+            }
+            console.debug('Agenda geral: status change payload', payload);
+            detailStatusButton.disabled = true;
+            fetch(AGENDA_SUPERVISION_STATUS_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify(payload),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao alterar status');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const newStatus = (data.supervisor_status || 'pendente').toLowerCase();
+                    const newLabel = data.status_label || AGENDA_SUPERVISION_STATUS_LABELS[newStatus] || newStatus;
+                    activeSupervisionEntry.supervisor_status = newStatus;
+                    activeSupervisionEntry.status_label = newLabel;
+                    updateDetailStatusButton(activeSupervisionEntry, 'S');
+                    updateDetailMetaStatusRow(activeSupervisionEntry.id, newLabel);
+                    const eventDetail = {
+                        analise_id: activeSupervisionEntry.analise_id,
+                        processo_id: activeSupervisionEntry.processo_id,
+                        cnj: activeSupervisionEntry.cnj_label,
+                        status: newStatus,
+                    };
+                    if (eventDetail.analise_id) {
+                        window.dispatchEvent(new CustomEvent('agenda:supervision-status-changed', { detail: eventDetail }));
+                    }
+                })
+                .catch(() => {
+                    createSystemAlert('Agenda Geral', 'Não foi possível atualizar o status de supervisão.');
+                })
+                .finally(() => {
+                    detailStatusButton.disabled = false;
+                });
+        };
+
+        detailStatusButton?.addEventListener('click', handleDetailStatusClick);
+        hideDetailStatusButton();
+        const handleDetailEntrySelect = (entryData, type) => {
+            updateDetailStatusButton(entryData, type);
+        };
         const setDetailTitle = (dayNumber, type) => {
             const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
             detailTitleText.textContent = base;
-            const typeLabel = type === 'T' ? 'Tarefa' : type === 'P' ? 'Prazo' : '';
+            const typeLabel = type === 'T'
+                ? 'Tarefa'
+                : type === 'P'
+                    ? 'Prazo'
+                    : type === 'S'
+                        ? 'Supervisão'
+                        : '';
             detailTitleType.textContent = typeLabel;
             detailTitleType.dataset.type = type || '';
             detailTitleType.style.visibility = typeLabel ? 'visible' : 'hidden';
@@ -1456,17 +1722,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         applyEntriesToCalendar(entriesToApply);
         calendarState.lastAppliedEntries = entriesToApply;
-        if (!calendarState.preserveView && entriesToApply.length) {
-            const first = entriesToApply
-                .slice()
-                .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
-            if (first) {
-                    calendarState.monthIndex = first.monthIndex;
-                    calendarState.year = first.year;
+        if (!calendarState.preserveView) {
+            if (entriesToApply.length) {
+                const focusEntries = entriesToApply.filter(entry => !(entry.type === 'S' && entry.expired));
+                if (focusEntries.length) {
+                    const first = focusEntries
+                        .slice()
+                        .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+                    if (first) {
+                        calendarState.monthIndex = first.monthIndex;
+                        calendarState.year = first.year;
+                    }
+                } else {
+                    const todayFallback = new Date();
+                    calendarState.monthIndex = todayFallback.getMonth();
+                    calendarState.year = todayFallback.getFullYear();
                 }
+            } else {
+                const todayFallback = new Date();
+                calendarState.monthIndex = todayFallback.getMonth();
+                calendarState.year = todayFallback.getFullYear();
             }
-            calendarState.preserveView = false;
-        };
+        }
+        calendarState.preserveView = false;
+    };
         const updateMonthTitle = () => {
             if (!monthTitleEl) return;
             const yearText = `${calendarState.year || new Date().getFullYear()}`;
@@ -1585,7 +1864,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             applyAgendaEntriesToState();
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle);
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle, handleDetailEntrySelect);
             renderSummaryBar(calendarState.lastAppliedEntries || []);
         };
         if (focusToggle) {
@@ -2838,11 +3117,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (tribunalInput) tribunalInput.value = processo.tribunal || '';
             
             // CORRIGIDO: Agora espera o valor numérico do backend.
-            if (valorCausaInput && processo.valor_causa) {
-                // O Django DecimalField espera um ponto como separador decimal, não vírgula.
-                valorCausaInput.value = processo.valor_causa;
-            } else if (valorCausaInput) {
-                valorCausaInput.value = '0.00';
+            if (valorCausaInput) {
+                const formattedValorCausa = formatCurrencyBrl(processo.valor_causa);
+                valorCausaInput.value = formattedValorCausa || '';
             }
 
             if (ufInput && !ufInput.value) ufInput.value = processo.uf || '';

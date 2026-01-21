@@ -3033,6 +3033,64 @@ function formatCnjDigits(raw) {
                 updateConcludeButton();
             };
 
+            const handleAgendaStatusEvent = (event) => {
+                const detail = event?.detail;
+                if (!detail) return;
+                const matchesProcessoId = detail.processo_id && String(detail.processo_id) === String(processo.processo_id);
+                const matchesCnj = detail.cnj && String(detail.cnj).trim() === String(getProcessoCnjLabel(processo)).trim();
+                if (matchesProcessoId || matchesCnj) {
+                    processo.supervisor_status = detail.status || 'pendente';
+                    updateStatusButton();
+                }
+            };
+            const normalizeBarradoForStorage = (raw) => ({
+                ativo: Boolean(raw?.ativo),
+                inicio: raw?.inicio || null,
+                retorno_em: raw?.retorno_em || null,
+            });
+
+            const syncBarradoToSavedResponses = (cnj, barrado) => {
+                if (!cnj || !barrado) return;
+                ensureUserResponsesShape();
+                const normalizedTarget = String(cnj || '').trim().toLowerCase();
+                if (!normalizedTarget) return;
+                const updateList = (list) => {
+                    if (!Array.isArray(list)) return false;
+                    let changed = false;
+                    list.forEach(entry => {
+                        if (!entry || typeof entry !== 'object') return;
+                        const entryCnj = String(entry.cnj || '').trim().toLowerCase();
+                        if (!entryCnj || entryCnj !== normalizedTarget) return;
+                        entry.barrado = normalizeBarradoForStorage(barrado);
+                        changed = true;
+                    });
+                    return changed;
+                };
+                const hasChanges =
+                    updateList(userResponses.processos_vinculados) ||
+                    updateList(userResponses.saved_processos_vinculados);
+                if (hasChanges) {
+                    saveResponses({ skipRender: true });
+                }
+            };
+
+            const handleAgendaBarradoEvent = (event) => {
+                const detail = event?.detail;
+                if (!detail) return;
+                const matchesProcessoId = detail.processo_id && String(detail.processo_id) === String(processo.processo_id);
+                const matchesCnj = detail.cnj && String(detail.cnj).trim() === String(getProcessoCnjLabel(processo)).trim();
+                if (matchesProcessoId || matchesCnj) {
+                    processo.barrado = detail.barrado || { ativo: false, inicio: null, retorno_em: null };
+                    processo.barrado.ativo = Boolean(processo.barrado.ativo);
+                    processo.barrado.inicio = processo.barrado.inicio || null;
+                    processo.barrado.retorno_em = processo.barrado.retorno_em || null;
+                    updateBarradoControls();
+                    syncBarradoToSavedResponses(detail.cnj, processo.barrado);
+                }
+            };
+            window.addEventListener('agenda:supervision-status-changed', handleAgendaStatusEvent);
+            window.addEventListener('agenda:supervision-barrado-changed', handleAgendaBarradoEvent);
+
             const updateBarradoControls = () => {
                 const { barrado } = processo;
                 const hasInicio = Boolean(barrado.inicio);
@@ -3121,6 +3179,11 @@ function formatCnjDigits(raw) {
                 updateConcludeButton();
                 saveResponses();
                 renderSupervisionPanel();
+            });
+
+            $footer.on('remove', () => {
+                window.removeEventListener('agenda:supervision-status-changed', handleAgendaStatusEvent);
+                window.removeEventListener('agenda:supervision-barrado-changed', handleAgendaBarradoEvent);
             });
 
             return $footer;

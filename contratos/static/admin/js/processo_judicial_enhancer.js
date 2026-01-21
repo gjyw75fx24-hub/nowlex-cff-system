@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
         reprovado: 'status-reprovado',
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
+    const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
 
     function deduplicateInlineAndamentos() {
         const seen = new Set();
@@ -813,6 +814,13 @@ document.addEventListener('DOMContentLoaded', function() {
             prescricao_date: item.prescricao_date || null,
             expired: Boolean(item.expired),
             active: Boolean(item.active),
+            barrado: item.barrado && typeof item.barrado === 'object'
+                ? {
+                    ativo: Boolean(item.barrado.ativo),
+                    inicio: item.barrado.inicio || null,
+                    retorno_em: item.barrado.retorno_em || null,
+                }
+                : { ativo: false, inicio: null, retorno_em: null },
             cnj_label: item.cnj_label || item.cnj || '',
             analise_id: item.analise_id || item.analiseId || null,
             card_source: item.card_source || item.cardSource || '',
@@ -852,6 +860,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (setEntriesRef) {
                     setEntriesRef(combined);
                 }
+                restoreActiveEntryReference(combined);
                 let filtered = combined;
                 const activeUserId = calendarStateRef?.activeUser?.id;
                 if (activeUserId) {
@@ -1366,6 +1375,13 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
                                     </div>
                                     <p class="agenda-panel__details-card-body">Selecione um item para visualizar mais informações.</p>
+                                    <div class="agenda-panel__details-card-footer">
+                                        <div class="agenda-panel__details-card-barrar">
+                                            <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
+                                            <input type="date" class="agenda-panel__details-card-barrar-date">
+                                        </div>
+                                        <span class="agenda-panel__details-card-barrado-note"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1397,7 +1413,12 @@ document.addEventListener('DOMContentLoaded', function() {
         detailTitleWrapper.textContent = '';
         detailTitleWrapper.append(detailTitleText, detailTitleType);
         const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
+        const detailBarrarGroup = overlay.querySelector('.agenda-panel__details-card-barrar');
+        const detailBarrarButton = overlay.querySelector('.agenda-panel__details-card-barrar-btn');
+        const detailBarrarDate = overlay.querySelector('.agenda-panel__details-card-barrar-date');
+        const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
         let activeSupervisionEntry = null;
+        let persistedSupervisionEntryId = null;
 
         const hideDetailStatusButton = () => {
             if (!detailStatusButton) return;
@@ -1407,6 +1428,54 @@ document.addEventListener('DOMContentLoaded', function() {
             detailStatusButton.dataset.analiseId = '';
             detailStatusButton.dataset.cardSource = '';
             detailStatusButton.dataset.cardIndex = '';
+        };
+
+        const buildBarradoNote = (barrado) => {
+            if (!barrado || !barrado.inicio) return '';
+            const inicio = formatDateLabel(barrado.inicio) || barrado.inicio;
+            const retorno = barrado.retorno_em
+                ? (formatDateLabel(barrado.retorno_em) || barrado.retorno_em)
+                : 'sem data definida';
+            return `Barrado de ${inicio} a ${retorno}`;
+        };
+
+        const hideBarrarControls = () => {
+            if (!detailBarrarGroup) return;
+            detailBarrarGroup.style.display = 'none';
+            if (detailBarrarButton) {
+                detailBarrarButton.disabled = false;
+                detailBarrarButton.textContent = 'Barrar';
+            }
+            if (detailBarrarDate) {
+                detailBarrarDate.value = '';
+                detailBarrarDate.disabled = false;
+            }
+            if (detailBarradoNote) {
+                detailBarradoNote.textContent = '';
+                detailBarradoNote.style.display = 'none';
+            }
+        };
+
+        const updateDetailBarrarControls = (entryData, type) => {
+            if (!detailBarrarGroup || !detailBarrarButton) {
+                return;
+            }
+            if (!entryData || type !== 'S') {
+                hideBarrarControls();
+                return;
+            }
+            const barrado = entryData.barrado || { ativo: false, inicio: null, retorno_em: null };
+            detailBarrarGroup.style.display = 'flex';
+            detailBarrarButton.textContent = barrado.ativo ? 'Desbloquear' : 'Barrar';
+            if (detailBarrarDate) {
+                detailBarrarDate.value = barrado.retorno_em || '';
+                detailBarrarDate.disabled = false;
+            }
+            if (detailBarradoNote) {
+                const note = buildBarradoNote(barrado);
+                detailBarradoNote.textContent = note;
+                detailBarradoNote.style.display = note ? 'block' : 'none';
+            }
         };
 
         const updateDetailMetaStatusRow = (entryId, label) => {
@@ -1500,10 +1569,122 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         };
 
+        const sendBarradoUpdate = (payload) => {
+            if (!payload) return;
+            if (detailBarrarButton) {
+                detailBarrarButton.disabled = true;
+            }
+            if (detailBarrarDate) {
+                detailBarrarDate.disabled = true;
+            }
+            fetch(AGENDA_SUPERVISION_BARRADO_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify(payload),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao alterar barrado');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const newBarrado = data.barrado || {};
+                    if (activeSupervisionEntry) {
+                        activeSupervisionEntry.barrado = {
+                            ativo: Boolean(newBarrado.ativo),
+                            inicio: newBarrado.inicio || null,
+                            retorno_em: newBarrado.retorno_em || null,
+                        };
+                        updateDetailBarrarControls(activeSupervisionEntry, 'S');
+                        const eventDetail = {
+                            analise_id: activeSupervisionEntry.analise_id,
+                            processo_id: activeSupervisionEntry.processo_id,
+                            cnj: activeSupervisionEntry.cnj_label,
+                            barrado: { ...activeSupervisionEntry.barrado },
+                        };
+                        if (eventDetail.analise_id) {
+                            window.dispatchEvent(new CustomEvent('agenda:supervision-barrado-changed', { detail: eventDetail }));
+                        }
+                    }
+                })
+                .catch(() => {
+                    createSystemAlert('Agenda Geral', 'Não foi possível atualizar o bloqueio da supervisão.');
+                })
+                .finally(() => {
+                    if (detailBarrarButton) {
+                        detailBarrarButton.disabled = false;
+                    }
+                    if (detailBarrarDate) {
+                        detailBarrarDate.disabled = false;
+                    }
+                });
+        };
+
+        const buildCommonBarradoPayload = () => {
+            if (!activeSupervisionEntry) return null;
+            const payload = {
+                analise_id: activeSupervisionEntry.analise_id,
+                source: activeSupervisionEntry.card_source,
+                index: activeSupervisionEntry.card_index,
+            };
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
+                return null;
+            }
+            return payload;
+        };
+
+        const handleBarrarToggleClick = () => {
+            if (!detailBarrarButton) return;
+            const payload = buildCommonBarradoPayload();
+            if (!payload) {
+                console.warn('Agenda geral: barrado change blocked por dados incompletos', payload);
+                return;
+            }
+            const isActive = Boolean(activeSupervisionEntry?.barrado?.ativo);
+            payload.toggle_active = !isActive;
+            sendBarradoUpdate(payload);
+        };
+
+        const handleBarrarDateChange = () => {
+            if (!detailBarrarDate) return;
+            const payload = buildCommonBarradoPayload();
+            if (!payload) {
+                console.warn('Agenda geral: barrado change blocked por dados incompletos', payload);
+                return;
+            }
+            payload.retorno_em = detailBarrarDate.value || null;
+            sendBarradoUpdate(payload);
+        };
+
+        detailBarrarButton?.addEventListener('click', handleBarrarToggleClick);
+        detailBarrarDate?.addEventListener('change', handleBarrarDateChange);
         detailStatusButton?.addEventListener('click', handleDetailStatusClick);
         hideDetailStatusButton();
+        hideBarrarControls();
         const handleDetailEntrySelect = (entryData, type) => {
+            persistedSupervisionEntryId = entryData?.id || null;
             updateDetailStatusButton(entryData, type);
+            updateDetailBarrarControls(entryData, type);
+        };
+
+        const restoreActiveDetailControls = () => {
+            if (!activeSupervisionEntry) return;
+            updateDetailStatusButton(activeSupervisionEntry, 'S');
+            updateDetailBarrarControls(activeSupervisionEntry, 'S');
+        };
+
+        const restoreActiveEntryReference = (entries) => {
+            if (!persistedSupervisionEntryId) return;
+            const collection = Array.isArray(entries) ? entries : agendaEntries;
+            const restored = collection.find(item => item && item.id === persistedSupervisionEntryId);
+            if (restored) {
+                activeSupervisionEntry = restored;
+            }
         };
         const setDetailTitle = (dayNumber, type) => {
             const base = dayNumber ? `Eventos do dia ${dayNumber}` : 'Eventos do dia';
@@ -1888,12 +2069,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
             const preferApiOnly = calendarState.showCompleted || false;
-            hydrateAgendaFromApi(inline, calendarState, () => {
-                applyAgendaEntriesToState();
-                renderCalendar();
-                if (refreshButton) {
-                    refreshButton.disabled = false;
-                }
+        hydrateAgendaFromApi(inline, calendarState, () => {
+            applyAgendaEntriesToState();
+            renderCalendar();
+            restoreActiveDetailControls();
+            if (refreshButton) {
+                refreshButton.disabled = false;
+            }
             }, (combined) => {
                 agendaEntries = combined;
             }, preferApiOnly);
