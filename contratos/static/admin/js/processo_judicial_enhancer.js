@@ -3800,7 +3800,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         const labelInput = document.createElement('input');
         labelInput.type = 'text';
-        labelInput.className = 'checagem-question-label';
+        labelInput.className = 'checagem-question-title checagem-question-label';
         labelInput.value = labelValue;
         labelInput.setAttribute('aria-label', `Título da questão ${labelValue}`);
 
@@ -3841,13 +3841,9 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         const questionContent = document.createElement('div');
         questionContent.className = 'checagem-question-content';
 
-        const questionTitle = document.createElement('span');
-        questionTitle.className = 'checagem-question-title';
-        questionTitle.textContent = labelValue;
-
         const topRow = document.createElement('div');
         topRow.className = 'checagem-question-top';
-        topRow.append(linkWrapper, questionTitle, observationInput, indicator, editTrigger);
+        topRow.append(linkWrapper, labelInput, observationInput, indicator, editTrigger);
 
         questionContent.append(topRow, editorWrapper);
         questionBody.appendChild(questionContent);
@@ -3920,7 +3916,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             }
         });
 
-        row.append(linkWrapper, questionBody, notesWrapper);
+        row.appendChild(questionBody);
         return row;
     };
 
