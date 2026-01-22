@@ -72,6 +72,12 @@
             color: #5b6780;
             font-weight: 500;
         }
+        .demandas-form__label--bottom {
+            margin-top: 0.35rem;
+            font-size: 0.68rem;
+            color: #5b6780;
+            font-weight: 500;
+        }
 
         .demandas-etiqueta-preview {
             padding: 5px 12px;
@@ -183,9 +189,9 @@
                 </div>
                 <div class="demandas-form__row">
                     <div class="demandas-form__group demandas-form__group--wide">
-                        <label class="demandas-form__label" for="{{ form.carteira.id_for_label }}">{{ form.carteira.label }}</label>
                         {{ form.carteira }}
                         {{ form.carteira.errors }}
+                        <span class="demandas-form__label demandas-form__label--bottom">{{ form.carteira.label }}</span>
                     </div>
                 </div>
                 <div class="demandas-form__footer">
