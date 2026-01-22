@@ -3699,11 +3699,47 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
     let modalBlocker = null;
     let checagemOverlay = null;
     let checagemKeyHandlerAttached = false;
+    let observationTooltip = null;
+    let tooltipVisibilityInput = null;
 
     const removeChecagemModalBlockers = () => {
         if (modalBlocker) {
             modalBlocker.remove();
             modalBlocker = null;
+        }
+    };
+
+    const ensureObservationTooltip = () => {
+        if (!observationTooltip) {
+            observationTooltip = document.createElement('div');
+            observationTooltip.className = 'checagem-observation-tooltip';
+            observationTooltip.style.display = 'none';
+            document.body.appendChild(observationTooltip);
+        }
+        return observationTooltip;
+    };
+
+    const showObservationTooltip = (input) => {
+        if (!input || !input.value.trim()) {
+            return;
+        }
+        const tooltip = ensureObservationTooltip();
+        tooltip.textContent = input.value;
+        const rect = input.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.style.display = 'block';
+        tooltipVisibilityInput = input;
+        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
+        if (overflowBottom > 0) {
+            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
+        }
+    };
+
+    const hideObservationTooltip = () => {
+        if (observationTooltip) {
+            observationTooltip.style.display = 'none';
+            tooltipVisibilityInput = null;
         }
     };
 
@@ -4008,6 +4044,14 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         document.body.classList.add('checagem-modal-open');
     };
 
+    const destroyObservationTooltip = () => {
+        if (observationTooltip) {
+            observationTooltip.remove();
+            observationTooltip = null;
+            tooltipVisibilityInput = null;
+        }
+    };
+
     const destroyChecagemOverlay = () => {
         if (checagemOverlay) {
             checagemOverlay.remove();
@@ -4027,6 +4071,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
         checagemOverlay.setAttribute('aria-hidden', 'true');
         removeChecagemModalBlockers();
+        hideObservationTooltip();
+        destroyObservationTooltip();
         document.body.classList.remove('checagem-modal-open');
         setTimeout(() => {
             trigger?.focus();
