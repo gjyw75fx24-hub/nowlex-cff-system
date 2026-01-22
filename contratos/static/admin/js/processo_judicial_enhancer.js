@@ -3831,19 +3831,26 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         editorWrapper.append(urlInput);
 
-        const linkRow = document.createElement('div');
-        linkRow.className = 'checagem-link-row';
-        linkRow.append(indicator, editTrigger);
-        questionBody.append(labelInput, linkRow, editorWrapper);
+        const observationInput = document.createElement('input');
+        observationInput.type = 'text';
+        observationInput.className = 'checagem-question-observation';
+        observationInput.placeholder = 'Notas ou status';
+        observationInput.value = questionData.notes || '';
+        observationInput.setAttribute('aria-label', `Observações para ${labelValue}`);
 
-        const notesWrapper = document.createElement('div');
-        notesWrapper.className = 'checagem-question-right';
-        const notesTextarea = document.createElement('textarea');
-        notesTextarea.className = 'checagem-question-notes';
-        notesTextarea.placeholder = '';
-        notesTextarea.value = questionData.notes || '';
-        notesTextarea.setAttribute('aria-label', `Anotações para ${labelValue}`);
-        notesWrapper.appendChild(notesTextarea);
+        const questionContent = document.createElement('div');
+        questionContent.className = 'checagem-question-content';
+
+        const questionTitle = document.createElement('span');
+        questionTitle.className = 'checagem-question-title';
+        questionTitle.textContent = labelValue;
+
+        const topRow = document.createElement('div');
+        topRow.className = 'checagem-question-top';
+        topRow.append(linkWrapper, questionTitle, observationInput, indicator, editTrigger);
+
+        questionContent.append(topRow, editorWrapper);
+        questionBody.appendChild(questionContent);
 
         const toggleEditor = () => {
             editorWrapper.classList.toggle('visible');
@@ -3892,8 +3899,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             persistAndRefresh({ label: labelInput.value });
         });
 
-        notesTextarea.addEventListener('input', () => {
-            persistAndRefresh({ notes: notesTextarea.value });
+        observationInput.addEventListener('input', () => {
+            persistAndRefresh({ notes: observationInput.value });
         });
 
         const syncLinkValue = () => {
