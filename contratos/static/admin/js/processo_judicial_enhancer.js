@@ -3701,6 +3701,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
     let checagemKeyHandlerAttached = false;
     let observationTooltip = null;
     let tooltipVisibilityInput = null;
+    let tooltipHideTimeout = null;
 
     const removeChecagemModalBlockers = () => {
         if (modalBlocker) {
@@ -3715,8 +3716,21 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             observationTooltip.className = 'checagem-observation-tooltip';
             observationTooltip.style.display = 'none';
             document.body.appendChild(observationTooltip);
+            observationTooltip.addEventListener('mouseenter', () => {
+                cancelScheduledTooltipHide();
+            });
+            observationTooltip.addEventListener('mouseleave', () => {
+                scheduleObservationTooltipHide();
+            });
         }
         return observationTooltip;
+    };
+
+    const cancelScheduledTooltipHide = () => {
+        if (tooltipHideTimeout) {
+            clearTimeout(tooltipHideTimeout);
+            tooltipHideTimeout = null;
+        }
     };
 
     const showObservationTooltip = (input) => {
@@ -3734,13 +3748,22 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         if (overflowBottom > 0) {
             tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
         }
+        cancelScheduledTooltipHide();
     };
 
     const hideObservationTooltip = () => {
         if (observationTooltip) {
             observationTooltip.style.display = 'none';
             tooltipVisibilityInput = null;
+            cancelScheduledTooltipHide();
         }
+    };
+
+    const scheduleObservationTooltipHide = () => {
+        cancelScheduledTooltipHide();
+        tooltipHideTimeout = setTimeout(() => {
+            hideObservationTooltip();
+        }, 220);
     };
 
     const ensureModal = () => {
@@ -3934,6 +3957,11 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         observationInput.addEventListener('input', () => {
             persistAndRefresh({ notes: observationInput.value });
         });
+
+        observationInput.addEventListener('mouseenter', () => showObservationTooltip(observationInput));
+        observationInput.addEventListener('focus', () => showObservationTooltip(observationInput));
+        observationInput.addEventListener('mouseleave', scheduleObservationTooltipHide);
+        observationInput.addEventListener('blur', scheduleObservationTooltipHide);
 
         const syncLinkValue = () => {
             const normalized = normalizeLinkValue(urlInput.value);
