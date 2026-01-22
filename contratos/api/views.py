@@ -337,12 +337,13 @@ class AgendaGeralAPIView(APIView):
                             continue
                     if not parsed_ids:
                         continue
+                    card_key_id = f"{analise.pk}-{source}-{idx}"
                     key = (
                         analise.pk,
                         source,
                         idx,
                         status,
-                        tuple(sorted(parsed_ids)),
+                        card_key_id,
                     )
                     if key in seen_keys:
                         continue
@@ -355,6 +356,7 @@ class AgendaGeralAPIView(APIView):
                         'source': source,
                         'index': idx,
                         'status': status,
+                        'card_key_id': card_key_id,
                     })
 
         if not cards_data:
@@ -418,6 +420,7 @@ class AgendaGeralAPIView(APIView):
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
                 'cnj_label': cnj_label,
+                'cardId': card_info.get('card_key_id') or f"supervision-{analise.pk}-{card_info['source']}-{card_info['index']}",
                 'analysis_lines': self._build_analysis_result_lines(card_info, contract_map),
                 'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
                 'processo_id': processo.pk if processo else None,

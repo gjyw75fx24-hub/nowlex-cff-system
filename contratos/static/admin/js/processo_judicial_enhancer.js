@@ -506,6 +506,16 @@ document.addEventListener('DOMContentLoaded', function() {
             entryOrigins.set(key, originDate || entry.originalDay || entry.day);
         }
     };
+
+    const shouldIncludeEntryForActiveUser = (entry, activeUserId) => {
+        if (!activeUserId) {
+            return true;
+        }
+        if (entry?.type === 'S') {
+            return true;
+        }
+        return `${entry?.responsavel?.id || ''}` === `${activeUserId}`;
+    };
     const applyOriginFromMap = (entry) => {
         const key = getOriginKey(entry);
         if (!key) return;
@@ -874,7 +884,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 let filtered = combined;
                 const activeUserId = calendarStateRef?.activeUser?.id;
                 if (activeUserId) {
-                    filtered = filtered.filter(entry => entry?.responsavel?.id === activeUserId);
+                    filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
                 }
                 if (calendarStateRef?.focused && currentProcessId) {
                     filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
@@ -1977,8 +1987,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let entriesToApply = agendaEntries;
         const activeUserId = calendarState.activeUser?.id;
         if (activeUserId) {
-            entriesToApply = entriesToApply.filter(
-                entry => `${entry?.responsavel?.id || ''}` === `${activeUserId}`
+            entriesToApply = entriesToApply.filter(entry =>
+                shouldIncludeEntryForActiveUser(entry, activeUserId)
             );
         }
         if (calendarState.focused && currentProcessId) {
