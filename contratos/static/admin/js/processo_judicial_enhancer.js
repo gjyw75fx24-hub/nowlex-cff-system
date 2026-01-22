@@ -3818,17 +3818,29 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return checagemOverlay;
     };
 
-    const updateLinkIndicatorText = (indicator, hasLink, link) => {
-        if (!indicator) {
+    const updateLinkIndicatorText = (indicator, button, hasLink, link) => {
+        if (indicator) {
+            indicator.textContent = '';
+            indicator.title = hasLink ? (link || '') : '';
+        }
+        if (button) {
+            button.classList.toggle('checagem-link-button--active', hasLink);
+        }
+    };
+
+    const autoResizeObservationTextarea = (textarea) => {
+        if (!textarea) {
             return;
         }
-        if (hasLink) {
-            indicator.textContent = 'Link salvo (clique no botão ao lado)';
-            indicator.title = link || '';
-        } else {
-            indicator.textContent = '';
-            indicator.title = 'Clique para registrar um link externo';
+        textarea.style.height = 'auto';
+        textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+
+    const resetObservationTextareaHeight = (textarea) => {
+        if (!textarea) {
+            return;
         }
+        textarea.style.height = '';
     };
 
     const buildQuestionRow = (storageKey, question, linkIcon) => {
@@ -3867,6 +3879,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         indicator.className = 'checagem-link-indicator';
         updateLinkIndicatorText(
             indicator,
+            linkButton,
             Boolean(questionData.link),
             questionData.link
         );
@@ -3875,10 +3888,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         editTrigger.type = 'button';
         editTrigger.className = 'checagem-link-edit-trigger';
         editTrigger.setAttribute('title', 'Editar link');
-        editTrigger.innerHTML = `
-            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" focusable="false">
-                <path d="M4 2h10a2 2 0 0 1 2 2v12h-2V4H4V2zm14.6 8.5L13 18.1c-.2.2-.5.3-.8.3h-3.5c-.6 0-1-.4-1-1V13c0-.3.1-.6.3-.8l6.7-6.7 3.5 3.5zm-3.7-3.5l-6.3 6.3v1.5h1.5l6.3-6.3-1.5-1.5zm5.1-.4l-1.1 1.2 1.5 1.5 1.1-1.2a.7.7 0 0 0-.1-1l-.4-.4a.7.7 0 0 0-1 .1z" fill="currentColor"></path>
-            </svg>`;
+        const editarLinkIcon = '/static/images/editar_link.png';
+        editTrigger.innerHTML = `<img src="${editarLinkIcon}" alt="Editar link">`;
 
         const editorWrapper = document.createElement('div');
         editorWrapper.className = 'checagem-link-editor';
@@ -3890,12 +3901,12 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         editorWrapper.append(urlInput);
 
-        const observationInput = document.createElement('input');
-        observationInput.type = 'text';
+        const observationInput = document.createElement('textarea');
         observationInput.className = 'checagem-question-observation';
         observationInput.placeholder = 'Notas ou status';
         observationInput.value = questionData.notes || '';
         observationInput.setAttribute('aria-label', `Observações para ${labelValue}`);
+        observationInput.rows = 1;
 
         const questionContent = document.createElement('div');
         questionContent.className = 'checagem-question-content';
@@ -3934,7 +3945,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             if (!updated) {
                 updated = getCachedQuestion(storageKey, question.key);
             }
-            updateLinkIndicatorText(indicator, Boolean(updated.link), updated.link);
+            updateLinkIndicatorText(indicator, linkButton, Boolean(updated.link), updated.link);
             return updated;
         };
 
@@ -3956,12 +3967,21 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         observationInput.addEventListener('input', () => {
             persistAndRefresh({ notes: observationInput.value });
+            autoResizeObservationTextarea(observationInput);
         });
 
+        const handleObservationFocus = () => {
+            autoResizeObservationTextarea(observationInput);
+            showObservationTooltip(observationInput);
+        };
+
         observationInput.addEventListener('mouseenter', () => showObservationTooltip(observationInput));
-        observationInput.addEventListener('focus', () => showObservationTooltip(observationInput));
+        observationInput.addEventListener('focus', handleObservationFocus);
         observationInput.addEventListener('mouseleave', scheduleObservationTooltipHide);
-        observationInput.addEventListener('blur', scheduleObservationTooltipHide);
+        observationInput.addEventListener('blur', () => {
+            resetObservationTextareaHeight(observationInput);
+            scheduleObservationTooltipHide();
+        });
 
         const syncLinkValue = () => {
             const normalized = normalizeLinkValue(urlInput.value);

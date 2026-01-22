@@ -232,6 +232,11 @@
     font-size: 0.95rem;
     background: #f7f9ff;
     color: #1f2c52;
+    height: 30px;
+    min-height: 30px;
+    line-height: 1.4;
+    resize: none;
+    overflow: hidden;
 }
 
 .checagem-question-observation:focus {
@@ -350,7 +355,7 @@
     cursor: pointer;
 }
 
-.checagem-link-edit-trigger svg {
+.checagem-link-edit-trigger img {
     width: 18px;
     height: 18px;
     display: block;
@@ -370,6 +375,7 @@
     background: transparent;
     padding: 0;
     cursor: pointer;
+    position: relative;
 }
 
 .checagem-link-button img {
@@ -378,9 +384,24 @@
     object-fit: contain;
 }
 
+.checagem-link-button--active::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 38px;
+    height: 38px;
+    background: url('/static/images/icone_link_ativo.png') no-repeat center/contain;
+    background-size: 38px 38px;
+    pointer-events: none;
+}
+
+.checagem-link-button--active img {
+    opacity: 0;
+}
+
 .checagem-link-indicator {
-    font-size: 0.75rem;
-    color: #5b6c8a;
+    display: none;
 }
 
 .checagem-question-right {
