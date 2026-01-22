@@ -1453,6 +1453,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         document.body.appendChild(overlay);
+        document.body.classList.add('agenda-panel-open');
         const closeButton = overlay.querySelector('.agenda-panel__close');
         const refreshButton = overlay.querySelector('.agenda-panel__refresh-btn');
         const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
@@ -2190,12 +2191,7 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.preserveView = true;
             renderCalendar();
         };
-        closeButton.addEventListener('click', () => overlay.remove());
-        overlay.addEventListener('click', (event) => {
-            if (event.target === overlay) {
-                overlay.remove();
-            }
-        });
+        closeButton.addEventListener('click', () => closeAgendaPanel());
         cycleBtn.addEventListener('click', () => {
             const current = Number(cycleBtn.dataset.months) || 1;
             const next = current === 3 ? 1 : current + 1;
@@ -2254,6 +2250,29 @@ document.addEventListener('DOMContentLoaded', function() {
         renderCalendar();
     };
 
+    const closeAgendaPanel = () => {
+        const overlay = document.querySelector('.agenda-panel-overlay');
+        if (!overlay) {
+            return;
+        }
+        closeChecagemModal();
+        overlay.remove();
+        document.body.classList.remove('agenda-panel-open');
+    };
+
+    const handleAgendaPanelEscape = (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        const checagemOverlay = document.getElementById('checagem-modal-overlay');
+        if (checagemOverlay && checagemOverlay.getAttribute('aria-hidden') === 'false') {
+            closeChecagemModal();
+            return;
+        }
+        closeAgendaPanel();
+    };
+    document.addEventListener('keydown', handleAgendaPanelEscape);
+
     const createAgendaFormModal = (type) => {
         if (document.querySelector(`.agenda-form-modal[data-form="${type}"]`)) {
             return;
@@ -2308,7 +2327,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const attachAgendaActions = () => {
         const placeholder = document.querySelector('.agenda-placeholder-card');
         if (!placeholder) return;
-        placeholder.addEventListener('click', () => openAgendaPanel());
+        placeholder.addEventListener('click', (event) => {
+            event.preventDefault();
+            if (document.querySelector('.agenda-panel-overlay')) {
+                closeAgendaPanel();
+                return;
+            }
+            openAgendaPanel();
+        });
         placeholder.querySelectorAll('[data-agenda-action]').forEach(btn => {
             btn.addEventListener('click', (event) => {
                 event.stopPropagation();
@@ -3670,58 +3696,68 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
     };
 
     let activeChecagemTrigger = null;
-    const ensureModal = (() => {
-        let overlay = null;
-        let keyHandlerAttached = false;
-        let activeChecagemTrigger = null;
+    let modalBlocker = null;
+    let checagemOverlay = null;
+    let checagemKeyHandlerAttached = false;
 
-        return () => {
-            if (overlay) {
-                return overlay;
-            }
-            overlay = document.createElement('div');
-            overlay.id = 'checagem-modal-overlay';
-            overlay.className = 'checagem-modal-overlay';
-            overlay.setAttribute('aria-hidden', 'true');
-            overlay.innerHTML = `
-                <div class="checagem-modal" role="dialog" aria-modal="true">
-                    <div class="checagem-modal__header">
-                        <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
-                        <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
-                    </div>
-                    <div class="checagem-modal__body">
-                        <div class="checagem-modal__questions"></div>
-                    </div>
-                    <div class="checagem-modal__footer">
-                        <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
-                        <button type="button" class="checagem-modal__close-btn">Fechar</button>
-                    </div>
+    const removeChecagemModalBlockers = () => {
+        if (modalBlocker) {
+            modalBlocker.remove();
+            modalBlocker = null;
+        }
+    };
+
+    const ensureModal = () => {
+        if (checagemOverlay) {
+            return checagemOverlay;
+        }
+        checagemOverlay = document.createElement('div');
+        checagemOverlay.id = 'checagem-modal-overlay';
+        checagemOverlay.className = 'checagem-modal-overlay';
+        checagemOverlay.setAttribute('aria-hidden', 'true');
+        checagemOverlay.innerHTML = `
+            <div class="checagem-modal" role="dialog" aria-modal="true">
+                <div class="checagem-modal__header">
+                    <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
+                    <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
                 </div>
-            `;
-            document.body.appendChild(overlay);
-            overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
-                button.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    closeChecagemModal();
-                });
-            });
-            overlay.querySelectorAll('.checagem-modal__close-btn').forEach((button) => {
-                button.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    closeChecagemModal();
-                });
-            });
-            if (!keyHandlerAttached) {
-                document.addEventListener('keydown', (event) => {
-                    if (event.key === 'Escape' && overlay.getAttribute('aria-hidden') === 'false') {
-                        closeChecagemModal();
-                    }
-                });
-                keyHandlerAttached = true;
+                <div class="checagem-modal__body">
+                    <div class="checagem-modal__questions"></div>
+                </div>
+                <div class="checagem-modal__footer">
+                    <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
+                    <button type="button" class="checagem-modal__close-btn">Fechar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(checagemOverlay);
+        checagemOverlay.addEventListener('click', (event) => {
+            if (event.target === checagemOverlay) {
+                closeChecagemModal();
             }
-            return overlay;
-        };
-    })();
+        });
+        checagemOverlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                closeChecagemModal();
+            });
+        });
+        checagemOverlay.querySelectorAll('.checagem-modal__close-btn').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                closeChecagemModal();
+            });
+        });
+        if (!checagemKeyHandlerAttached) {
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && checagemOverlay?.getAttribute('aria-hidden') === 'false') {
+                    closeChecagemModal();
+                }
+            });
+            checagemKeyHandlerAttached = true;
+        }
+        return checagemOverlay;
+    };
 
     const updateLinkIndicatorText = (indicator, hasLink, link) => {
         if (!indicator) {
@@ -3931,6 +3967,19 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         modal.style.position = 'absolute';
         modal.style.left = `${left}px`;
         modal.style.top = `${top}px`;
+        if (modalBlocker) {
+            modalBlocker.remove();
+        }
+        modalBlocker = document.createElement('div');
+        modalBlocker.className = 'checagem-modal-blocker';
+        modalBlocker.style.position = 'absolute';
+        modalBlocker.style.left = `${left}px`;
+        modalBlocker.style.top = `${top}px`;
+        modalBlocker.style.width = `${modalRect.width}px`;
+        modalBlocker.style.height = `${modalRect.height}px`;
+        modalBlocker.style.pointerEvents = 'auto';
+        modalBlocker.style.borderRadius = '26px';
+        document.body.appendChild(modalBlocker);
     };
 
     const openChecagemModal = (card, trigger, fallbackContext = {}) => {
@@ -3953,14 +4002,33 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         positionChecagemModal(trigger);
         activeChecagemTrigger = trigger;
         overlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('checagem-modal-open');
+    };
+
+    const destroyChecagemOverlay = () => {
+        if (checagemOverlay) {
+            checagemOverlay.remove();
+            checagemOverlay = null;
+        }
     };
 
     const closeChecagemModal = () => {
-        const overlay = document.getElementById('checagem-modal-overlay');
-        if (overlay) {
-            overlay.setAttribute('aria-hidden', 'true');
-            activeChecagemTrigger = null;
+        if (!checagemOverlay) {
+            return;
         }
+        const trigger = activeChecagemTrigger;
+        activeChecagemTrigger = null;
+        const focused = document.activeElement;
+        if (focused && checagemOverlay.contains(focused)) {
+            focused.blur();
+        }
+        checagemOverlay.setAttribute('aria-hidden', 'true');
+        removeChecagemModalBlockers();
+        document.body.classList.remove('checagem-modal-open');
+        setTimeout(() => {
+            trigger?.focus();
+        }, 0);
+        destroyChecagemOverlay();
     };
 
     const openAgendaChecagemFromEntry = (entryData, trigger) => {
