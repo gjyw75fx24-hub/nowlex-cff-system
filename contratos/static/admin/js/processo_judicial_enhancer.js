@@ -3692,6 +3692,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                     </div>
                     <div class="checagem-modal__footer">
                         <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
+                        <button type="button" class="checagem-modal__close-btn">Fechar</button>
                     </div>
                 </div>
             `;
@@ -3702,6 +3703,12 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 }
             });
             overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
+                button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    closeChecagemModal();
+                });
+            });
+            overlay.querySelectorAll('.checagem-modal__close-btn').forEach((button) => {
                 button.addEventListener('click', (event) => {
                     event.preventDefault();
                     closeChecagemModal();

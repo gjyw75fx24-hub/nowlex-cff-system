@@ -318,6 +318,23 @@
     font-size: 0.75rem;
     color: #5b6c8a;
 }
+
+.checagem-modal__close-btn {
+    margin-left: 12px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 58, 118, 0.15);
+    background: #f5f7ff;
+    color: #0f3a60;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.checagem-modal__close-btn:hover {
+    background: #eef3fb;
+    border-color: rgba(15, 58, 118, 0.3);
+}
 @media (max-width: 900px) {
     .checagem-question {
         grid-template-columns: 54px 1fr;
