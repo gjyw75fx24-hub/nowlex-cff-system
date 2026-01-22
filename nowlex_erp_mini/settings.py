@@ -116,7 +116,7 @@ if CARTEIRA_DATABASE_URL or CARTEIRA_DB_NAME:
             conn_health_checks=True,
         )
     else:
-    carteira_config = {
+        carteira_config = {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': CARTEIRA_DB_NAME,
             'USER': os.getenv('CARTEIRA_DB_USER'),
