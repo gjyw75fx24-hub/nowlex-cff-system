@@ -1008,7 +1008,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </span>`;
                 checagemButton.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    openAgendaChecagemPanel(entryData, checagemButton);
+                    openAgendaChecagemFromEntry(entryData);
                 });
                 actions.appendChild(checagemButton);
                 footerGroup.appendChild(actions);
@@ -3918,144 +3918,25 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
     };
 
-    const agendaChecagemPanelState = {
-        panel: null,
-        body: null,
-        subtitle: null,
-        badge: null,
-        visible: false,
-        triggerElement: null,
-        listenersInit: false,
-    };
-
-    const ensureAgendaChecagemPanel = () => {
-        if (agendaChecagemPanelState.panel) {
-            return agendaChecagemPanelState.panel;
-        }
-        const panel = document.createElement('div');
-        panel.className = 'agenda-checagem-panel';
-        panel.setAttribute('aria-hidden', 'true');
-        panel.innerHTML = `
-            <div class="agenda-checagem-panel__card">
-                <div class="agenda-checagem-panel__header">
-                    <div>
-                        <span class="agenda-checagem-panel__badge">Notações</span>
-                        <p class="agenda-checagem-panel__title">Checagem de Sistemas</p>
-                        <p class="agenda-checagem-panel__subtitle"></p>
-                    </div>
-                    <button type="button" class="agenda-checagem-panel__close" aria-label="Fechar painel">×</button>
-                </div>
-                <div class="agenda-checagem-panel__body"></div>
-            </div>
-        `;
-        document.body.appendChild(panel);
-        agendaChecagemPanelState.panel = panel;
-        agendaChecagemPanelState.body = panel.querySelector('.agenda-checagem-panel__body');
-        agendaChecagemPanelState.subtitle = panel.querySelector('.agenda-checagem-panel__subtitle');
-        agendaChecagemPanelState.badge = panel.querySelector('.agenda-checagem-panel__badge');
-        const closeButton = panel.querySelector('.agenda-checagem-panel__close');
-        closeButton.addEventListener('click', () => closeAgendaChecagemPanel());
-        panel.addEventListener('click', (event) => event.stopPropagation());
-        if (!agendaChecagemPanelState.listenersInit) {
-            document.addEventListener('keydown', (event) => {
-                if (agendaChecagemPanelState.visible && event.key === 'Escape') {
-                    closeAgendaChecagemPanel();
-                }
-            });
-            agendaChecagemPanelState.listenersInit = true;
-        }
-        return panel;
-    };
-
-    const renderAgendaChecagemPanelContent = (cardContext, linkIcon) => {
-        const panel = ensureAgendaChecagemPanel();
-        if (!panel) {
+    const openAgendaChecagemFromEntry = (entryData) => {
+        const processId = entryData?.processo_id ?? entryData?.processoId;
+        if (!processId) {
             return;
         }
-        const subtitleText = (cardContext?.cardName || '').trim();
-        agendaChecagemPanelState.subtitle.textContent = subtitleText.length > 1 ? subtitleText : '';
-        const body = agendaChecagemPanelState.body;
-        body.innerHTML = '';
-        const storageKey = resolveChecagemStorageKey(cardContext || {});
-        CHECAGEM_SECTIONS.forEach((section) => {
-            const sectionBlock = document.createElement('section');
-            sectionBlock.className = 'checagem-section agenda-checagem-panel__section';
-            const heading = document.createElement('div');
-            heading.className = 'checagem-section-title agenda-checagem-panel__section-title';
-            heading.textContent = section.title;
-            sectionBlock.appendChild(heading);
-            const questionsWrapper = document.createElement('div');
-            questionsWrapper.className = 'checagem-questions';
-            section.questions.forEach((question) => {
-                questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
-            });
-            sectionBlock.appendChild(questionsWrapper);
-            body.appendChild(sectionBlock);
-        });
-    };
-
-    const positionAgendaChecagemPanel = (panel, trigger) => {
-        if (!panel || !trigger) {
+        const canonicalCard = document.querySelector(`.info-card[data-processo-id="${processId}"]`);
+        if (canonicalCard) {
+            openChecagemModal(canonicalCard);
             return;
         }
-        panel.style.visibility = 'hidden';
-        panel.style.left = '0px';
-        panel.style.top = '0px';
-        const panelRect = panel.getBoundingClientRect();
-        const triggerRect = trigger.getBoundingClientRect();
-        let left = triggerRect.left - panelRect.width - 12;
-        if (left < 12) {
-            left = 12;
-        }
-        if (left + panelRect.width > window.innerWidth - 12) {
-            left = Math.max(12, window.innerWidth - panelRect.width - 12);
-        }
-        let top = triggerRect.top + triggerRect.height + 8;
-        const maxTop = window.innerHeight - panelRect.height - 12;
-        if (top > maxTop) {
-            top = Math.max(12, maxTop);
-        }
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-        panel.style.visibility = 'visible';
-    };
-
-    const openAgendaChecagemPanel = (entryData, trigger) => {
-        if (!entryData || !trigger) {
-            return;
-        }
-        closeAgendaChecagemPanel();
-        const cardId = entryData.backendId
-            ? `agenda-supervision-${entryData.backendId}`
-            : `agenda-supervision-${entryData.processo_id || 'global'}`;
-        const cardName = entryData.label || entryData.viabilidade_label || '';
+        const cardName = entryData?.cardName || entryData?.viabilidade_label || entryData?.label || '';
         const cardContext = {
-            cardId,
-            processoId: entryData.processo_id,
+            cardId: entryData?.cardId ?? `agenda-supervision-${entryData?.backendId ?? processId}`,
+            processoId: processId,
             cardName,
         };
-        renderAgendaChecagemPanelContent(cardContext, AGENDA_CHECAGEM_LINK_ICON);
-        const panel = ensureAgendaChecagemPanel();
-        if (!panel) {
-            return;
-        }
-        positionAgendaChecagemPanel(panel, trigger);
-        panel.classList.add('agenda-checagem-panel--visible');
-        panel.setAttribute('aria-hidden', 'false');
-        agendaChecagemPanelState.visible = true;
-        agendaChecagemPanelState.triggerElement = trigger;
-    };
-
-    const closeAgendaChecagemPanel = () => {
-        const panel = agendaChecagemPanelState.panel;
-        if (!panel) {
-            return;
-        }
-        panel.classList.remove('agenda-checagem-panel--visible');
-        panel.setAttribute('aria-hidden', 'true');
-        panel.style.visibility = 'hidden';
-        agendaChecagemPanelState.visible = false;
-        agendaChecagemPanelState.triggerElement = null;
+        renderChecagemModal(cardContext, AGENDA_CHECAGEM_LINK_ICON);
+        const overlay = ensureModal();
+        overlay.setAttribute('aria-hidden', 'false');
     };
 
     document.body.addEventListener('click', (event) => {
