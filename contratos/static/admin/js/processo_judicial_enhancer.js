@@ -3669,9 +3669,11 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return (cardState.questions || {})[questionKey] || {};
     };
 
+    let activeChecagemTrigger = null;
     const ensureModal = (() => {
         let overlay = null;
         let keyHandlerAttached = false;
+        let activeChecagemTrigger = null;
 
         return () => {
             if (overlay) {
@@ -3697,11 +3699,6 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 </div>
             `;
             document.body.appendChild(overlay);
-            overlay.addEventListener('click', (event) => {
-                if (event.target === overlay) {
-                    closeChecagemModal();
-                }
-            });
             overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
                 button.addEventListener('click', (event) => {
                     event.preventDefault();
@@ -3935,6 +3932,11 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
     const openChecagemModal = (card, trigger, fallbackContext = {}) => {
         const overlay = ensureModal();
+        const wasVisible = overlay.getAttribute('aria-hidden') === 'false';
+        if (wasVisible && activeChecagemTrigger === trigger) {
+            closeChecagemModal();
+            return;
+        }
         const cardId = card?.dataset?.parteId || fallbackContext.cardId || 'global';
         const processoId = card?.dataset?.processoId || fallbackContext.processoId;
         const cardName = card?.querySelector('.parte-nome')?.textContent?.trim()
@@ -3946,6 +3948,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
         renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
         positionChecagemModal(trigger);
+        activeChecagemTrigger = trigger;
         overlay.setAttribute('aria-hidden', 'false');
     };
 
@@ -3953,6 +3956,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         const overlay = document.getElementById('checagem-modal-overlay');
         if (overlay) {
             overlay.setAttribute('aria-hidden', 'true');
+            activeChecagemTrigger = null;
         }
     };
 
