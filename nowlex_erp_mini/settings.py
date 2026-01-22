@@ -116,7 +116,7 @@ if CARTEIRA_DATABASE_URL or CARTEIRA_DB_NAME:
             conn_health_checks=True,
         )
     else:
-        carteira_config = {
+    carteira_config = {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': CARTEIRA_DB_NAME,
             'USER': os.getenv('CARTEIRA_DB_USER'),
@@ -125,6 +125,20 @@ if CARTEIRA_DATABASE_URL or CARTEIRA_DB_NAME:
             'PORT': os.getenv('CARTEIRA_DB_PORT'),
         }
     DATABASES['carteira'] = carteira_config
+
+for env_key, env_value in os.environ.items():
+    if not env_key.startswith('CARTEIRA_DATABASE_URL_'):
+        continue
+    alias_suffix = env_key.replace('CARTEIRA_DATABASE_URL_', '').strip().lower()
+    if not alias_suffix:
+        continue
+    alias = f"carteira_{alias_suffix}"
+    if env_value:
+        DATABASES.setdefault(alias, dj_database_url.config(
+            default=env_value,
+            conn_max_age=600,
+            conn_health_checks=True,
+        ))
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

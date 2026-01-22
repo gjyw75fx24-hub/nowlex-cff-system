@@ -26,6 +26,15 @@ class Etiqueta(models.Model):
 
 class Carteira(models.Model):
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome da Carteira")
+    fonte_alias = models.CharField(
+        max_length=64,
+        blank=True,
+        verbose_name="Fonte da Carteira",
+        help_text=(
+            "Alias da conexão do banco que será utilizada para importar cadastros (ex.: "
+            "carteira, carteira_bcs, carteira_teste). Deixe em branco para usar a conexão padrão 'carteira'."
+        ),
+    )
 
     class Meta:
         verbose_name = "Carteira"

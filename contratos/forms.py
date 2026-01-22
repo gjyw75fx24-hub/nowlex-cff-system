@@ -1,5 +1,7 @@
 from django import forms
 
+from .models import Carteira
+
 
 class AndamentoSearchForm(forms.Form):
     dias_para_tras = forms.IntegerField(
@@ -33,6 +35,14 @@ class DemandasAnaliseForm(forms.Form):
         required=False,
         initial=True,
         widget=forms.CheckboxInput(attrs={'class': 'form-check-input'})
+    )
+
+    carteira = forms.ModelChoiceField(
+        queryset=Carteira.objects.order_by('nome'),
+        label="Carteira",
+        required=True,
+        empty_label="Escolha uma carteira",
+        widget=forms.Select(attrs={'class': 'form-control'})
     )
 
     def clean(self):

@@ -166,6 +166,13 @@
                 {% endif %}
                 <div class="demandas-form__row">
                     <div class="demandas-form__group">
+                        <label class="demandas-form__label" for="{{ form.carteira.id_for_label }}">{{ form.carteira.label }}</label>
+                        {{ form.carteira }}
+                        {{ form.carteira.errors }}
+                    </div>
+                </div>
+                <div class="demandas-form__row">
+                    <div class="demandas-form__group">
                         <label class="demandas-form__label" for="{{ form.data_de.id_for_label }}">{{ form.data_de.label }}</label>
                         {{ form.data_de }}
                         {{ form.data_de.errors }}

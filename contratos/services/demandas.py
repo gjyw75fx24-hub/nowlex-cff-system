@@ -120,7 +120,8 @@ class DemandasImportService:
     def _load_contracts_grouped_by_cpf(self, data_de, data_ate) -> Dict[str, List[Dict]]:
         if not self.has_carteira_connection:
             raise DemandasImportError(
-                "A base carteira não está configurada. Defina CARTEIRA_DATABASE_URL ou CARTEIRA_DB_NAME."
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
             )
 
         try:
