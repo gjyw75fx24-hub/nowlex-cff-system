@@ -49,6 +49,13 @@
             flex-wrap: wrap;
         }
 
+        .demandas-form__row--stacked {
+            flex-direction: column;
+            margin-top: 1.25rem;
+            gap: 0.35rem;
+            align-items: flex-start;
+        }
+
         .demandas-form__group {
             flex: 1;
             min-width: 220px;
@@ -187,7 +194,7 @@
                         {{ form.data_ate.errors }}
                     </div>
                 </div>
-                <div class="demandas-form__row">
+                <div class="demandas-form__row demandas-form__row--stacked">
                     <div class="demandas-form__group demandas-form__group--wide">
                         {{ form.carteira }}
                         {{ form.carteira.errors }}
