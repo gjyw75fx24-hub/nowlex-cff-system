@@ -1061,15 +1061,16 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
         }
 
-        function buildSnapshotFromProcessosVinculados() {
-            if (!Array.isArray(userResponses.processos_vinculados) || userResponses.processos_vinculados.length === 0) {
+        function buildProcessSnapshotFromCard(processo) {
+            if (!processo || typeof processo !== 'object') {
                 return null;
             }
-            const processo = userResponses.processos_vinculados[0];
             const contratoArray = Array.isArray(processo.contratos) ? processo.contratos : [];
-            const respostaContratos = processo.tipo_de_acao_respostas && Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria)
-                ? processo.tipo_de_acao_respostas.contratos_para_monitoria
-                : [];
+            const respostaContratos =
+                processo.tipo_de_acao_respostas &&
+                Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria)
+                    ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                    : [];
             const contractIds = Array.from(
                 new Set(
                     [...contratoArray, ...respostaContratos]
@@ -1093,6 +1094,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 barrado,
                 general_card_snapshot: false
             };
+        }
+
+        function buildSnapshotsFromProcessosVinculados() {
+            if (!Array.isArray(userResponses.processos_vinculados)) {
+                return [];
+            }
+            return userResponses.processos_vinculados
+                .map(buildProcessSnapshotFromCard)
+                .filter(Boolean);
         }
 
         function appendProcessCardToHistory(cardData) {
@@ -1167,23 +1177,39 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             if (editingIndex !== null) {
                 syncEditingCardWithCurrentResponses();
             }
-            let snapshot = buildSnapshotFromProcessosVinculados();
-            if (!snapshot) {
-                snapshot = captureActiveAnalysisSnapshot();
+            let snapshots = buildSnapshotsFromProcessosVinculados();
+            if (!snapshots.length) {
+                const fallback = captureActiveAnalysisSnapshot();
+                if (fallback) {
+                    snapshots = [fallback];
+                }
             }
-            if (!snapshot) {
+            if (!snapshots.length) {
                 return false;
             }
-            snapshot.saved_at = new Date().toISOString();
-            snapshot.updated_at = snapshot.saved_at;
 
-            if (editingIndex !== null && savedCards[editingIndex]) {
-                snapshot.general_card_snapshot =
+            const timestamp = new Date().toISOString();
+
+            const snapshotsToPersist = snapshots.slice();
+            if (
+                editingIndex !== null &&
+                Number.isFinite(editingIndex) &&
+                savedCards[editingIndex] &&
+                snapshotsToPersist.length
+            ) {
+                const snapshotToUpdate = snapshotsToPersist.shift();
+                snapshotToUpdate.saved_at = timestamp;
+                snapshotToUpdate.updated_at = timestamp;
+                snapshotToUpdate.general_card_snapshot =
                     savedCards[editingIndex].general_card_snapshot || false;
-                savedCards[editingIndex] = snapshot;
-            } else {
-                appendProcessCardToHistory(snapshot);
+                savedCards[editingIndex] = snapshotToUpdate;
             }
+
+            snapshotsToPersist.forEach(snapshot => {
+                snapshot.saved_at = timestamp;
+                snapshot.updated_at = timestamp;
+                appendProcessCardToHistory(snapshot);
+            });
 
             userResponses.processos_vinculados = [];
             if (editingIndex !== null) {
