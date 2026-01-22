@@ -85,6 +85,8 @@ WSGI_APPLICATION = 'nowlex_erp_mini.wsgi.application'
 
 # Database - Suporta DATABASE_URL (Render) ou variáveis individuais (local)
 DATABASE_URL = os.getenv('DATABASE_URL')
+CARTEIRA_DATABASE_URL = os.getenv('CARTEIRA_DATABASE_URL')
+CARTEIRA_DB_NAME = os.getenv('CARTEIRA_DB_NAME')
 
 if DATABASE_URL:
     DATABASES = {
@@ -105,6 +107,24 @@ else:
             'PORT': os.getenv('DB_PORT'),
         }
     }
+
+if CARTEIRA_DATABASE_URL or CARTEIRA_DB_NAME:
+    if CARTEIRA_DATABASE_URL:
+        carteira_config = dj_database_url.config(
+            default=CARTEIRA_DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    else:
+        carteira_config = {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': CARTEIRA_DB_NAME,
+            'USER': os.getenv('CARTEIRA_DB_USER'),
+            'PASSWORD': os.getenv('CARTEIRA_DB_PASSWORD'),
+            'HOST': os.getenv('CARTEIRA_DB_HOST'),
+            'PORT': os.getenv('CARTEIRA_DB_PORT'),
+        }
+    DATABASES['carteira'] = carteira_config
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
