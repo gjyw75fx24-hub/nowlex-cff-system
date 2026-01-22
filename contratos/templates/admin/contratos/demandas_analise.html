@@ -1,0 +1,249 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+    <style>
+        .demandas-page {
+            padding: 2rem 1.25rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .demandas-panel {
+            width: min(980px, 100%);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .demandas-card {
+            background: #fff;
+            border-radius: 20px;
+            border: 1px solid rgba(15, 58, 118, 0.1);
+            box-shadow: 0 14px 30px rgba(15, 58, 118, 0.15);
+            padding: 1.75rem;
+        }
+
+        .demandas-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .demandas-header .checagem-modal__title {
+            margin: 0;
+        }
+
+        .demandas-header .checagem-modal__subtitle {
+            margin-top: 0.25rem;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+
+        .demandas-form__row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .demandas-form__group {
+            flex: 1;
+            min-width: 220px;
+        }
+
+        .demandas-form__group label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .demandas-form__label {
+            font-size: 0.68rem;
+            letter-spacing: -0.02em;
+            color: #5b6780;
+            font-weight: 500;
+        }
+
+        .demandas-etiqueta-preview {
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: none;
+            letter-spacing: 0;
+            background-color: #9e9e9e;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+        }
+
+        .demandas-etiqueta-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.2rem;
+        }
+
+        .demandas-etiqueta-caption {
+            font-size: 0.65rem;
+            color: #4c5a6b;
+            opacity: 0.7;
+        }
+
+
+        .demandas-form__footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 0.75rem;
+        }
+
+        .demandas-form__footer-label {
+            font-size: 0.78rem;
+            color: #5b6c8a;
+            font-weight: 500;
+        }
+
+        .demandas-form__actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin-top: 0;
+        }
+
+        .demandas-form__actions button {
+            min-width: 160px;
+        }
+
+        .agenda-checagem-panel__body {
+            padding: 0.5rem 0;
+        }
+
+        .agenda-checagem-panel__badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #0f3a60;
+        }
+
+        .checagem-question-title {
+            font-weight: 600;
+        }
+    </style>
+{% endblock %}
+
+{% block content_title %}{% endblock %}
+
+{% block content %}
+<div class="demandas-page">
+    <div class="demandas-panel">
+        <div class="demandas-card">
+            <div class="demandas-header">
+                <div>
+                    <h2 class="checagem-modal__title">Demandas P/ Análise</h2>
+                    <p class="checagem-modal__subtitle">
+                        Selecione o período para buscar demandas para análise considerando a data de prescrição dos contratos.
+                    </p>
+                </div>
+                <div class="demandas-etiqueta-group">
+                    <span class="etiqueta-badge demandas-etiqueta-preview">{{ period_label_sample }}</span>
+                    <span class="demandas-etiqueta-caption">Etiqueta</span>
+                </div>
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="checagem-question">
+                        {{ form.non_field_errors }}
+                    </div>
+                {% endif %}
+                <div class="demandas-form__row">
+                    <div class="demandas-form__group">
+                        <label class="demandas-form__label" for="{{ form.data_de.id_for_label }}">{{ form.data_de.label }}</label>
+                        {{ form.data_de }}
+                        {{ form.data_de.errors }}
+                    </div>
+                    <div class="demandas-form__group">
+                        <label class="demandas-form__label" for="{{ form.data_ate.id_for_label }}">{{ form.data_ate.label }}</label>
+                        {{ form.data_ate }}
+                        {{ form.data_ate.errors }}
+                    </div>
+                </div>
+                <div class="demandas-form__footer">
+                    <label class="demandas-form__footer-label">
+                        {{ form.preview_only }}
+                        {{ form.preview_only.label }}
+                    </label>
+                    <div class="demandas-form__actions">
+                        <a class="button" href="{% url 'admin:index' %}">Cancelar</a>
+                        <button type="submit" class="button button-primary">
+                            Buscar cadastros
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div class="demandas-card agenda-checagem-panel">
+            <div class="agenda-checagem-panel__header">
+                <div>
+                    <p class="agenda-checagem-panel__title">Pré-visualização</p>
+                    <p class="agenda-checagem-panel__subtitle">Resultados que serão considerados na importação em lote.</p>
+                </div>
+                {% if period_label %}
+                    <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
+                {% else %}
+                    <span class="agenda-checagem-panel__badge">Preencha o período</span>
+                {% endif %}
+            </div>
+            <div class="agenda-checagem-panel__body">
+                {% if preview_ready %}
+                    {% if preview_rows %}
+                        <div class="checagem-questions">
+                            {% for row in preview_rows %}
+                                <div class="checagem-question">
+                                    <div class="checagem-question-top">
+                                        <div class="checagem-question-title">CPF {{ row.cpf }}</div>
+                                    </div>
+                                    <div class="checagem-question-body">
+                                        <p class="checagem-question-observation">
+                                            {{ row.nome }} · Contratos: {{ row.contratos }} · Total aberto: {{ row.total_aberto }}
+                                        </p>
+                                        <p class="checagem-question-observation">
+                                            Prescrição ativadora: {{ row.prescricao_ativadora }}
+                                        </p>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="checagem-question-observation">
+                            Nenhum CPF retornado ainda. A listagem real será exibida após implementar a importação.
+                        </p>
+                    {% endif %}
+                {% else %}
+                    <p class="checagem-question-observation">
+                        Informe o período desejado e clique em “Buscar cadastros” para ativar a pré-visualização.
+                    </p>
+                {% endif %}
+                <p class="checagem-footer-hint">
+                    {{ preview_hint }}
+                </p>
+            </div>
+            <div class="checagem-modal__footer" style="gap:0.5rem;">
+                <a class="checagem-modal__close-btn" href="{% url 'admin:index' %}">Voltar</a>
+                <button type="button" class="checagem-link-button" disabled>
+                    Gerar importação
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

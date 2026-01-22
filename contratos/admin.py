@@ -33,6 +33,7 @@ from .models import (
     _generate_tipo_peticao_key,
 )
 from .widgets import EnderecoWidget
+from .forms import DemandasAnaliseForm
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
 
 
@@ -534,6 +535,40 @@ def configuracao_analise_novas_monitorias_view(request):
     })
     return render(request, "admin/contratos/configuracao_analise_novas_monitorias.html", context)
 
+
+def demandas_analise_view(request):
+    if not is_user_supervisor(request.user):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    form = DemandasAnaliseForm(request.POST or None)
+    preview_rows = []
+    period_label = ""
+    preview_ready = False
+    preview_hint = (
+        "Use o intervalo de prescrições para identificar CPFs elegíveis. "
+        "Após implementar a importação em lote, esta lista mostrará os cadastros encontrados."
+    )
+
+    if form.is_valid():
+        preview_ready = True
+        data_de = form.cleaned_data['data_de']
+        data_ate = form.cleaned_data['data_ate']
+        period_label = f"{data_de.strftime('%d/%m/%Y')} - {data_ate.strftime('%d/%m/%Y')}"
+        preview_rows = []
+
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Demandas P/ Análise",
+        "form": form,
+        "preview_rows": preview_rows,
+        "preview_ready": preview_ready,
+        "period_label": period_label,
+        "period_label_sample": period_label or "xx/xx/xxxx - xx/xx/xxxx",
+        "preview_hint": preview_hint,
+    })
+    return render(request, "admin/contratos/demandas_analise.html", context)
+
 _original_get_admin_urls = admin.site.get_urls
 
 def _get_admin_urls():
@@ -553,6 +588,11 @@ def _get_admin_urls():
             "contratos/configuracao-analise/tipos/novas-monitorias/",
             admin.site.admin_view(configuracao_analise_novas_monitorias_view),
             name="contratos_configuracao_analise_novas_monitorias",
+        ),
+        path(
+            "contratos/demandas-analise/",
+            admin.site.admin_view(demandas_analise_view),
+            name="contratos_demandas_analise",
         ),
     ]
     return custom_urls + urls
@@ -576,12 +616,25 @@ def _get_app_list(request, app_label=None):
             filtered_models.append(model)
         if insertion_index is None:
             insertion_index = 0
+        config_position = min(insertion_index, len(filtered_models))
         filtered_models.insert(
-            min(insertion_index, len(filtered_models)),
+            config_position,
             {
                 "name": "Configuração de Análise",
                 "object_name": "ConfiguracaoAnalise",
                 "admin_url": reverse("admin:contratos_configuracao_analise"),
+                "add_url": None,
+                "perms": {"add": False, "change": False, "delete": False, "view": True},
+                "view_only": True,
+            },
+        )
+        demandas_position = min(config_position + 1, len(filtered_models))
+        filtered_models.insert(
+            demandas_position,
+            {
+                "name": "Demandas P/ Análise",
+                "object_name": "DemandasAnalise",
+                "admin_url": reverse("admin:contratos_demandas_analise"),
                 "add_url": None,
                 "perms": {"add": False, "change": False, "delete": False, "view": True},
                 "view_only": True,
