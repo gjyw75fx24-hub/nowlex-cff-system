@@ -74,6 +74,7 @@
     left: 0;
     top: 0;
     font-family: 'Inter', 'Roboto', system-ui, sans-serif;
+    pointer-events: auto;
 }
 
 .checagem-modal__header {
@@ -226,6 +227,32 @@
     z-index: 2;
 }
 
+.checagem-link-edit-icon {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    position: relative;
+}
+.checagem-link-edit-icon::before,
+.checagem-link-edit-icon::after {
+    content: '';
+    position: absolute;
+    background: #0f3a60;
+    border-radius: 1px;
+}
+.checagem-link-edit-icon::before {
+    width: 2px;
+    height: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.checagem-link-edit-icon::after {
+    height: 2px;
+    width: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
 .checagem-link-editor.visible {
     display: flex;
 }
@@ -252,6 +279,12 @@
     font-size: 1rem;
     color: #0f3a60;
     cursor: pointer;
+}
+
+.checagem-link-edit-trigger svg {
+    width: 18px;
+    height: 18px;
+    display: block;
 }
 
 .checagem-link-edit {
@@ -334,6 +367,22 @@
 .checagem-modal__close-btn:hover {
     background: #eef3fb;
     border-color: rgba(15, 58, 118, 0.3);
+}
+
+body.checagem-modal-open {
+    overflow: hidden;
+}
+
+body.checagem-modal-open .agenda-panel__calendar-wrapper,
+body.checagem-modal-open .agenda-panel__calendar-inner,
+body.checagem-modal-open .agenda-panel__calendar-grid,
+body.checagem-modal-open .agenda-panel__calendar-grid-wrapper,
+body.checagem-modal-open .agenda-panel__calendar-header,
+body.checagem-modal-open .agenda-panel__calendar-nav,
+body.checagem-modal-open .agenda-panel__month-switches,
+body.checagem-modal-open .agenda-panel__month-switches button,
+body.checagem-modal-open .agenda-panel__day {
+    pointer-events: none;
 }
 @media (max-width: 900px) {
     .checagem-question {

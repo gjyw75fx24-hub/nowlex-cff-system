@@ -3731,8 +3731,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             indicator.textContent = 'Link salvo (clique no botão ao lado)';
             indicator.title = link || '';
         } else {
-            indicator.textContent = 'Sem link cadastrado';
-            indicator.title = 'Utilize o lápis para registrar um link externo';
+            indicator.textContent = '';
+            indicator.title = 'Clique para registrar um link externo';
         }
     };
 
@@ -3780,7 +3780,10 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         editTrigger.type = 'button';
         editTrigger.className = 'checagem-link-edit-trigger';
         editTrigger.setAttribute('title', 'Editar link');
-        editTrigger.innerHTML = '✏️';
+        editTrigger.innerHTML = `
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 2h10a2 2 0 0 1 2 2v12h-2V4H4V2zm14.6 8.5L13 18.1c-.2.2-.5.3-.8.3h-3.5c-.6 0-1-.4-1-1V13c0-.3.1-.6.3-.8l6.7-6.7 3.5 3.5zm-3.7-3.5l-6.3 6.3v1.5h1.5l6.3-6.3-1.5-1.5zm5.1-.4l-1.1 1.2 1.5 1.5 1.1-1.2a.7.7 0 0 0-.1-1l-.4-.4a.7.7 0 0 0-1 .1z" fill="currentColor"></path>
+            </svg>`;
 
         const editorWrapper = document.createElement('div');
         editorWrapper.className = 'checagem-link-editor';
