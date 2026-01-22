@@ -54,6 +54,11 @@
             min-width: 220px;
         }
 
+        .demandas-form__group--wide {
+            flex: 1 1 100%;
+            max-width: 420px;
+        }
+
         .demandas-form__group label {
             display: block;
             margin-bottom: 0.35rem;
@@ -166,13 +171,6 @@
                 {% endif %}
                 <div class="demandas-form__row">
                     <div class="demandas-form__group">
-                        <label class="demandas-form__label" for="{{ form.carteira.id_for_label }}">{{ form.carteira.label }}</label>
-                        {{ form.carteira }}
-                        {{ form.carteira.errors }}
-                    </div>
-                </div>
-                <div class="demandas-form__row">
-                    <div class="demandas-form__group">
                         <label class="demandas-form__label" for="{{ form.data_de.id_for_label }}">{{ form.data_de.label }}</label>
                         {{ form.data_de }}
                         {{ form.data_de.errors }}
@@ -181,6 +179,13 @@
                         <label class="demandas-form__label" for="{{ form.data_ate.id_for_label }}">{{ form.data_ate.label }}</label>
                         {{ form.data_ate }}
                         {{ form.data_ate.errors }}
+                    </div>
+                </div>
+                <div class="demandas-form__row">
+                    <div class="demandas-form__group demandas-form__group--wide">
+                        <label class="demandas-form__label" for="{{ form.carteira.id_for_label }}">{{ form.carteira.label }}</label>
+                        {{ form.carteira }}
+                        {{ form.carteira.errors }}
                     </div>
                 </div>
                 <div class="demandas-form__footer">
