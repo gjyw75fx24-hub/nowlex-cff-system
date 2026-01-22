@@ -201,7 +201,9 @@
                     <div class="demandas-form__group demandas-form__group--wide">
                         {{ form.carteira }}
                         {{ form.carteira.errors }}
-                        <span class="demandas-form__label demandas-form__label--bottom">{{ form.carteira.label }}</span>
+                        <label class="demandas-form__label demandas-form__label--bottom" for="{{ form.carteira.id_for_label }}">
+                            {{ form.carteira.label }}
+                        </label>
                     </div>
                 </div>
                 <div class="demandas-form__footer">
