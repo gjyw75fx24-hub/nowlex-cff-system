@@ -550,14 +550,15 @@ def demandas_analise_view(request):
         "Use o intervalo de prescrições para identificar CPFs elegíveis. "
         "Após implementar a importação em lote, esta lista mostrará os cadastros encontrados."
     )
-    service = DemandasImportService()
-
     if form.is_valid():
+        carteira = form.cleaned_data['carteira']
+        alias = (carteira.fonte_alias or '').strip() or DemandasImportService.SOURCE_ALIAS
+        preview_service = DemandasImportService(db_alias=alias)
         data_de = form.cleaned_data['data_de']
         data_ate = form.cleaned_data['data_ate']
-        period_label = service.build_period_label(data_de, data_ate)
+        period_label = preview_service.build_period_label(data_de, data_ate)
         try:
-            preview_rows = service.build_preview(data_de, data_ate)
+            preview_rows = preview_service.build_preview(data_de, data_ate)
             preview_ready = True
         except DemandasImportError as exc:
             messages.error(request, str(exc))

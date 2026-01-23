@@ -110,8 +110,8 @@ else:
 
 if CARTEIRA_DATABASE_URL or CARTEIRA_DB_NAME:
     if CARTEIRA_DATABASE_URL:
-        carteira_config = dj_database_url.config(
-            default=CARTEIRA_DATABASE_URL,
+        carteira_config = dj_database_url.parse(
+            CARTEIRA_DATABASE_URL,
             conn_max_age=600,
             conn_health_checks=True,
         )

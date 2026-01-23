@@ -178,13 +178,17 @@
                 </div>
             </div>
 
-            <form method="post">
+            <form method="post" action="{% url 'admin:contratos_demandas_analise' %}">
                 {% csrf_token %}
                 {% if form.non_field_errors %}
                     <div class="checagem-question">
                         {{ form.non_field_errors }}
                     </div>
                 {% endif %}
+                <div style="margin-bottom: 0.75rem;">
+                    <small>preview_ready: {{ preview_ready }}</small><br>
+                    <small>form errors: {{ form.errors }}</small>
+                </div>
                 <div class="demandas-form__row">
                     <div class="demandas-form__group">
                         <label class="demandas-form__label" for="{{ form.data_de.id_for_label }}">{{ form.data_de.label }}</label>
@@ -221,7 +225,7 @@
             </form>
         </div>
 
-        <div class="demandas-card agenda-checagem-panel">
+        <div class="demandas-card agenda-checagem-panel{% if preview_ready %} agenda-checagem-panel--visible{% endif %}">
             <div class="agenda-checagem-panel__header">
                 <div>
                     <p class="agenda-checagem-panel__title">Pré-visualização</p>
