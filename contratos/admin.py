@@ -565,7 +565,7 @@ def demandas_analise_view(request):
             preview_total_label = _format_currency(preview_total)
             preview_ready = True
             if import_action in ("import_all", "import_selected"):
-                etiqueta_nome = carteira.nome or "Demandas"
+                etiqueta_nome = preview_service.build_etiqueta_nome(carteira, period_label)
                 import_result = None
                 if import_action == "import_selected":
                     filtered_cpfs = [cpf for cpf in selected_cpfs if cpf]
@@ -573,10 +573,10 @@ def demandas_analise_view(request):
                         messages.warning(request, "Selecione pelo menos um CPF para importar.")
                     else:
                         import_result = preview_service.import_selected_cpfs(
-                            data_de, data_ate, filtered_cpfs, etiqueta_nome
+                            data_de, data_ate, filtered_cpfs, etiqueta_nome, carteira
                         )
                 else:
-                    import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome)
+                    import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome, carteira)
 
                 if import_result:
                     summary = []

@@ -8,7 +8,7 @@ from django.conf import settings
 from django.db import connections, transaction
 from django.db.utils import OperationalError
 
-from contratos.models import Contrato, Etiqueta, Parte, ProcessoJudicial
+from contratos.models import Carteira, Contrato, Etiqueta, Parte, ProcessoJudicial
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,12 @@ class DemandasImportService:
     def build_period_label(self, data_de, data_ate) -> str:
         return f"{data_de.strftime('%d/%m/%Y')} - {data_ate.strftime('%d/%m/%Y')}"
 
+    def build_etiqueta_nome(self, carteira: Carteira, period_label: Optional[str]) -> str:
+        nome_carteira = (carteira.nome or "Demandas").strip()
+        if period_label:
+            return f"{nome_carteira} · {period_label}"
+        return nome_carteira
+
     def build_preview(self, data_de, data_ate) -> Tuple[List[Dict[str, str]], Decimal]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
         rows = []
@@ -96,18 +102,30 @@ class DemandasImportService:
             })
         return rows, total_aberto_sum
 
-    def import_period(self, data_de, data_ate, etiqueta_nome: str) -> Dict[str, int]:
+    def import_period(self, data_de, data_ate, etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
-        return self._apply_import(grouped, etiqueta_nome)
+        return self._apply_import(grouped, etiqueta_nome, carteira)
 
-    def import_selected_cpfs(self, data_de, data_ate, selected_cpfs: List[str], etiqueta_nome: str) -> Dict[str, int]:
+    def import_selected_cpfs(
+        self,
+        data_de,
+        data_ate,
+        selected_cpfs: List[str],
+        etiqueta_nome: str,
+        carteira: Optional[Carteira] = None,
+    ) -> Dict[str, int]:
         if not selected_cpfs:
             return {"imported": 0, "skipped": 0}
         normalized_cpfs = [_normalize_digits(cpf) for cpf in selected_cpfs if _normalize_digits(cpf)]
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate, normalized_cpfs)
-        return self._apply_import(grouped, etiqueta_nome)
+        return self._apply_import(grouped, etiqueta_nome, carteira)
 
-    def _apply_import(self, grouped: Dict[str, List[Dict]], etiqueta_nome: str) -> Dict[str, int]:
+    def _apply_import(
+        self,
+        grouped: Dict[str, List[Dict]],
+        etiqueta_nome: str,
+        carteira: Optional[Carteira],
+    ) -> Dict[str, int]:
         if not grouped:
             return {"imported": 0, "skipped": 0}
 
@@ -126,7 +144,7 @@ class DemandasImportService:
                 skipped += 1
                 continue
             with transaction.atomic():
-                processo = self._build_processo(cpf, contracts)
+                processo = self._build_processo(cpf, contracts, carteira)
                 processo.etiquetas.add(etiqueta)
                 imported += 1
         return {"imported": imported, "skipped": skipped}
@@ -251,7 +269,7 @@ class DemandasImportService:
             for row in rows
         }
 
-    def _build_processo(self, cpf: str, contracts: List[Dict]) -> ProcessoJudicial:
+    def _build_processo(self, cpf: str, contracts: List[Dict], carteira: Optional[Carteira] = None) -> ProcessoJudicial:
         total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)
         processo = ProcessoJudicial.objects.create(
             cnj=next((c.get('num_processo_jud') for c in contracts if c.get('num_processo_jud')), None),
@@ -260,15 +278,16 @@ class DemandasImportService:
             tribunal='',
             valor_causa=total_aberto or None,
             soma_contratos=total_aberto,
+            carteira=carteira,
         )
         cpf_para_gravar = _normalize_digits(cpf) or cpf
         Parte.objects.bulk_create([
             Parte(
                 processo=processo,
                 tipo_polo='ATIVO',
-                nome='Nowlex Demandas',
+                nome='',
                 tipo_pessoa='PJ',
-                documento='00000000000191',
+                documento='',
             ),
             Parte(
                 processo=processo,
