@@ -34,7 +34,7 @@ from .models import (
 )
 from .widgets import EnderecoWidget
 from .forms import DemandasAnaliseForm
-from .services.demandas import DemandasImportError, DemandasImportService
+from .services.demandas import DemandasImportError, DemandasImportService, _format_currency
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
 
 
@@ -546,6 +546,7 @@ def demandas_analise_view(request):
     preview_rows = []
     period_label = ""
     preview_ready = False
+    preview_total_label = _format_currency(Decimal('0'))
     preview_hint = (
         "Use o intervalo de prescrições para identificar CPFs elegíveis. "
         "Após implementar a importação em lote, esta lista mostrará os cadastros encontrados."
@@ -558,7 +559,8 @@ def demandas_analise_view(request):
         data_ate = form.cleaned_data['data_ate']
         period_label = preview_service.build_period_label(data_de, data_ate)
         try:
-            preview_rows = preview_service.build_preview(data_de, data_ate)
+            preview_rows, preview_total = preview_service.build_preview(data_de, data_ate)
+            preview_total_label = _format_currency(preview_total)
             preview_ready = True
         except DemandasImportError as exc:
             messages.error(request, str(exc))
@@ -571,6 +573,7 @@ def demandas_analise_view(request):
         "preview_ready": preview_ready,
         "period_label": period_label,
         "period_label_sample": period_label or "xx/xx/xxxx - xx/xx/xxxx",
+        "preview_total_label": preview_total_label,
         "preview_hint": preview_hint,
     })
     return render(request, "admin/contratos/demandas_analise.html", context)

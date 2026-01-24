@@ -2,7 +2,7 @@ import logging
 import re
 from collections import defaultdict
 from decimal import Decimal
-from typing import Dict, Iterable, List, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from django.conf import settings
 from django.db import connections, transaction
@@ -75,14 +75,16 @@ class DemandasImportService:
     def build_period_label(self, data_de, data_ate) -> str:
         return f"{data_de.strftime('%d/%m/%Y')} - {data_ate.strftime('%d/%m/%Y')}"
 
-    def build_preview(self, data_de, data_ate) -> List[Dict[str, str]]:
+    def build_preview(self, data_de, data_ate) -> Tuple[List[Dict[str, str]], Decimal]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
         rows = []
+        total_aberto_sum = Decimal('0')
         for cpf, contracts in grouped.items():
             nome = next((c.get('cliente_nome') for c in contracts if c.get('cliente_nome')), 'Cliente sem nome')
             total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)
             prescricao_dates = [c['data_prescricao'] for c in contracts if c.get('data_prescricao')]
             prescricao_text = prescricao_dates[0].strftime('%d/%m/%Y') if prescricao_dates else ''
+            total_aberto_sum += total_aberto
             rows.append({
                 "cpf": _format_cpf(cpf),
                 "nome": nome,
@@ -90,7 +92,7 @@ class DemandasImportService:
                 "total_aberto": _format_currency(total_aberto),
                 "prescricao_ativadora": prescricao_text,
             })
-        return rows
+        return rows, total_aberto_sum
 
     def import_period(self, data_de, data_ate, etiqueta_nome: str) -> Dict[str, int]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
