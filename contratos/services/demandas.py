@@ -134,7 +134,7 @@ class DemandasImportService:
             return {}
 
         try:
-            contratos = self._fetch_contracts(cpfs)
+            contratos = self._fetch_contracts(cpfs, data_de, data_ate)
         except OperationalError as exc:
             logger.exception("Falha ao buscar contratos na base da carteira")
             raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
@@ -161,7 +161,7 @@ class DemandasImportService:
             results = [row[0].strip() for row in cursor.fetchall() if row[0]]
         return results
 
-    def _fetch_contracts(self, cpfs: Iterable[str]) -> List[Dict]:
+    def _fetch_contracts(self, cpfs: Iterable[str], data_de, data_ate) -> List[Dict]:
         sql = """
             SELECT
                 c.id,
@@ -185,10 +185,11 @@ class DemandasImportService:
             FROM b6_erp_contratos c
             LEFT JOIN b6_erp_clientes cl ON cl.cpf_cgc = c.cpf_cgc
             WHERE c.cpf_cgc = ANY(%s)
+              AND c.data_prescricao BETWEEN %s AND %s
             ORDER BY c.cpf_cgc, c.data_prescricao
         """
         with connections[self.db_alias].cursor() as cursor:
-            cursor.execute(sql, [list(cpfs)])
+            cursor.execute(sql, [list(cpfs), data_de, data_ate])
             rows = cursor.fetchall()
             column_names = [desc[0] for desc in cursor.description]
 

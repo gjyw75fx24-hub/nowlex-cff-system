@@ -2197,15 +2197,26 @@ a.historylink {
 .agenda-checagem-panel__header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     margin-bottom: 12px;
     gap: 16px;
+}
+.agenda-checagem-panel__header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
 }
 .agenda-checagem-panel__badge {
     font-size: 0.625rem;
     text-transform: uppercase;
     letter-spacing: 0.2em;
     color: #a76b00;
+}
+.agenda-checagem-panel__stat {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #0f3a60;
 }
 .agenda-checagem-panel__title {
     margin: 0;

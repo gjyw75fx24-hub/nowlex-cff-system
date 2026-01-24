@@ -231,11 +231,14 @@
                     <p class="agenda-checagem-panel__title">Pré-visualização</p>
                     <p class="agenda-checagem-panel__subtitle">Resultados que serão considerados na importação em lote.</p>
                 </div>
-                {% if period_label %}
-                    <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
-                {% else %}
-                    <span class="agenda-checagem-panel__badge">Preencha o período</span>
-                {% endif %}
+                <div class="agenda-checagem-panel__header-right">
+                    <span class="agenda-checagem-panel__stat">{{ preview_rows|length }} CPFs únicos</span>
+                    {% if period_label %}
+                        <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
+                    {% else %}
+                        <span class="agenda-checagem-panel__badge">Preencha o período</span>
+                    {% endif %}
+                </div>
             </div>
             <div class="agenda-checagem-panel__body">
                 {% if preview_ready %}
