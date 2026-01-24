@@ -39,18 +39,47 @@ def _format_currency(value: Decimal) -> str:
     return f"R$ {formatted}"
 
 
-def _build_endereco(row: Mapping[str, Optional[str]]) -> str:
-    parts = [
-        row.get('endereco_rua'),
-        row.get('endereco_numero'),
-        row.get('endereco_complemento'),
-        row.get('endereco_bairro'),
-        row.get('endereco_cidade'),
-        row.get('endereco_uf'),
-        row.get('endereco_cep'),
-    ]
-    cleaned = [part.strip() for part in parts if part and part.strip()]
-    return ', '.join(cleaned)
+def _format_cep(value: Optional[str]) -> str:
+    digits = re.sub(r'\D', '', str(value or ''))
+    if len(digits) == 8:
+        return f"{digits[:5]}-{digits[5:]}"
+    return digits
+
+
+def _uf_to_nome(uf_sigla: str) -> str:
+    UFS = {
+        'AC':'Acre', 'AL':'Alagoas', 'AP':'Amapá', 'AM':'Amazonas', 'BA':'Bahia', 'CE':'Ceará', 'DF':'Distrito Federal',
+        'ES':'Espírito Santo', 'GO':'Goiás', 'MA':'Maranhão', 'MT':'Mato Grosso', 'MS':'Mato Grosso do Sul', 'MG':'Minas Gerais',
+        'PA':'Pará', 'PB':'Paraíba', 'PR':'Paraná', 'PE':'Pernambuco', 'PI':'Piauí', 'RJ':'Rio de Janeiro', 'RN':'Rio Grande do Norte',
+        'RS':'Rio Grande do Sul', 'RO':'Rondônia', 'RR':'Roraima', 'SC':'Santa Catarina', 'SP':'São Paulo', 'SE':'Sergipe', 'TO':'Tocantins'
+    }
+    return UFS.get(uf_sigla.upper(), '')
+
+
+def _clean_street_name(street: Optional[str], number: Optional[str]) -> str:
+    s = str(street or '').strip()
+    n = str(number or '').strip()
+    if not s:
+        return ''
+    if n:
+        s = re.sub(r'\s*,\s*' + re.escape(n) + r'(\b.*)?$', '', s, flags=re.IGNORECASE)
+        s = re.sub(r'\s+' + re.escape(n) + r'(\b.*)?$', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'\s*,\s*\d[\w\s\-\/]*$', '', s)
+    s = re.sub(r'\s+\d[\w\-\/]*$', '', s)
+    return s.strip()
+
+
+def _montar_texto_endereco(parts: Mapping[str, str]) -> str:
+    return (
+        f"A: {parts.get('A', '')} - "
+        f"B: {parts.get('B', '')} - "
+        f"C: {parts.get('C', '')} - "
+        f"D: {parts.get('D', '')} - "
+        f"E: {parts.get('E', '')} - "
+        f"F: {parts.get('F', '')} - "
+        f"G: {parts.get('G', '')} - "
+        f"H: {parts.get('H', '')}"
+    )
 
 
 def _build_telefone(row: Mapping[str, Optional[str]]) -> str:
@@ -242,7 +271,19 @@ class DemandasImportService:
             mapped = dict(zip(column_names, row))
             cpf_value = (mapped.get("cpf_cgc") or "").strip()
             mapped["cpf"] = cpf_value
-            mapped["endereco"] = _build_endereco(mapped)
+            uf = (mapped.get("endereco_uf") or '').strip().upper()
+            cep = _format_cep(mapped.get("endereco_cep"))
+            endereco_map = {
+                "A": _clean_street_name(mapped.get("endereco_rua"), mapped.get("endereco_numero")),
+                "B": mapped.get("endereco_numero") or '',
+                "C": mapped.get("endereco_complemento") or '',
+                "D": mapped.get("endereco_bairro") or '',
+                "E": mapped.get("endereco_cidade") or '',
+                "F": _uf_to_nome(uf),
+                "G": cep,
+                "H": uf,
+            }
+            mapped["endereco"] = _montar_texto_endereco(endereco_map)
             mapped["telefone"] = _build_telefone(mapped)
             mapped["contato_tipo_pessoa"] = _determine_tipo_pessoa(mapped["cpf"])
             mapped["valor_aberto"] = Decimal(mapped.get("valor_aberto") or 0)

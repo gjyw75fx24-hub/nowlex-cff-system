@@ -547,6 +547,25 @@ body.checagem-modal-open {
     margin-right: 10px;
 }
 
+/* Ajusta os campos de CPF e Data de Nascimento nas inlines de partes */
+.dynamic-partes .form-row.field-documento,
+.dynamic-partes .form-row.field-data_nascimento {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+.dynamic-partes .form-row.field-documento label,
+.dynamic-partes .form-row.field-data_nascimento label {
+    min-width: 150px;
+    margin-bottom: 0;
+    white-space: nowrap;
+}
+.dynamic-partes .form-row.field-documento .field-box,
+.dynamic-partes .form-row.field-data_nascimento .field-box {
+    flex: 1;
+}
+
 /* --- Estilos para Etiquetas --- */
 .etiqueta-badge {
     display: inline-block;

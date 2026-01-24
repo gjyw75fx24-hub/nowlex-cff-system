@@ -217,6 +217,11 @@ class Parte(models.Model):
     nome = models.CharField(max_length=255, verbose_name="Nome / Razão Social")
     tipo_pessoa = models.CharField(max_length=2, choices=TIPO_PESSOA_CHOICES, verbose_name="Tipo de Pessoa")
     documento = models.CharField(max_length=20, verbose_name="CPF / CNPJ")
+    data_nascimento = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Data de Nascimento"
+    )
     endereco = models.TextField(blank=True, null=True, verbose_name="Endereço")
     advogados_info = models.TextField(
         blank=True,

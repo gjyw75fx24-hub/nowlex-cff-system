@@ -113,6 +113,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
 
+    function clearInlineDuplicateValidationErrors() {
+        document.querySelectorAll('.dynamic-andamento').forEach(row => {
+            const errorList = row.querySelector('.errorlist');
+            if (errorList && /Andamento Processual com este Processo/.test(errorList.textContent)) {
+                errorList.remove();
+            }
+            const erroredRows = row.querySelectorAll('.errors');
+            erroredRows.forEach(errorNode => {
+                errorNode.classList.remove('errors');
+            });
+        });
+    }
+
     function deduplicateInlineAndamentos() {
         const seen = new Set();
         let removedCount = 0;
@@ -142,6 +155,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 seen.add(key);
             }
         });
+        if (removedCount > 0) {
+            clearInlineDuplicateValidationErrors();
+        }
         return removedCount;
     }
 
@@ -196,12 +212,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        detailCardBody.style.maxHeight = '320px';
-        detailCardBody.style.display = 'block';
-        detailCardBody.style.overflowY = 'auto';
-        detailCardBody.style.overflowX = 'hidden';
-        detailCardBody.style.paddingRight = '0.5rem';
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
+        if (detailCardBody && detailList && calendarGridEl) {
+            detailCardBody.style.maxHeight = '320px';
+            detailCardBody.style.display = 'block';
+            detailCardBody.style.overflowY = 'auto';
+            detailCardBody.style.overflowX = 'hidden';
+            detailCardBody.style.paddingRight = '0.5rem';
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
+        }
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -2532,13 +2550,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error(data.message || 'Erro ao remover duplicados.');
                 }
                 const removed = data.removed || 0;
+                const defaultServerMessage = removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.';
+                const serverMessage = data.message || defaultServerMessage;
                 const messageParts = [];
-                const serverMessage = data.message || (removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.');
-                if (serverMessage) {
-                    messageParts.push(serverMessage);
-                }
                 if (inlineRemoved > 0) {
                     messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                }
+                if (removed > 0) {
+                    messageParts.push(serverMessage);
+                } else if (inlineRemoved === 0) {
+                    messageParts.push(serverMessage);
                 }
                 if (!messageParts.length) {
                     messageParts.push('Nenhum andamento duplicado encontrado.');
@@ -3278,6 +3299,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
         const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
         const clearBtn = enderecoField ? enderecoField.querySelector('.endereco-clear-button') : null;
+        const dataNascimentoField = parteInline.querySelector('.field-data_nascimento');
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
         if (isPassive) {
@@ -3292,6 +3314,10 @@ document.addEventListener('DOMContentLoaded', function() {
             enderecoGrid.style.display = showGrid ? 'grid' : 'none';
             if (toggleBtn) toggleBtn.style.display = 'inline-block';
             if (clearBtn) clearBtn.style.display = showGrid ? 'inline-block' : 'none';
+        }
+
+        if (dataNascimentoField) {
+            dataNascimentoField.style.display = isPassive ? '' : 'none';
         }
 
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado

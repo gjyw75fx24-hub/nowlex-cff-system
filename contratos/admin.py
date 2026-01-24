@@ -1460,6 +1460,21 @@ class ParteForm(forms.ModelForm):
             'obito': forms.HiddenInput(),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        for field_name in ('tipo_polo', 'nome', 'documento'):
+            field = self.fields.get(field_name)
+            if not field:
+                continue
+            field.required = False
+
+        polo_field = self.fields.get('tipo_polo')
+        if polo_field and polo_field.choices:
+            default_choice = polo_field.choices[0]
+            if default_choice[0] != '':
+                polo_field.choices = [('', '---------')] + list(polo_field.choices)
+
 class ParteInline(admin.StackedInline):
     model = Parte
     form = ParteForm
@@ -1473,7 +1488,8 @@ class ParteInline(admin.StackedInline):
             {
                 "fields": (
                     ("tipo_polo", "tipo_pessoa"),
-                    ("nome", "documento"),
+                    "nome",
+                    ("documento", "data_nascimento"),
                     "endereco",
                     "obito",
                 )
