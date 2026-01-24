@@ -237,12 +237,12 @@
                     <div class="agenda-checagem-panel__body">
                         {% if preview_ready %}
                             <div class="agenda-checagem-panel__actions">
-                            <button type="submit" class="button button-primary" name="import_action" value="import_all" {% if not preview_ready %}disabled{% endif %}>
-                                Importar todos
-                            </button>
-                            <button type="submit" class="button" name="import_action" value="import_selected" {% if not preview_ready %}disabled{% endif %}>
-                                Importar selecionados
-                            </button>
+                                <button type="submit" class="button button-primary" name="import_action" value="import_all" {% if not preview_ready %}disabled{% endif %}>
+                                    Importar todos
+                                </button>
+                                <button type="submit" class="button" name="import_action" value="import_selected" {% if not preview_ready %}disabled{% endif %}>
+                                    Importar selecionados
+                                </button>
                             </div>
                             {% if preview_rows %}
                                 <div class="checagem-questions">
