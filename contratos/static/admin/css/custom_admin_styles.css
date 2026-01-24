@@ -2218,6 +2218,23 @@ a.historylink {
     font-weight: 600;
     color: #0f3a60;
 }
+.agenda-checagem-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+.checagem-question-checkbox {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-right: 0.5rem;
+}
+.checagem-question-checkbox input[type="checkbox"] {
+    margin: 0;
+    width: 16px;
+    height: 16px;
+}
 .agenda-checagem-panel__title {
     margin: 0;
     font-size: 1rem;

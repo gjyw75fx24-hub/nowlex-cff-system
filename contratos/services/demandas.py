@@ -85,8 +85,10 @@ class DemandasImportService:
             prescricao_dates = [c['data_prescricao'] for c in contracts if c.get('data_prescricao')]
             prescricao_text = prescricao_dates[0].strftime('%d/%m/%Y') if prescricao_dates else ''
             total_aberto_sum += total_aberto
+            cpf_normalized = _normalize_digits(cpf)
             rows.append({
                 "cpf": _format_cpf(cpf),
+                "cpf_raw": cpf_normalized,
                 "nome": nome,
                 "contratos": len(contracts),
                 "total_aberto": _format_currency(total_aberto),
@@ -96,6 +98,16 @@ class DemandasImportService:
 
     def import_period(self, data_de, data_ate, etiqueta_nome: str) -> Dict[str, int]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
+        return self._apply_import(grouped, etiqueta_nome)
+
+    def import_selected_cpfs(self, data_de, data_ate, selected_cpfs: List[str], etiqueta_nome: str) -> Dict[str, int]:
+        if not selected_cpfs:
+            return {"imported": 0, "skipped": 0}
+        normalized_cpfs = [_normalize_digits(cpf) for cpf in selected_cpfs if _normalize_digits(cpf)]
+        grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate, normalized_cpfs)
+        return self._apply_import(grouped, etiqueta_nome)
+
+    def _apply_import(self, grouped: Dict[str, List[Dict]], etiqueta_nome: str) -> Dict[str, int]:
         if not grouped:
             return {"imported": 0, "skipped": 0}
 
@@ -119,7 +131,12 @@ class DemandasImportService:
                 imported += 1
         return {"imported": imported, "skipped": skipped}
 
-    def _load_contracts_grouped_by_cpf(self, data_de, data_ate) -> Dict[str, List[Dict]]:
+    def _load_contracts_grouped_by_cpf(
+        self,
+        data_de,
+        data_ate,
+        cpfs_override: Optional[Iterable[str]] = None,
+    ) -> Dict[str, List[Dict]]:
         if not self.has_carteira_connection:
             raise DemandasImportError(
                 f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
@@ -127,7 +144,14 @@ class DemandasImportService:
             )
 
         try:
-            cpfs = self._fetch_cpfs_for_period(data_de, data_ate)
+            if cpfs_override is None:
+                cpfs = self._fetch_cpfs_for_period(data_de, data_ate)
+            else:
+                cpfs = [
+                    cpf.strip()
+                    for cpf in cpfs_override
+                    if cpf and cpf.strip()
+                ]
         except OperationalError as exc:
             logger.exception("Falha ao buscar CPFs na base da carteira")
             raise DemandasImportError("Não foi possível conectar ao banco da carteira.") from exc

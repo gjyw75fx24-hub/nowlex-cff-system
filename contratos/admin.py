@@ -547,6 +547,8 @@ def demandas_analise_view(request):
     period_label = ""
     preview_ready = False
     preview_total_label = _format_currency(Decimal('0'))
+    import_action = request.POST.get('import_action')
+    selected_cpfs = request.POST.getlist('selected_cpfs')
     preview_hint = (
         "Use o intervalo de prescrições para identificar CPFs elegíveis. "
         "Após implementar a importação em lote, esta lista mostrará os cadastros encontrados."
@@ -562,6 +564,30 @@ def demandas_analise_view(request):
             preview_rows, preview_total = preview_service.build_preview(data_de, data_ate)
             preview_total_label = _format_currency(preview_total)
             preview_ready = True
+            if import_action in ("import_all", "import_selected"):
+                etiqueta_nome = carteira.nome or "Demandas"
+                import_result = None
+                if import_action == "import_selected":
+                    filtered_cpfs = [cpf for cpf in selected_cpfs if cpf]
+                    if not filtered_cpfs:
+                        messages.warning(request, "Selecione pelo menos um CPF para importar.")
+                    else:
+                        import_result = preview_service.import_selected_cpfs(
+                            data_de, data_ate, filtered_cpfs, etiqueta_nome
+                        )
+                else:
+                    import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome)
+
+                if import_result:
+                    summary = []
+                    if import_result.get("imported"):
+                        summary.append(f"{import_result['imported']} importados")
+                    if import_result.get("skipped"):
+                        summary.append(f"{import_result['skipped']} ignorados")
+                    if summary:
+                        messages.success(request, "Importação concluída: " + ", ".join(summary))
+                    else:
+                        messages.info(request, "Nenhum CPF foi importado.")
         except DemandasImportError as exc:
             messages.error(request, str(exc))
 

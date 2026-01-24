@@ -213,70 +213,81 @@
                     </label>
                     <div class="demandas-form__actions">
                         <a class="button" href="{% url 'admin:index' %}">Cancelar</a>
-                        <button type="submit" class="button button-primary">
+                        <button type="submit" class="button button-primary" name="import_action" value="preview">
                             Buscar cadastros
                         </button>
                     </div>
                 </div>
-            </form>
-        </div>
-
-        <div class="demandas-card agenda-checagem-panel{% if preview_ready %} agenda-checagem-panel--visible{% endif %}">
-            <div class="agenda-checagem-panel__header">
-                <div>
-                    <p class="agenda-checagem-panel__title">Pré-visualização</p>
-                    <p class="agenda-checagem-panel__subtitle">Resultados que serão considerados na importação em lote.</p>
-                </div>
-                <div class="agenda-checagem-panel__header-right">
-                    <span class="agenda-checagem-panel__stat">{{ preview_rows|length }} CPFs únicos</span>
-                    <span class="agenda-checagem-panel__stat">Valor total: {{ preview_total_label }}</span>
-                    {% if period_label %}
-                        <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
-                    {% else %}
-                        <span class="agenda-checagem-panel__badge">Preencha o período</span>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="agenda-checagem-panel__body">
-                {% if preview_ready %}
-                    {% if preview_rows %}
-                        <div class="checagem-questions">
-                            {% for row in preview_rows %}
-                                <div class="checagem-question">
-                                    <div class="checagem-question-top">
-                                        <div class="checagem-question-title">CPF {{ row.cpf }}</div>
-                                    </div>
-                                    <div class="checagem-question-body">
-                                        <p class="checagem-question-observation">
-                                            {{ row.nome }} · Contratos: {{ row.contratos }} · Total aberto: {{ row.total_aberto }}
-                                        </p>
-                                        <p class="checagem-question-observation">
-                                            Prescrição ativadora: {{ row.prescricao_ativadora }}
-                                        </p>
-                                    </div>
-                                </div>
-                            {% endfor %}
+                <div class="demandas-card agenda-checagem-panel{% if preview_ready %} agenda-checagem-panel--visible{% endif %}">
+                    <div class="agenda-checagem-panel__header">
+                        <div>
+                            <p class="agenda-checagem-panel__title">Pré-visualização</p>
+                            <p class="agenda-checagem-panel__subtitle">Resultados que serão considerados na importação em lote.</p>
                         </div>
-                    {% else %}
-                        <p class="checagem-question-observation">
-                            Nenhum CPF retornado ainda. A listagem real será exibida após implementar a importação.
+                        <div class="agenda-checagem-panel__header-right">
+                            <span class="agenda-checagem-panel__stat">{{ preview_rows|length }} CPFs únicos</span>
+                            <span class="agenda-checagem-panel__stat">Valor total: {{ preview_total_label }}</span>
+                            {% if period_label %}
+                                <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
+                            {% else %}
+                                <span class="agenda-checagem-panel__badge">Preencha o período</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="agenda-checagem-panel__body">
+                        {% if preview_ready %}
+                            <div class="agenda-checagem-panel__actions">
+                            <button type="submit" class="button button-primary" name="import_action" value="import_all" {% if not preview_ready %}disabled{% endif %}>
+                                Importar todos
+                            </button>
+                            <button type="submit" class="button" name="import_action" value="import_selected" {% if not preview_ready %}disabled{% endif %}>
+                                Importar selecionados
+                            </button>
+                            </div>
+                            {% if preview_rows %}
+                                <div class="checagem-questions">
+                                    {% for row in preview_rows %}
+                                        <div class="checagem-question">
+                                            <div class="checagem-question-top">
+                                                <label class="checagem-question-checkbox">
+                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}">
+                                                    <span></span>
+                                                </label>
+                                                <div class="checagem-question-title">CPF {{ row.cpf }}</div>
+                                            </div>
+                                            <div class="checagem-question-body">
+                                                <p class="checagem-question-observation">
+                                                    {{ row.nome }} · Contratos: {{ row.contratos }} · Total aberto: {{ row.total_aberto }}
+                                                </p>
+                                                <p class="checagem-question-observation">
+                                                    Prescrição ativadora: {{ row.prescricao_ativadora }}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <p class="checagem-question-observation">
+                                    Nenhum CPF retornado ainda. A listagem real será exibida após implementar a importação.
+                                </p>
+                            {% endif %}
+                        {% else %}
+                            <p class="checagem-question-observation">
+                                Informe o período desejado e clique em “Buscar cadastros” para ativar a pré-visualização.
+                            </p>
+                        {% endif %}
+                        <p class="checagem-footer-hint">
+                            {{ preview_hint }}
                         </p>
-                    {% endif %}
-                {% else %}
-                    <p class="checagem-question-observation">
-                        Informe o período desejado e clique em “Buscar cadastros” para ativar a pré-visualização.
-                    </p>
-                {% endif %}
-                <p class="checagem-footer-hint">
-                    {{ preview_hint }}
-                </p>
-            </div>
-            <div class="checagem-modal__footer" style="gap:0.5rem;">
-                <a class="checagem-modal__close-btn" href="{% url 'admin:index' %}">Voltar</a>
-                <button type="button" class="checagem-link-button" disabled>
-                    Gerar importação
-                </button>
-            </div>
+                    </div>
+                    <div class="checagem-modal__footer" style="gap:0.5rem;">
+                        <a class="checagem-modal__close-btn" href="{% url 'admin:index' %}">Voltar</a>
+                        <button type="button" class="checagem-link-button" disabled>
+                            Gerar importação
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
 </div>
