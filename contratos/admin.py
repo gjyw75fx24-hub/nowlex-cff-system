@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import re
 
 from django import forms
 from django.contrib import admin, messages
@@ -1945,6 +1946,16 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     list_filter = BASE_LIST_FILTERS[:]
     search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
+    def get_search_results(self, request, queryset, search_term):
+        qs, use_distinct = super().get_search_results(request, queryset, search_term)
+        if not search_term:
+            return qs, use_distinct
+        sanitized_digits = re.sub(r'\D', '', search_term)
+        if sanitized_digits and sanitized_digits != search_term:
+            extra = queryset.filter(partes_processuais__documento__icontains=sanitized_digits)
+            qs = (qs | extra).distinct()
+            use_distinct = True
+        return qs, use_distinct
     fieldsets = (
         ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
         ("Dados do Processo", {"fields": ("cnj", "valor_causa", "valor_causa_display", "uf", "vara", "tribunal")}),
