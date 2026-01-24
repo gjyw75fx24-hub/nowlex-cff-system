@@ -1951,8 +1951,11 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         if not search_term:
             return qs, use_distinct
         sanitized_digits = re.sub(r'\D', '', search_term)
-        if sanitized_digits and sanitized_digits != search_term:
-            extra = queryset.filter(partes_processuais__documento__icontains=sanitized_digits)
+        if sanitized_digits:
+            filters = Q(partes_processuais__documento__icontains=sanitized_digits) | Q(
+                cnj__icontains=sanitized_digits
+            )
+            extra = queryset.filter(filters)
             qs = (qs | extra).distinct()
             use_distinct = True
         return qs, use_distinct
