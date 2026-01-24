@@ -17,6 +17,9 @@ media/
 # Exceção: templates de documentos são versionados
 !media/documentos_modelo/
 
+# Dumps de carteira consignado
+carteira_consignado_dump_*.dump
+
 # Arquivos de ambiente (NUNCA commitar!)
 .env
 .env.*
