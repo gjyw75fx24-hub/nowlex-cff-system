@@ -158,7 +158,51 @@ class ProcessoJudicial(models.Model):
                 return f"Cadastro de {parte_principal.nome} (ID: {self.pk})"
             return f"Cadastro Simplificado #{self.pk}"
             
-        return "Novo Cadastro"
+            return "Novo Cadastro"
+
+class ProcessoJudicialNumeroCnj(models.Model):
+    processo = models.ForeignKey(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='numeros_cnj',
+        verbose_name="Processo Judicial"
+    )
+    cnj = models.CharField(max_length=30, verbose_name="Número CNJ")
+    uf = models.CharField(max_length=2, blank=True, verbose_name="UF")
+    valor_causa = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Valor da Causa"
+    )
+    status = models.ForeignKey(
+        StatusProcessual,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Classe Processual"
+    )
+    carteira = models.ForeignKey(
+        Carteira,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Carteira",
+        related_name='numeros_cnj'
+    )
+    vara = models.CharField(max_length=255, blank=True, null=True, verbose_name="Vara")
+    tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+
+    class Meta:
+        verbose_name = "Número CNJ"
+        verbose_name_plural = "Números CNJ"
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f"{self.cnj} — {self.processo}"
 
 # 🔽 NOVO MODELO PARA ARMAZENAR ANDAMENTOS
 class AndamentoProcessual(models.Model):

@@ -13,18 +13,94 @@ document.addEventListener('DOMContentLoaded', function() {
     let prevButton = null;
     let nextButton = null;
     let addButton = null;
+    let deleteButton = null;
     const entryStates = [];
     let currentEntryIndex = -1;
+    const ensureHiddenInput = (name) => {
+        if (!form) {
+            return null;
+        }
+        let input = form.querySelector(`input[name="${name}"]`);
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            form.appendChild(input);
+        }
+        return input;
+    };
+    const cnjEntriesInput = ensureHiddenInput('cnj_entries_data');
+    const cnjActiveIndexInput = ensureHiddenInput('cnj_active_index');
+    const dedupeEntryStates = () => {
+        const seen = new Set();
+        const filtered = [];
+        entryStates.forEach((entry) => {
+            const key = entry.cnj ? entry.cnj.trim() : '';
+            if (!key || seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            filtered.push(entry);
+        });
+        entryStates.splice(0, entryStates.length, ...filtered);
+        if (entryStates.length === 0) {
+            currentEntryIndex = -1;
+        } else {
+            currentEntryIndex = Math.min(currentEntryIndex, entryStates.length - 1);
+        }
+    };
 
-    const buildEntryState = () => ({
-        cnj: cnjInput.value.trim(),
-        uf: ufInput.value.trim(),
-        valor_causa: valorCausaInput.value.trim(),
-        status: statusSelect ? statusSelect.value : '',
-        carteira: carteiraSelect ? carteiraSelect.value : '',
-        vara: varaInput ? varaInput.value.trim() : '',
-        tribunal: tribunalInput ? tribunalInput.value.trim() : '',
-    });
+    const syncHiddenEntries = () => {
+        if (cnjEntriesInput) {
+            cnjEntriesInput.value = JSON.stringify(entryStates);
+        }
+        if (cnjActiveIndexInput) {
+            cnjActiveIndexInput.value = currentEntryIndex;
+        }
+    };
+    const hydrateInitialEntries = () => {
+        const initialEntries = Array.isArray(window.__cnj_entries) ? window.__cnj_entries : [];
+        const desiredIndex = Number.isInteger(window.__cnj_active_index) ? window.__cnj_active_index : 0;
+        initialEntries.forEach((entry) => {
+            entryStates.push({
+                id: entry.id,
+                cnj: entry.cnj || '',
+                uf: entry.uf || '',
+                valor_causa: entry.valor_causa || '',
+                status: entry.status || '',
+                carteira: entry.carteira || '',
+                vara: entry.vara || '',
+                tribunal: entry.tribunal || '',
+            });
+        });
+        dedupeEntryStates();
+        if (entryStates.length > 0) {
+            currentEntryIndex = Math.min(Math.max(0, desiredIndex), entryStates.length - 1);
+            applyEntryState(entryStates[currentEntryIndex]);
+        }
+        syncHiddenEntries();
+        updateNavButtons();
+    };
+
+    const buildEntryState = () => {
+        const currentId = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex].id : null;
+        return {
+            id: currentId,
+            cnj: cnjInput.value.trim(),
+            uf: ufInput.value.trim(),
+            valor_causa: valorCausaInput.value.trim(),
+            status: statusSelect ? statusSelect.value : '',
+            carteira: carteiraSelect ? carteiraSelect.value : '',
+            vara: varaInput ? varaInput.value.trim() : '',
+            tribunal: tribunalInput ? tribunalInput.value.trim() : '',
+        };
+    };
+
+    const setActiveCnjText = (value) => {
+        if (typeof window.__setActiveCnjHeader === 'function') {
+            window.__setActiveCnjHeader(value);
+        }
+    };
 
     const applyEntryState = (entry) => {
         cnjInput.value = entry.cnj;
@@ -35,21 +111,31 @@ document.addEventListener('DOMContentLoaded', function() {
         if (varaInput) varaInput.value = entry.vara;
         if (tribunalInput) tribunalInput.value = entry.tribunal;
         cnjInput.focus();
+        setActiveCnjText(entry.cnj);
     };
 
     const updateNavButtons = () => {
         if (prevButton) {
-            prevButton.disabled = currentEntryIndex <= 0;
+            prevButton.disabled = currentEntryIndex <= 0 || entryStates.length <= 1;
         }
         if (nextButton) {
-            nextButton.disabled = currentEntryIndex < 0 || currentEntryIndex >= entryStates.length - 1;
+            nextButton.disabled = entryStates.length <= 1 || currentEntryIndex < 0 || currentEntryIndex >= entryStates.length - 1;
+        }
+        if (deleteButton) {
+            deleteButton.disabled = entryStates.length === 0;
         }
     };
 
     const storeCurrentEntry = () => {
+        const currentState = buildEntryState();
         if (currentEntryIndex >= 0) {
-            entryStates[currentEntryIndex] = buildEntryState();
+            entryStates[currentEntryIndex] = currentState;
+        } else if (currentState.cnj) {
+            entryStates.push(currentState);
+            currentEntryIndex = entryStates.length - 1;
         }
+        dedupeEntryStates();
+        syncHiddenEntries();
     };
 
     // --- 1. Criação do Botão "Dados Online" ---
@@ -104,6 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
         prevButton.style.padding = '0 .65rem';
         prevButton.style.minWidth = '34px';
         prevButton.style.height = '32px';
+        prevButton.disabled = true;
         inlineGroup.appendChild(prevButton);
 
         nextButton = document.createElement('button');
@@ -115,26 +202,55 @@ document.addEventListener('DOMContentLoaded', function() {
         nextButton.style.padding = '0 .65rem';
         nextButton.style.minWidth = '34px';
         nextButton.style.height = '32px';
+        nextButton.disabled = true;
         inlineGroup.appendChild(nextButton);
 
+        deleteButton = document.createElement('button');
+        deleteButton.id = 'btn_delete_cnj';
+        deleteButton.type = 'button';
+        deleteButton.className = 'button destructive';
+        deleteButton.innerHTML = '×';
+        deleteButton.title = 'Remover CNJ ativo';
+        deleteButton.setAttribute('aria-label', 'Remover CNJ ativo');
+        deleteButton.style.padding = '0 .75rem';
+        deleteButton.style.minWidth = '34px';
+        deleteButton.style.height = '32px';
+        inlineGroup.appendChild(deleteButton);
+
         const clearFields = () => {
-            cnjInput.value = '';
-            if (ufInput) ufInput.value = '';
-            if (valorCausaInput) valorCausaInput.value = '';
+        cnjInput.value = '';
+        if (ufInput) ufInput.value = '';
+        if (valorCausaInput) valorCausaInput.value = '';
             if (statusSelect) statusSelect.selectedIndex = 0;
             if (varaInput) varaInput.value = '';
             if (tribunalInput) tribunalInput.value = '';
-            if (carteiraSelect) carteiraSelect.selectedIndex = 0;
-            cnjInput.focus();
+        if (carteiraSelect) carteiraSelect.selectedIndex = 0;
+        cnjInput.focus();
+        setActiveCnjText('');
         };
 
-        addButton.addEventListener('click', () => {
-            const currentState = buildEntryState();
-            if (currentState.cnj) {
-                entryStates.push(currentState);
-                currentEntryIndex = entryStates.length - 1;
+        deleteButton.addEventListener('click', () => {
+            if (currentEntryIndex < 0 || entryStates.length === 0) {
+                return;
             }
+            entryStates.splice(currentEntryIndex, 1);
+            if (entryStates.length === 0) {
+                currentEntryIndex = -1;
+                clearFields();
+            } else {
+                currentEntryIndex = Math.min(currentEntryIndex, entryStates.length - 1);
+                applyEntryState(entryStates[currentEntryIndex]);
+            }
+            dedupeEntryStates();
+            syncHiddenEntries();
+            updateNavButtons();
+        });
+
+        addButton.addEventListener('click', () => {
+            storeCurrentEntry();
             clearFields();
+            currentEntryIndex = -1;
+            syncHiddenEntries();
             updateNavButtons();
         });
 
@@ -144,6 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentEntryIndex -= 1;
                 applyEntryState(entryStates[currentEntryIndex]);
                 updateNavButtons();
+                syncHiddenEntries();
             }
         });
 
@@ -153,21 +270,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentEntryIndex += 1;
                 applyEntryState(entryStates[currentEntryIndex]);
                 updateNavButtons();
+                syncHiddenEntries();
             }
         });
 
-        const initialState = buildEntryState();
-        if (initialState.cnj) {
-            entryStates.push(initialState);
-            currentEntryIndex = 0;
-        }
-        updateNavButtons();
+        hydrateInitialEntries();
 
         const feedbackDiv = document.createElement('div');
         feedbackDiv.id = 'cnj_feedback';
         feedbackDiv.style.marginTop = '5px';
         feedbackDiv.style.fontWeight = 'bold';
         inlineGroup.parentNode.parentNode.appendChild(feedbackDiv);
+
+        hydrateInitialEntries();
     }
 
     const searchButton = document.getElementById('btn_buscar_cnj');
@@ -179,6 +294,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
                 event.preventDefault();
             }
+        });
+        form.addEventListener('submit', function() {
+            storeCurrentEntry();
+            syncHiddenEntries();
+            console.debug('cnj_entries submit', entryStates);
         });
     }
 

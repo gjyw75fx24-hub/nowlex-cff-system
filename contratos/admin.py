@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
-    Parte, ProcessoArquivo, ProcessoJudicial, Prazo, QuestaoAnalise,
-    StatusProcessual, Tarefa, TipoPeticao, TipoPeticaoAnexoContinua,
+    Parte, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
+    QuestaoAnalise, StatusProcessual, Tarefa, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
 )
 from .widgets import EnderecoWidget
@@ -1617,6 +1617,14 @@ class ContratoForm(forms.ModelForm):
 
 
 class ProcessoJudicialForm(forms.ModelForm):
+    cnj_entries_data = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput()
+    )
+    cnj_active_index = forms.IntegerField(
+        required=False,
+        widget=forms.HiddenInput()
+    )
     valor_causa = MoneyDecimalField(
         required=False,
         decimal_places=2,
@@ -2029,9 +2037,29 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return None
 
     def save_model(self, request, obj, form, change):
-        # Garante que a carteira escolhida no formulário seja persistida
-        obj.carteira = form.cleaned_data.get('carteira')
+        entries_payload = form.cleaned_data.get('cnj_entries_data')
+        entries = self._parse_cnj_entries(entries_payload)
+        active_entry = self._get_active_entry(entries, form.cleaned_data.get('cnj_active_index'))
+        if not entries:
+            obj.cnj = ''
+            obj.uf = ''
+            obj.valor_causa = None
+            obj.status = None
+            obj.carteira = None
+            obj.vara = ''
+            obj.tribunal = ''
+        if active_entry:
+            obj.cnj = active_entry.get('cnj') or obj.cnj
+            obj.uf = active_entry.get('uf') or obj.uf
+            obj.valor_causa = self._decimal_from_string(active_entry.get('valor_causa'))
+            status_id = active_entry.get('status')
+            carteira_id = active_entry.get('carteira')
+            obj.status_id = int(status_id) if status_id else None
+            obj.carteira_id = int(carteira_id) if carteira_id else None
+            obj.vara = active_entry.get('vara') or obj.vara
+            obj.tribunal = active_entry.get('tribunal') or obj.tribunal
         super().save_model(request, obj, form, change)
+        self._sync_cnj_entries(obj, entries)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -2045,6 +2073,121 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
         )
+
+    def _build_cnj_entries_context(self, obj):
+        if not obj:
+            return []
+        entries = []
+        queryset = obj.numeros_cnj.all().order_by('-criado_em')
+        for entry in queryset:
+            entries.append({
+                'id': entry.pk,
+                'cnj': entry.cnj or '',
+                'uf': entry.uf or '',
+                'valor_causa': format_decimal_brl(entry.valor_causa),
+                'status': entry.status_id,
+                'carteira': entry.carteira_id,
+                'vara': entry.vara or '',
+                'tribunal': entry.tribunal or '',
+            })
+        if not entries and obj.cnj:
+            entries.append({
+                'id': None,
+                'cnj': obj.cnj or '',
+                'uf': obj.uf or '',
+                'valor_causa': format_decimal_brl(obj.valor_causa),
+                'status': obj.status_id,
+                'carteira': obj.carteira_id,
+                'vara': obj.vara or '',
+                'tribunal': obj.tribunal or '',
+            })
+        return entries
+
+    def _determine_active_index(self, entries, obj):
+        if not entries:
+            return 0
+        current_cnj = obj.cnj if obj else None
+        for idx, entry in enumerate(entries):
+            if current_cnj and entry.get('cnj') and entry.get('cnj') == current_cnj:
+                return idx
+        return 0
+
+    def _parse_cnj_entries(self, payload):
+        if not payload:
+            return []
+        try:
+            data = json.loads(payload or '[]')
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(data, list):
+            return []
+        sanitized = []
+        seen = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get('id')
+            parsed_id = None
+            try:
+                parsed_id = int(raw_id)
+            except (TypeError, ValueError):
+                parsed_id = None
+            cnj_val = (item.get('cnj') or '').strip()
+            if not cnj_val:
+                continue
+            status_raw = item.get('status')
+            carteira_raw = item.get('carteira')
+            key = cnj_val
+            if key in seen:
+                continue
+            seen.add(key)
+            sanitized.append({
+                'id': parsed_id,
+                'cnj': cnj_val,
+                'uf': (item.get('uf') or '').strip(),
+                'valor_causa': item.get('valor_causa') or '',
+                'status': None if status_raw in (None, '') else int(status_raw),
+                'carteira': None if carteira_raw in (None, '') else int(carteira_raw),
+                'vara': (item.get('vara') or '').strip(),
+                'tribunal': (item.get('tribunal') or '').strip(),
+            })
+        return sanitized
+
+    def _get_active_entry(self, entries, index):
+        if not entries:
+            return None
+        if index is None or index < 0 or index >= len(entries):
+            return entries[0]
+        return entries[index]
+
+    def _decimal_from_string(self, raw):
+        value = normalize_decimal_string(raw)
+        if not value:
+            return None
+        try:
+            return Decimal(value)
+        except (InvalidOperation, TypeError):
+            return None
+
+    def _sync_cnj_entries(self, processo, entries):
+        processo.numeros_cnj.all().delete()
+        if not entries:
+            return
+        for entry_data in entries:
+            cnj_value = (entry_data.get('cnj') or '').strip()
+            if not cnj_value:
+                continue
+            entry_obj = ProcessoJudicialNumeroCnj(
+                processo=processo,
+                cnj=cnj_value,
+                uf=(entry_data.get('uf') or '').strip(),
+                valor_causa=self._decimal_from_string(entry_data.get('valor_causa')),
+                status_id=entry_data.get('status'),
+                carteira_id=entry_data.get('carteira'),
+                vara=(entry_data.get('vara') or '').strip(),
+                tribunal=(entry_data.get('tribunal') or '').strip(),
+            )
+            entry_obj.save()
 
     @admin.display(description="Número CNJ", ordering="cnj")
     def cnj_with_valor(self, obj):
@@ -2082,6 +2225,15 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         obj = self.get_object(request, object_id)
         if obj:
             extra_context['valuation_display'] = self.valor_causa_display(obj)
+            cnj_entries = self._build_cnj_entries_context(obj)
+            extra_context['cnj_entries_json'] = mark_safe(json.dumps(cnj_entries))
+            extra_context['cnj_active_index'] = self._determine_active_index(cnj_entries, obj)
+            active_idx = extra_context['cnj_active_index']
+            extra_context['cnj_active_display'] = cnj_entries[active_idx]['cnj'] if cnj_entries and 0 <= active_idx < len(cnj_entries) else (obj.cnj or '')
+        else:
+            extra_context['cnj_entries_json'] = mark_safe(json.dumps([]))
+            extra_context['cnj_active_index'] = 0
+            extra_context['cnj_active_display'] = ''
         
         # Preserva os filtros da changelist para a navegação
         changelist_filters = request.GET.get('_changelist_filters')
