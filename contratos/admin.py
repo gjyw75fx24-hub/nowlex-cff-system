@@ -1936,7 +1936,7 @@ class ObitoFilter(admin.SimpleListFilter):
 @admin.register(ProcessoJudicial)
 class ProcessoJudicialAdmin(admin.ModelAdmin):
     form = ProcessoJudicialForm
-    readonly_fields = ('valor_causa_display',)
+    readonly_fields = ()
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
     list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
@@ -1976,8 +1976,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             use_distinct = True
         return qs, use_distinct
     fieldsets = (
-        ("Controle e Status", {"fields": ("status", "carteira", "busca_ativa", "viabilidade")}),
-        ("Dados do Processo", {"fields": ("cnj", "valor_causa", "valor_causa_display", "uf", "vara", "tribunal")}),
+        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "carteira", "vara", "tribunal")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
@@ -2080,6 +2079,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
+        obj = self.get_object(request, object_id)
+        if obj:
+            extra_context['valuation_display'] = self.valor_causa_display(obj)
         
         # Preserva os filtros da changelist para a navegação
         changelist_filters = request.GET.get('_changelist_filters')

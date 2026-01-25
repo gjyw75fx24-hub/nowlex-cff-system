@@ -895,26 +895,68 @@ a.historylink {
 .processo-cnj-hashtag:hover {
     text-decoration: underline;
 }
-.field-cnj {
+.field-cnj,
+.field-uf {
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
+    align-items: center;
+    gap: 0.75rem;
 }
 .field-cnj label {
     font-weight: 600;
     font-size: 0.95rem;
     color: #1f1f1f;
+    margin-right: 0.3rem;
+    min-width: 170px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: 170px;
 }
-.cnj-input-row {
+.field-uf label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #1f1f1f;
+    margin-right: 0.25rem;
+    min-width: 35px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.cnj-inline-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.cnj-inline-group .button {
+    border-radius: 5px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.cnj-inline-group .button.tertiary {
+    background: #f4f4f4;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+}
+.cnj-inline-group .button.tertiary:hover {
+    background: #e5e5e5;
+}
+.cnj-inline-group .button.secondary {
+    background: #0d6efd;
+    color: #fff;
+    border: none;
+}
+.field-cnj .field-box,
+.field-uf .field-box {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+    flex: 0 1 auto;
+    margin-left: 0;
 }
-.cnj-input-row .processo-cnj-input {
-    flex: 0 1 300px;
-    min-width: 220px;
-    max-width: 360px;
+.cnj-inline-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: -2%;
 }
 .processo-card-remove-inline {
     margin-left: auto;

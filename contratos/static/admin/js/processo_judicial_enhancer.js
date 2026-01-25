@@ -9,26 +9,169 @@ document.addEventListener('DOMContentLoaded', function() {
     const valorCausaInput = document.getElementById('id_valor_causa');
     const statusSelect = document.getElementById('id_status');
 
+    const carteiraSelect = document.getElementById('id_carteira');
+    let prevButton = null;
+    let nextButton = null;
+    let addButton = null;
+    const entryStates = [];
+    let currentEntryIndex = -1;
+
+    const buildEntryState = () => ({
+        cnj: cnjInput.value.trim(),
+        uf: ufInput.value.trim(),
+        valor_causa: valorCausaInput.value.trim(),
+        status: statusSelect ? statusSelect.value : '',
+        carteira: carteiraSelect ? carteiraSelect.value : '',
+        vara: varaInput ? varaInput.value.trim() : '',
+        tribunal: tribunalInput ? tribunalInput.value.trim() : '',
+    });
+
+    const applyEntryState = (entry) => {
+        cnjInput.value = entry.cnj;
+        if (ufInput) ufInput.value = entry.uf;
+        if (valorCausaInput) valorCausaInput.value = entry.valor_causa;
+        if (statusSelect) statusSelect.value = entry.status;
+        if (carteiraSelect) carteiraSelect.value = entry.carteira;
+        if (varaInput) varaInput.value = entry.vara;
+        if (tribunalInput) tribunalInput.value = entry.tribunal;
+        cnjInput.focus();
+    };
+
+    const updateNavButtons = () => {
+        if (prevButton) {
+            prevButton.disabled = currentEntryIndex <= 0;
+        }
+        if (nextButton) {
+            nextButton.disabled = currentEntryIndex < 0 || currentEntryIndex >= entryStates.length - 1;
+        }
+    };
+
+    const storeCurrentEntry = () => {
+        if (currentEntryIndex >= 0) {
+            entryStates[currentEntryIndex] = buildEntryState();
+        }
+    };
+
     // --- 1. Criação do Botão "Dados Online" ---
     if (cnjInput && !document.getElementById('btn_buscar_cnj')) {
         const searchButton = document.createElement('button');
         searchButton.id = 'btn_buscar_cnj';
         searchButton.type = 'button';
         searchButton.className = 'button';
-        searchButton.innerText = '📄 Dados Online';
-        searchButton.style.marginLeft = '10px';
-        cnjInput.parentNode.appendChild(searchButton);
+        searchButton.innerHTML = '🌐';
+        searchButton.title = 'Buscar dados online (API Escavador)';
+        searchButton.setAttribute('aria-label', 'Buscar dados online (API Escavador)');
+        searchButton.style.marginLeft = '6px';
+        searchButton.style.padding = '0';
+        searchButton.style.minWidth = '32px';
+        searchButton.style.width = '32px';
+        searchButton.style.height = '32px';
+        searchButton.style.lineHeight = '32px';
+        searchButton.style.display = 'inline-flex';
+        searchButton.style.alignItems = 'center';
+        searchButton.style.justifyContent = 'center';
+        searchButton.style.borderRadius = '4px';
+
+        const cnjInputParent = cnjInput.parentNode;
+        const inlineGroup = document.createElement('div');
+        inlineGroup.className = 'cnj-inline-group';
+        inlineGroup.style.display = 'inline-flex';
+        inlineGroup.style.alignItems = 'center';
+        inlineGroup.style.gap = '6px';
+        inlineGroup.style.flexWrap = 'nowrap';
+        cnjInputParent.insertBefore(inlineGroup, cnjInput);
+        inlineGroup.appendChild(cnjInput);
+        inlineGroup.appendChild(searchButton);
+
+        addButton = document.createElement('button');
+        addButton.id = 'btn_add_cnj';
+        addButton.type = 'button';
+        addButton.className = 'button secondary';
+        addButton.innerHTML = '+';
+        addButton.title = 'Adicionar novo Número CNJ';
+        addButton.setAttribute('aria-label', 'Adicionar novo Número CNJ');
+        addButton.style.padding = '0 .75rem';
+        addButton.style.minWidth = '34px';
+        addButton.style.height = '32px';
+        inlineGroup.appendChild(addButton);
+
+        prevButton = document.createElement('button');
+        prevButton.id = 'btn_prev_cnj';
+        prevButton.type = 'button';
+        prevButton.className = 'button tertiary';
+        prevButton.innerHTML = '‹';
+        prevButton.title = 'Ir para CNJ anterior';
+        prevButton.style.padding = '0 .65rem';
+        prevButton.style.minWidth = '34px';
+        prevButton.style.height = '32px';
+        inlineGroup.appendChild(prevButton);
+
+        nextButton = document.createElement('button');
+        nextButton.id = 'btn_next_cnj';
+        nextButton.type = 'button';
+        nextButton.className = 'button tertiary';
+        nextButton.innerHTML = '›';
+        nextButton.title = 'Ir para próximo CNJ';
+        nextButton.style.padding = '0 .65rem';
+        nextButton.style.minWidth = '34px';
+        nextButton.style.height = '32px';
+        inlineGroup.appendChild(nextButton);
+
+        const clearFields = () => {
+            cnjInput.value = '';
+            if (ufInput) ufInput.value = '';
+            if (valorCausaInput) valorCausaInput.value = '';
+            if (statusSelect) statusSelect.selectedIndex = 0;
+            if (varaInput) varaInput.value = '';
+            if (tribunalInput) tribunalInput.value = '';
+            if (carteiraSelect) carteiraSelect.selectedIndex = 0;
+            cnjInput.focus();
+        };
+
+        addButton.addEventListener('click', () => {
+            const currentState = buildEntryState();
+            if (currentState.cnj) {
+                entryStates.push(currentState);
+                currentEntryIndex = entryStates.length - 1;
+            }
+            clearFields();
+            updateNavButtons();
+        });
+
+        prevButton.addEventListener('click', () => {
+            if (currentEntryIndex > 0) {
+                storeCurrentEntry();
+                currentEntryIndex -= 1;
+                applyEntryState(entryStates[currentEntryIndex]);
+                updateNavButtons();
+            }
+        });
+
+        nextButton.addEventListener('click', () => {
+            if (currentEntryIndex < entryStates.length - 1) {
+                storeCurrentEntry();
+                currentEntryIndex += 1;
+                applyEntryState(entryStates[currentEntryIndex]);
+                updateNavButtons();
+            }
+        });
+
+        const initialState = buildEntryState();
+        if (initialState.cnj) {
+            entryStates.push(initialState);
+            currentEntryIndex = 0;
+        }
+        updateNavButtons();
 
         const feedbackDiv = document.createElement('div');
         feedbackDiv.id = 'cnj_feedback';
         feedbackDiv.style.marginTop = '5px';
         feedbackDiv.style.fontWeight = 'bold';
-        cnjInput.parentNode.parentNode.appendChild(feedbackDiv);
+        inlineGroup.parentNode.parentNode.appendChild(feedbackDiv);
     }
 
     const searchButton = document.getElementById('btn_buscar_cnj');
     const cnjFeedback = document.getElementById('cnj_feedback');
-
 
     // --- 2. Prevenção de Envio com Enter ---
     if (form) {
@@ -81,6 +224,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
         ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
+    }
+
+    if (ufInput) {
+        ufInput.setAttribute('maxlength', '2');
+        ufInput.style.maxWidth = '70px';
+        ufInput.style.width = '70px';
+        ufInput.style.textTransform = 'uppercase';
+        ufInput.style.letterSpacing = '0.08em';
+        ufInput.style.fontSize = '0.95rem';
     }
 
     // --- 4. Lógica do Botão de Busca Online ---

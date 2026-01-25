@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function setupCompletarDados() {
     const cnjInput = document.getElementById("id_cnj");
+    const ufInput = document.getElementById("id_uf");
     if (!cnjInput) {
         console.warn("Campo CNJ (id_cnj) não encontrado.");
         return;
@@ -21,11 +22,40 @@ function setupCompletarDados() {
     botao.id = "btn_completar_dados";
     botao.type = "button";
     botao.className = "button";
-    botao.innerText = "📄 Dados Online (API Escavador)";
-    botao.style.marginLeft = "10px";
+    botao.innerHTML = "🌐";
+    botao.title = "Buscar dados online (API Escavador)";
+    botao.setAttribute("aria-label", "Buscar dados online (API Escavador)");
+    botao.style.marginLeft = "6px";
+    botao.style.padding = "0";
+    botao.style.minWidth = "32px";
+    botao.style.width = "32px";
+    botao.style.height = "32px";
+    botao.style.lineHeight = "32px";
+    botao.style.display = "inline-flex";
+    botao.style.alignItems = "center";
+    botao.style.justifyContent = "center";
+    botao.style.borderRadius = "4px";
+    botao.style.verticalAlign = "middle";
 
-    // Insere o botão ao lado do campo CNJ
-    cnjInput.parentNode.appendChild(botao);
+    const cnjInputParent = cnjInput.parentNode;
+    const inlineGroup = document.createElement("div");
+    inlineGroup.className = "cnj-inline-group";
+    inlineGroup.style.display = "inline-flex";
+    inlineGroup.style.alignItems = "center";
+    inlineGroup.style.gap = "6px";
+    inlineGroup.style.flexWrap = "nowrap";
+    cnjInputParent.insertBefore(inlineGroup, cnjInput);
+    inlineGroup.appendChild(cnjInput);
+    inlineGroup.appendChild(botao);
+
+    if (ufInput) {
+        ufInput.setAttribute("maxlength", "2");
+        ufInput.style.maxWidth = "70px";
+        ufInput.style.width = "70px";
+        ufInput.style.textTransform = "uppercase";
+        ufInput.style.letterSpacing = "0.08em";
+        ufInput.style.fontSize = "0.95rem";
+    }
 
     // Adiciona o listener de clique
     botao.addEventListener("click", async () => {
