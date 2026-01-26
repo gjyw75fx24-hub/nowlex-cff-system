@@ -156,6 +156,18 @@
             font-size: 0.75rem;
             color: #5a6573;
         }
+        #result_list tbody tr.clickable-row {
+            cursor: pointer;
+            transition: background-color 0.1s ease;
+        }
+        #result_list tbody tr.clickable-row:hover {
+            background-color: rgba(0, 90, 160, 0.1);
+        }
+        #result_list,
+        #result_list th,
+        #result_list td {
+            font-size: 1.1rem;
+        }
     </style>
 {% endblock %}
 
@@ -574,6 +586,34 @@
                 }
             });
         }, 250);
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const table = document.getElementById('result_list');
+        if (!table) return;
+        const rows = Array.from(table.querySelectorAll('tbody tr'));
+        rows.forEach(row => {
+            const changeLink = row.querySelector('th a[href*="/change/"]');
+            if (!changeLink) return;
+            row.classList.add('clickable-row');
+            row.addEventListener('click', function(event) {
+                if (event.target.closest('a, button, input, select, textarea, label')) {
+                    return;
+                }
+                changeLink.click();
+            });
+            row.addEventListener('keydown', function(event) {
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                    return;
+                }
+                if (event.target.closest('a, button, input, select, textarea, label')) {
+                    return;
+                }
+                event.preventDefault();
+                changeLink.click();
+            });
+        });
     });
     </script>
 {% endblock %}
