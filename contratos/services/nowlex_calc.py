@@ -56,13 +56,22 @@ def create_calc(contract_number: str) -> dict:
         logger.exception('Erro ao criar cálculo NowLex: %s', exc)
         raise NowlexCalcError(f'Falha de conexão com NowLex Calc: {exc}')
     if resp.status_code < 200 or resp.status_code >= 300:
-        raise NowlexCalcError(f'HTTP {resp.status_code} ao criar cálculo: {resp.text}')
+        try:
+            payload = resp.json()
+        except ValueError:
+            raise NowlexCalcError(f'HTTP {resp.status_code} ao criar cálculo: {resp.text}')
+        if isinstance(payload, dict) and (payload.get('error_code') == 'CONTRACT_NOT_FOUND'):
+            raise NowlexCalcError('Contrato não existente na base.')
+        message = payload.get('message') or payload.get('error')
+        raise NowlexCalcError(f'HTTP {resp.status_code} ao criar cálculo: {message or resp.text}')
     try:
         body = resp.json()
     except ValueError:
         raise NowlexCalcError('Resposta inválida ao criar cálculo (JSON esperado).')
     if not body.get('success') or 'data' not in body:
-        message = body.get('message') or 'Resposta sem sucesso do NowLex Calc.'
+        if body.get('error_code') == 'CONTRACT_NOT_FOUND':
+            raise NowlexCalcError('Contrato não existente na base.')
+        message = body.get('message') or body.get('error') or 'Resposta sem sucesso do NowLex Calc.'
         raise NowlexCalcError(message)
     return body['data']
 

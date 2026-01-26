@@ -492,6 +492,54 @@ document.addEventListener('DOMContentLoaded', function() {
             currency: 'BRL',
         });
     };
+    const fetchContractInfoFromDOM = (contractId) => {
+        if (!contractId) return null;
+        const idStr = String(contractId).trim();
+        if (!idStr) return null;
+        let wrapper = document.querySelector(`.contrato-item-wrapper[data-contrato-id="${idStr}"]`);
+        if (!wrapper) {
+            const norm = idStr.replace(/\D/g, '');
+            wrapper = Array.from(document.querySelectorAll('.contrato-item-wrapper')).find(element => {
+                const numEl = element.querySelector('.contrato-numero');
+                if (!numEl) return false;
+                const numText = (numEl.textContent || '').trim().split('\n')[0].trim();
+                return norm && numText.replace(/\D/g, '') === norm;
+            });
+        }
+        if (!wrapper) return null;
+        const numeroEl = wrapper.querySelector('.contrato-numero');
+        const numero = (numeroEl?.textContent || '').trim().split('\n')[0].trim();
+        let custasRaw = wrapper.getAttribute('data-custas') || wrapper.dataset.custas || '';
+        const custasInput = wrapper.querySelector('input[name$="-custas"]');
+        if (custasInput && custasInput.value) {
+            custasRaw = custasInput.value;
+        }
+        const custasValue = normalizeNumericCurrency(custasRaw || '');
+        return {
+            numero_contrato: numero || idStr,
+            custas: Number.isFinite(custasValue) ? custasValue : 0,
+        };
+    };
+    const getCustasFromContracts = (contractNumbers) => {
+        const seen = new Set();
+        let total = 0;
+        if (!contractNumbers || !contractNumbers.length) {
+            return { total, items: [] };
+        }
+        contractNumbers.forEach(ref => {
+            if (!ref) return;
+            const info = fetchContractInfoFromDOM(ref);
+            if (!info) return;
+            const key = info.numero_contrato || ref;
+            if (seen.has(key)) return;
+            seen.add(key);
+            const numeric = Number(info.custas);
+            if (Number.isFinite(numeric)) {
+                total += numeric;
+            }
+        });
+        return { total, items: Array.from(seen) };
+    };
     const NOWLEX_PROCESSO_ID = (() => {
         const match = window.location.pathname.match(/\/processojudicial\/(\d+)/i);
         return match ? match[1] : null;
@@ -597,7 +645,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             const message = (error && error.message) ? error.message : 'Erro inesperado.';
-            setNowlexStatus(statusEl, `Erro: ${message}`, 'error');
+            setNowlexStatus(statusEl, message, 'error');
         } finally {
             const stillDisable = !row.querySelector('input[name$="-id"]')?.value;
             buttons.forEach(btn => {
@@ -1112,9 +1160,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
                 renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
-                const responsavelName = formatResponsavelName(entryData.responsavel);
-                if (responsavelName) {
-                    renderMetaRow('Analisado por', responsavelName);
+                const custasSummary = getCustasFromContracts(entryData.contract_numbers);
+                if (custasSummary.items.length) {
+                    renderMetaRow('Custas', formatCurrencyBrl(custasSummary.total));
                 }
                 renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
                 if (entryData.status_label) {
