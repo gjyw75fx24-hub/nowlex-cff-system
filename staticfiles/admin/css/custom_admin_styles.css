@@ -3,6 +3,40 @@
   focados em melhorar a visualização dos andamentos.
 */
 
+#result_list th.column-polo_passivo,
+#result_list td.field-polo_passivo {
+    --polo-passivo-base-width: 120px;
+    min-width: calc(var(--polo-passivo-base-width) * 1.15);
+    width: calc(var(--polo-passivo-base-width) * 1.15);
+}
+
+#result_list th.column-cnj_with_navigation,
+#result_list td.field-cnj_with_navigation {
+    white-space: nowrap;
+    min-width: 320px;
+    max-width: 320px;
+    font-family: var(--font-family-primary, "Inter", "Open Sans", Arial, sans-serif);
+    font-weight: 400;
+    letter-spacing: normal;
+    line-height: 1.2;
+}
+
+#result_list th.column-cpf_passivo,
+#result_list td.field-cpf_passivo {
+    white-space: nowrap;
+    min-width: 128px;
+    max-width: 128px;
+}
+
+#result_list th.column-get_polo_ativo,
+#result_list td.field-get_polo_ativo,
+#result_list th.column-get_polo_passivo,
+#result_list td.field-get_polo_passivo {
+    --polo-nome-base-width: 180px;
+    min-width: calc(var(--polo-nome-base-width) * 1.15);
+    width: calc(var(--polo-nome-base-width) * 1.15);
+}
+
 .info-card-floating {
     position: sticky;
     top: 12px;
@@ -550,24 +584,24 @@ a.historylink {
 .agenda-placeholder-card {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px;
-    border-radius: 10px;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 9px;
     background: linear-gradient(135deg, #0d2f44, #115a78);
-    box-shadow: 0 6px 16px rgba(19, 43, 66, 0.35);
+    box-shadow: 0 4px 12px rgba(19, 43, 66, 0.35);
     color: #f4fbff;
     border: 1px solid rgba(255, 255, 255, 0.18);
     flex-wrap: wrap;
-    width: auto;
-    min-height: 150px;
-    min-width: 220px;
-    padding-bottom: 16px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 102px;
+    padding-bottom: 10px;
 }
 
 .agenda-placeholder-card__icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
+    width: 33px;
+    height: 33px;
+    border-radius: 8px;
     background: #0a6cb9;
     display: flex;
     align-items: center;
@@ -577,9 +611,8 @@ a.historylink {
 }
 
 .agenda-placeholder-card__icon svg {
-    width: 28px;
-    height: 28px;
-}
+    width: 19px;
+    height: 19px;
 
 .agenda-placeholder-card__body {
     display: flex;
@@ -592,13 +625,13 @@ a.historylink {
 }
 
 .agenda-placeholder-card__title {
-    font-size: 0.88rem;
+    font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.05em;
 }
 
 .agenda-placeholder-card__text {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     margin: 0;
     color: rgba(230, 244, 255, 0.9);
     line-height: 1.35;
@@ -606,7 +639,7 @@ a.historylink {
 }
 
 .agenda-placeholder-card__note {
-    font-size: 0.6rem;
+    font-size: 0.5rem;
     color: rgba(255, 255, 255, 0.7);
     margin-top: 4px;
 }
@@ -864,6 +897,7 @@ a.historylink {
 
 #nav-sidebar {
     font-size: 0.8rem;
+    line-height: 1;
 }
 
 #nav-sidebar table {
@@ -872,7 +906,19 @@ a.historylink {
 
 #nav-sidebar .section {
     font-size: 0.85rem;
+    line-height: 1;
     padding: 4px 8px;
+}
+
+#nav-sidebar .module h2,
+#nav-sidebar .module a {
+    font-size: 0.72rem;
+    line-height: 1.1;
+}
+
+#nav-sidebar .module li a {
+    font-size: 0.64rem;
+    line-height: 1.1;
 }
 
 #nav-sidebar td {
@@ -1856,4 +1902,80 @@ a.historylink {
         opacity: 1;
         transform: scale(1);
     }
+}
+
+body.colSM {
+    margin-left: 220px;
+}
+
+body.colMS {
+    margin-right: 220px;
+}
+
+.nowlex-action-buttons {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+    font-size: 0.75rem;
+}
+.nowlex-action-btn {
+    border-radius: 999px;
+    border: 1px solid #cbd5e0;
+    background: #fff;
+    color: #1f2937;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+.nowlex-action-btn.nowlex-pdf-btn {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #fff;
+}
+.nowlex-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.nowlex-action-btn:not(.nowlex-pdf-btn):not(:disabled):hover {
+    background: #eef2ff;
+}
+.field-valor_causa,
+.field-valor_causa .field-box {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+.nowlex-status {
+    font-size: 0.7rem;
+    color: #475569;
+}
+.nowlex-status--loading {
+    color: #c026d3;
+}
+.nowlex-status--success {
+    color: #047857;
+}
+.nowlex-status--error {
+    color: #b91c1c;
+}
+.nowlex-status--hint {
+    color: #4338ca;
+}
+.analise-custas-input {
+    border: 1px solid #cfd4da;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.9rem;
+    width: 150px;
+    margin-left: 8px;
+}
+.analise-custas-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }

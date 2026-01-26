@@ -9,10 +9,20 @@
         }
         /* Container que mantém os blocos alinhados na mesma coluna */
         .custom-filters-container {
-            width: 270px;
+            width: 150px;
             box-sizing: border-box;
-            float: right;
-            clear: right;
+            position: fixed;
+            top: 200px;
+            right: 0;
+            padding-right: 8px;
+            font-size: 0.8rem;
+        }
+        #changelist-filter h2,
+        #changelist-filter label,
+        #changelist-filter a,
+        #changelist-filter button,
+        #changelist-filter select {
+            font-size: 0.8rem;
         }
         #changelist-filter {
             width: 100%;
@@ -22,6 +32,11 @@
             clear: none;
         }
         /* Cabeçalho fixo e rolagem vertical na lista */
+        body.change-list #changelist-form {
+            transform: scale(0.7);
+            transform-origin: top left;
+            width: calc(100% / 0.7);
+        }
         /* Rolagem com cabeçalho fixo */
         body.change-list #changelist-form .results {
             max-height: calc(100vh - 240px);
@@ -59,6 +74,24 @@
             border-left: 1px solid #d9d9d9;
             border-right: 1px solid #d9d9d9;
         }
+        body div#nav-sidebar {
+            width: 96px;
+            transform: scale(0.8);
+            transform-origin: top left;
+        }
+        body div#nav-sidebar .module {
+            padding-left: 6px;
+            padding-right: 6px;
+        }
+        body div#nav-sidebar .module h2,
+        body div#nav-sidebar .module a {
+            font-size: 0.72rem;
+            line-height: 1.1;
+        }
+        body div#nav-sidebar .module li a {
+            font-size: 0.64rem;
+            line-height: 1.1;
+        }
         #changelist-filter .custom-filters-actions {
             display: flex;
             gap: 6px;
@@ -89,6 +122,39 @@
             background: #f7f7f7;
             cursor: pointer;
             transform: translateY(-20%);
+        }
+        .cnj-nav-wrapper {
+            font-size: 0.92rem;
+            color: #1d2b3a;
+            gap: 4px;
+        }
+        .cnj-nav-wrapper a,
+        .cnj-nav-wrapper span {
+            color: inherit;
+        }
+        .cnj-nav-control {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: transparent;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            font-weight: 400;
+        }
+        .cnj-nav-control.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .cnj-nav-current {
+            font-size: 0.96rem;
+            font-weight: 400;
+        }
+        .cnj-nav-count {
+            font-size: 0.75rem;
+            color: #5a6573;
         }
     </style>
 {% endblock %}

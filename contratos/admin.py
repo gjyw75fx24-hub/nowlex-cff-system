@@ -35,8 +35,27 @@ from .models import (
 )
 from .widgets import EnderecoWidget
 from .forms import DemandasAnaliseForm
-from .services.demandas import DemandasImportError, DemandasImportService, _format_currency
+from .services.demandas import DemandasImportError, DemandasImportService, _format_currency, _format_cpf
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
+
+PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
+
+def format_polo_name(value: str) -> str:
+    if not value:
+        return "-"
+    parts = value.split()
+    if not parts:
+        return value
+    formatted = []
+    for idx, part in enumerate(parts):
+        cleaned = part.strip().lower()
+        if not cleaned:
+            continue
+        if idx > 0 and cleaned in PREPOSITIONS:
+            formatted.append(cleaned)
+        else:
+            formatted.append(cleaned.title())
+    return " ".join(formatted)
 
 
 # Form para seleção de usuário na ação de delegar
@@ -1584,10 +1603,16 @@ class ContratoForm(forms.ModelForm):
         max_digits=14,
         widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
     )
+    custas = MoneyDecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=14,
+        widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field_name in ('valor_total_devido', 'valor_causa'):
+        for field_name in ('valor_total_devido', 'valor_causa', 'custas'):
             prefixed_name = self.add_prefix(field_name)
             if self.data and self.data.get(prefixed_name):
                 continue
@@ -1611,6 +1636,9 @@ class ContratoForm(forms.ModelForm):
 
     def clean_valor_causa(self):
         return self._clean_decimal('valor_causa')
+
+    def clean_custas(self):
+        return self._clean_decimal('custas')
 
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
@@ -1947,8 +1975,9 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ()
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
-    list_display = ("cnj_with_valor", "get_polo_ativo", "get_x_separator", "get_polo_passivo", "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
-    list_display_links = ("cnj_with_valor",)
+    list_display = ("cnj_with_navigation", "cpf_passivo", "get_polo_ativo", "get_x_separator", "get_polo_passivo",
+                    "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
+    list_display_links = ("cnj_with_navigation",)
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
         EquipeDelegadoFilter,
@@ -1976,8 +2005,12 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             return qs, use_distinct
         sanitized_digits = re.sub(r'\D', '', search_term)
         if sanitized_digits:
-            filters = Q(partes_processuais__documento__icontains=sanitized_digits) | Q(
-                cnj__icontains=sanitized_digits
+            escaped_digits = ''.join(re.escape(d) for d in sanitized_digits)
+            digit_pattern = ''.join(f'{d}\\D*' for d in escaped_digits)
+            filters = (
+                Q(partes_processuais__documento__icontains=sanitized_digits)
+                | Q(partes_processuais__documento__iregex=rf'.*{digit_pattern}')
+                | Q(cnj__iregex=rf'.*{digit_pattern}')
             )
             extra = queryset.filter(filters)
             qs = (qs | extra).distinct()
@@ -2190,20 +2223,46 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             entry_obj.save()
 
     @admin.display(description="Número CNJ", ordering="cnj")
-    def cnj_with_valor(self, obj):
-        cnj_text = obj.cnj or f"Cadastro #{obj.pk}"
-        valor = obj.valor_causa or Decimal('0.00')
-        formatted = f"R$ {valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    def cnj_with_navigation(self, obj):
+        cnj_values = []
+        for entry in obj.numeros_cnj.order_by('-criado_em'):
+            if entry.cnj:
+                cnj_values.append(entry.cnj)
+        if obj.cnj and obj.cnj not in cnj_values:
+            cnj_values.insert(0, obj.cnj)
+        cnj_values = list(dict.fromkeys(cnj_values))
+        if not cnj_values:
+            return "-"
         change_url = reverse("admin:contratos_processojudicial_change", args=(obj.pk,))
+        current_cnj = obj.cnj if obj.cnj in cnj_values else cnj_values[0]
+        current_index = cnj_values.index(current_cnj)
+        total = len(cnj_values)
+        def nav_button(symbol, target_idx, disabled):
+            if disabled:
+                return format_html('<span class="cnj-nav-control disabled">{}</span>', symbol)
+            url = f"{change_url}?cnj_index={target_idx}"
+            return format_html('<a href="{}" class="cnj-nav-control">{}</a>', url, symbol)
+        prev_btn = nav_button('‹', current_index - 1, current_index <= 0)
+        next_btn = nav_button('›', current_index + 1, current_index >= total - 1)
+        counter = format_html('{}/{}', current_index + 1, total)
+        control_buttons = format_html('{}{}', prev_btn, next_btn)
         return format_html(
-            '<div style="display:flex; flex-direction:column; align-items:flex-start;">'
-            '<a href="{}" style="font-weight:600;">{}</a>'
-            '<span style="font-size:0.82rem; color:#475569; margin-top:2px;">{}</span>'
+            '<div class="cnj-nav-wrapper" style="display:flex; align-items:center; gap:6px;">'
+            '<span class="cnj-current">{}</span>'
+            '<div class="cnj-nav-controls">{}</div>'
+            '<span class="cnj-nav-count">{}</span>'
             '</div>',
-            change_url,
-            cnj_text,
-            formatted
+            current_cnj,
+            control_buttons,
+            counter
         )
+
+    @admin.display(description="CPF Passivo")
+    def cpf_passivo(self, obj):
+        parte = obj.partes_processuais.filter(tipo_polo='PASSIVO').first()
+        if parte and parte.documento:
+            return _format_cpf(parte.documento)
+        return "-"
 
     @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valuation por Contratos</span>'))
     def valor_causa_display(self, obj):
@@ -2591,11 +2650,13 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
 
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
-        return getattr(obj.partes_processuais.filter(tipo_polo="ATIVO").first(), 'nome', '---')
+        nome = getattr(obj.partes_processuais.filter(tipo_polo="ATIVO").first(), 'nome', '')
+        return format_polo_name(nome)
 
     @admin.display(description="Polo Passivo")
     def get_polo_passivo(self, obj):
-        return getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '---')
+        nome = getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '')
+        return format_polo_name(nome)
 
     def delegate_select_user_view(self, request):
         opts = self.model._meta

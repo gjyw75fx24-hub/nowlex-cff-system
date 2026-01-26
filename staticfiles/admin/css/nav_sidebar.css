@@ -33,9 +33,9 @@
 
 #nav-sidebar {
     z-index: 15;
-    flex: 0 0 275px;
-    left: -276px;
-    margin-left: -276px;
+    flex: 0 0 220px;
+    left: -221px;
+    margin-left: -221px;
     border-top: 1px solid transparent;
     border-right: 1px solid var(--hairline-color);
     background-color: var(--body-bg);
@@ -47,8 +47,8 @@
     border-right: 0;
     left: 0;
     margin-left: 0;
-    right: -276px;
-    margin-right: -276px;
+    right: -221px;
+    margin-right: -221px;
 }
 
 .toggle-nav-sidebar::before {
@@ -113,7 +113,7 @@
 }
 
 .main.shifted > #nav-sidebar + .content {
-    max-width: calc(100% - 299px);
+    max-width: calc(100% - 244px);
 }
 
 @media (max-width: 767px) {

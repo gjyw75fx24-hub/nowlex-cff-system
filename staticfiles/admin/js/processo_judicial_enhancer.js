@@ -492,6 +492,138 @@ document.addEventListener('DOMContentLoaded', function() {
             currency: 'BRL',
         });
     };
+    const NOWLEX_PROCESSO_ID = (() => {
+        const match = window.location.pathname.match(/\/processojudicial\/(\d+)/i);
+        return match ? match[1] : null;
+    })();
+    const NOWLEX_CALC_ENDPOINT = NOWLEX_PROCESSO_ID
+        ? `/api/processo/${NOWLEX_PROCESSO_ID}/nowlex-valor-causa/`
+        : null;
+
+    const setNowlexStatus = (el, text, variant) => {
+        if (!el) return;
+        const states = ['loading', 'success', 'error', 'hint'];
+        el.textContent = text || '';
+        states.forEach(state => el.classList.remove(`nowlex-status--${state}`));
+        if (variant && states.includes(variant)) {
+            el.classList.add(`nowlex-status--${variant}`);
+        }
+    };
+
+    const enhanceNowlexRow = (row) => {
+        if (!row || row.dataset.nowlexEnhanced === '1') return;
+        const valorField = row.querySelector('.field-valor_causa');
+        if (!valorField) return;
+        const fieldBox = valorField.querySelector('.field-box') || valorField;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'nowlex-action-buttons';
+        const statusEl = document.createElement('span');
+        statusEl.className = 'nowlex-status';
+        const btnValor = document.createElement('button');
+        btnValor.type = 'button';
+        btnValor.className = 'nowlex-action-btn nowlex-valor-btn';
+        btnValor.textContent = 'Só valor';
+        const btnPdf = document.createElement('button');
+        btnPdf.type = 'button';
+        btnPdf.className = 'nowlex-action-btn nowlex-pdf-btn';
+        btnPdf.textContent = 'Valor + PDF';
+        wrapper.append(statusEl, btnValor, btnPdf);
+        fieldBox.appendChild(wrapper);
+
+        const contratoId = row.querySelector('input[name$="-id"]')?.value;
+        const shouldDisable = !contratoId;
+        [btnValor, btnPdf].forEach(btn => {
+            btn.disabled = shouldDisable;
+            if (shouldDisable) {
+                btn.title = 'Salve o contrato para habilitar o NowLex.';
+            }
+        });
+        if (shouldDisable) {
+            setNowlexStatus(statusEl, 'Salve o contrato para usar.', 'hint');
+        }
+
+        btnValor.addEventListener('click', () => handleNowlexAction(row, false));
+        btnPdf.addEventListener('click', () => handleNowlexAction(row, true));
+        row.dataset.nowlexEnhanced = '1';
+    };
+
+    const handleNowlexAction = async (row, gerarPdf) => {
+        if (!NOWLEX_CALC_ENDPOINT) return;
+        const statusEl = row.querySelector('.nowlex-status');
+        const buttons = Array.from(row.querySelectorAll('.nowlex-action-btn'));
+        const contratoInput = row.querySelector('input[name$="-id"]');
+        const contratoId = contratoInput?.value;
+        if (!contratoId) {
+            setNowlexStatus(statusEl, 'Salve o contrato antes de usar.', 'error');
+            return;
+        }
+        try {
+            buttons.forEach(btn => btn.disabled = true);
+            setNowlexStatus(statusEl, gerarPdf ? 'Gerando PDF...' : 'Atualizando valor...', 'loading');
+            const response = await fetch(NOWLEX_CALC_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken || '',
+                },
+                body: JSON.stringify({
+                    contrato_id: contratoId,
+                    action: gerarPdf ? 'valor_pdf' : 'valor',
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.error) {
+                const message = data.error || response.statusText || 'Erro inesperado.';
+                throw new Error(message);
+            }
+            const formatted = formatCurrencyBrl(data.valor_causa || '');
+            const valorInput = row.querySelector('input[name$="-valor_causa"]');
+            if (valorInput) {
+                valorInput.value = formatted;
+                valorInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (valorCausaInput) {
+                valorCausaInput.value = formatted;
+                valorCausaInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            setNowlexStatus(
+                statusEl,
+                gerarPdf ? 'Valor + PDF atualizados. PDF salvo em Arquivos.' : 'Valor atualizado.',
+                'success'
+            );
+            if (gerarPdf) {
+                setNowlexStatus(statusEl, 'PDF salvo, atualizando aba Arquivos...', 'loading');
+                setTimeout(() => window.location.reload(), 900);
+            }
+        } catch (error) {
+            const message = (error && error.message) ? error.message : 'Erro inesperado.';
+            setNowlexStatus(statusEl, `Erro: ${message}`, 'error');
+        } finally {
+            const stillDisable = !row.querySelector('input[name$="-id"]')?.value;
+            buttons.forEach(btn => {
+                btn.disabled = stillDisable;
+            });
+        }
+    };
+
+    const initNowlexControls = () => {
+        if (!NOWLEX_CALC_ENDPOINT) return;
+        const contractRows = document.querySelectorAll('#contratos-group .inline-related, .dynamic-contratos');
+        contractRows.forEach(enhanceNowlexRow);
+    };
+
+    if (NOWLEX_CALC_ENDPOINT) {
+        initNowlexControls();
+        if (window.django && window.django.jQuery) {
+            window.django.jQuery(document).on('formset:added', (event, row, formsetName) => {
+        if (formsetName !== 'contratos') {
+            if (!formsetName || !formsetName.toLowerCase().includes('contrato')) return;
+        }
+                const element = row && row.jquery ? row[0] : row;
+                enhanceNowlexRow(element);
+            });
+        }
+    }
     const entryOrigins = new Map();
     const getOriginKey = (entry) => {
         if (!entry) return null;
@@ -3134,24 +3266,42 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     };
-    setupHerdeirosModalActions();
-    document.querySelectorAll('.info-card').forEach((card) => {
-        const hasObito = card.dataset.obito === '1';
-        const trigger = card.querySelector('.herdeiros-trigger');
-        if (trigger) {
-            trigger.addEventListener('click', () => openHerdeirosModal(card));
-        }
-        if (hasObito && card.dataset.parteCpf) {
-            const cpf = normalizeCpf(card.dataset.parteCpf);
-            if (cpf) {
-                fetchHerdeiros(cpf)
-                    .then((data) => {
-                        updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
-                    })
-                    .catch(() => {});
+    const infoCards = document.querySelectorAll('.info-card');
+    const hasHerdeirosTrigger = document.querySelector('.herdeiros-trigger');
+    if (hasHerdeirosTrigger) {
+        setupHerdeirosModalActions();
+        infoCards.forEach((card) => {
+            const hasObito = card.dataset.obito === '1';
+            const trigger = card.querySelector('.herdeiros-trigger');
+            if (trigger) {
+                trigger.addEventListener('click', () => openHerdeirosModal(card));
             }
-        }
-    });
+            if (hasObito && card.dataset.parteCpf) {
+                const cpf = normalizeCpf(card.dataset.parteCpf);
+                if (cpf) {
+                    fetchHerdeiros(cpf)
+                        .then((data) => {
+                            updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        })
+                        .catch(() => {});
+                }
+            }
+        });
+    } else {
+        infoCards.forEach((card) => {
+            const hasObito = card.dataset.obito === '1';
+            if (hasObito && card.dataset.parteCpf) {
+                const cpf = normalizeCpf(card.dataset.parteCpf);
+                if (cpf) {
+                    fetchHerdeiros(cpf)
+                        .then((data) => {
+                            updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        })
+                        .catch(() => {});
+                }
+            }
+        });
+    }
 
     const repositionHistoryLink = () => {
         const historyLink = document.querySelector('#content-main .object-tools li .historylink');

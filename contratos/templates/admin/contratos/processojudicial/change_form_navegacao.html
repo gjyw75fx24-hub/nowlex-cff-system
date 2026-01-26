@@ -40,15 +40,7 @@ window.__cnj_active_display = "{{ cnj_active_display|default:''|escapejs }}";
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const header = document.querySelector('#content-main h2');
-    const setHeader = (value) => {
-        if (!header) {
-            return;
-        }
-        header.textContent = value || '';
-    };
-    setHeader(window.__cnj_active_display || '');
-    window.__setActiveCnjHeader = setHeader;
+    window.__setActiveCnjHeader = window.__setActiveCnjHeader || function () {};
 });
 </script>
 

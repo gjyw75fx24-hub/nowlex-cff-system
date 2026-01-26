@@ -1985,9 +1985,48 @@ function formatCnjDigits(raw) {
             return Number.isFinite(parsed) ? parsed : null;
         }
 
+        function parseCurrencyValue(raw) {
+            if (raw === undefined || raw === null) {
+                return null;
+            }
+            const sanitized = String(raw).trim();
+            if (!sanitized) {
+                return null;
+            }
+            let normalized = sanitized.replace(/[^\d.,-]/g, '');
+            const hasComma = normalized.indexOf(',') >= 0;
+            const hasDot = normalized.indexOf('.') >= 0;
+            if (hasComma && hasDot) {
+                normalized = normalized.replace(/\./g, '');
+                normalized = normalized.replace(',', '.');
+            } else if (hasComma) {
+                normalized = normalized.replace(',', '.');
+            }
+            const parsed = parseFloat(normalized);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
         function formatCurrency(value) {
             const numeric = Number.isFinite(value) ? value : 0;
             return currencyFormatter.format(numeric);
+        }
+
+        function updateContractCustas(contractId, numericValue) {
+            if (!contractId) return;
+            const wrapper = document.querySelector(`.contrato-item-wrapper[data-contrato-id="${contractId}"]`);
+            if (wrapper) {
+                wrapper.setAttribute('data-custas', numericValue != null ? numericValue : '');
+            }
+            const idInput = document.querySelector(`.dynamic-contratos input[name$="-id"][value="${contractId}"]`);
+            if (!idInput) return;
+            const inlineRow = idInput.closest('.dynamic-contratos');
+            if (!inlineRow) return;
+            const custasInput = inlineRow.querySelector('input[name$="-custas"]');
+            if (!custasInput) return;
+            const formatted = numericValue == null ? '' : formatCurrency(numericValue);
+            custasInput.value = formatted;
+            custasInput.dispatchEvent(new Event('input', { bubbles: true }));
+            custasInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
         function parseContractsField(value) {
@@ -2382,12 +2421,28 @@ function formatCnjDigits(raw) {
                 (acc, c) => acc + (c.valor_causa || 0),
                 0
             );
+            const totalCustas = contratoInfos.reduce(
+                (acc, c) => acc + (c.custas || 0),
+                0
+            );
             $ulDetalhes.append(
                 `<li><strong>Valor Total Devido:</strong> ${formatCurrency(totalDevido)}</li>`
             );
             $ulDetalhes.append(
                 `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
             );
+            const firstContractId = contratoInfos.length ? contratoInfos[0].id : null;
+            const $custasInput = $('<input type="text" class="analise-custas-input">');
+            $custasInput.val(formatCurrency(totalCustas));
+            $custasInput.on('change', () => {
+                const numeric = parseCurrencyValue($custasInput.val());
+                $custasInput.val(formatCurrency(numeric));
+                if (!firstContractId) return;
+                updateContractCustas(firstContractId, numeric);
+            });
+            const $custasLine = $('<li class="analise-custas-line"><strong>Custas:</strong></li>');
+            $custasLine.append($custasInput);
+            $ulDetalhes.append($custasLine);
 
             const fieldEntries = getAnsweredFieldEntries(processo, {
                 excludeFields: options.excludeFields || [],

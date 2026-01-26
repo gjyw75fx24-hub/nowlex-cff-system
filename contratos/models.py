@@ -374,6 +374,7 @@ class Contrato(models.Model):
     numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato", blank=True, null=True)
     valor_total_devido = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor Total Devido", blank=True, null=True)
     valor_causa = models.DecimalField("Valor da Causa", max_digits=14, decimal_places=2, null=True, blank=True)
+    custas = models.DecimalField("Custas", max_digits=14, decimal_places=2, null=True, blank=True)
     parcelas_em_aberto = models.IntegerField(verbose_name="Parcelas em Aberto", blank=True, null=True)
     data_prescricao = models.DateField(verbose_name="Data de Prescrição", blank=True, null=True)
 

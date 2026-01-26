@@ -1,36 +1,44 @@
+import json
+import os
+import re
+from datetime import datetime, date as date_cls, time as time_cls
 from decimal import Decimal
 
+import requests
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
+from django.db.models import Q, Count
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.http import JsonResponse
+
 from ..models import (
     AnaliseProcesso,
     Contrato,
     Herdeiro,
     ListaDeTarefas,
+    Parte,
+    ProcessoArquivo,
     ProcessoJudicial,
     Prazo,
     Tarefa,
 )
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
-from django.db.models import Q, Count
-from django.urls import reverse
-from django.utils import timezone
-from django.shortcuts import get_object_or_404
-
-# Imports adicionados para as novas views
-import requests
-import os
-import re
-from django.http import JsonResponse
-from django.views import View
-from django.contrib.auth.decorators import login_required
-from django.utils.decorators import method_decorator
-import json
-from datetime import datetime
-from datetime import date as date_cls, time as time_cls
+from ..services.nowlex_calc import (
+    NowlexCalcError,
+    create_calc,
+    download_pdf_with_fallback,
+    parse_decimal,
+)
 
 SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado']
 SUPERVISION_STATUS_LABELS = {
@@ -1022,3 +1030,88 @@ class BuscarDadosEscavadorView(View):
             return JsonResponse({'status': 'error', 'message': f'Erro na API do Escavador: {e.response.status_code}'}, status=500)
         except requests.exceptions.RequestException as e:
             return JsonResponse({'status': 'error', 'message': f'Erro de conexão com a API do Escavador: {e}'}, status=500)
+
+
+@method_decorator(staff_member_required, name='dispatch')
+class ProcessoNowlexValorCausaAPIView(View):
+    """
+    Aciona os endpoints do NowLex Calc para atualizar o valor da causa e, opcionalmente,
+    baixar o PDF do saldo devedor e salvar nos Arquivos do processo.
+    """
+    def post(self, request, processo_id):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'JSON inválido.'}, status=400)
+
+        contrato_id = payload.get('contrato_id')
+        if contrato_id is None:
+            return JsonResponse({'error': 'Contrato não informado.'}, status=400)
+        try:
+            contrato_id = int(contrato_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Contrato inválido.'}, status=400)
+
+        action = (payload.get('action') or 'valor').lower()
+        gerar_pdf = action == 'valor_pdf'
+
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id)
+        contrato = get_object_or_404(Contrato, pk=contrato_id, processo=processo)
+        contrato_numero = re.sub(r'\D', '', str(contrato.numero_contrato or ''))
+        if not contrato_numero:
+            return JsonResponse({'error': 'Número de contrato inválido.'}, status=400)
+
+        try:
+            calc_data = create_calc(contrato_numero)
+        except NowlexCalcError as exc:
+            return JsonResponse({'error': str(exc)}, status=502)
+
+        valor_bruto = (
+            calc_data.get('total_amount')
+            or calc_data.get('total')
+            or calc_data.get('valor')
+            or calc_data.get('valor_causa')
+        )
+        valor_decimal = parse_decimal(valor_bruto)
+        if valor_decimal is None:
+            return JsonResponse({'error': 'O valor retornado é inválido.'}, status=502)
+
+        contrato.valor_causa = valor_decimal
+        contrato.save(update_fields=['valor_causa'])
+        if processo.valor_causa != valor_decimal:
+            processo.valor_causa = valor_decimal
+            processo.save(update_fields=['valor_causa'])
+
+        response = {
+            'valor_causa': str(valor_decimal),
+            'pdf_saved': False,
+            'message': 'Valor da causa atualizado.',
+        }
+
+        if gerar_pdf:
+            calc_id = (
+                calc_data.get('calc_id')
+                or calc_data.get('id')
+                or calc_data.get('calcId')
+            )
+            try:
+                pdf_bytes = download_pdf_with_fallback(calc_id, contrato_numero)
+            except NowlexCalcError as exc:
+                return JsonResponse({'error': str(exc)}, status=502)
+
+            nome_arquivo = f"{contrato_numero} - Saldo devedor.pdf"
+            arquivo = ProcessoArquivo(
+                processo=processo,
+                enviado_por=request.user if request.user.is_authenticated else None,
+                nome=nome_arquivo,
+            )
+            arquivo.arquivo.save(nome_arquivo, ContentFile(pdf_bytes), save=False)
+            arquivo.save()
+
+            response.update({
+                'pdf_saved': True,
+                'arquivo_id': arquivo.pk,
+                'arquivo_url': arquivo.arquivo.url,
+            })
+
+        return JsonResponse(response)
