@@ -96,8 +96,12 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     };
 
-    const headerElement = document.querySelector('#content-main h2');
     const HEADER_TITLE = 'Dados do Processo';
+    const findHeaderElement = () => {
+        const headings = Array.from(document.querySelectorAll('#content-main h2'));
+        return headings.find((heading) => heading.textContent.trim() === HEADER_TITLE) || null;
+    };
+    let headerElement = findHeaderElement();
     const headerTitleSpan = document.createElement('span');
     const headerControls = document.createElement('div');
     const storageKey = `dados_processo_state_${window.location.pathname}`;
@@ -117,6 +121,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const ensureHeaderLayout = () => {
+        if (!headerElement) {
+            headerElement = findHeaderElement();
+        }
         if (!headerElement) {
             return null;
         }
@@ -199,8 +206,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const setActiveCnjText = () => {
         const fieldset = ensureHeaderLayout();
         headerTitleSpan.textContent = HEADER_TITLE;
-        if (fieldset) {
-            setupCollapseControls(fieldset);
+        const collapseContainer = fieldset || headerElement?.parentElement;
+        if (collapseContainer) {
+            setupCollapseControls(collapseContainer);
         }
         if (window.__setActiveCnjHeader) {
             window.__setActiveCnjHeader(HEADER_TITLE);

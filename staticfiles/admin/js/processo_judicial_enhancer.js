@@ -39,6 +39,80 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- 2.b Controles de minimizar/maximizar os Dados do Processo ---
+    (function () {
+        const findHeader = () => {
+            const headings = Array.from(document.querySelectorAll('#content-main h2'));
+            return headings.find((heading) => heading.textContent.trim() === 'Dados do Processo') || null;
+        };
+        let header = findHeader();
+        if (!header) return;
+        const fieldset = header.closest('fieldset') || header.parentElement;
+        if (!fieldset) return;
+        const controlWrapper = document.createElement('div');
+        controlWrapper.style.display = 'inline-flex';
+        controlWrapper.style.gap = '0.35rem';
+        const createBtn = (symbol, title) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'button tertiary';
+            btn.textContent = symbol;
+            btn.title = title;
+            btn.setAttribute('aria-label', title);
+            btn.style.padding = '0 0.6rem';
+            btn.style.height = '32px';
+            btn.style.minWidth = '32px';
+            btn.style.display = 'inline-flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.fontSize = '1.25rem';
+            btn.style.lineHeight = '1';
+            return btn;
+        };
+        const contentNodes = Array.from(fieldset.children).filter(node => node !== header);
+        contentNodes.forEach(node => {
+            if (typeof node.dataset.originalDisplay === 'undefined') {
+                node.dataset.originalDisplay = node.style.display || '';
+            }
+        });
+        const minimizeBtn = createBtn('-', 'Minimizar dados do processo');
+        const maximizeBtn = createBtn('+', 'Maximizar dados do processo');
+        const storageKey = 'dados_processo_collapsed';
+        const saveCollapsedPreference = (collapsed) => {
+            try {
+                window.localStorage?.setItem(storageKey, collapsed ? 'collapsed' : 'expanded');
+            } catch (_){}
+        };
+        const loadCollapsedPreference = () => {
+            try {
+                return window.localStorage?.getItem(storageKey);
+            } catch (_){}
+            return null;
+        };
+        const setCollapsed = (value) => {
+            contentNodes.forEach(node => {
+                node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+            });
+            minimizeBtn.disabled = value;
+            maximizeBtn.disabled = !value;
+            header.dataset.processSectionCollapsed = value ? 'true' : 'false';
+            saveCollapsedPreference(value);
+        };
+        minimizeBtn.addEventListener('click', () => setCollapsed(true));
+        maximizeBtn.addEventListener('click', () => setCollapsed(false));
+        controlWrapper.appendChild(minimizeBtn);
+        controlWrapper.appendChild(maximizeBtn);
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.gap = '0.35rem';
+        header.appendChild(controlWrapper);
+        setTimeout(() => {
+            const stored = loadCollapsedPreference();
+            setCollapsed(stored === 'collapsed');
+        }, 10);
+    })();
+
     // --- 3. Lógica do Botão "Preencher UF" ---
     if (ufInput && !document.getElementById("btn_preencher_uf")) {
         const botao = document.createElement("button");
