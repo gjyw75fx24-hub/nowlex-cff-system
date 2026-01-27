@@ -145,6 +145,9 @@
 
         .agenda-checagem-panel__body {
             padding: 0.5rem 0;
+            max-height: calc(100vh - 320px);
+            overflow-y: auto;
+            position: relative;
         }
 
         .agenda-checagem-panel__badge {
@@ -155,6 +158,28 @@
 
         .checagem-question-title {
             font-weight: 600;
+        }
+        .agenda-checagem-panel__actions {
+            position: sticky;
+            top: 0;
+            background: #fff;
+            padding-bottom: 0.5rem;
+            padding-top: 0.75rem;
+            margin-bottom: 0.35rem;
+            z-index: 2;
+            box-shadow: 0 4px 25px -15px rgba(15, 58, 118, 0.8);
+        }
+        .checagem-question-top {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .checagem-question-uf {
+            margin-left: auto;
+            font-size: 0.72rem;
+            color: #4c5a6b;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
         }
     </style>
 {% endblock %}
@@ -254,6 +279,7 @@
                                                     <span></span>
                                                 </label>
                                                 <div class="checagem-question-title">CPF {{ row.cpf }}</div>
+                                                <span class="checagem-question-uf">{{ row.uf_endereco|default:'--' }}</span>
                                             </div>
                                             <div class="checagem-question-body">
                                                 <p class="checagem-question-observation">

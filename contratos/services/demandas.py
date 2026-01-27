@@ -121,6 +121,12 @@ class DemandasImportService:
             prescricao_text = prescricao_dates[0].strftime('%d/%m/%Y') if prescricao_dates else ''
             total_aberto_sum += total_aberto
             cpf_normalized = _normalize_digits(cpf)
+            uf_endereco = ''
+            for contract in contracts:
+                uf_candidate = (contract.get('endereco_uf') or '').strip().upper()
+                if uf_candidate:
+                    uf_endereco = uf_candidate
+                    break
             rows.append({
                 "cpf": _format_cpf(cpf),
                 "cpf_raw": cpf_normalized,
@@ -128,6 +134,7 @@ class DemandasImportService:
                 "contratos": len(contracts),
                 "total_aberto": _format_currency(total_aberto),
                 "prescricao_ativadora": prescricao_text,
+                "uf_endereco": uf_endereco,
             })
         return rows, total_aberto_sum
 
@@ -312,9 +319,17 @@ class DemandasImportService:
 
     def _build_processo(self, cpf: str, contracts: List[Dict], carteira: Optional[Carteira] = None) -> ProcessoJudicial:
         total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)
+        uf_value = ''
+        for contract in contracts:
+            uf_candidate = (contract.get('endereco_uf') or '').strip().upper()
+            if uf_candidate:
+                uf_value = uf_candidate
+                break
+        if not uf_value:
+            uf_value = (contracts[0].get('uf') or '').strip().upper()
         processo = ProcessoJudicial.objects.create(
             cnj=next((c.get('num_processo_jud') for c in contracts if c.get('num_processo_jud')), None),
-            uf=contracts[0].get('uf') or '',
+            uf=uf_value,
             vara=contracts[0].get('loja_nome') or '',
             tribunal='',
             valor_causa=total_aberto or None,
