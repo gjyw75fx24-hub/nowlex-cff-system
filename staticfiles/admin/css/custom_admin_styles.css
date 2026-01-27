@@ -26,15 +26,32 @@
     white-space: nowrap;
     min-width: 128px;
     max-width: 128px;
+    padding-right: 12px;
+}
+
+#result_list th.column-get_polo_passivo,
+#result_list td.field-get_polo_passivo {
+    --polo-nome-base-width: 240px;
+    min-width: calc(var(--polo-nome-base-width) * 1.15);
+    width: calc(var(--polo-nome-base-width) * 1.15);
+    padding-left: 12px;
+    white-space: normal;
 }
 
 #result_list th.column-get_polo_ativo,
-#result_list td.field-get_polo_ativo,
-#result_list th.column-get_polo_passivo,
-#result_list td.field-get_polo_passivo {
-    --polo-nome-base-width: 180px;
+#result_list td.field-get_polo_ativo {
+    --polo-nome-base-width: 220px;
     min-width: calc(var(--polo-nome-base-width) * 1.15);
     width: calc(var(--polo-nome-base-width) * 1.15);
+    padding-left: 12px;
+    white-space: normal;
+}
+
+#result_list th.column-get_x_separator,
+#result_list td.field-get_x_separator {
+    min-width: 36px;
+    width: 36px;
+    text-align: center;
 }
 
 .info-card-floating {

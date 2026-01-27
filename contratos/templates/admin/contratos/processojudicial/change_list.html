@@ -81,19 +81,6 @@
             border-left: 1px solid #d9d9d9;
             border-right: 1px solid #d9d9d9;
         }
-        #changelist-search .clear-search-btn,
-        #changelist-search input.clear-search-btn {
-            margin-left: 4px;
-            border: 1px solid var(--border-color, #ccc);
-            font-size: 0.8125rem;
-            padding: 4px 8px;
-            vertical-align: middle;
-            background: var(--body-bg, #f8f8f8);
-            box-shadow: 0 -15px 20px -10px rgba(0, 0, 0, 0.15) inset;
-            cursor: pointer;
-            color: var(--body-fg, #333);
-            border-radius: 4px;
-        }
         body div#nav-sidebar {
             width: 96px;
             transform: scale(0.8);
@@ -187,11 +174,6 @@
         #result_list th,
         #result_list td {
             font-size: 1.1rem;
-        }
-        #result_list th.column-get_polo_passivo,
-        #result_list td.field-get_polo_passivo {
-            min-width: 40%;
-            width: 40%;
         }
     </style>
 {% endblock %}
@@ -647,24 +629,26 @@
         if (!searchForm) return;
         const searchInput = searchForm.querySelector('input[name=q]');
         if (!searchInput) return;
-        if (searchForm.querySelector('.clear-search-btn')) return;
+        if (searchForm.querySelector('[data-clear-search="true"]')) return;
 
-        const submitInput = searchForm.querySelector('input[type=submit]');
+        const submitInput = searchForm.querySelector('input[type=submit], button[type=submit]');
         let clearBtn;
         if (submitInput) {
             clearBtn = submitInput.cloneNode(true);
-            clearBtn.type = 'button';
+            clearBtn.type = submitInput.tagName.toLowerCase() === 'button' ? 'button' : submitInput.type;
             clearBtn.value = 'Limpar';
             clearBtn.textContent = 'Limpar';
             clearBtn.removeAttribute('id');
-            clearBtn.classList.remove('default');
+            clearBtn.removeAttribute('name');
         } else {
-            clearBtn = document.createElement('button');
-            clearBtn.type = 'button';
-            clearBtn.textContent = 'Limpar';
+            clearBtn = document.createElement('input');
+            clearBtn.type = 'submit';
+            clearBtn.value = 'Limpar';
         }
-        clearBtn.classList.add('clear-search-btn');
-        clearBtn.addEventListener('click', function() {
+        clearBtn.dataset.clearSearch = 'true';
+        clearBtn.style.marginLeft = '4px';
+        clearBtn.addEventListener('click', function(event) {
+            event.preventDefault();
             if (!searchInput.value) {
                 searchInput.focus();
                 return;

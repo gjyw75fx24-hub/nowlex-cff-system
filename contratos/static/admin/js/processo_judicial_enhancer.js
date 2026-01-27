@@ -25,7 +25,10 @@ document.addEventListener('DOMContentLoaded', function() {
             input = document.createElement('input');
             input.type = 'hidden';
             input.name = name;
+            input.id = `id_${name}`;
             form.appendChild(input);
+        } else if (!input.id) {
+            input.id = `id_${name}`;
         }
         return input;
     };
@@ -608,6 +611,84 @@ document.addEventListener('DOMContentLoaded', function() {
             detailCardBody.style.paddingRight = '0.5rem';
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
         }
+    };
+
+    let observationTooltip = null;
+    let tooltipVisibilityInput = null;
+    let tooltipHideTimeout = null;
+
+    const ensureObservationTooltip = () => {
+        if (!observationTooltip) {
+            observationTooltip = document.createElement('div');
+            observationTooltip.className = 'checagem-observation-tooltip';
+            observationTooltip.style.display = 'none';
+            document.body.appendChild(observationTooltip);
+            observationTooltip.addEventListener('mouseenter', () => {
+                cancelScheduledTooltipHide();
+            });
+            observationTooltip.addEventListener('mouseleave', () => {
+                scheduleObservationTooltipHide();
+            });
+        }
+        return observationTooltip;
+    };
+
+    const cancelScheduledTooltipHide = () => {
+        if (tooltipHideTimeout) {
+            clearTimeout(tooltipHideTimeout);
+            tooltipHideTimeout = null;
+        }
+    };
+
+    const showObservationTooltip = (input) => {
+        if (!input || !input.value.trim()) {
+            return;
+        }
+        const tooltip = ensureObservationTooltip();
+        tooltip.textContent = input.value;
+        const rect = input.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.style.display = 'block';
+        tooltipVisibilityInput = input;
+        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
+        if (overflowBottom > 0) {
+            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
+        }
+        cancelScheduledTooltipHide();
+    };
+
+    const hideObservationTooltip = () => {
+        if (observationTooltip) {
+            observationTooltip.style.display = 'none';
+            tooltipVisibilityInput = null;
+            cancelScheduledTooltipHide();
+        }
+    };
+
+    const scheduleObservationTooltipHide = () => {
+        cancelScheduledTooltipHide();
+        tooltipHideTimeout = setTimeout(() => {
+            hideObservationTooltip();
+        }, 220);
+    };
+
+    const showObservationTooltipForTarget = (target, text) => {
+        if (!target || !text) {
+            return;
+        }
+        const tooltip = ensureObservationTooltip();
+        tooltip.textContent = text;
+        const rect = target.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.style.display = 'block';
+        tooltipVisibilityInput = target;
+        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
+        if (overflowBottom > 0) {
+            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
+        }
+        cancelScheduledTooltipHide();
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -3475,15 +3556,204 @@ document.addEventListener('DOMContentLoaded', function() {
         return row;
     }
     const herdeirosCache = new Map();
-    const fetchHerdeiros = (cpf) => {
+    const OBITO_UFS = ['', 'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
+        'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+    let obitoModal = null;
+    const buildAdminRoot = (() => {
+        const path = window.location.pathname;
+        if (!path.includes('/admin')) {
+            return '/admin';
+        }
+        return path.split('/admin')[0] + '/admin';
+    })();
+    const buildObitoUrl = (parteId) => `${window.location.origin}${buildAdminRoot}/contratos/parte/${parteId}/obito-info/`;
+    const formatDateForTooltip = (isoValue) => {
+        if (!isoValue) {
+            return '';
+        }
+        const parts = isoValue.split('-');
+        if (parts.length !== 3) {
+            return isoValue;
+        }
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+    const computeObitoTooltipText = (card) => {
+        if (!card) return '';
+        const dateValue = card.dataset.obitoData;
+        const cidade = card.dataset.obitoCidade || '';
+        const uf = card.dataset.obitoUf || '';
+        const parts = [];
+        if (dateValue) {
+            parts.push(`Data: ${formatDateForTooltip(dateValue)}`);
+        }
+        if (cidade) {
+            parts.push(`Cidade: ${cidade}`);
+        }
+        if (uf) {
+            parts.push(`UF: ${uf}`);
+        }
+        return parts.join(' · ');
+    };
+    const ensureObitoModal = () => {
+        if (obitoModal) {
+            return obitoModal;
+        }
+        obitoModal = document.createElement('div');
+        obitoModal.className = 'obito-modal';
+        obitoModal.setAttribute('aria-hidden', 'true');
+        obitoModal.innerHTML = `
+            <div class="obito-modal__panel">
+                <div class="obito-modal__header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong>Detalhes do Óbito</strong>
+                    <button type="button" class="obito-modal__close" aria-label="Fechar">&times;</button>
+                </div>
+                <form class="obito-modal__form">
+                    <label>
+                        Data do óbito
+                        <input type="date" name="obito_data">
+                    </label>
+                    <label>
+                        Cidade
+                        <input type="text" name="obito_cidade" placeholder="Cidade">
+                    </label>
+                    <label>
+                        UF
+                        <select name="obito_uf"></select>
+                    </label>
+                    <div class="obito-modal__actions">
+                        <button type="button" class="button button-primary obito-modal__save">Salvar</button>
+                        <button type="button" class="button obito-modal__cancel">Cancelar</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        const select = obitoModal.querySelector('select[name="obito_uf"]');
+        if (select) {
+            OBITO_UFS.forEach((uf) => {
+                const option = document.createElement('option');
+                option.value = uf;
+                option.textContent = uf || 'Selecione a UF';
+                select.appendChild(option);
+            });
+        }
+        document.body.appendChild(obitoModal);
+        const closeHandler = () => {
+            obitoModal.setAttribute('aria-hidden', 'true');
+        };
+        obitoModal.querySelector('.obito-modal__close')?.addEventListener('click', closeHandler);
+        obitoModal.querySelector('.obito-modal__cancel')?.addEventListener('click', closeHandler);
+        obitoModal.addEventListener('click', (event) => {
+            if (event.target === obitoModal) {
+                closeHandler();
+            }
+        });
+        return obitoModal;
+    };
+    const openObitoModal = (card) => {
+        if (!card) return;
+        const modal = ensureObitoModal();
+        const form = modal.querySelector('.obito-modal__form');
+        if (!form) return;
+        const dateInput = form.querySelector('input[name="obito_data"]');
+        const cidadeInput = form.querySelector('input[name="obito_cidade"]');
+        const ufSelect = form.querySelector('select[name="obito_uf"]');
+        if (dateInput) {
+            dateInput.value = card.dataset.obitoData || '';
+        }
+        if (cidadeInput) {
+            cidadeInput.value = card.dataset.obitoCidade || '';
+        }
+        if (ufSelect) {
+            ufSelect.value = card.dataset.obitoUf || '';
+        }
+        modal.dataset.parteId = card.dataset.parteId || '';
+        modal.setAttribute('aria-hidden', 'false');
+        dateInput?.focus();
+    };
+    const hideObitoModal = () => {
+        if (obitoModal) {
+            obitoModal.setAttribute('aria-hidden', 'true');
+        }
+    };
+    const updateCardObitoData = (card, payload = {}) => {
+        if (!card) return;
+        if (typeof payload.obito_data !== 'undefined') {
+            card.dataset.obitoData = payload.obito_data || '';
+        }
+        if (typeof payload.obito_cidade !== 'undefined') {
+            card.dataset.obitoCidade = payload.obito_cidade || '';
+        }
+        if (typeof payload.obito_uf !== 'undefined') {
+            card.dataset.obitoUf = payload.obito_uf || '';
+        }
+    };
+    const setupObitoModalActions = () => {
+        const modal = ensureObitoModal();
+        const saveButton = modal.querySelector('.obito-modal__save');
+        const form = modal.querySelector('.obito-modal__form');
+        const getFormValue = (name) => form?.querySelector(`[name="${name}"]`)?.value || '';
+        if (!saveButton || !form) return;
+        saveButton.addEventListener('click', () => {
+            const parteId = modal.dataset.parteId;
+            if (!parteId) {
+                return;
+            }
+            const payload = {
+                data_obito: getFormValue('obito_data'),
+                cidade: getFormValue('obito_cidade'),
+                uf: getFormValue('obito_uf'),
+            };
+            saveButton.disabled = true;
+            fetch(buildObitoUrl(parteId), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken || '',
+                },
+                body: JSON.stringify(payload),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.json().then((err) => {
+                            throw new Error(err.error || 'Não foi possível salvar os dados do óbito.');
+                        });
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const card = document.querySelector(`.info-card[data-parte-id="${parteId}"]`);
+                    updateCardObitoData(card, data);
+                    hideObitoModal();
+                    createSystemAlert('Óbito', 'Dados atualizados com sucesso.');
+                })
+                .catch((error) => {
+                    createSystemAlert('Óbito', error.message || 'Erro ao salvar os dados do óbito.');
+                })
+                .finally(() => {
+                    saveButton.disabled = false;
+                });
+        });
+    };
+    const buildHerdeirosCacheKey = (cpf, parteId = '', processoId = '') => {
+        return `${cpf}:${parteId || ''}:${processoId || ''}`;
+    };
+    const fetchHerdeiros = (cpf, parteId = '', processoId = '') => {
         const normalized = normalizeCpf(cpf);
         if (!normalized) {
             return Promise.resolve({ cpf_falecido: '', herdeiros: [] });
         }
-        if (herdeirosCache.has(normalized)) {
-            return herdeirosCache.get(normalized);
+        const cacheKey = buildHerdeirosCacheKey(normalized, parteId, processoId);
+        if (herdeirosCache.has(cacheKey)) {
+            return herdeirosCache.get(cacheKey);
         }
-        const promise = fetch(`/api/herdeiros/?cpf_falecido=${encodeURIComponent(normalized)}`)
+        const query = new URLSearchParams({ cpf_falecido: normalized });
+        if (parteId) {
+            query.set('parte_id', parteId);
+        }
+        if (processoId) {
+            query.set('processo_id', processoId);
+        }
+        const promise = fetch(`/api/herdeiros/?${query.toString()}`)
             .then((response) => {
                 if (!response.ok) {
                     throw new Error('Falha ao buscar herdeiros.');
@@ -3491,10 +3761,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return response.json();
             })
             .catch((error) => {
-                herdeirosCache.delete(normalized);
+                herdeirosCache.delete(cacheKey);
                 throw error;
             });
-        herdeirosCache.set(normalized, promise);
+        herdeirosCache.set(cacheKey, promise);
         return promise;
     };
     const updateHerdeirosBadge = (card, hasEntries) => {
@@ -3519,8 +3789,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="herdeiros-modal__body">
                     <div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>
                 </div>
+                <div class="herdeiros-modal__heritage-form" hidden>
+                    <label>
+                        Valor da herança
+                        <input type="text" name="heranca_valor" placeholder="R$ 0,00">
+                    </label>
+                    <label>
+                        Descrição
+                        <input type="text" name="heranca_descricao" placeholder="Ex: Terreno, cota...">
+                    </label>
+                    <div class="herdeiros-modal__heritage-form-actions">
+                        <button type="button" class="herdeiros-modal__heritage-apply">Aplicar</button>
+                        <button type="button" class="herdeiros-modal__heritage-cancel">Cancelar</button>
+                    </div>
+                </div>
                 <div class="herdeiros-modal__footer">
-                    <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                    <div class="herdeiros-modal__footer-actions">
+                        <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                        <button type="button" class="herdeiros-modal__heritage-toggle">Informar Herança</button>
+                        <span class="herdeiros-modal__heritage-summary" aria-live="polite" hidden></span>
+                    </div>
                     <button type="button" class="herdeiros-modal__save">Salvar herdeiros</button>
                 </div>
             </div>
@@ -3534,12 +3822,115 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.querySelector('.herdeiros-modal__close').addEventListener('click', () => {
             modal.setAttribute('aria-hidden', 'true');
         });
+        const attachDescricaoTooltip = () => {
+            const descriptionInput = modal.querySelector('.herdeiros-modal__heritage-form input[name=heranca_descricao]');
+            if (!descriptionInput) return;
+            descriptionInput.addEventListener('mouseenter', () => showObservationTooltip(descriptionInput));
+            descriptionInput.addEventListener('focus', () => showObservationTooltip(descriptionInput));
+            descriptionInput.addEventListener('mouseleave', () => scheduleObservationTooltipHide());
+            descriptionInput.addEventListener('blur', () => hideObservationTooltip());
+        };
+        attachDescricaoTooltip();
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && modal.getAttribute('aria-hidden') !== 'true') {
                 modal.setAttribute('aria-hidden', 'true');
             }
         });
         return modal;
+    };
+    const getHerancaNumericValue = (modal) => {
+        if (!modal || !modal.dataset) return null;
+        const raw = modal.dataset.herancaValue;
+        if (!raw) return null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+    const updateHerancaSummary = (modal) => {
+        if (!modal) return;
+        const summary = modal.querySelector('.herdeiros-modal__heritage-summary');
+        if (!summary) return;
+        const value = getHerancaNumericValue(modal);
+        if (!value) {
+            summary.textContent = '';
+            summary.hidden = true;
+            return;
+        }
+        const description = (modal.dataset.herancaDescription || '').trim();
+        const parts = [];
+        if (description) {
+            parts.push(description);
+        }
+        summary.textContent = parts.join(' · ');
+        summary.hidden = false;
+    };
+    const updatePartilhaFields = (modal) => {
+        if (!modal) return;
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (!body) return;
+        const entries = Array.from(body.querySelectorAll('.herdeiros-entry'));
+        const herancaValue = getHerancaNumericValue(modal);
+        const share = herancaValue && entries.length ? herancaValue / entries.length : null;
+        entries.forEach((entry) => {
+            const partilhaInput = entry.querySelector('input[name=partilha]');
+            if (!partilhaInput) return;
+            partilhaInput.value = share ? formatCurrencyBrl(share) : '';
+        });
+    };
+    const setHerancaState = (modal, numericValue, description) => {
+        if (!modal) return;
+        if (numericValue !== null) {
+            modal.dataset.herancaValue = String(numericValue);
+        } else {
+            delete modal.dataset.herancaValue;
+        }
+        if (description) {
+            modal.dataset.herancaDescription = description;
+        } else {
+            delete modal.dataset.herancaDescription;
+        }
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (heritageForm) {
+            const valorInput = heritageForm.querySelector('input[name="heranca_valor"]');
+            const descInput = heritageForm.querySelector('input[name="heranca_descricao"]');
+            if (valorInput) {
+                valorInput.value = numericValue !== null ? formatCurrencyBrl(numericValue) : '';
+            }
+            if (descInput) {
+                descInput.value = description || '';
+            }
+        }
+        updateHerancaSummary(modal);
+        updatePartilhaFields(modal);
+        const cardSelector = modal.dataset.parteId
+            ? `.info-card[data-parte-id="${modal.dataset.parteId}"]`
+            : null;
+        const card = cardSelector ? document.querySelector(cardSelector) : null;
+        if (card) {
+            if (modal.dataset.herancaValue) {
+                card.dataset.herancaValue = modal.dataset.herancaValue;
+            } else {
+                delete card.dataset.herancaValue;
+            }
+            if (modal.dataset.herancaDescription) {
+                card.dataset.herancaDescription = modal.dataset.herancaDescription;
+            } else {
+                delete card.dataset.herancaDescription;
+            }
+        }
+    };
+    const refreshHerancaInputs = (modal) => {
+        if (!modal) return;
+        const form = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (!form) return;
+        const valorInput = form.querySelector('input[name=heranca_valor]');
+        const descInput = form.querySelector('input[name=heranca_descricao]');
+        const value = getHerancaNumericValue(modal);
+        if (valorInput) {
+            valorInput.value = value ? formatCurrencyBrl(value) : '';
+        }
+        if (descInput) {
+            descInput.value = modal.dataset.herancaDescription || '';
+        }
     };
     const renderHerdeiroEntry = (data = {}, index = 0) => {
         const entry = document.createElement('div');
@@ -3558,6 +3949,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 </label>
                 <label>Grau de parentesco
                     <input type="text" name="grau_parentesco">
+                </label>
+                <label class="herdeiros-entry__partilha">Partilha
+                    <input type="text" name="partilha" readonly>
                 </label>
             </div>
             <div class="herdeiros-entry__actions">
@@ -3639,8 +4033,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!body.querySelector('.herdeiros-entry')) {
                     body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
                 }
+                updatePartilhaFields(modal);
             });
         });
+        updatePartilhaFields(modal);
     };
     const openHerdeirosModal = (card) => {
         const cpfRaw = card?.dataset?.parteCpf || '';
@@ -3654,13 +4050,37 @@ document.addEventListener('DOMContentLoaded', function() {
         if (card?.dataset?.parteId) {
             modal.dataset.parteId = card.dataset.parteId;
         }
+        if (card?.dataset?.processoId) {
+            modal.dataset.processoId = card.dataset.processoId;
+        }
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (card) {
+            modal.dataset.herancaValue = card.dataset.herancaValue || '';
+            modal.dataset.herancaDescription = card.dataset.herancaDescription || '';
+        } else {
+            delete modal.dataset.herancaValue;
+            delete modal.dataset.herancaDescription;
+        }
+        if (heritageForm) {
+            heritageForm.hidden = true;
+            heritageForm.classList.remove('herdeiros-modal__heritage-form--visible');
+        }
+        updateHerancaSummary(modal);
+        refreshHerancaInputs(modal);
+        updatePartilhaFields(modal);
         modal.setAttribute('aria-hidden', 'false');
         const body = modal.querySelector('.herdeiros-modal__body');
         if (body) {
             body.innerHTML = '<div class="herdeiros-empty">Carregando herdeiros...</div>';
         }
-        fetchHerdeiros(cpf)
+        const parteId = card?.dataset?.parteId || '';
+        const processoId = card?.dataset?.processoId || '';
+        fetchHerdeiros(cpf, parteId, processoId)
             .then((data) => {
+                if (data && (data.heranca_valor || data.heranca_descricao)) {
+                    const parsedValue = data.heranca_valor ? Number(data.heranca_valor) : null;
+                    setHerancaState(modal, Number.isFinite(parsedValue) ? parsedValue : null, data.heranca_descricao || '');
+                }
                 renderHerdeirosModal(modal, data.herdeiros || []);
             })
             .catch(() => {
@@ -3674,6 +4094,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const addButton = modal.querySelector('.herdeiros-modal__add');
         const saveButton = modal.querySelector('.herdeiros-modal__save');
         const body = modal.querySelector('.herdeiros-modal__body');
+        const heritageToggle = modal.querySelector('.herdeiros-modal__heritage-toggle');
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        const heritageValueInput = heritageForm?.querySelector('input[name="heranca_valor"]');
+        const heritageDescriptionInput = heritageForm?.querySelector('input[name="heranca_descricao"]');
+        const heritageApply = heritageForm?.querySelector('.herdeiros-modal__heritage-apply');
+        const heritageCancel = heritageForm?.querySelector('.herdeiros-modal__heritage-cancel');
         const isHerdeiroFilled = (entry) => {
             if (!entry) return false;
             const nome = entry.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
@@ -3685,6 +4111,51 @@ document.addEventListener('DOMContentLoaded', function() {
             const enderecoHasValue = Object.values(enderecoParts).some((value) => (value || '').trim());
             return Boolean(nome || cpf || rg || grau || enderecoHasValue);
         };
+        const showHerancaForm = () => {
+            if (!heritageForm) return;
+            heritageForm.hidden = false;
+            heritageForm.classList.add('herdeiros-modal__heritage-form--visible');
+            refreshHerancaInputs(modal);
+            heritageValueInput?.focus();
+        };
+        const hideHerancaForm = () => {
+            if (!heritageForm) return;
+            heritageForm.hidden = true;
+            heritageForm.classList.remove('herdeiros-modal__heritage-form--visible');
+        };
+        if (heritageToggle && heritageForm) {
+            heritageToggle.addEventListener('click', () => {
+                if (heritageForm.hidden) {
+                    showHerancaForm();
+                } else {
+                    hideHerancaForm();
+                }
+            });
+        }
+        if (heritageApply) {
+            heritageApply.addEventListener('click', () => {
+                const raw = heritageValueInput?.value || '';
+                if (!raw.trim()) {
+                    setHerancaState(modal, null, '');
+                    hideHerancaForm();
+                    return;
+                }
+                const parsed = normalizeNumericCurrency(raw);
+                if (parsed === null) {
+                    createSystemAlert('Informar Herança', 'Informe um valor válido para a herança.');
+                    heritageValueInput?.focus();
+                    return;
+                }
+                const description = (heritageDescriptionInput?.value || '').trim();
+                setHerancaState(modal, parsed, description);
+                hideHerancaForm();
+            });
+        }
+        if (heritageCancel) {
+            heritageCancel.addEventListener('click', () => {
+                hideHerancaForm();
+            });
+        }
         if (addButton) {
             addButton.addEventListener('click', () => {
                 if (!body) return;
@@ -3715,7 +4186,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!body.querySelector('.herdeiros-entry')) {
                         body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
                     }
+                    updatePartilhaFields(modal);
                 });
+                updatePartilhaFields(modal);
             });
         }
         if (saveButton) {
@@ -3727,13 +4200,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 saveButton.disabled = true;
+                const herancaValue = modal.dataset.herancaValue || '';
+                const herancaDescription = modal.dataset.herancaDescription || '';
                 fetch('/api/herdeiros/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrftoken || '',
                     },
-                    body: JSON.stringify({ cpf_falecido: cpf, herdeiros }),
+                    body: JSON.stringify({
+                        cpf_falecido: cpf,
+                        herdeiros,
+                        parte_id: modal.dataset.parteId || '',
+                        processo_id: modal.dataset.processoId || '',
+                        heranca_valor: herancaValue,
+                        heranca_descricao: herancaDescription,
+                    }),
                 })
                     .then((response) => {
                         if (!response.ok) {
@@ -3743,11 +4225,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     })
                     .then((data) => {
                         modal.setAttribute('aria-hidden', 'true');
-                        herdeirosCache.set(cpf, Promise.resolve(data));
+                        const cacheKey = buildHerdeirosCacheKey(
+                            cpf,
+                            modal.dataset.parteId || '',
+                            modal.dataset.processoId || ''
+                        );
+                        herdeirosCache.set(cacheKey, Promise.resolve(data));
                         const card = modal.dataset.parteId
                             ? document.querySelector(`.info-card[data-parte-id="${modal.dataset.parteId}"]`)
                             : null;
                         updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        if (card) {
+                            if (typeof data.heranca_valor !== 'undefined') {
+                                card.dataset.herancaValue = data.heranca_valor || '';
+                            }
+                            if (typeof data.heranca_descricao !== 'undefined') {
+                                card.dataset.herancaDescription = data.heranca_descricao || '';
+                            }
+                        }
+                        if (data.heranca_valor || data.heranca_descricao) {
+                            const parsedValue = data.heranca_valor ? Number(data.heranca_valor) : null;
+                            setHerancaState(modal, Number.isFinite(parsedValue) ? parsedValue : null, data.heranca_descricao || '');
+                        }
                         createSystemAlert('CFF System', 'Herdeiros salvos com sucesso.');
                     })
                     .catch(() => {
@@ -3772,7 +4271,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasObito && card.dataset.parteCpf) {
                 const cpf = normalizeCpf(card.dataset.parteCpf);
                 if (cpf) {
-                    fetchHerdeiros(cpf)
+                    const parteId = card.dataset.parteId || '';
+                    const processoId = card.dataset.processoId || '';
+                    fetchHerdeiros(cpf, parteId, processoId)
                         .then((data) => {
                             updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
                         })
@@ -3786,7 +4287,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasObito && card.dataset.parteCpf) {
                 const cpf = normalizeCpf(card.dataset.parteCpf);
                 if (cpf) {
-                    fetchHerdeiros(cpf)
+                    const parteId = card.dataset.parteId || '';
+                    const processoId = card.dataset.processoId || '';
+                    fetchHerdeiros(cpf, parteId, processoId)
                         .then((data) => {
                             updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
                         })
@@ -3795,6 +4298,27 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const setupObitoRibbonHandlers = () => {
+        setupObitoModalActions();
+        const cards = document.querySelectorAll('.info-card');
+        cards.forEach((card) => {
+            const button = card.querySelector('.parte-luto-ribbon');
+            if (!button) return;
+            button.addEventListener('click', () => openObitoModal(card));
+            const handleTooltip = () => {
+                const text = computeObitoTooltipText(card);
+                if (text) {
+                    showObservationTooltipForTarget(button, text);
+                }
+            };
+            button.addEventListener('mouseenter', handleTooltip);
+            button.addEventListener('focus', handleTooltip);
+            button.addEventListener('mouseleave', scheduleObservationTooltipHide);
+            button.addEventListener('blur', hideObservationTooltip);
+        });
+    };
+    setupObitoRibbonHandlers();
 
     const repositionHistoryLink = () => {
         const historyLink = document.querySelector('#content-main .object-tools li .historylink');
@@ -4321,71 +4845,12 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
     let modalBlocker = null;
     let checagemOverlay = null;
     let checagemKeyHandlerAttached = false;
-    let observationTooltip = null;
-    let tooltipVisibilityInput = null;
-    let tooltipHideTimeout = null;
 
     const removeChecagemModalBlockers = () => {
         if (modalBlocker) {
             modalBlocker.remove();
             modalBlocker = null;
         }
-    };
-
-    const ensureObservationTooltip = () => {
-        if (!observationTooltip) {
-            observationTooltip = document.createElement('div');
-            observationTooltip.className = 'checagem-observation-tooltip';
-            observationTooltip.style.display = 'none';
-            document.body.appendChild(observationTooltip);
-            observationTooltip.addEventListener('mouseenter', () => {
-                cancelScheduledTooltipHide();
-            });
-            observationTooltip.addEventListener('mouseleave', () => {
-                scheduleObservationTooltipHide();
-            });
-        }
-        return observationTooltip;
-    };
-
-    const cancelScheduledTooltipHide = () => {
-        if (tooltipHideTimeout) {
-            clearTimeout(tooltipHideTimeout);
-            tooltipHideTimeout = null;
-        }
-    };
-
-    const showObservationTooltip = (input) => {
-        if (!input || !input.value.trim()) {
-            return;
-        }
-        const tooltip = ensureObservationTooltip();
-        tooltip.textContent = input.value;
-        const rect = input.getBoundingClientRect();
-        tooltip.style.left = `${rect.right + 10}px`;
-        tooltip.style.top = `${rect.top}px`;
-        tooltip.style.display = 'block';
-        tooltipVisibilityInput = input;
-        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
-        if (overflowBottom > 0) {
-            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
-        }
-        cancelScheduledTooltipHide();
-    };
-
-    const hideObservationTooltip = () => {
-        if (observationTooltip) {
-            observationTooltip.style.display = 'none';
-            tooltipVisibilityInput = null;
-            cancelScheduledTooltipHide();
-        }
-    };
-
-    const scheduleObservationTooltipHide = () => {
-        cancelScheduledTooltipHide();
-        tooltipHideTimeout = setTimeout(() => {
-            hideObservationTooltip();
-        }, 220);
     };
 
     const ensureModal = () => {

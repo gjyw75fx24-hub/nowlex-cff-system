@@ -107,6 +107,19 @@ class ProcessoJudicial(models.Model):
         related_name='processos'
     )
 
+    heranca_valor = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Herança (R\$)"
+    )
+    heranca_descricao = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Descrição da Herança"
+    )
+
     etiquetas = models.ManyToManyField(
         'Etiqueta',
         blank=True,
@@ -273,6 +286,21 @@ class Parte(models.Model):
         verbose_name="Informações dos Advogados"
     )
     obito = models.BooleanField(default=False, verbose_name="Óbito")
+    obito_data = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Data do Óbito"
+    )
+    obito_cidade = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Cidade do Óbito"
+    )
+    obito_uf = models.CharField(
+        max_length=2,
+        blank=True,
+        verbose_name="UF do Óbito"
+    )
 
     def __str__(self):
         return self.nome

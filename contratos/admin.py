@@ -1510,7 +1510,7 @@ class ParteInline(admin.StackedInline):
                     "nome",
                     ("documento", "data_nascimento"),
                     "endereco",
-                    "obito",
+                    ("obito", "obito_data", "obito_cidade", "obito_uf"),
                 )
             },
         ),
@@ -1662,7 +1662,7 @@ class ProcessoJudicialForm(forms.ModelForm):
 
     class Meta:
         model = ProcessoJudicial
-        fields = "__all__"
+        exclude = ('heranca_valor', 'heranca_descricao')
         widgets = {
             'valor_causa': forms.TextInput(attrs={'class': 'vTextField money-mask'})
         }
@@ -2017,7 +2017,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             use_distinct = True
         return qs, use_distinct
     fieldsets = (
-        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "carteira", "vara", "tribunal")}),
+        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "vara", "tribunal")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
@@ -2471,6 +2471,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
             path('<path:object_id>/remover-andamentos-duplicados/', self.admin_site.admin_view(self.remover_andamentos_duplicados_view), name='processo_remover_andamentos_duplicados'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
+            path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
 
@@ -2644,7 +2645,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gte=0)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    @admin.display(description="")
+    @admin.display(description="X")
     def get_x_separator(self, obj):
         return mark_safe('<span title="Mais de dois polos">⚠️</span>') if obj.partes_processuais.count() > 2 else "x"
 
@@ -2715,46 +2716,37 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             self.message_user(request, f"Processo delegado para {user_name}.", messages.SUCCESS)
         return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
-def delegate_select_user_view(self, request):
-        opts = self.model._meta
-        app_label = opts.app_label
-        
-        # Recupera os IDs dos processos selecionados da URL
-        selected_ids = request.GET.get('ids', '')
-        if not selected_ids:
-            self.message_user(request, "Nenhum processo selecionado para delegar.", messages.WARNING)
-            return HttpResponseRedirect("../")
-        
-        process_pks = [int(pk) for pk in selected_ids.split(',')]
-        
-        if request.method == 'POST':
-            form = UserForm(request.POST)
-            if form.is_valid():
-                selected_user = form.cleaned_data['user']
-                
-                # Atualiza os processos
-                self.model.objects.filter(pk__in=process_pks).update(delegado_para=selected_user)
-                
-                user_name = selected_user.username if selected_user else "Ninguém"
-                self.message_user(request, f"{len(process_pks)} processo(s) delegados para {user_name} com sucesso.", messages.SUCCESS)
-                return HttpResponseRedirect("../") # Volta para a changelist
-            else:
-                self.message_user(request, "Por favor, selecione um usuário válido.", messages.ERROR)
-        else:
-            form = UserForm()
-        
-        context = {
-            'form': form,
-            'process_pks': process_pks,
-            'opts': opts,
-            'app_label': app_label,
-            'title': "Delegar Processos Selecionados",
-            'is_popup': False,
-            'media': self.media, # Inclui os assets do admin para o formulário
-        }
-        return render(request, 'admin/contratos/processojudicial/delegate_select_user.html', context)
-
-
+    def obito_info_view(self, request, parte_id):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido'}, status=405)
+        if not request.user.has_perm('contratos.change_parte'):
+            return JsonResponse({'error': 'Permissão negada'}, status=403)
+        parte = get_object_or_404(Parte, pk=parte_id)
+        try:
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Dados inválidos'}, status=400)
+        data_value = (payload.get('data_obito') or '').strip()
+        parsed_date = None
+        if data_value:
+            try:
+                parsed_date = datetime.date.fromisoformat(data_value)
+            except ValueError:
+                return JsonResponse({'error': 'Data inválida'}, status=400)
+        cidade = (payload.get('cidade') or '').strip()
+        uf = (payload.get('uf') or '').strip().upper()[:2]
+        parte.obito_data = parsed_date
+        parte.obito_cidade = cidade
+        parte.obito_uf = uf
+        if parsed_date or cidade or uf:
+            parte.obito = True
+        parte.save(update_fields=['obito', 'obito_data', 'obito_cidade', 'obito_uf'])
+        return JsonResponse({
+            'status': 'ok',
+            'obito_data': parte.obito_data.isoformat() if parte.obito_data else '',
+            'obito_cidade': parte.obito_cidade or '',
+            'obito_uf': parte.obito_uf or '',
+        })
 @admin.register(BuscaAtivaConfig)
 class BuscaAtivaConfigAdmin(admin.ModelAdmin):
     list_display = ("horario", "habilitado", "ultima_execucao")

@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datetime import datetime, date as date_cls, time as time_cls
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import requests
 from rest_framework import generics, status
@@ -46,6 +46,33 @@ SUPERVISION_STATUS_LABELS = {
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
+
+def _normalize_decimal_string(value):
+    if value is None:
+        return ''
+    normalized = str(value).strip()
+    if not normalized:
+        return ''
+    normalized = normalized.replace('\u00A0', '')
+    normalized = normalized.replace('R$', '')
+    normalized = normalized.replace(' ', '')
+    has_comma = ',' in normalized
+    has_dot = '.' in normalized
+    if has_comma and has_dot:
+        normalized = normalized.replace('.', '')
+        normalized = normalized.replace(',', '.')
+    elif has_comma:
+        normalized = normalized.replace(',', '.')
+    return normalized
+
+def _parse_decimal_value(value):
+    normalized = _normalize_decimal_string(value)
+    if not normalized:
+        return None
+    try:
+        return Decimal(normalized)
+    except (InvalidOperation, TypeError):
+        return None
 
 def get_next_supervision_status(current_status):
     normalized = (current_status or 'pendente').lower()
@@ -656,7 +683,31 @@ class HerdeiroAPIView(APIView):
         if not cpf:
             return Response({'error': 'cpf_falecido inválido'}, status=status.HTTP_400_BAD_REQUEST)
         herdeiros = Herdeiro.objects.filter(cpf_falecido=cpf).order_by('-herdeiro_citado', 'id')
-        return Response({'cpf_falecido': cpf, 'herdeiros': self._serialize(herdeiros)})
+        parte_id = request.query_params.get('parte_id')
+        processo_id = request.query_params.get('processo_id')
+        processo = None
+        if processo_id:
+            try:
+                processo = ProcessoJudicial.objects.get(pk=processo_id)
+            except ProcessoJudicial.DoesNotExist:
+                processo = None
+        if parte_id:
+            try:
+                parte = Parte.objects.select_related('processo').get(pk=parte_id)
+                processo = parte.processo
+            except Parte.DoesNotExist:
+                processo = None
+        if processo is None:
+            parte = Parte.objects.select_related('processo').filter(
+                documento__in=[cpf, cpf_raw], tipo_polo='PASSIVO'
+            ).order_by('-id').first()
+            processo = parte.processo if parte else None
+        return Response({
+            'cpf_falecido': cpf,
+            'herdeiros': self._serialize(herdeiros),
+            'heranca_valor': str(processo.heranca_valor) if processo and processo.heranca_valor is not None else '',
+            'heranca_descricao': processo.heranca_descricao if processo and processo.heranca_descricao else '',
+        })
 
     def post(self, request):
         cpf_raw = (request.data.get('cpf_falecido') or '').strip()
@@ -665,34 +716,69 @@ class HerdeiroAPIView(APIView):
         cpf = re.sub(r'\\D', '', cpf_raw)
         if not cpf:
             return Response({'error': 'cpf_falecido inválido'}, status=status.HTTP_400_BAD_REQUEST)
-        incoming = request.data.get('herdeiros', [])
+        heranca_only = bool(request.data.get('heranca_only'))
+        incoming = request.data.get('herdeiros', None)
+        if incoming is None:
+            incoming = []
         if not isinstance(incoming, list):
             return Response({'error': 'herdeiros deve ser uma lista'}, status=status.HTTP_400_BAD_REQUEST)
 
-        Herdeiro.objects.filter(cpf_falecido=cpf).delete()
-        cited_set = False
-        for item in incoming:
-            nome = (item.get('nome_completo') or '').strip()
-            cpf_herdeiro = (item.get('cpf') or '').strip()
-            rg = (item.get('rg') or '').strip()
-            grau = (item.get('grau_parentesco') or '').strip()
-            endereco = (item.get('endereco') or '').strip()
-            if not any([nome, cpf_herdeiro, rg, grau, endereco]):
-                continue
-            citado = bool(item.get('herdeiro_citado')) and not cited_set
-            if citado:
-                cited_set = True
-            Herdeiro.objects.create(
-                cpf_falecido=cpf,
-                nome_completo=nome,
-                cpf=cpf_herdeiro or None,
-                rg=rg or None,
-                grau_parentesco=grau or None,
-                herdeiro_citado=citado,
-                endereco=endereco or None,
-            )
+        parte_id = request.data.get('parte_id')
+        processo_id = request.data.get('processo_id')
+        processo = None
+        if processo_id:
+            try:
+                processo = ProcessoJudicial.objects.get(pk=processo_id)
+            except ProcessoJudicial.DoesNotExist:
+                processo = None
+        if parte_id:
+            try:
+                parte = Parte.objects.select_related('processo').get(pk=parte_id)
+                processo = parte.processo
+            except Parte.DoesNotExist:
+                processo = None
+        if processo is None:
+            parte = Parte.objects.select_related('processo').filter(
+                documento__in=[cpf, cpf_raw], tipo_polo='PASSIVO'
+            ).order_by('-id').first()
+            processo = parte.processo if parte else None
+
+        if not heranca_only:
+            Herdeiro.objects.filter(cpf_falecido=cpf).delete()
+            cited_set = False
+            for item in incoming:
+                nome = (item.get('nome_completo') or '').strip()
+                cpf_herdeiro = (item.get('cpf') or '').strip()
+                rg = (item.get('rg') or '').strip()
+                grau = (item.get('grau_parentesco') or '').strip()
+                endereco = (item.get('endereco') or '').strip()
+                if not any([nome, cpf_herdeiro, rg, grau, endereco]):
+                    continue
+                citado = bool(item.get('herdeiro_citado')) and not cited_set
+                if citado:
+                    cited_set = True
+                Herdeiro.objects.create(
+                    cpf_falecido=cpf,
+                    nome_completo=nome,
+                    cpf=cpf_herdeiro or None,
+                    rg=rg or None,
+                    grau_parentesco=grau or None,
+                    herdeiro_citado=citado,
+                    endereco=endereco or None,
+                )
+        if processo is not None:
+            heranca_valor = _parse_decimal_value(request.data.get('heranca_valor'))
+            heranca_descricao = (request.data.get('heranca_descricao') or '').strip()
+            processo.heranca_valor = heranca_valor
+            processo.heranca_descricao = heranca_descricao or None
+            processo.save(update_fields=['heranca_valor', 'heranca_descricao'])
         herdeiros = Herdeiro.objects.filter(cpf_falecido=cpf).order_by('-herdeiro_citado', 'id')
-        return Response({'cpf_falecido': cpf, 'herdeiros': self._serialize(herdeiros)})
+        return Response({
+            'cpf_falecido': cpf,
+            'herdeiros': self._serialize(herdeiros),
+            'heranca_valor': str(processo.heranca_valor) if processo and processo.heranca_valor is not None else '',
+            'heranca_descricao': processo.heranca_descricao if processo and processo.heranca_descricao else '',
+        })
 
 class AgendaTarefaUpdateDateAPIView(APIView):
     """

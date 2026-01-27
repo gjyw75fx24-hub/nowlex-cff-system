@@ -9,26 +9,403 @@ document.addEventListener('DOMContentLoaded', function() {
     const valorCausaInput = document.getElementById('id_valor_causa');
     const statusSelect = document.getElementById('id_status');
 
+    const carteiraSelect = document.getElementById('id_carteira');
+    let prevButton = null;
+    let nextButton = null;
+    let addButton = null;
+    let deleteButton = null;
+    const entryStates = [];
+    let currentEntryIndex = -1;
+    const ensureHiddenInput = (name) => {
+        if (!form) {
+            return null;
+        }
+        let input = form.querySelector(`input[name="${name}"]`);
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.id = `id_${name}`;
+            form.appendChild(input);
+        } else if (!input.id) {
+            input.id = `id_${name}`;
+        }
+        return input;
+    };
+    const cnjEntriesInput = ensureHiddenInput('cnj_entries_data');
+    const cnjActiveIndexInput = ensureHiddenInput('cnj_active_index');
+    const dedupeEntryStates = () => {
+        const seen = new Set();
+        const filtered = [];
+        entryStates.forEach((entry) => {
+            const key = entry.cnj ? entry.cnj.trim() : '';
+            if (!key || seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            filtered.push(entry);
+        });
+        entryStates.splice(0, entryStates.length, ...filtered);
+        if (entryStates.length === 0) {
+            currentEntryIndex = -1;
+        } else {
+            currentEntryIndex = Math.min(currentEntryIndex, entryStates.length - 1);
+        }
+    };
+
+    const syncHiddenEntries = () => {
+        if (cnjEntriesInput) {
+            cnjEntriesInput.value = JSON.stringify(entryStates);
+        }
+        if (cnjActiveIndexInput) {
+            cnjActiveIndexInput.value = currentEntryIndex;
+        }
+    };
+    const hydrateInitialEntries = () => {
+        const initialEntries = Array.isArray(window.__cnj_entries) ? window.__cnj_entries : [];
+        const desiredIndex = Number.isInteger(window.__cnj_active_index) ? window.__cnj_active_index : 0;
+        initialEntries.forEach((entry) => {
+            entryStates.push({
+                id: entry.id,
+                cnj: entry.cnj || '',
+                uf: entry.uf || '',
+                valor_causa: entry.valor_causa || '',
+                status: entry.status || '',
+                carteira: entry.carteira || '',
+                vara: entry.vara || '',
+                tribunal: entry.tribunal || '',
+            });
+        });
+        dedupeEntryStates();
+        if (entryStates.length > 0) {
+            currentEntryIndex = Math.min(Math.max(0, desiredIndex), entryStates.length - 1);
+            applyEntryState(entryStates[currentEntryIndex]);
+        }
+        syncHiddenEntries();
+        updateNavButtons();
+    };
+
+    const buildEntryState = () => {
+        const currentId = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex].id : null;
+        return {
+            id: currentId,
+            cnj: cnjInput.value.trim(),
+            uf: ufInput.value.trim(),
+            valor_causa: valorCausaInput.value.trim(),
+            status: statusSelect ? statusSelect.value : '',
+            carteira: carteiraSelect ? carteiraSelect.value : '',
+            vara: varaInput ? varaInput.value.trim() : '',
+            tribunal: tribunalInput ? tribunalInput.value.trim() : '',
+        };
+    };
+
+    const HEADER_TITLE = 'Dados do Processo';
+    const findHeaderElement = () => {
+        const headings = Array.from(document.querySelectorAll('#content-main h2'));
+        return headings.find((heading) => heading.textContent.trim() === HEADER_TITLE) || null;
+    };
+    let headerElement = findHeaderElement();
+    const headerTitleSpan = document.createElement('span');
+    const headerControls = document.createElement('div');
+    const storageKey = `dados_processo_state_${window.location.pathname}`;
+    const loadCollapsedPreference = () => {
+        try {
+            return window.localStorage?.getItem(storageKey);
+        } catch (error) {
+            return null;
+        }
+    };
+    const saveCollapsedPreference = (value) => {
+        try {
+            window.localStorage?.setItem(storageKey, value ? 'collapsed' : 'expanded');
+        } catch (error) {
+            // ignore storage errors
+        }
+    };
+
+    const ensureHeaderLayout = () => {
+        if (!headerElement) {
+            headerElement = findHeaderElement();
+        }
+        if (!headerElement) {
+            return null;
+        }
+        if (!headerElement.dataset.processoHeaderEnhanced) {
+            headerElement.dataset.processoHeaderEnhanced = 'true';
+            headerElement.innerHTML = '';
+            headerElement.style.display = 'flex';
+            headerElement.style.alignItems = 'center';
+            headerElement.style.justifyContent = 'space-between';
+            headerElement.style.gap = '0.6rem';
+            headerTitleSpan.className = 'processo-header-title';
+            headerControls.className = 'processo-header-controls';
+            headerControls.style.display = 'inline-flex';
+            headerControls.style.alignItems = 'center';
+            headerControls.style.gap = '0.35rem';
+            headerControls.style.marginLeft = 'auto';
+            headerControls.style.marginRight = '0';
+            headerControls.style.padding = '0';
+            headerElement.appendChild(headerTitleSpan);
+            headerElement.appendChild(headerControls);
+        }
+        return headerElement.closest('fieldset');
+    };
+
+    // Add minimize/maximize buttons for the Dados do Processo section.
+    const setupCollapseControls = (() => {
+        let initialized = false;
+        const createControlButton = (symbol, title) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'button tertiary';
+            button.textContent = symbol;
+            button.title = title;
+            button.setAttribute('aria-label', title);
+            button.style.padding = '0 0.65rem';
+            button.style.height = '32px';
+            button.style.minWidth = '32px';
+            button.style.display = 'inline-flex';
+            button.style.alignItems = 'center';
+            button.style.justifyContent = 'center';
+            button.style.fontSize = '1.25rem';
+            button.style.lineHeight = '1';
+            return button;
+        };
+        return (fieldset) => {
+            if (initialized || !fieldset || !headerElement) {
+                return;
+            }
+            const contentNodes = Array.from(fieldset.children).filter((node) => node !== headerElement);
+            if (contentNodes.length === 0) {
+                return;
+            }
+            contentNodes.forEach((node) => {
+                if (typeof node.dataset.originalDisplay === 'undefined') {
+                    node.dataset.originalDisplay = node.style.display || '';
+                }
+            });
+            const minimizeButton = createControlButton('-', 'Minimizar dados do processo');
+            const maximizeButton = createControlButton('+', 'Maximizar dados do processo');
+            const setCollapsed = (value) => {
+                contentNodes.forEach((node) => {
+                    node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+                });
+                minimizeButton.disabled = value;
+                maximizeButton.disabled = !value;
+                headerElement.dataset.processSectionCollapsed = value ? 'true' : 'false';
+                saveCollapsedPreference(value);
+            };
+            minimizeButton.addEventListener('click', () => setCollapsed(true));
+            maximizeButton.addEventListener('click', () => setCollapsed(false));
+            headerControls.appendChild(minimizeButton);
+            headerControls.appendChild(maximizeButton);
+            const stored = loadCollapsedPreference();
+            const initialCollapsed = stored === 'collapsed';
+            setCollapsed(initialCollapsed);
+            initialized = true;
+        };
+    })();
+
+    const setActiveCnjText = () => {
+        const fieldset = ensureHeaderLayout();
+        headerTitleSpan.textContent = HEADER_TITLE;
+        const collapseContainer = fieldset || headerElement?.parentElement;
+        if (collapseContainer) {
+            setupCollapseControls(collapseContainer);
+        }
+        if (window.__setActiveCnjHeader) {
+            window.__setActiveCnjHeader(HEADER_TITLE);
+        }
+        if (typeof window.__cnj_active_display !== 'undefined') {
+            window.__cnj_active_display = HEADER_TITLE;
+        }
+    };
+
+    const applyEntryState = (entry) => {
+        cnjInput.value = entry.cnj;
+        if (ufInput) ufInput.value = entry.uf;
+        if (valorCausaInput) valorCausaInput.value = entry.valor_causa;
+        if (statusSelect) statusSelect.value = entry.status;
+        if (carteiraSelect) carteiraSelect.value = entry.carteira;
+        if (varaInput) varaInput.value = entry.vara;
+        if (tribunalInput) tribunalInput.value = entry.tribunal;
+        cnjInput.focus();
+        setActiveCnjText();
+    };
+
+    const updateNavButtons = () => {
+        if (prevButton) {
+            prevButton.disabled = currentEntryIndex <= 0 || entryStates.length <= 1;
+        }
+        if (nextButton) {
+            nextButton.disabled = entryStates.length <= 1 || currentEntryIndex < 0 || currentEntryIndex >= entryStates.length - 1;
+        }
+        if (deleteButton) {
+            deleteButton.disabled = entryStates.length === 0;
+        }
+    };
+
+    const storeCurrentEntry = () => {
+        const currentState = buildEntryState();
+        if (currentEntryIndex >= 0) {
+            entryStates[currentEntryIndex] = currentState;
+        } else if (currentState.cnj) {
+            entryStates.push(currentState);
+            currentEntryIndex = entryStates.length - 1;
+        }
+        dedupeEntryStates();
+        syncHiddenEntries();
+    };
+
     // --- 1. Criação do Botão "Dados Online" ---
     if (cnjInput && !document.getElementById('btn_buscar_cnj')) {
         const searchButton = document.createElement('button');
         searchButton.id = 'btn_buscar_cnj';
         searchButton.type = 'button';
         searchButton.className = 'button';
-        searchButton.innerText = '📄 Dados Online';
-        searchButton.style.marginLeft = '10px';
-        cnjInput.parentNode.appendChild(searchButton);
+        searchButton.innerHTML = '🌐';
+        searchButton.title = 'Buscar dados online (API Escavador)';
+        searchButton.setAttribute('aria-label', 'Buscar dados online (API Escavador)');
+        searchButton.style.marginLeft = '6px';
+        searchButton.style.padding = '0';
+        searchButton.style.minWidth = '32px';
+        searchButton.style.width = '32px';
+        searchButton.style.height = '32px';
+        searchButton.style.lineHeight = '32px';
+        searchButton.style.display = 'inline-flex';
+        searchButton.style.alignItems = 'center';
+        searchButton.style.justifyContent = 'center';
+        searchButton.style.borderRadius = '4px';
+
+        const cnjInputParent = cnjInput.parentNode;
+        const inlineGroup = document.createElement('div');
+        inlineGroup.className = 'cnj-inline-group';
+        inlineGroup.style.display = 'inline-flex';
+        inlineGroup.style.alignItems = 'center';
+        inlineGroup.style.gap = '6px';
+        inlineGroup.style.flexWrap = 'nowrap';
+        cnjInputParent.insertBefore(inlineGroup, cnjInput);
+        inlineGroup.appendChild(cnjInput);
+        inlineGroup.appendChild(searchButton);
+
+        addButton = document.createElement('button');
+        addButton.id = 'btn_add_cnj';
+        addButton.type = 'button';
+        addButton.className = 'button secondary';
+        addButton.innerHTML = '+';
+        addButton.title = 'Adicionar novo Número CNJ';
+        addButton.setAttribute('aria-label', 'Adicionar novo Número CNJ');
+        addButton.style.padding = '0 .75rem';
+        addButton.style.minWidth = '34px';
+        addButton.style.height = '32px';
+        inlineGroup.appendChild(addButton);
+
+        prevButton = document.createElement('button');
+        prevButton.id = 'btn_prev_cnj';
+        prevButton.type = 'button';
+        prevButton.className = 'button tertiary';
+        prevButton.innerHTML = '‹';
+        prevButton.title = 'Ir para CNJ anterior';
+        prevButton.style.padding = '0 .65rem';
+        prevButton.style.minWidth = '34px';
+        prevButton.style.height = '32px';
+        prevButton.disabled = true;
+        inlineGroup.appendChild(prevButton);
+
+        nextButton = document.createElement('button');
+        nextButton.id = 'btn_next_cnj';
+        nextButton.type = 'button';
+        nextButton.className = 'button tertiary';
+        nextButton.innerHTML = '›';
+        nextButton.title = 'Ir para próximo CNJ';
+        nextButton.style.padding = '0 .65rem';
+        nextButton.style.minWidth = '34px';
+        nextButton.style.height = '32px';
+        nextButton.disabled = true;
+        inlineGroup.appendChild(nextButton);
+
+        deleteButton = document.createElement('button');
+        deleteButton.id = 'btn_delete_cnj';
+        deleteButton.type = 'button';
+        deleteButton.className = 'button destructive';
+        deleteButton.innerHTML = '×';
+        deleteButton.title = 'Remover CNJ ativo';
+        deleteButton.setAttribute('aria-label', 'Remover CNJ ativo');
+        deleteButton.style.padding = '0 .75rem';
+        deleteButton.style.minWidth = '34px';
+        deleteButton.style.height = '32px';
+        inlineGroup.appendChild(deleteButton);
+
+        const clearFields = () => {
+        cnjInput.value = '';
+        if (ufInput) ufInput.value = '';
+        if (valorCausaInput) valorCausaInput.value = '';
+            if (statusSelect) statusSelect.selectedIndex = 0;
+            if (varaInput) varaInput.value = '';
+            if (tribunalInput) tribunalInput.value = '';
+        if (carteiraSelect) carteiraSelect.selectedIndex = 0;
+        cnjInput.focus();
+        setActiveCnjText();
+        };
+
+        deleteButton.addEventListener('click', () => {
+            if (currentEntryIndex < 0 || entryStates.length === 0) {
+                return;
+            }
+            entryStates.splice(currentEntryIndex, 1);
+            if (entryStates.length === 0) {
+                currentEntryIndex = -1;
+                clearFields();
+            } else {
+                currentEntryIndex = Math.min(currentEntryIndex, entryStates.length - 1);
+                applyEntryState(entryStates[currentEntryIndex]);
+            }
+            dedupeEntryStates();
+            syncHiddenEntries();
+            updateNavButtons();
+        });
+
+        addButton.addEventListener('click', () => {
+            storeCurrentEntry();
+            clearFields();
+            currentEntryIndex = -1;
+            syncHiddenEntries();
+            updateNavButtons();
+        });
+
+        prevButton.addEventListener('click', () => {
+            if (currentEntryIndex > 0) {
+                storeCurrentEntry();
+                currentEntryIndex -= 1;
+                applyEntryState(entryStates[currentEntryIndex]);
+                updateNavButtons();
+                syncHiddenEntries();
+            }
+        });
+
+        nextButton.addEventListener('click', () => {
+            if (currentEntryIndex < entryStates.length - 1) {
+                storeCurrentEntry();
+                currentEntryIndex += 1;
+                applyEntryState(entryStates[currentEntryIndex]);
+                updateNavButtons();
+                syncHiddenEntries();
+            }
+        });
+
+        hydrateInitialEntries();
 
         const feedbackDiv = document.createElement('div');
         feedbackDiv.id = 'cnj_feedback';
         feedbackDiv.style.marginTop = '5px';
         feedbackDiv.style.fontWeight = 'bold';
-        cnjInput.parentNode.parentNode.appendChild(feedbackDiv);
+        inlineGroup.parentNode.parentNode.appendChild(feedbackDiv);
+
+        hydrateInitialEntries();
     }
 
     const searchButton = document.getElementById('btn_buscar_cnj');
     const cnjFeedback = document.getElementById('cnj_feedback');
-
 
     // --- 2. Prevenção de Envio com Enter ---
     if (form) {
@@ -37,81 +414,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 event.preventDefault();
             }
         });
-    }
-
-    // --- 2.b Controles de minimizar/maximizar os Dados do Processo ---
-    (function () {
-        const findHeader = () => {
-            const headings = Array.from(document.querySelectorAll('#content-main h2'));
-            return headings.find((heading) => heading.textContent.trim() === 'Dados do Processo') || null;
-        };
-        let header = findHeader();
-        if (!header) return;
-        const fieldset = header.closest('fieldset') || header.parentElement;
-        if (!fieldset) return;
-        const controlWrapper = document.createElement('div');
-        controlWrapper.style.display = 'inline-flex';
-        controlWrapper.style.gap = '0.35rem';
-        const createBtn = (symbol, title) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'button tertiary';
-            btn.textContent = symbol;
-            btn.title = title;
-            btn.setAttribute('aria-label', title);
-            btn.style.padding = '0 0.6rem';
-            btn.style.height = '32px';
-            btn.style.minWidth = '32px';
-            btn.style.display = 'inline-flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.fontSize = '1.25rem';
-            btn.style.lineHeight = '1';
-            return btn;
-        };
-        const contentNodes = Array.from(fieldset.children).filter(node => node !== header);
-        contentNodes.forEach(node => {
-            if (typeof node.dataset.originalDisplay === 'undefined') {
-                node.dataset.originalDisplay = node.style.display || '';
-            }
+        form.addEventListener('submit', function() {
+            storeCurrentEntry();
+            syncHiddenEntries();
+            console.debug('cnj_entries submit', entryStates);
         });
-        const minimizeBtn = createBtn('-', 'Minimizar dados do processo');
-        const maximizeBtn = createBtn('+', 'Maximizar dados do processo');
-        const storageKey = 'dados_processo_collapsed';
-        const saveCollapsedPreference = (collapsed) => {
-            try {
-                window.localStorage?.setItem(storageKey, collapsed ? 'collapsed' : 'expanded');
-            } catch (_){}
-        };
-        const loadCollapsedPreference = () => {
-            try {
-                return window.localStorage?.getItem(storageKey);
-            } catch (_){}
-            return null;
-        };
-        const setCollapsed = (value) => {
-            contentNodes.forEach(node => {
-                node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
-            });
-            minimizeBtn.disabled = value;
-            maximizeBtn.disabled = !value;
-            header.dataset.processSectionCollapsed = value ? 'true' : 'false';
-            saveCollapsedPreference(value);
-        };
-        minimizeBtn.addEventListener('click', () => setCollapsed(true));
-        maximizeBtn.addEventListener('click', () => setCollapsed(false));
-        controlWrapper.appendChild(minimizeBtn);
-        controlWrapper.appendChild(maximizeBtn);
-        header.style.display = 'flex';
-        header.style.alignItems = 'center';
-        header.style.justifyContent = 'space-between';
-        header.style.gap = '0.35rem';
-        header.appendChild(controlWrapper);
-        setTimeout(() => {
-            const stored = loadCollapsedPreference();
-            setCollapsed(stored === 'collapsed');
-        }, 10);
-    })();
+    }
 
     // --- 3. Lógica do Botão "Preencher UF" ---
     if (ufInput && !document.getElementById("btn_preencher_uf")) {
@@ -157,6 +465,15 @@ document.addEventListener('DOMContentLoaded', function() {
         ufInput.parentNode.insertBefore(botao, ufInput.nextSibling);
     }
 
+    if (ufInput) {
+        ufInput.setAttribute('maxlength', '2');
+        ufInput.style.maxWidth = '70px';
+        ufInput.style.width = '70px';
+        ufInput.style.textTransform = 'uppercase';
+        ufInput.style.letterSpacing = '0.08em';
+        ufInput.style.fontSize = '0.95rem';
+    }
+
     // --- 4. Lógica do Botão de Busca Online ---
     function getCookie(name) {
         let cookieValue = null;
@@ -187,6 +504,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
 
+    function clearInlineDuplicateValidationErrors() {
+        document.querySelectorAll('.dynamic-andamento').forEach(row => {
+            const errorList = row.querySelector('.errorlist');
+            if (errorList && /Andamento Processual com este Processo/.test(errorList.textContent)) {
+                errorList.remove();
+            }
+            const erroredRows = row.querySelectorAll('.errors');
+            erroredRows.forEach(errorNode => {
+                errorNode.classList.remove('errors');
+            });
+        });
+    }
+
     function deduplicateInlineAndamentos() {
         const seen = new Set();
         let removedCount = 0;
@@ -216,6 +546,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 seen.add(key);
             }
         });
+        if (removedCount > 0) {
+            clearInlineDuplicateValidationErrors();
+        }
         return removedCount;
     }
 
@@ -270,12 +603,92 @@ document.addEventListener('DOMContentLoaded', function() {
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
-        detailCardBody.style.maxHeight = '320px';
-        detailCardBody.style.display = 'block';
-        detailCardBody.style.overflowY = 'auto';
-        detailCardBody.style.overflowX = 'hidden';
-        detailCardBody.style.paddingRight = '0.5rem';
-        renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
+        if (detailCardBody && detailList && calendarGridEl) {
+            detailCardBody.style.maxHeight = '320px';
+            detailCardBody.style.display = 'block';
+            detailCardBody.style.overflowY = 'auto';
+            detailCardBody.style.overflowX = 'hidden';
+            detailCardBody.style.paddingRight = '0.5rem';
+            renderCalendarDays(calendarGridEl, detailList, detailCardBody, null, null, () => {});
+        }
+    };
+
+    let observationTooltip = null;
+    let tooltipVisibilityInput = null;
+    let tooltipHideTimeout = null;
+
+    const ensureObservationTooltip = () => {
+        if (!observationTooltip) {
+            observationTooltip = document.createElement('div');
+            observationTooltip.className = 'checagem-observation-tooltip';
+            observationTooltip.style.display = 'none';
+            document.body.appendChild(observationTooltip);
+            observationTooltip.addEventListener('mouseenter', () => {
+                cancelScheduledTooltipHide();
+            });
+            observationTooltip.addEventListener('mouseleave', () => {
+                scheduleObservationTooltipHide();
+            });
+        }
+        return observationTooltip;
+    };
+
+    const cancelScheduledTooltipHide = () => {
+        if (tooltipHideTimeout) {
+            clearTimeout(tooltipHideTimeout);
+            tooltipHideTimeout = null;
+        }
+    };
+
+    const showObservationTooltip = (input) => {
+        if (!input || !input.value.trim()) {
+            return;
+        }
+        const tooltip = ensureObservationTooltip();
+        tooltip.textContent = input.value;
+        const rect = input.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.style.display = 'block';
+        tooltipVisibilityInput = input;
+        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
+        if (overflowBottom > 0) {
+            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
+        }
+        cancelScheduledTooltipHide();
+    };
+
+    const hideObservationTooltip = () => {
+        if (observationTooltip) {
+            observationTooltip.style.display = 'none';
+            tooltipVisibilityInput = null;
+            cancelScheduledTooltipHide();
+        }
+    };
+
+    const scheduleObservationTooltipHide = () => {
+        cancelScheduledTooltipHide();
+        tooltipHideTimeout = setTimeout(() => {
+            hideObservationTooltip();
+        }, 220);
+    };
+
+    const showObservationTooltipForTarget = (target, text) => {
+        if (!target || !text) {
+            return;
+        }
+        const tooltip = ensureObservationTooltip();
+        tooltip.textContent = text;
+        const rect = target.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.style.display = 'block';
+        tooltipVisibilityInput = target;
+        const overflowBottom = rect.top + tooltip.offsetHeight - window.innerHeight;
+        if (overflowBottom > 0) {
+            tooltip.style.top = `${Math.max(8, rect.top - overflowBottom - 8)}px`;
+        }
+        cancelScheduledTooltipHide();
     };
 
     const insertAgendaSidebarPlaceholder = () => {
@@ -760,6 +1173,16 @@ document.addEventListener('DOMContentLoaded', function() {
             entryOrigins.set(key, originDate || entry.originalDay || entry.day);
         }
     };
+
+    const shouldIncludeEntryForActiveUser = (entry, activeUserId) => {
+        if (!activeUserId) {
+            return true;
+        }
+        if (entry?.type === 'S') {
+            return true;
+        }
+        return `${entry?.responsavel?.id || ''}` === `${activeUserId}`;
+    };
     const applyOriginFromMap = (entry) => {
         const key = getOriginKey(entry);
         if (!key) return;
@@ -1128,7 +1551,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 let filtered = combined;
                 const activeUserId = calendarStateRef?.activeUser?.id;
                 if (activeUserId) {
-                    filtered = filtered.filter(entry => entry?.responsavel?.id === activeUserId);
+                    filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
                 }
                 if (calendarStateRef?.focused && currentProcessId) {
                     filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
@@ -1262,7 +1685,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </span>`;
                 checagemButton.addEventListener('click', (event) => {
                     event.stopPropagation();
-                    openAgendaChecagemPanel(entryData, checagemButton);
+                    openAgendaChecagemFromEntry(entryData, checagemButton);
                 });
                 actions.appendChild(checagemButton);
                 footerGroup.appendChild(actions);
@@ -1707,6 +2130,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         document.body.appendChild(overlay);
+        document.body.classList.add('agenda-panel-open');
         const closeButton = overlay.querySelector('.agenda-panel__close');
         const refreshButton = overlay.querySelector('.agenda-panel__refresh-btn');
         const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
@@ -2230,8 +2654,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let entriesToApply = agendaEntries;
         const activeUserId = calendarState.activeUser?.id;
         if (activeUserId) {
-            entriesToApply = entriesToApply.filter(
-                entry => `${entry?.responsavel?.id || ''}` === `${activeUserId}`
+            entriesToApply = entriesToApply.filter(entry =>
+                shouldIncludeEntryForActiveUser(entry, activeUserId)
             );
         }
         if (calendarState.focused && currentProcessId) {
@@ -2444,12 +2868,7 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.preserveView = true;
             renderCalendar();
         };
-        closeButton.addEventListener('click', () => overlay.remove());
-        overlay.addEventListener('click', (event) => {
-            if (event.target === overlay) {
-                overlay.remove();
-            }
-        });
+        closeButton.addEventListener('click', () => closeAgendaPanel());
         cycleBtn.addEventListener('click', () => {
             const current = Number(cycleBtn.dataset.months) || 1;
             const next = current === 3 ? 1 : current + 1;
@@ -2508,6 +2927,29 @@ document.addEventListener('DOMContentLoaded', function() {
         renderCalendar();
     };
 
+    const closeAgendaPanel = () => {
+        const overlay = document.querySelector('.agenda-panel-overlay');
+        if (!overlay) {
+            return;
+        }
+        closeChecagemModal();
+        overlay.remove();
+        document.body.classList.remove('agenda-panel-open');
+    };
+
+    const handleAgendaPanelEscape = (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        const checagemOverlay = document.getElementById('checagem-modal-overlay');
+        if (checagemOverlay && checagemOverlay.getAttribute('aria-hidden') === 'false') {
+            closeChecagemModal();
+            return;
+        }
+        closeAgendaPanel();
+    };
+    document.addEventListener('keydown', handleAgendaPanelEscape);
+
     const createAgendaFormModal = (type) => {
         if (document.querySelector(`.agenda-form-modal[data-form="${type}"]`)) {
             return;
@@ -2562,7 +3004,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const attachAgendaActions = () => {
         const placeholder = document.querySelector('.agenda-placeholder-card');
         if (!placeholder) return;
-        placeholder.addEventListener('click', () => openAgendaPanel());
+        placeholder.addEventListener('click', (event) => {
+            event.preventDefault();
+            if (document.querySelector('.agenda-panel-overlay')) {
+                closeAgendaPanel();
+                return;
+            }
+            openAgendaPanel();
+        });
         placeholder.querySelectorAll('[data-agenda-action]').forEach(btn => {
             btn.addEventListener('click', (event) => {
                 event.stopPropagation();
@@ -2750,13 +3199,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error(data.message || 'Erro ao remover duplicados.');
                 }
                 const removed = data.removed || 0;
+                const defaultServerMessage = removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.';
+                const serverMessage = data.message || defaultServerMessage;
                 const messageParts = [];
-                const serverMessage = data.message || (removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.');
-                if (serverMessage) {
-                    messageParts.push(serverMessage);
-                }
                 if (inlineRemoved > 0) {
                     messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                }
+                if (removed > 0) {
+                    messageParts.push(serverMessage);
+                } else if (inlineRemoved === 0) {
+                    messageParts.push(serverMessage);
                 }
                 if (!messageParts.length) {
                     messageParts.push('Nenhum andamento duplicado encontrado.');
@@ -3104,15 +3556,204 @@ document.addEventListener('DOMContentLoaded', function() {
         return row;
     }
     const herdeirosCache = new Map();
-    const fetchHerdeiros = (cpf) => {
+    const OBITO_UFS = ['', 'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
+        'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+    let obitoModal = null;
+    const buildAdminRoot = (() => {
+        const path = window.location.pathname;
+        if (!path.includes('/admin')) {
+            return '/admin';
+        }
+        return path.split('/admin')[0] + '/admin';
+    })();
+    const buildObitoUrl = (parteId) => `${window.location.origin}${buildAdminRoot}/contratos/parte/${parteId}/obito-info/`;
+    const formatDateForTooltip = (isoValue) => {
+        if (!isoValue) {
+            return '';
+        }
+        const parts = isoValue.split('-');
+        if (parts.length !== 3) {
+            return isoValue;
+        }
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+    const computeObitoTooltipText = (card) => {
+        if (!card) return '';
+        const dateValue = card.dataset.obitoData;
+        const cidade = card.dataset.obitoCidade || '';
+        const uf = card.dataset.obitoUf || '';
+        const parts = [];
+        if (dateValue) {
+            parts.push(`Data: ${formatDateForTooltip(dateValue)}`);
+        }
+        if (cidade) {
+            parts.push(`Cidade: ${cidade}`);
+        }
+        if (uf) {
+            parts.push(`UF: ${uf}`);
+        }
+        return parts.join(' · ');
+    };
+    const ensureObitoModal = () => {
+        if (obitoModal) {
+            return obitoModal;
+        }
+        obitoModal = document.createElement('div');
+        obitoModal.className = 'obito-modal';
+        obitoModal.setAttribute('aria-hidden', 'true');
+        obitoModal.innerHTML = `
+            <div class="obito-modal__panel">
+                <div class="obito-modal__header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong>Detalhes do Óbito</strong>
+                    <button type="button" class="obito-modal__close" aria-label="Fechar">&times;</button>
+                </div>
+                <form class="obito-modal__form">
+                    <label>
+                        Data do óbito
+                        <input type="date" name="obito_data">
+                    </label>
+                    <label>
+                        Cidade
+                        <input type="text" name="obito_cidade" placeholder="Cidade">
+                    </label>
+                    <label>
+                        UF
+                        <select name="obito_uf"></select>
+                    </label>
+                    <div class="obito-modal__actions">
+                        <button type="button" class="button button-primary obito-modal__save">Salvar</button>
+                        <button type="button" class="button obito-modal__cancel">Cancelar</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        const select = obitoModal.querySelector('select[name="obito_uf"]');
+        if (select) {
+            OBITO_UFS.forEach((uf) => {
+                const option = document.createElement('option');
+                option.value = uf;
+                option.textContent = uf || 'Selecione a UF';
+                select.appendChild(option);
+            });
+        }
+        document.body.appendChild(obitoModal);
+        const closeHandler = () => {
+            obitoModal.setAttribute('aria-hidden', 'true');
+        };
+        obitoModal.querySelector('.obito-modal__close')?.addEventListener('click', closeHandler);
+        obitoModal.querySelector('.obito-modal__cancel')?.addEventListener('click', closeHandler);
+        obitoModal.addEventListener('click', (event) => {
+            if (event.target === obitoModal) {
+                closeHandler();
+            }
+        });
+        return obitoModal;
+    };
+    const openObitoModal = (card) => {
+        if (!card) return;
+        const modal = ensureObitoModal();
+        const form = modal.querySelector('.obito-modal__form');
+        if (!form) return;
+        const dateInput = form.querySelector('input[name="obito_data"]');
+        const cidadeInput = form.querySelector('input[name="obito_cidade"]');
+        const ufSelect = form.querySelector('select[name="obito_uf"]');
+        if (dateInput) {
+            dateInput.value = card.dataset.obitoData || '';
+        }
+        if (cidadeInput) {
+            cidadeInput.value = card.dataset.obitoCidade || '';
+        }
+        if (ufSelect) {
+            ufSelect.value = card.dataset.obitoUf || '';
+        }
+        modal.dataset.parteId = card.dataset.parteId || '';
+        modal.setAttribute('aria-hidden', 'false');
+        dateInput?.focus();
+    };
+    const hideObitoModal = () => {
+        if (obitoModal) {
+            obitoModal.setAttribute('aria-hidden', 'true');
+        }
+    };
+    const updateCardObitoData = (card, payload = {}) => {
+        if (!card) return;
+        if (typeof payload.obito_data !== 'undefined') {
+            card.dataset.obitoData = payload.obito_data || '';
+        }
+        if (typeof payload.obito_cidade !== 'undefined') {
+            card.dataset.obitoCidade = payload.obito_cidade || '';
+        }
+        if (typeof payload.obito_uf !== 'undefined') {
+            card.dataset.obitoUf = payload.obito_uf || '';
+        }
+    };
+    const setupObitoModalActions = () => {
+        const modal = ensureObitoModal();
+        const saveButton = modal.querySelector('.obito-modal__save');
+        const form = modal.querySelector('.obito-modal__form');
+        const getFormValue = (name) => form?.querySelector(`[name="${name}"]`)?.value || '';
+        if (!saveButton || !form) return;
+        saveButton.addEventListener('click', () => {
+            const parteId = modal.dataset.parteId;
+            if (!parteId) {
+                return;
+            }
+            const payload = {
+                data_obito: getFormValue('obito_data'),
+                cidade: getFormValue('obito_cidade'),
+                uf: getFormValue('obito_uf'),
+            };
+            saveButton.disabled = true;
+            fetch(buildObitoUrl(parteId), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken || '',
+                },
+                body: JSON.stringify(payload),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.json().then((err) => {
+                            throw new Error(err.error || 'Não foi possível salvar os dados do óbito.');
+                        });
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const card = document.querySelector(`.info-card[data-parte-id="${parteId}"]`);
+                    updateCardObitoData(card, data);
+                    hideObitoModal();
+                    createSystemAlert('Óbito', 'Dados atualizados com sucesso.');
+                })
+                .catch((error) => {
+                    createSystemAlert('Óbito', error.message || 'Erro ao salvar os dados do óbito.');
+                })
+                .finally(() => {
+                    saveButton.disabled = false;
+                });
+        });
+    };
+    const buildHerdeirosCacheKey = (cpf, parteId = '', processoId = '') => {
+        return `${cpf}:${parteId || ''}:${processoId || ''}`;
+    };
+    const fetchHerdeiros = (cpf, parteId = '', processoId = '') => {
         const normalized = normalizeCpf(cpf);
         if (!normalized) {
             return Promise.resolve({ cpf_falecido: '', herdeiros: [] });
         }
-        if (herdeirosCache.has(normalized)) {
-            return herdeirosCache.get(normalized);
+        const cacheKey = buildHerdeirosCacheKey(normalized, parteId, processoId);
+        if (herdeirosCache.has(cacheKey)) {
+            return herdeirosCache.get(cacheKey);
         }
-        const promise = fetch(`/api/herdeiros/?cpf_falecido=${encodeURIComponent(normalized)}`)
+        const query = new URLSearchParams({ cpf_falecido: normalized });
+        if (parteId) {
+            query.set('parte_id', parteId);
+        }
+        if (processoId) {
+            query.set('processo_id', processoId);
+        }
+        const promise = fetch(`/api/herdeiros/?${query.toString()}`)
             .then((response) => {
                 if (!response.ok) {
                     throw new Error('Falha ao buscar herdeiros.');
@@ -3120,10 +3761,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return response.json();
             })
             .catch((error) => {
-                herdeirosCache.delete(normalized);
+                herdeirosCache.delete(cacheKey);
                 throw error;
             });
-        herdeirosCache.set(normalized, promise);
+        herdeirosCache.set(cacheKey, promise);
         return promise;
     };
     const updateHerdeirosBadge = (card, hasEntries) => {
@@ -3148,8 +3789,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="herdeiros-modal__body">
                     <div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>
                 </div>
+                <div class="herdeiros-modal__heritage-form" hidden>
+                    <label>
+                        Valor da herança
+                        <input type="text" name="heranca_valor" placeholder="R$ 0,00">
+                    </label>
+                    <label>
+                        Descrição
+                        <input type="text" name="heranca_descricao" placeholder="Ex: Terreno, cota...">
+                    </label>
+                    <div class="herdeiros-modal__heritage-form-actions">
+                        <button type="button" class="herdeiros-modal__heritage-apply">Aplicar</button>
+                        <button type="button" class="herdeiros-modal__heritage-cancel">Cancelar</button>
+                    </div>
+                </div>
                 <div class="herdeiros-modal__footer">
-                    <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                    <div class="herdeiros-modal__footer-actions">
+                        <button type="button" class="herdeiros-modal__add">+ Adicionar herdeiro</button>
+                        <button type="button" class="herdeiros-modal__heritage-toggle">Informar Herança</button>
+                        <span class="herdeiros-modal__heritage-summary" aria-live="polite" hidden></span>
+                    </div>
                     <button type="button" class="herdeiros-modal__save">Salvar herdeiros</button>
                 </div>
             </div>
@@ -3163,12 +3822,115 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.querySelector('.herdeiros-modal__close').addEventListener('click', () => {
             modal.setAttribute('aria-hidden', 'true');
         });
+        const attachDescricaoTooltip = () => {
+            const descriptionInput = modal.querySelector('.herdeiros-modal__heritage-form input[name=heranca_descricao]');
+            if (!descriptionInput) return;
+            descriptionInput.addEventListener('mouseenter', () => showObservationTooltip(descriptionInput));
+            descriptionInput.addEventListener('focus', () => showObservationTooltip(descriptionInput));
+            descriptionInput.addEventListener('mouseleave', () => scheduleObservationTooltipHide());
+            descriptionInput.addEventListener('blur', () => hideObservationTooltip());
+        };
+        attachDescricaoTooltip();
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && modal.getAttribute('aria-hidden') !== 'true') {
                 modal.setAttribute('aria-hidden', 'true');
             }
         });
         return modal;
+    };
+    const getHerancaNumericValue = (modal) => {
+        if (!modal || !modal.dataset) return null;
+        const raw = modal.dataset.herancaValue;
+        if (!raw) return null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+    const updateHerancaSummary = (modal) => {
+        if (!modal) return;
+        const summary = modal.querySelector('.herdeiros-modal__heritage-summary');
+        if (!summary) return;
+        const value = getHerancaNumericValue(modal);
+        if (!value) {
+            summary.textContent = '';
+            summary.hidden = true;
+            return;
+        }
+        const description = (modal.dataset.herancaDescription || '').trim();
+        const parts = [];
+        if (description) {
+            parts.push(description);
+        }
+        summary.textContent = parts.join(' · ');
+        summary.hidden = false;
+    };
+    const updatePartilhaFields = (modal) => {
+        if (!modal) return;
+        const body = modal.querySelector('.herdeiros-modal__body');
+        if (!body) return;
+        const entries = Array.from(body.querySelectorAll('.herdeiros-entry'));
+        const herancaValue = getHerancaNumericValue(modal);
+        const share = herancaValue && entries.length ? herancaValue / entries.length : null;
+        entries.forEach((entry) => {
+            const partilhaInput = entry.querySelector('input[name=partilha]');
+            if (!partilhaInput) return;
+            partilhaInput.value = share ? formatCurrencyBrl(share) : '';
+        });
+    };
+    const setHerancaState = (modal, numericValue, description) => {
+        if (!modal) return;
+        if (numericValue !== null) {
+            modal.dataset.herancaValue = String(numericValue);
+        } else {
+            delete modal.dataset.herancaValue;
+        }
+        if (description) {
+            modal.dataset.herancaDescription = description;
+        } else {
+            delete modal.dataset.herancaDescription;
+        }
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (heritageForm) {
+            const valorInput = heritageForm.querySelector('input[name="heranca_valor"]');
+            const descInput = heritageForm.querySelector('input[name="heranca_descricao"]');
+            if (valorInput) {
+                valorInput.value = numericValue !== null ? formatCurrencyBrl(numericValue) : '';
+            }
+            if (descInput) {
+                descInput.value = description || '';
+            }
+        }
+        updateHerancaSummary(modal);
+        updatePartilhaFields(modal);
+        const cardSelector = modal.dataset.parteId
+            ? `.info-card[data-parte-id="${modal.dataset.parteId}"]`
+            : null;
+        const card = cardSelector ? document.querySelector(cardSelector) : null;
+        if (card) {
+            if (modal.dataset.herancaValue) {
+                card.dataset.herancaValue = modal.dataset.herancaValue;
+            } else {
+                delete card.dataset.herancaValue;
+            }
+            if (modal.dataset.herancaDescription) {
+                card.dataset.herancaDescription = modal.dataset.herancaDescription;
+            } else {
+                delete card.dataset.herancaDescription;
+            }
+        }
+    };
+    const refreshHerancaInputs = (modal) => {
+        if (!modal) return;
+        const form = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (!form) return;
+        const valorInput = form.querySelector('input[name=heranca_valor]');
+        const descInput = form.querySelector('input[name=heranca_descricao]');
+        const value = getHerancaNumericValue(modal);
+        if (valorInput) {
+            valorInput.value = value ? formatCurrencyBrl(value) : '';
+        }
+        if (descInput) {
+            descInput.value = modal.dataset.herancaDescription || '';
+        }
     };
     const renderHerdeiroEntry = (data = {}, index = 0) => {
         const entry = document.createElement('div');
@@ -3187,6 +3949,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 </label>
                 <label>Grau de parentesco
                     <input type="text" name="grau_parentesco">
+                </label>
+                <label class="herdeiros-entry__partilha">Partilha
+                    <input type="text" name="partilha" readonly>
                 </label>
             </div>
             <div class="herdeiros-entry__actions">
@@ -3268,8 +4033,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!body.querySelector('.herdeiros-entry')) {
                     body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
                 }
+                updatePartilhaFields(modal);
             });
         });
+        updatePartilhaFields(modal);
     };
     const openHerdeirosModal = (card) => {
         const cpfRaw = card?.dataset?.parteCpf || '';
@@ -3283,13 +4050,37 @@ document.addEventListener('DOMContentLoaded', function() {
         if (card?.dataset?.parteId) {
             modal.dataset.parteId = card.dataset.parteId;
         }
+        if (card?.dataset?.processoId) {
+            modal.dataset.processoId = card.dataset.processoId;
+        }
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        if (card) {
+            modal.dataset.herancaValue = card.dataset.herancaValue || '';
+            modal.dataset.herancaDescription = card.dataset.herancaDescription || '';
+        } else {
+            delete modal.dataset.herancaValue;
+            delete modal.dataset.herancaDescription;
+        }
+        if (heritageForm) {
+            heritageForm.hidden = true;
+            heritageForm.classList.remove('herdeiros-modal__heritage-form--visible');
+        }
+        updateHerancaSummary(modal);
+        refreshHerancaInputs(modal);
+        updatePartilhaFields(modal);
         modal.setAttribute('aria-hidden', 'false');
         const body = modal.querySelector('.herdeiros-modal__body');
         if (body) {
             body.innerHTML = '<div class="herdeiros-empty">Carregando herdeiros...</div>';
         }
-        fetchHerdeiros(cpf)
+        const parteId = card?.dataset?.parteId || '';
+        const processoId = card?.dataset?.processoId || '';
+        fetchHerdeiros(cpf, parteId, processoId)
             .then((data) => {
+                if (data && (data.heranca_valor || data.heranca_descricao)) {
+                    const parsedValue = data.heranca_valor ? Number(data.heranca_valor) : null;
+                    setHerancaState(modal, Number.isFinite(parsedValue) ? parsedValue : null, data.heranca_descricao || '');
+                }
                 renderHerdeirosModal(modal, data.herdeiros || []);
             })
             .catch(() => {
@@ -3303,6 +4094,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const addButton = modal.querySelector('.herdeiros-modal__add');
         const saveButton = modal.querySelector('.herdeiros-modal__save');
         const body = modal.querySelector('.herdeiros-modal__body');
+        const heritageToggle = modal.querySelector('.herdeiros-modal__heritage-toggle');
+        const heritageForm = modal.querySelector('.herdeiros-modal__heritage-form');
+        const heritageValueInput = heritageForm?.querySelector('input[name="heranca_valor"]');
+        const heritageDescriptionInput = heritageForm?.querySelector('input[name="heranca_descricao"]');
+        const heritageApply = heritageForm?.querySelector('.herdeiros-modal__heritage-apply');
+        const heritageCancel = heritageForm?.querySelector('.herdeiros-modal__heritage-cancel');
         const isHerdeiroFilled = (entry) => {
             if (!entry) return false;
             const nome = entry.querySelector('input[name="nome_completo"]')?.value?.trim() || '';
@@ -3314,6 +4111,51 @@ document.addEventListener('DOMContentLoaded', function() {
             const enderecoHasValue = Object.values(enderecoParts).some((value) => (value || '').trim());
             return Boolean(nome || cpf || rg || grau || enderecoHasValue);
         };
+        const showHerancaForm = () => {
+            if (!heritageForm) return;
+            heritageForm.hidden = false;
+            heritageForm.classList.add('herdeiros-modal__heritage-form--visible');
+            refreshHerancaInputs(modal);
+            heritageValueInput?.focus();
+        };
+        const hideHerancaForm = () => {
+            if (!heritageForm) return;
+            heritageForm.hidden = true;
+            heritageForm.classList.remove('herdeiros-modal__heritage-form--visible');
+        };
+        if (heritageToggle && heritageForm) {
+            heritageToggle.addEventListener('click', () => {
+                if (heritageForm.hidden) {
+                    showHerancaForm();
+                } else {
+                    hideHerancaForm();
+                }
+            });
+        }
+        if (heritageApply) {
+            heritageApply.addEventListener('click', () => {
+                const raw = heritageValueInput?.value || '';
+                if (!raw.trim()) {
+                    setHerancaState(modal, null, '');
+                    hideHerancaForm();
+                    return;
+                }
+                const parsed = normalizeNumericCurrency(raw);
+                if (parsed === null) {
+                    createSystemAlert('Informar Herança', 'Informe um valor válido para a herança.');
+                    heritageValueInput?.focus();
+                    return;
+                }
+                const description = (heritageDescriptionInput?.value || '').trim();
+                setHerancaState(modal, parsed, description);
+                hideHerancaForm();
+            });
+        }
+        if (heritageCancel) {
+            heritageCancel.addEventListener('click', () => {
+                hideHerancaForm();
+            });
+        }
         if (addButton) {
             addButton.addEventListener('click', () => {
                 if (!body) return;
@@ -3344,7 +4186,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!body.querySelector('.herdeiros-entry')) {
                         body.innerHTML = '<div class="herdeiros-empty">Nenhum herdeiro informado ainda.</div>';
                     }
+                    updatePartilhaFields(modal);
                 });
+                updatePartilhaFields(modal);
             });
         }
         if (saveButton) {
@@ -3356,13 +4200,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 saveButton.disabled = true;
+                const herancaValue = modal.dataset.herancaValue || '';
+                const herancaDescription = modal.dataset.herancaDescription || '';
                 fetch('/api/herdeiros/', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrftoken || '',
                     },
-                    body: JSON.stringify({ cpf_falecido: cpf, herdeiros }),
+                    body: JSON.stringify({
+                        cpf_falecido: cpf,
+                        herdeiros,
+                        parte_id: modal.dataset.parteId || '',
+                        processo_id: modal.dataset.processoId || '',
+                        heranca_valor: herancaValue,
+                        heranca_descricao: herancaDescription,
+                    }),
                 })
                     .then((response) => {
                         if (!response.ok) {
@@ -3372,11 +4225,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     })
                     .then((data) => {
                         modal.setAttribute('aria-hidden', 'true');
-                        herdeirosCache.set(cpf, Promise.resolve(data));
+                        const cacheKey = buildHerdeirosCacheKey(
+                            cpf,
+                            modal.dataset.parteId || '',
+                            modal.dataset.processoId || ''
+                        );
+                        herdeirosCache.set(cacheKey, Promise.resolve(data));
                         const card = modal.dataset.parteId
                             ? document.querySelector(`.info-card[data-parte-id="${modal.dataset.parteId}"]`)
                             : null;
                         updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
+                        if (card) {
+                            if (typeof data.heranca_valor !== 'undefined') {
+                                card.dataset.herancaValue = data.heranca_valor || '';
+                            }
+                            if (typeof data.heranca_descricao !== 'undefined') {
+                                card.dataset.herancaDescription = data.heranca_descricao || '';
+                            }
+                        }
+                        if (data.heranca_valor || data.heranca_descricao) {
+                            const parsedValue = data.heranca_valor ? Number(data.heranca_valor) : null;
+                            setHerancaState(modal, Number.isFinite(parsedValue) ? parsedValue : null, data.heranca_descricao || '');
+                        }
                         createSystemAlert('CFF System', 'Herdeiros salvos com sucesso.');
                     })
                     .catch(() => {
@@ -3401,7 +4271,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasObito && card.dataset.parteCpf) {
                 const cpf = normalizeCpf(card.dataset.parteCpf);
                 if (cpf) {
-                    fetchHerdeiros(cpf)
+                    const parteId = card.dataset.parteId || '';
+                    const processoId = card.dataset.processoId || '';
+                    fetchHerdeiros(cpf, parteId, processoId)
                         .then((data) => {
                             updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
                         })
@@ -3415,7 +4287,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (hasObito && card.dataset.parteCpf) {
                 const cpf = normalizeCpf(card.dataset.parteCpf);
                 if (cpf) {
-                    fetchHerdeiros(cpf)
+                    const parteId = card.dataset.parteId || '';
+                    const processoId = card.dataset.processoId || '';
+                    fetchHerdeiros(cpf, parteId, processoId)
                         .then((data) => {
                             updateHerdeirosBadge(card, (data.herdeiros || []).length > 0);
                         })
@@ -3424,6 +4298,27 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const setupObitoRibbonHandlers = () => {
+        setupObitoModalActions();
+        const cards = document.querySelectorAll('.info-card');
+        cards.forEach((card) => {
+            const button = card.querySelector('.parte-luto-ribbon');
+            if (!button) return;
+            button.addEventListener('click', () => openObitoModal(card));
+            const handleTooltip = () => {
+                const text = computeObitoTooltipText(card);
+                if (text) {
+                    showObservationTooltipForTarget(button, text);
+                }
+            };
+            button.addEventListener('mouseenter', handleTooltip);
+            button.addEventListener('focus', handleTooltip);
+            button.addEventListener('mouseleave', scheduleObservationTooltipHide);
+            button.addEventListener('blur', hideObservationTooltip);
+        });
+    };
+    setupObitoRibbonHandlers();
 
     const repositionHistoryLink = () => {
         const historyLink = document.querySelector('#content-main .object-tools li .historylink');
@@ -3514,6 +4409,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const enderecoGrid = enderecoField ? enderecoField.querySelector('.endereco-fields-grid') : null;
         const toggleBtn = enderecoField ? enderecoField.querySelector('.endereco-toggle-button') : null;
         const clearBtn = enderecoField ? enderecoField.querySelector('.endereco-clear-button') : null;
+        const dataNascimentoField = parteInline.querySelector('.field-data_nascimento');
         const isPassive = tipoPoloSelect && tipoPoloSelect.value === 'PASSIVO';
 
         if (isPassive) {
@@ -3528,6 +4424,10 @@ document.addEventListener('DOMContentLoaded', function() {
             enderecoGrid.style.display = showGrid ? 'grid' : 'none';
             if (toggleBtn) toggleBtn.style.display = 'inline-block';
             if (clearBtn) clearBtn.style.display = showGrid ? 'inline-block' : 'none';
+        }
+
+        if (dataNascimentoField) {
+            dataNascimentoField.style.display = isPassive ? '' : 'none';
         }
 
         setupCiaButton(parteInline); // Garante que o botão CIA seja atualizado
@@ -3941,67 +4841,93 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return (cardState.questions || {})[questionKey] || {};
     };
 
-    const ensureModal = (() => {
-        let overlay = null;
-        let keyHandlerAttached = false;
+    let activeChecagemTrigger = null;
+    let modalBlocker = null;
+    let checagemOverlay = null;
+    let checagemKeyHandlerAttached = false;
 
-        return () => {
-            if (overlay) {
-                return overlay;
-            }
-            overlay = document.createElement('div');
-            overlay.id = 'checagem-modal-overlay';
-            overlay.className = 'checagem-modal-overlay';
-            overlay.setAttribute('aria-hidden', 'true');
-            overlay.innerHTML = `
-                <div class="checagem-modal" role="dialog" aria-modal="true">
-                    <div class="checagem-modal__header">
-                        <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
-                        <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
-                    </div>
-                    <div class="checagem-modal__body">
-                        <div class="checagem-modal__questions"></div>
-                    </div>
-                    <div class="checagem-modal__footer">
-                        <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
-                    </div>
+    const removeChecagemModalBlockers = () => {
+        if (modalBlocker) {
+            modalBlocker.remove();
+            modalBlocker = null;
+        }
+    };
+
+    const ensureModal = () => {
+        if (checagemOverlay) {
+            return checagemOverlay;
+        }
+        checagemOverlay = document.createElement('div');
+        checagemOverlay.id = 'checagem-modal-overlay';
+        checagemOverlay.className = 'checagem-modal-overlay';
+        checagemOverlay.setAttribute('aria-hidden', 'true');
+        checagemOverlay.innerHTML = `
+            <div class="checagem-modal" role="dialog" aria-modal="true">
+                <div class="checagem-modal__header">
+                    <h2 class="checagem-modal__title">Checagem de Sistemas</h2>
+                    <button type="button" class="checagem-modal__close" aria-label="Fechar">×</button>
                 </div>
-            `;
-            document.body.appendChild(overlay);
-            overlay.addEventListener('click', (event) => {
-                if (event.target === overlay) {
+                <div class="checagem-modal__body">
+                    <div class="checagem-modal__questions"></div>
+                </div>
+                <div class="checagem-modal__footer">
+                    <span class="checagem-footer-hint">As observações são salvas automaticamente.</span>
+                    <button type="button" class="checagem-modal__close-btn">Fechar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(checagemOverlay);
+        checagemOverlay.addEventListener('click', (event) => {
+            if (event.target === checagemOverlay) {
+                closeChecagemModal();
+            }
+        });
+        checagemOverlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                closeChecagemModal();
+            });
+        });
+        checagemOverlay.querySelectorAll('.checagem-modal__close-btn').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                closeChecagemModal();
+            });
+        });
+        if (!checagemKeyHandlerAttached) {
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && checagemOverlay?.getAttribute('aria-hidden') === 'false') {
                     closeChecagemModal();
                 }
             });
-            overlay.querySelectorAll('.checagem-modal__close').forEach((button) => {
-                button.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    closeChecagemModal();
-                });
-            });
-            if (!keyHandlerAttached) {
-                document.addEventListener('keydown', (event) => {
-                    if (event.key === 'Escape' && overlay.getAttribute('aria-hidden') === 'false') {
-                        closeChecagemModal();
-                    }
-                });
-                keyHandlerAttached = true;
-            }
-            return overlay;
-        };
-    })();
+            checagemKeyHandlerAttached = true;
+        }
+        return checagemOverlay;
+    };
 
-    const updateLinkIndicatorText = (indicator, hasLink, link) => {
-        if (!indicator) {
+    const updateLinkIndicatorText = (indicator, button, hasLink, link) => {
+        if (indicator) {
+            indicator.textContent = '';
+            indicator.title = hasLink ? (link || '') : '';
+        }
+        if (button) {
+            button.classList.toggle('checagem-link-button--active', hasLink);
+        }
+    };
+
+    const autoResizeObservationTextarea = (textarea) => {
+        if (!textarea) {
             return;
         }
-        if (hasLink) {
-            indicator.textContent = 'Link salvo (clique no botão ao lado)';
-            indicator.title = link || '';
-        } else {
-            indicator.textContent = 'Sem link cadastrado';
-            indicator.title = 'Utilize o lápis para registrar um link externo';
+        textarea.style.height = 'auto';
+        textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+
+    const resetObservationTextareaHeight = (textarea) => {
+        if (!textarea) {
+            return;
         }
+        textarea.style.height = '';
     };
 
     const buildQuestionRow = (storageKey, question, linkIcon) => {
@@ -4032,7 +4958,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         const labelInput = document.createElement('input');
         labelInput.type = 'text';
-        labelInput.className = 'checagem-question-label';
+        labelInput.className = 'checagem-question-title checagem-question-label';
         labelInput.value = labelValue;
         labelInput.setAttribute('aria-label', `Título da questão ${labelValue}`);
 
@@ -4040,6 +4966,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         indicator.className = 'checagem-link-indicator';
         updateLinkIndicatorText(
             indicator,
+            linkButton,
             Boolean(questionData.link),
             questionData.link
         );
@@ -4048,7 +4975,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         editTrigger.type = 'button';
         editTrigger.className = 'checagem-link-edit-trigger';
         editTrigger.setAttribute('title', 'Editar link');
-        editTrigger.innerHTML = '✏️';
+        const editarLinkIcon = '/static/images/editar_link.png';
+        editTrigger.innerHTML = `<img src="${editarLinkIcon}" alt="Editar link">`;
 
         const editorWrapper = document.createElement('div');
         editorWrapper.className = 'checagem-link-editor';
@@ -4060,19 +4988,22 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         editorWrapper.append(urlInput);
 
-        const linkRow = document.createElement('div');
-        linkRow.className = 'checagem-link-row';
-        linkRow.append(indicator, editTrigger);
-        questionBody.append(labelInput, linkRow, editorWrapper);
+        const observationInput = document.createElement('textarea');
+        observationInput.className = 'checagem-question-observation';
+        observationInput.placeholder = 'Notas ou status';
+        observationInput.value = questionData.notes || '';
+        observationInput.setAttribute('aria-label', `Observações para ${labelValue}`);
+        observationInput.rows = 1;
 
-        const notesWrapper = document.createElement('div');
-        notesWrapper.className = 'checagem-question-right';
-        const notesTextarea = document.createElement('textarea');
-        notesTextarea.className = 'checagem-question-notes';
-        notesTextarea.placeholder = '';
-        notesTextarea.value = questionData.notes || '';
-        notesTextarea.setAttribute('aria-label', `Anotações para ${labelValue}`);
-        notesWrapper.appendChild(notesTextarea);
+        const questionContent = document.createElement('div');
+        questionContent.className = 'checagem-question-content';
+
+        const topRow = document.createElement('div');
+        topRow.className = 'checagem-question-top';
+        topRow.append(linkWrapper, labelInput, observationInput, indicator, editTrigger);
+
+        questionContent.append(topRow, editorWrapper);
+        questionBody.appendChild(questionContent);
 
         const toggleEditor = () => {
             editorWrapper.classList.toggle('visible');
@@ -4101,7 +5032,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             if (!updated) {
                 updated = getCachedQuestion(storageKey, question.key);
             }
-            updateLinkIndicatorText(indicator, Boolean(updated.link), updated.link);
+            updateLinkIndicatorText(indicator, linkButton, Boolean(updated.link), updated.link);
             return updated;
         };
 
@@ -4121,8 +5052,22 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             persistAndRefresh({ label: labelInput.value });
         });
 
-        notesTextarea.addEventListener('input', () => {
-            persistAndRefresh({ notes: notesTextarea.value });
+        observationInput.addEventListener('input', () => {
+            persistAndRefresh({ notes: observationInput.value });
+            autoResizeObservationTextarea(observationInput);
+        });
+
+        const handleObservationFocus = () => {
+            autoResizeObservationTextarea(observationInput);
+            showObservationTooltip(observationInput);
+        };
+
+        observationInput.addEventListener('mouseenter', () => showObservationTooltip(observationInput));
+        observationInput.addEventListener('focus', handleObservationFocus);
+        observationInput.addEventListener('mouseleave', scheduleObservationTooltipHide);
+        observationInput.addEventListener('blur', () => {
+            resetObservationTextareaHeight(observationInput);
+            scheduleObservationTooltipHide();
         });
 
         const syncLinkValue = () => {
@@ -4142,7 +5087,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             }
         });
 
-        row.append(linkWrapper, questionBody, notesWrapper);
+        row.appendChild(questionBody);
         return row;
     };
 
@@ -4160,174 +5105,132 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             heading.className = 'checagem-section-title';
             heading.textContent = section.title;
             sectionBlock.appendChild(heading);
-        const questionsWrapper = document.createElement('div');
-        questionsWrapper.className = 'checagem-questions';
-        section.questions.forEach((question) => {
-            questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
-        });
-        sectionBlock.appendChild(questionsWrapper);
-        pool.appendChild(sectionBlock);
-    });
-    };
-
-    const openChecagemModal = (card, trigger) => {
-        const overlay = ensureModal();
-        const cardId = card?.dataset?.parteId || 'global';
-        const processoId = card?.dataset?.processoId;
-        const cardName = card?.querySelector('.parte-nome')?.textContent?.trim() || '';
-        const linkIcon =
-            document
-                .querySelector('.checagem-sistemas-trigger')
-                ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
-        renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
-        overlay.setAttribute('aria-hidden', 'false');
-    };
-
-    const closeChecagemModal = () => {
-        const overlay = document.getElementById('checagem-modal-overlay');
-        if (overlay) {
-            overlay.setAttribute('aria-hidden', 'true');
-        }
-    };
-
-    const agendaChecagemPanelState = {
-        panel: null,
-        body: null,
-        subtitle: null,
-        badge: null,
-        visible: false,
-        triggerElement: null,
-        listenersInit: false,
-    };
-
-    const ensureAgendaChecagemPanel = () => {
-        if (agendaChecagemPanelState.panel) {
-            return agendaChecagemPanelState.panel;
-        }
-        const panel = document.createElement('div');
-        panel.className = 'agenda-checagem-panel';
-        panel.setAttribute('aria-hidden', 'true');
-        panel.innerHTML = `
-            <div class="agenda-checagem-panel__card">
-                <div class="agenda-checagem-panel__header">
-                    <div>
-                        <span class="agenda-checagem-panel__badge">Notações</span>
-                        <p class="agenda-checagem-panel__title">Checagem de Sistemas</p>
-                        <p class="agenda-checagem-panel__subtitle"></p>
-                    </div>
-                    <button type="button" class="agenda-checagem-panel__close" aria-label="Fechar painel">×</button>
-                </div>
-                <div class="agenda-checagem-panel__body"></div>
-            </div>
-        `;
-        document.body.appendChild(panel);
-        agendaChecagemPanelState.panel = panel;
-        agendaChecagemPanelState.body = panel.querySelector('.agenda-checagem-panel__body');
-        agendaChecagemPanelState.subtitle = panel.querySelector('.agenda-checagem-panel__subtitle');
-        agendaChecagemPanelState.badge = panel.querySelector('.agenda-checagem-panel__badge');
-        const closeButton = panel.querySelector('.agenda-checagem-panel__close');
-        closeButton.addEventListener('click', () => closeAgendaChecagemPanel());
-        panel.addEventListener('click', (event) => event.stopPropagation());
-        if (!agendaChecagemPanelState.listenersInit) {
-            document.addEventListener('keydown', (event) => {
-                if (agendaChecagemPanelState.visible && event.key === 'Escape') {
-                    closeAgendaChecagemPanel();
-                }
-            });
-            agendaChecagemPanelState.listenersInit = true;
-        }
-        return panel;
-    };
-
-    const renderAgendaChecagemPanelContent = (cardContext, linkIcon) => {
-        const panel = ensureAgendaChecagemPanel();
-        if (!panel) {
-            return;
-        }
-        const subtitleText = (cardContext?.cardName || '').trim();
-        agendaChecagemPanelState.subtitle.textContent = subtitleText.length > 1 ? subtitleText : '';
-        const body = agendaChecagemPanelState.body;
-        body.innerHTML = '';
-        const storageKey = resolveChecagemStorageKey(cardContext || {});
-        CHECAGEM_SECTIONS.forEach((section) => {
-            const sectionBlock = document.createElement('section');
-            sectionBlock.className = 'checagem-section agenda-checagem-panel__section';
-            const heading = document.createElement('div');
-            heading.className = 'checagem-section-title agenda-checagem-panel__section-title';
-            heading.textContent = section.title;
-            sectionBlock.appendChild(heading);
             const questionsWrapper = document.createElement('div');
             questionsWrapper.className = 'checagem-questions';
             section.questions.forEach((question) => {
                 questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
             });
             sectionBlock.appendChild(questionsWrapper);
-            body.appendChild(sectionBlock);
+            pool.appendChild(sectionBlock);
         });
     };
 
-    const positionAgendaChecagemPanel = (panel, trigger) => {
-        if (!panel || !trigger) {
+    const positionChecagemModal = (trigger) => {
+        const overlay = document.getElementById('checagem-modal-overlay');
+        const modal = overlay?.querySelector('.checagem-modal');
+        if (!trigger || !modal) {
             return;
         }
-        panel.style.visibility = 'hidden';
-        panel.style.left = '0px';
-        panel.style.top = '0px';
-        const panelRect = panel.getBoundingClientRect();
+        const modalRect = modal.getBoundingClientRect();
         const triggerRect = trigger.getBoundingClientRect();
-        let left = triggerRect.left - panelRect.width - 12;
+        let left = triggerRect.left - modalRect.width - 12;
         if (left < 12) {
             left = 12;
         }
-        if (left + panelRect.width > window.innerWidth - 12) {
-            left = Math.max(12, window.innerWidth - panelRect.width - 12);
+        if (left + modalRect.width > window.innerWidth - 12) {
+            left = Math.max(12, window.innerWidth - modalRect.width - 12);
         }
-        let top = triggerRect.top + triggerRect.height + 8;
-        const maxTop = window.innerHeight - panelRect.height - 12;
+        let top = triggerRect.top;
+        const maxTop = window.innerHeight - modalRect.height - 12;
         if (top > maxTop) {
             top = Math.max(12, maxTop);
         }
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-        panel.style.visibility = 'visible';
+        if (top < 12) {
+            top = 12;
+        }
+        modal.style.position = 'absolute';
+        modal.style.left = `${left}px`;
+        modal.style.top = `${top}px`;
+        if (modalBlocker) {
+            modalBlocker.remove();
+        }
+        modalBlocker = document.createElement('div');
+        modalBlocker.className = 'checagem-modal-blocker';
+        modalBlocker.style.position = 'absolute';
+        modalBlocker.style.left = `${left}px`;
+        modalBlocker.style.top = `${top}px`;
+        modalBlocker.style.width = `${modalRect.width}px`;
+        modalBlocker.style.height = `${modalRect.height}px`;
+        modalBlocker.style.pointerEvents = 'auto';
+        modalBlocker.style.borderRadius = '26px';
+        document.body.appendChild(modalBlocker);
     };
 
-    const openAgendaChecagemPanel = (entryData, trigger) => {
-        if (!entryData || !trigger) {
+    const openChecagemModal = (card, trigger, fallbackContext = {}) => {
+        const overlay = ensureModal();
+        const wasVisible = overlay.getAttribute('aria-hidden') === 'false';
+        if (wasVisible && activeChecagemTrigger === trigger) {
+            closeChecagemModal();
             return;
         }
-        closeAgendaChecagemPanel();
-        const cardId = entryData.backendId
-            ? `agenda-supervision-${entryData.backendId}`
-            : `agenda-supervision-${entryData.processo_id || 'global'}`;
-        const cardName = entryData.label || entryData.viabilidade_label || '';
-        const cardContext = {
-            cardId,
-            processoId: entryData.processo_id,
+        const cardId = card?.dataset?.parteId || fallbackContext.cardId || 'global';
+        const processoId = card?.dataset?.processoId || fallbackContext.processoId;
+        const cardName = card?.querySelector('.parte-nome')?.textContent?.trim()
+            || fallbackContext.cardName
+            || '';
+        const linkIcon =
+            document
+                .querySelector('.checagem-sistemas-trigger')
+                ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
+        renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
+        positionChecagemModal(trigger);
+        activeChecagemTrigger = trigger;
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('checagem-modal-open');
+    };
+
+    const destroyObservationTooltip = () => {
+        if (observationTooltip) {
+            observationTooltip.remove();
+            observationTooltip = null;
+            tooltipVisibilityInput = null;
+        }
+    };
+
+    const destroyChecagemOverlay = () => {
+        if (checagemOverlay) {
+            checagemOverlay.remove();
+            checagemOverlay = null;
+        }
+    };
+
+    const closeChecagemModal = () => {
+        if (!checagemOverlay) {
+            return;
+        }
+        const trigger = activeChecagemTrigger;
+        activeChecagemTrigger = null;
+        const focused = document.activeElement;
+        if (focused && checagemOverlay.contains(focused)) {
+            focused.blur();
+        }
+        checagemOverlay.setAttribute('aria-hidden', 'true');
+        removeChecagemModalBlockers();
+        hideObservationTooltip();
+        destroyObservationTooltip();
+        document.body.classList.remove('checagem-modal-open');
+        setTimeout(() => {
+            trigger?.focus();
+        }, 0);
+        destroyChecagemOverlay();
+    };
+
+    const openAgendaChecagemFromEntry = (entryData, trigger) => {
+        const processId = entryData?.processo_id ?? entryData?.processoId;
+        const canonicalCard = processId
+            ? document.querySelector(`.info-card[data-processo-id="${processId}"]`)
+            : null;
+        if (canonicalCard) {
+            openChecagemModal(canonicalCard, trigger);
+            return;
+        }
+        const cardName = entryData?.viabilidade_label || entryData?.label || '';
+        const fallbackContext = {
+            cardId: entryData?.cardId ?? `agenda-supervision-${entryData?.backendId ?? processId ?? 'global'}`,
+            processoId: processId,
             cardName,
         };
-        renderAgendaChecagemPanelContent(cardContext, AGENDA_CHECAGEM_LINK_ICON);
-        const panel = ensureAgendaChecagemPanel();
-        if (!panel) {
-            return;
-        }
-        positionAgendaChecagemPanel(panel, trigger);
-        panel.classList.add('agenda-checagem-panel--visible');
-        panel.setAttribute('aria-hidden', 'false');
-        agendaChecagemPanelState.visible = true;
-        agendaChecagemPanelState.triggerElement = trigger;
-    };
-
-    const closeAgendaChecagemPanel = () => {
-        const panel = agendaChecagemPanelState.panel;
-        if (!panel) {
-            return;
-        }
-        panel.classList.remove('agenda-checagem-panel--visible');
-        panel.setAttribute('aria-hidden', 'true');
-        panel.style.visibility = 'hidden';
-        agendaChecagemPanelState.visible = false;
-        agendaChecagemPanelState.triggerElement = null;
+        openChecagemModal(null, trigger, fallbackContext);
     };
 
     document.body.addEventListener('click', (event) => {

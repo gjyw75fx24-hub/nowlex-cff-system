@@ -57,11 +57,64 @@
     }
     .parte-luto-ribbon {
         display: none;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
     }
     .parte-luto-ribbon img {
         display: block;
         width: 20px;
         height: auto;
+    }
+    .obito-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2400;
+    }
+    .obito-modal[aria-hidden="true"] {
+        display: none;
+    }
+    .obito-modal__panel {
+        background: #fff;
+        border-radius: 12px;
+        width: min(420px, 90vw);
+        padding: 16px;
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
+    }
+    .obito-modal__form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 8px;
+    }
+    .obito-modal__form label {
+        font-size: 0.85rem;
+        color: #4b5563;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+    .obito-modal__form input,
+    .obito-modal__form select {
+        border: 1px solid #cbd5f5;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 1rem;
+        background: #fff;
+    }
+    .obito-modal__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
     }
     .herdeiros-trigger {
         display: none;
@@ -214,9 +267,14 @@
     }
     .herdeiros-entry__row {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(5, minmax(140px, 1fr));
         gap: 10px;
         align-items: end;
+    }
+    @media (max-width: 720px) {
+        .herdeiros-entry__row {
+            grid-template-columns: repeat(2, minmax(140px, 1fr));
+        }
     }
     .herdeiros-entry label {
         font-size: 12px;
@@ -229,6 +287,8 @@
         border-radius: 8px;
         padding: 8px 10px;
         font-size: 13px;
+        width: 100%;
+        box-sizing: border-box;
     }
     .herdeiros-entry__actions {
         display: flex;
@@ -258,10 +318,28 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+    }
+    .herdeiros-modal__footer-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
     }
     .herdeiros-modal__add {
         border: none;
         background: #0d6efd;
+        color: #fff;
+        border-radius: 999px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .herdeiros-modal__heritage-toggle {
+        border: none;
+        background: #0f172a;
         color: #fff;
         border-radius: 999px;
         padding: 8px 14px;
@@ -278,6 +356,64 @@
         cursor: pointer;
         font-size: 12px;
         font-weight: 600;
+    }
+    .herdeiros-modal__heritage-summary {
+        font-size: 0.85rem;
+        color: #0f172a;
+        opacity: 0.8;
+        margin-left: 4px;
+        white-space: nowrap;
+    }
+    .herdeiros-modal__heritage-form {
+        padding: 0 20px 10px;
+        display: grid;
+        grid-template-columns: 1fr;
+        row-gap: 0.75rem;
+        align-items: stretch;
+        border-bottom: 1px solid #e5e7eb;
+        margin: 0 20px;
+    }
+    .herdeiros-modal__heritage-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.75rem;
+        color: #475569;
+        min-width: 180px;
+    }
+    .herdeiros-modal__heritage-form input[type=text] {
+        border: 1px solid #cbd5f5;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 0.85rem;
+        width: 100%;
+    }
+    .herdeiros-modal__heritage-form-actions {
+        display: flex;
+        gap: 0.35rem;
+        justify-self: flex-end;
+        padding-top: 0.25rem;
+    }
+    .herdeiros-modal__heritage-apply,
+    .herdeiros-modal__heritage-cancel {
+        border: none;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .herdeiros-modal__heritage-apply {
+        background: #2563eb;
+        color: #fff;
+    }
+    .herdeiros-modal__heritage-cancel {
+        background: #e2e8f0;
+        color: #0f172a;
+    }
+    .herdeiros-entry__partilha input {
+        background: #fff;
+        color: #0f172a;
     }
     .herdeiros-modal__close {
         border: none;
@@ -334,14 +470,14 @@
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">
                             <span class="parte-nome">{{ parte.nome }}</span>
-                            <span class="parte-luto-ribbon" aria-hidden="true">
+                            <button type="button" class="parte-luto-ribbon" aria-label="Registrar detalhes do óbito">
                                 <img src="{% static 'admin/img/fita-preta.png' %}" alt="Fita preta de luto">
-                            </span>
+                            </button>
                             <button type="button" class="herdeiros-trigger" aria-label="Cadastrar herdeiros" title="Cadastrar herdeiros">
                                 <img src="{% static 'admin/img/herdeiros.svg' %}" alt="Herdeiros">
                                 <span class="herdeiros-check" aria-hidden="true">✓</span>
