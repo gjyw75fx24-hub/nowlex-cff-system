@@ -1975,8 +1975,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     readonly_fields = ()
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
-    list_display = ("cnj_with_navigation", "cpf_passivo", "get_polo_ativo", "get_x_separator", "get_polo_passivo",
-                    "uf", "status", "carteira", "busca_ativa", "nao_judicializado")
+    list_display = ("uf", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
+                    "cnj_with_navigation", "classe_processual", "carteira", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
@@ -2657,6 +2657,10 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
     def get_polo_passivo(self, obj):
         nome = getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '')
         return format_polo_name(nome)
+
+    @admin.display(description="Classe Processual", ordering="status")
+    def classe_processual(self, obj):
+        return obj.status or '-'
 
     def delegate_select_user_view(self, request):
         opts = self.model._meta

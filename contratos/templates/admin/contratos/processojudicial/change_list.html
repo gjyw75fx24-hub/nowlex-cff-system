@@ -31,6 +31,11 @@
             float: none;
             clear: none;
         }
+        body.change-list #changelist-filter {
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+            padding-right: 4px;
+        }
         /* Cabeçalho fixo e rolagem vertical na lista */
         body.change-list #changelist-form {
             transform: scale(0.7);
@@ -39,9 +44,11 @@
         }
         /* Rolagem com cabeçalho fixo */
         body.change-list #changelist-form .results {
-            max-height: calc(100vh - 240px);
+            max-height: calc(100vh - 120px);
+            min-height: calc(100vh - 120px);
             overflow-y: auto;
             overflow-x: auto;
+            padding-bottom: 16px;
         }
         body.change-list #result_list thead th {
             position: sticky;
@@ -73,6 +80,19 @@
             border-bottom: 1px solid #d9d9d9;
             border-left: 1px solid #d9d9d9;
             border-right: 1px solid #d9d9d9;
+        }
+        #changelist-search .clear-search-btn,
+        #changelist-search input.clear-search-btn {
+            margin-left: 4px;
+            border: 1px solid var(--border-color, #ccc);
+            font-size: 0.8125rem;
+            padding: 4px 8px;
+            vertical-align: middle;
+            background: var(--body-bg, #f8f8f8);
+            box-shadow: 0 -15px 20px -10px rgba(0, 0, 0, 0.15) inset;
+            cursor: pointer;
+            color: var(--body-fg, #333);
+            border-radius: 4px;
         }
         body div#nav-sidebar {
             width: 96px;
@@ -167,6 +187,11 @@
         #result_list th,
         #result_list td {
             font-size: 1.1rem;
+        }
+        #result_list th.column-get_polo_passivo,
+        #result_list td.field-get_polo_passivo {
+            min-width: 40%;
+            width: 40%;
         }
     </style>
 {% endblock %}
@@ -614,6 +639,45 @@
                 changeLink.click();
             });
         });
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchForm = document.getElementById('changelist-search');
+        if (!searchForm) return;
+        const searchInput = searchForm.querySelector('input[name=q]');
+        if (!searchInput) return;
+        if (searchForm.querySelector('.clear-search-btn')) return;
+
+        const submitInput = searchForm.querySelector('input[type=submit]');
+        let clearBtn;
+        if (submitInput) {
+            clearBtn = submitInput.cloneNode(true);
+            clearBtn.type = 'button';
+            clearBtn.value = 'Limpar';
+            clearBtn.textContent = 'Limpar';
+            clearBtn.removeAttribute('id');
+            clearBtn.classList.remove('default');
+        } else {
+            clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.textContent = 'Limpar';
+        }
+        clearBtn.classList.add('clear-search-btn');
+        clearBtn.addEventListener('click', function() {
+            if (!searchInput.value) {
+                searchInput.focus();
+                return;
+            }
+            searchInput.value = '';
+            searchForm.submit();
+        });
+
+        if (submitInput && submitInput.parentNode) {
+            submitInput.parentNode.insertBefore(clearBtn, submitInput.nextSibling);
+        } else {
+            searchInput.insertAdjacentElement('afterend', clearBtn);
+        }
     });
     </script>
 {% endblock %}
