@@ -1528,7 +1528,7 @@ class ParteInline(admin.StackedInline):
                     "nome",
                     ("documento", "data_nascimento"),
                     "endereco",
-                    ("obito", "obito_data", "obito_cidade", "obito_uf", "obito_idade"),
+                    ("obito",),
                 )
             },
         ),
