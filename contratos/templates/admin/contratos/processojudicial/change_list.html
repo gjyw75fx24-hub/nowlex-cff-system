@@ -604,8 +604,13 @@
             const changeLink = row.querySelector('th a[href*="/change/"]');
             if (!changeLink) return;
             row.classList.add('clickable-row');
+            row.querySelectorAll('.cnj-nav-control').forEach(ctrl => {
+                ctrl.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                });
+            });
             row.addEventListener('click', function(event) {
-                if (event.target.closest('a, button, input, select, textarea, label')) {
+                if (event.target.closest('a, button, input, select, textarea, label, .cnj-nav-control, .cnj-nav-wrapper')) {
                     return;
                 }
                 changeLink.click();
@@ -614,12 +619,65 @@
                 if (event.key !== 'Enter' && event.key !== ' ') {
                     return;
                 }
-                if (event.target.closest('a, button, input, select, textarea, label')) {
+                if (event.target.closest('a, button, input, select, textarea, label, .cnj-nav-control, .cnj-nav-wrapper')) {
                     return;
                 }
                 event.preventDefault();
                 changeLink.click();
             });
+        });
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.cnj-nav-wrapper[data-cnj-values]').forEach((wrapper) => {
+            let values = [];
+            try {
+                values = JSON.parse(wrapper.dataset.cnjValues || '[]');
+            } catch (error) {
+                values = [];
+            }
+            let index = Number(wrapper.dataset.cnjIndex || 0);
+            const currentSpan = wrapper.querySelector('.cnj-current');
+            const countSpan = wrapper.querySelector('.cnj-nav-count');
+            const controls = Array.from(wrapper.querySelectorAll('.cnj-nav-control'));
+
+            const updateDisplay = () => {
+                if (!values.length) {
+                    if (currentSpan) currentSpan.textContent = '-';
+                    if (countSpan) countSpan.textContent = '0/0';
+                    controls.forEach(btn => btn.classList.add('disabled'));
+                    return;
+                }
+                index = Math.max(0, Math.min(index, values.length - 1));
+                wrapper.dataset.cnjIndex = index;
+                if (currentSpan) currentSpan.textContent = values[index] || '-';
+                if (countSpan) countSpan.textContent = `${index + 1}/${values.length}`;
+                controls.forEach((btn) => {
+                    const dir = btn.dataset.direction;
+                    const disabled = (dir === 'prev' && index <= 0) || (dir === 'next' && index >= values.length - 1);
+                    btn.classList.toggle('disabled', disabled);
+                    btn.disabled = disabled;
+                });
+            };
+
+            controls.forEach((btn) => {
+                btn.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!values.length) return;
+                    if (btn.dataset.direction === 'prev' && index > 0) {
+                        index -= 1;
+                    } else if (btn.dataset.direction === 'next' && index < values.length - 1) {
+                        index += 1;
+                    } else {
+                        return;
+                    }
+                    updateDisplay();
+                });
+            });
+
+            updateDisplay();
         });
     });
     </script>

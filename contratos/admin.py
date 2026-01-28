@@ -2234,25 +2234,30 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         cnj_values = list(dict.fromkeys(cnj_values))
         if not cnj_values:
             return "-"
-        change_url = reverse("admin:contratos_processojudicial_change", args=(obj.pk,))
         current_cnj = obj.cnj if obj.cnj in cnj_values else cnj_values[0]
         current_index = cnj_values.index(current_cnj)
         total = len(cnj_values)
-        def nav_button(symbol, target_idx, disabled):
-            if disabled:
-                return format_html('<span class="cnj-nav-control disabled">{}</span>', symbol)
-            url = f"{change_url}?cnj_index={target_idx}"
-            return format_html('<a href="{}" class="cnj-nav-control">{}</a>', url, symbol)
-        prev_btn = nav_button('‹', current_index - 1, current_index <= 0)
-        next_btn = nav_button('›', current_index + 1, current_index >= total - 1)
+        values_json = json.dumps(cnj_values).replace('"', '&quot;')
+        prev_disabled = 'true' if current_index <= 0 else 'false'
+        next_disabled = 'true' if current_index >= total - 1 else 'false'
+        prev_btn = format_html(
+            '<button type="button" class="cnj-nav-control" data-direction="prev" data-disabled="{}">‹</button>',
+            prev_disabled
+        )
+        next_btn = format_html(
+            '<button type="button" class="cnj-nav-control" data-direction="next" data-disabled="{}">›</button>',
+            next_disabled
+        )
         counter = format_html('{}/{}', current_index + 1, total)
         control_buttons = format_html('{}{}', prev_btn, next_btn)
         return format_html(
-            '<div class="cnj-nav-wrapper" style="display:flex; align-items:center; gap:6px;">'
+            '<div class="cnj-nav-wrapper" style="display:flex; align-items:center; gap:6px;" data-cnj-values="{}" data-cnj-index="{}">'
             '<span class="cnj-current">{}</span>'
             '<div class="cnj-nav-controls">{}</div>'
             '<span class="cnj-nav-count">{}</span>'
             '</div>',
+            mark_safe(values_json),
+            current_index,
             current_cnj,
             control_buttons,
             counter

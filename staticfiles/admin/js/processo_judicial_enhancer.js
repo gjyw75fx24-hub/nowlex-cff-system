@@ -85,6 +85,35 @@ document.addEventListener('DOMContentLoaded', function() {
         updateNavButtons();
     };
 
+    const ensureEntriesHydrated = () => {
+        if (entryStates.length > 0) {
+            return;
+        }
+        const initialEntries = Array.isArray(window.__cnj_entries) ? window.__cnj_entries : [];
+        if (initialEntries.length === 0) {
+            return;
+        }
+        const desiredIndex = Number.isInteger(window.__cnj_active_index) ? window.__cnj_active_index : 0;
+        initialEntries.forEach((entry) => {
+            entryStates.push({
+                id: entry.id,
+                cnj: entry.cnj || '',
+                uf: entry.uf || '',
+                valor_causa: entry.valor_causa || '',
+                status: entry.status || '',
+                carteira: entry.carteira || '',
+                vara: entry.vara || '',
+                tribunal: entry.tribunal || '',
+            });
+        });
+        dedupeEntryStates();
+        if (entryStates.length > 0) {
+            currentEntryIndex = Math.min(Math.max(0, desiredIndex), entryStates.length - 1);
+            applyEntryState(entryStates[currentEntryIndex]);
+        }
+        syncHiddenEntries();
+    };
+
     const buildEntryState = () => {
         const currentId = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex].id : null;
         return {
@@ -234,6 +263,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const updateNavButtons = () => {
+        ensureEntriesHydrated();
         if (prevButton) {
             prevButton.disabled = currentEntryIndex <= 0 || entryStates.length <= 1;
         }
@@ -374,6 +404,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         prevButton.addEventListener('click', () => {
+            ensureEntriesHydrated();
             if (currentEntryIndex > 0) {
                 storeCurrentEntry();
                 currentEntryIndex -= 1;
@@ -384,6 +415,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         nextButton.addEventListener('click', () => {
+            ensureEntriesHydrated();
             if (currentEntryIndex < entryStates.length - 1) {
                 storeCurrentEntry();
                 currentEntryIndex += 1;
