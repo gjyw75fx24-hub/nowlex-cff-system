@@ -58,6 +58,23 @@ def format_polo_name(value: str) -> str:
             formatted.append(cleaned.title())
     return " ".join(formatted)
 
+def normalize_label_title(value: str) -> str:
+    if not value:
+        return value
+    parts = value.split()
+    if not parts:
+        return value
+    formatted = []
+    for idx, part in enumerate(parts):
+        cleaned = part.strip().lower()
+        if not cleaned:
+            continue
+        if idx > 0 and cleaned in PREPOSITIONS:
+            formatted.append(cleaned)
+        else:
+            formatted.append(cleaned.title())
+    return " ".join(formatted)
+
 
 # Form para seleção de usuário na ação de delegar
 class UserForm(forms.Form):
@@ -2157,6 +2174,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             return []
         sanitized = []
         seen = set()
+        status_cache = {}
+        carteira_cache = {}
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -2171,6 +2190,42 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 continue
             status_raw = item.get('status')
             carteira_raw = item.get('carteira')
+            status_id = None
+            if status_raw not in (None, ''):
+                try:
+                    status_id = int(status_raw)
+                except (TypeError, ValueError):
+                    status_label = str(status_raw)
+                    status_label = re.sub(r'^\s*\d+\s*-\s*', '', status_label).strip()
+                    if status_label:
+                        normalized_label = normalize_label_title(status_label)
+                        cache_key = normalized_label.lower()
+                        if cache_key in status_cache:
+                            status_id = status_cache[cache_key]
+                        else:
+                            status_obj = StatusProcessual.objects.filter(nome__iexact=normalized_label).only('id').first()
+                            if not status_obj and normalized_label != status_label:
+                                status_obj = StatusProcessual.objects.filter(nome__iexact=status_label).only('id').first()
+                            status_id = status_obj.id if status_obj else None
+                            status_cache[cache_key] = status_id
+            carteira_id = None
+            if carteira_raw not in (None, ''):
+                try:
+                    carteira_id = int(carteira_raw)
+                except (TypeError, ValueError):
+                    carteira_label = str(carteira_raw)
+                    carteira_label = re.sub(r'^\s*\d+\s*-\s*', '', carteira_label).strip()
+                    if carteira_label:
+                        normalized_label = normalize_label_title(carteira_label)
+                        cache_key = normalized_label.lower()
+                        if cache_key in carteira_cache:
+                            carteira_id = carteira_cache[cache_key]
+                        else:
+                            carteira_obj = Carteira.objects.filter(nome__iexact=normalized_label).only('id').first()
+                            if not carteira_obj and normalized_label != carteira_label:
+                                carteira_obj = Carteira.objects.filter(nome__iexact=carteira_label).only('id').first()
+                            carteira_id = carteira_obj.id if carteira_obj else None
+                            carteira_cache[cache_key] = carteira_id
             key = cnj_val
             if key in seen:
                 continue
@@ -2180,8 +2235,8 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 'cnj': cnj_val,
                 'uf': (item.get('uf') or '').strip(),
                 'valor_causa': item.get('valor_causa') or '',
-                'status': None if status_raw in (None, '') else int(status_raw),
-                'carteira': None if carteira_raw in (None, '') else int(carteira_raw),
+                'status': status_id,
+                'carteira': carteira_id,
                 'vara': (item.get('vara') or '').strip(),
                 'tribunal': (item.get('tribunal') or '').strip(),
             })
