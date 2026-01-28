@@ -2015,7 +2015,7 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         EtiquetaFilter,
     ]
     list_filter = BASE_LIST_FILTERS[:]
-    search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento",)
+    search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento", "contratos__numero_contrato")
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     def get_search_results(self, request, queryset, search_term):
         qs, use_distinct = super().get_search_results(request, queryset, search_term)
