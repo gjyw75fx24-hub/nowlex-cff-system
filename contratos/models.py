@@ -301,6 +301,11 @@ class Parte(models.Model):
         blank=True,
         verbose_name="UF do Óbito"
     )
+    obito_idade = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        verbose_name="Idade no Óbito"
+    )
 
     def __str__(self):
         return self.nome

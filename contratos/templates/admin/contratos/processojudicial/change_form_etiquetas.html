@@ -85,10 +85,36 @@
     }
     .obito-modal__panel {
         background: #fff;
-        border-radius: 12px;
+        border: 1px solid rgba(15, 58, 118, 0.12);
+        border-radius: 20px;
         width: min(420px, 90vw);
-        padding: 16px;
-        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
+        padding: 0;
+        box-shadow: 0 26px 55px rgba(15, 58, 118, 0.25);
+        font-family: 'Inter', 'Roboto', system-ui, sans-serif;
+        overflow: hidden;
+    }
+    .obito-modal__header {
+        padding: 16px 18px 12px;
+        border-bottom: 1px solid rgba(15, 58, 118, 0.15);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #fbfdff;
+    }
+    .obito-modal__header strong {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0f3a60;
+    }
+    .obito-modal__close {
+        border: none;
+        background: transparent;
+        font-size: 20px;
+        color: rgba(15, 58, 118, 0.65);
+        cursor: pointer;
+    }
+    .obito-modal__form {
+        padding: 12px 18px 18px;
     }
     .obito-modal__form {
         display: flex;
@@ -107,14 +133,34 @@
     .obito-modal__form select {
         border: 1px solid #cbd5f5;
         border-radius: 8px;
-        padding: 8px 10px;
+        padding: 10px 12px;
         font-size: 1rem;
         background: #fff;
+        line-height: 1.2;
+        min-height: 42px;
+    }
+    .obito-modal__form select {
+        padding-right: 32px;
     }
     .obito-modal__actions {
         display: flex;
         justify-content: flex-end;
         gap: 0.5rem;
+    }
+    .obito-modal__actions .button {
+        border-radius: 10px;
+        padding: 8px 16px;
+        font-weight: 600;
+        border: 1px solid rgba(15, 58, 118, 0.2);
+        background: #eef3fb;
+        color: #0f3a60;
+    }
+    .obito-modal__actions .button.button-primary,
+    .obito-modal__actions .obito-modal__save {
+        background: #0f3a60;
+        border-color: #0f3a60;
+        color: #fff;
+        box-shadow: 0 8px 18px rgba(15, 58, 118, 0.2);
     }
     .herdeiros-trigger {
         display: none;
@@ -470,7 +516,7 @@
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}" data-obito-idade="{{ parte.obito_idade|default_if_none:'' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">

@@ -3566,7 +3566,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return path.split('/admin')[0] + '/admin';
     })();
-    const buildObitoUrl = (parteId) => `${window.location.origin}${buildAdminRoot}/contratos/parte/${parteId}/obito-info/`;
+    const buildObitoUrl = (parteId) => `${window.location.origin}${buildAdminRoot}/contratos/processojudicial/parte/${parteId}/obito-info/`;
     const formatDateForTooltip = (isoValue) => {
         if (!isoValue) {
             return '';
@@ -3582,6 +3582,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const dateValue = card.dataset.obitoData;
         const cidade = card.dataset.obitoCidade || '';
         const uf = card.dataset.obitoUf || '';
+        const idade = card.dataset.obitoIdade || '';
         const parts = [];
         if (dateValue) {
             parts.push(`Data: ${formatDateForTooltip(dateValue)}`);
@@ -3591,6 +3592,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (uf) {
             parts.push(`UF: ${uf}`);
+        }
+        if (idade) {
+            parts.push(`Idade: ${idade}`);
         }
         return parts.join(' · ');
     };
@@ -3619,6 +3623,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <label>
                         UF
                         <select name="obito_uf"></select>
+                    </label>
+                    <label>
+                        Idade
+                        <input type="number" name="obito_idade" min="0" max="120" placeholder="Idade no óbito">
                     </label>
                     <div class="obito-modal__actions">
                         <button type="button" class="button button-primary obito-modal__save">Salvar</button>
@@ -3654,21 +3662,52 @@ document.addEventListener('DOMContentLoaded', function() {
         const modal = ensureObitoModal();
         const form = modal.querySelector('.obito-modal__form');
         if (!form) return;
+        const setFieldValue = (input, value) => {
+            if (!input) return;
+            const val = value ?? '';
+            if (input.tagName.toLowerCase() === 'select') {
+                const hasOption = Array.from(input.options || []).some((opt) => opt.value === val);
+                if (!hasOption && val) {
+                    const option = document.createElement('option');
+                    option.value = val;
+                    option.textContent = val;
+                    input.appendChild(option);
+                }
+            }
+            input.value = val;
+            input.setAttribute('value', val);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
         const dateInput = form.querySelector('input[name="obito_data"]');
         const cidadeInput = form.querySelector('input[name="obito_cidade"]');
         const ufSelect = form.querySelector('select[name="obito_uf"]');
-        if (dateInput) {
-            dateInput.value = card.dataset.obitoData || '';
-        }
-        if (cidadeInput) {
-            cidadeInput.value = card.dataset.obitoCidade || '';
-        }
-        if (ufSelect) {
-            ufSelect.value = card.dataset.obitoUf || '';
-        }
+        const idadeInput = form.querySelector('input[name="obito_idade"]');
+        setFieldValue(dateInput, card.dataset.obitoData || '');
+        setFieldValue(cidadeInput, card.dataset.obitoCidade || '');
+        setFieldValue(ufSelect, card.dataset.obitoUf || '');
+        setFieldValue(idadeInput, card.dataset.obitoIdade || '');
         modal.dataset.parteId = card.dataset.parteId || '';
         modal.setAttribute('aria-hidden', 'false');
         dateInput?.focus();
+        if (modal.dataset.parteId) {
+            fetch(buildObitoUrl(modal.dataset.parteId), {
+                method: 'GET',
+                headers: {
+                    'X-CSRFToken': csrftoken || '',
+                },
+            })
+                .then((response) => (response.ok ? response.json() : null))
+                .then((data) => {
+                    if (!data) return;
+                    updateCardObitoData(card, data);
+                    setFieldValue(dateInput, data.obito_data || '');
+                    setFieldValue(cidadeInput, data.obito_cidade || '');
+                    setFieldValue(ufSelect, data.obito_uf || '');
+                    setFieldValue(idadeInput, data.obito_idade || '');
+                })
+                .catch(() => {});
+        }
     };
     const hideObitoModal = () => {
         if (obitoModal) {
@@ -3686,6 +3725,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof payload.obito_uf !== 'undefined') {
             card.dataset.obitoUf = payload.obito_uf || '';
         }
+        if (typeof payload.obito_idade !== 'undefined') {
+            card.dataset.obitoIdade = payload.obito_idade || '';
+        }
     };
     const setupObitoModalActions = () => {
         const modal = ensureObitoModal();
@@ -3702,6 +3744,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 data_obito: getFormValue('obito_data'),
                 cidade: getFormValue('obito_cidade'),
                 uf: getFormValue('obito_uf'),
+                idade: getFormValue('obito_idade'),
             };
             saveButton.disabled = true;
             fetch(buildObitoUrl(parteId), {
@@ -3714,14 +3757,23 @@ document.addEventListener('DOMContentLoaded', function() {
             })
                 .then((response) => {
                     if (!response.ok) {
-                        return response.json().then((err) => {
-                            throw new Error(err.error || 'Não foi possível salvar os dados do óbito.');
+                        const contentType = response.headers.get('content-type') || '';
+                        if (contentType.includes('application/json')) {
+                            return response.json().then((err) => {
+                                throw new Error(err.error || 'Não foi possível salvar os dados do óbito.');
+                            });
+                        }
+                        return response.text().then((text) => {
+                            throw new Error(text || 'Não foi possível salvar os dados do óbito.');
                         });
                     }
                     return response.json();
                 })
                 .then((data) => {
                     const card = document.querySelector(`.info-card[data-parte-id="${parteId}"]`);
+                    if (card) {
+                        card.dataset.obito = '1';
+                    }
                     updateCardObitoData(card, data);
                     hideObitoModal();
                     createSystemAlert('Óbito', 'Dados atualizados com sucesso.');
@@ -4753,6 +4805,7 @@ const CHECAGEM_SECTIONS = [
                 { key: 'juridico_isj', label: 'JURÍDICO ISJ' },
                 { key: 'judicase', label: 'JUDICASE' },
                 { key: 'jusbr', label: 'JUS.BR' },
+                { key: 'tribunal', label: 'TRIBUNAL' },
             ],
         },
         {

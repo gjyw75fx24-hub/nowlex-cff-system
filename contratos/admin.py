@@ -1,3 +1,4 @@
+import datetime
 import logging
 import json
 import os
@@ -1510,7 +1511,7 @@ class ParteInline(admin.StackedInline):
                     "nome",
                     ("documento", "data_nascimento"),
                     "endereco",
-                    ("obito", "obito_data", "obito_cidade", "obito_uf"),
+                    ("obito", "obito_data", "obito_cidade", "obito_uf", "obito_idade"),
                 )
             },
         ),
@@ -2717,11 +2718,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
     def obito_info_view(self, request, parte_id):
-        if request.method != 'POST':
+        if request.method not in ('POST', 'GET'):
             return JsonResponse({'error': 'Método não permitido'}, status=405)
         if not request.user.has_perm('contratos.change_parte'):
             return JsonResponse({'error': 'Permissão negada'}, status=403)
         parte = get_object_or_404(Parte, pk=parte_id)
+        if request.method == 'GET':
+            return JsonResponse({
+                'status': 'ok',
+                'obito_data': parte.obito_data.isoformat() if parte.obito_data else '',
+                'obito_cidade': parte.obito_cidade or '',
+                'obito_uf': parte.obito_uf or '',
+                'obito_idade': parte.obito_idade if parte.obito_idade is not None else '',
+            })
         try:
             payload = json.loads(request.body.decode('utf-8') or '{}')
         except json.JSONDecodeError:
@@ -2735,17 +2744,28 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
                 return JsonResponse({'error': 'Data inválida'}, status=400)
         cidade = (payload.get('cidade') or '').strip()
         uf = (payload.get('uf') or '').strip().upper()[:2]
+        idade_value = (payload.get('idade') or '').strip()
+        idade = None
+        if idade_value:
+            try:
+                idade = int(idade_value)
+                if idade < 0 or idade > 120:
+                    return JsonResponse({'error': 'Idade inválida'}, status=400)
+            except ValueError:
+                return JsonResponse({'error': 'Idade inválida'}, status=400)
         parte.obito_data = parsed_date
         parte.obito_cidade = cidade
         parte.obito_uf = uf
-        if parsed_date or cidade or uf:
+        parte.obito_idade = idade
+        if parsed_date or cidade or uf or idade is not None:
             parte.obito = True
-        parte.save(update_fields=['obito', 'obito_data', 'obito_cidade', 'obito_uf'])
+        parte.save(update_fields=['obito', 'obito_data', 'obito_cidade', 'obito_uf', 'obito_idade'])
         return JsonResponse({
             'status': 'ok',
             'obito_data': parte.obito_data.isoformat() if parte.obito_data else '',
             'obito_cidade': parte.obito_cidade or '',
             'obito_uf': parte.obito_uf or '',
+            'obito_idade': parte.obito_idade if parte.obito_idade is not None else '',
         })
 @admin.register(BuscaAtivaConfig)
 class BuscaAtivaConfigAdmin(admin.ModelAdmin):
