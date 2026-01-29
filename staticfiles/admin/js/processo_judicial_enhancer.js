@@ -129,9 +129,20 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const HEADER_TITLE = 'Dados do Processo';
+    const normalizeHeaderText = (value) => (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const findHeaderElement = () => {
         const headings = Array.from(document.querySelectorAll('#content-main h2'));
-        return headings.find((heading) => heading.textContent.trim() === HEADER_TITLE) || null;
+        const target = normalizeHeaderText(HEADER_TITLE);
+        const directMatch = headings.find((heading) => normalizeHeaderText(heading.textContent).includes(target));
+        if (directMatch) {
+            return directMatch;
+        }
+        const cnjInput = document.getElementById('id_cnj');
+        const fieldset = cnjInput?.closest('fieldset');
+        if (fieldset) {
+            return fieldset.querySelector('h2') || null;
+        }
+        return null;
     };
     let headerElement = findHeaderElement();
     const headerTitleSpan = document.createElement('span');
@@ -434,6 +445,10 @@ document.addEventListener('DOMContentLoaded', function() {
         inlineGroup.parentNode.parentNode.appendChild(feedbackDiv);
 
         hydrateInitialEntries();
+    }
+
+    if (cnjInput) {
+        setActiveCnjText();
     }
 
     const searchButton = document.getElementById('btn_buscar_cnj');
@@ -1076,12 +1091,60 @@ document.addEventListener('DOMContentLoaded', function() {
             el.classList.add(`nowlex-status--${variant}`);
         }
     };
+    const formatTodayDate = () => {
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = String(now.getFullYear());
+        return `${day}/${month}/${year}`;
+    };
+    const formatTodayIso = () => {
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = String(now.getFullYear());
+        return `${year}-${month}-${day}`;
+    };
+    const formatDateForStamp = (isoValue) => {
+        if (!isoValue) return '';
+        const raw = String(isoValue);
+        if (raw.includes('/')) {
+            return raw;
+        }
+        const parts = raw.split('-');
+        if (parts.length !== 3) return raw;
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+    const ensureNowlexInputWrap = (input) => {
+        if (!input) return null;
+        const existingWrap = input.closest('.nowlex-input-wrap');
+        if (existingWrap) {
+            return existingWrap;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'nowlex-input-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+        const stamp = document.createElement('span');
+        stamp.className = 'nowlex-updated-at';
+        wrap.appendChild(stamp);
+        return wrap;
+    };
 
     const enhanceNowlexRow = (row) => {
         if (!row || row.dataset.nowlexEnhanced === '1') return;
         const valorField = row.querySelector('.field-valor_causa');
         if (!valorField) return;
         const fieldBox = valorField.querySelector('.field-box') || valorField;
+        const valorInput = row.querySelector('input[name$="-valor_causa"]');
+        ensureNowlexInputWrap(valorInput);
+        const dateInput = row.querySelector('input[name$="-data_saldo_atualizado"]');
+        const existingStamp = row.querySelector('.nowlex-updated-at');
+        if (dateInput && existingStamp && dateInput.value) {
+            const displayDate = formatDateForStamp(dateInput.value);
+            existingStamp.textContent = displayDate;
+            existingStamp.setAttribute('title', `Atualizado em ${displayDate}`);
+        }
         const wrapper = document.createElement('div');
         wrapper.className = 'nowlex-action-buttons';
         const statusEl = document.createElement('span');
@@ -1148,6 +1211,20 @@ document.addEventListener('DOMContentLoaded', function() {
             if (valorInput) {
                 valorInput.value = formatted;
                 valorInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            const stamp = row.querySelector('.nowlex-updated-at');
+            const dateInput = row.querySelector('input[name$="-data_saldo_atualizado"]');
+            const todayIso = formatTodayIso();
+            const todayDisplay = formatTodayDate();
+            if (dateInput) {
+                dateInput.value = todayIso;
+                dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+                dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (stamp) {
+                const display = dateInput?.value ? formatDateForStamp(dateInput.value) : todayDisplay;
+                stamp.textContent = display;
+                stamp.setAttribute('title', `Atualizado em ${display}`);
             }
             if (valorCausaInput) {
                 valorCausaInput.value = formatted;
@@ -1688,7 +1765,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (entryData.contract_numbers && entryData.contract_numbers.length) {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
-                renderMetaRow('Valor da causa', formatCurrencyBrl(entryData.valor_causa));
+                renderMetaRow('Saldo atualizado', formatCurrencyBrl(entryData.valor_causa));
                 const custasSummary = getCustasFromContracts(entryData.contract_numbers);
                 if (custasSummary.items.length) {
                     renderMetaRow('Custas', formatCurrencyBrl(custasSummary.total));
@@ -3603,11 +3680,47 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!isoValue) {
             return '';
         }
+        if (/^\d{4}-01-01$/.test(isoValue)) {
+            return isoValue.slice(0, 4);
+        }
         const parts = isoValue.split('-');
         if (parts.length !== 3) {
             return isoValue;
         }
         return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+    const formatDateForInput = (isoValue) => {
+        if (!isoValue) {
+            return '';
+        }
+        if (/^\d{4}-01-01$/.test(isoValue)) {
+            return isoValue.slice(0, 4);
+        }
+        const parts = isoValue.split('-');
+        if (parts.length !== 3) {
+            return isoValue;
+        }
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+    const normalizeObitoDateInput = (value) => {
+        const trimmed = (value || '').trim();
+        if (!trimmed) {
+            return '';
+        }
+        const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (slashMatch) {
+            const day = slashMatch[1].padStart(2, '0');
+            const month = slashMatch[2].padStart(2, '0');
+            const year = slashMatch[3];
+            return `${year}-${month}-${day}`;
+        }
+        if (/^\d{4}$/.test(trimmed)) {
+            return `${trimmed}-01-01`;
+        }
+        if (/^\d{4}-\d{2}$/.test(trimmed)) {
+            return `${trimmed}-01`;
+        }
+        return trimmed;
     };
     const computeObitoTooltipText = (card) => {
         if (!card) return '';
@@ -3646,7 +3759,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <form class="obito-modal__form">
                     <label>
                         Data do óbito
-                        <input type="date" name="obito_data">
+                        <input type="text" name="obito_data" inputmode="numeric" placeholder="DD/MM/AAAA ou AAAA">
                     </label>
                     <label>
                         Cidade
@@ -3682,9 +3795,11 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         obitoModal.querySelector('.obito-modal__close')?.addEventListener('click', closeHandler);
         obitoModal.querySelector('.obito-modal__cancel')?.addEventListener('click', closeHandler);
-        obitoModal.addEventListener('click', (event) => {
-            if (event.target === obitoModal) {
-                closeHandler();
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' || event.key === 'Esc') {
+                if (obitoModal.getAttribute('aria-hidden') === 'false') {
+                    closeHandler();
+                }
             }
         });
         return obitoModal;
@@ -3715,7 +3830,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const cidadeInput = form.querySelector('input[name="obito_cidade"]');
         const ufSelect = form.querySelector('select[name="obito_uf"]');
         const idadeInput = form.querySelector('input[name="obito_idade"]');
-        setFieldValue(dateInput, card.dataset.obitoData || '');
+        setFieldValue(dateInput, formatDateForInput(card.dataset.obitoData || ''));
         setFieldValue(cidadeInput, card.dataset.obitoCidade || '');
         setFieldValue(ufSelect, card.dataset.obitoUf || '');
         setFieldValue(idadeInput, card.dataset.obitoIdade || '');
@@ -3733,7 +3848,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 .then((data) => {
                     if (!data) return;
                     updateCardObitoData(card, data);
-                    setFieldValue(dateInput, data.obito_data || '');
+                    setFieldValue(dateInput, formatDateForInput(data.obito_data || ''));
                     setFieldValue(cidadeInput, data.obito_cidade || '');
                     setFieldValue(ufSelect, data.obito_uf || '');
                     setFieldValue(idadeInput, data.obito_idade || '');
@@ -3773,7 +3888,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             const payload = {
-                data_obito: getFormValue('obito_data'),
+                data_obito: normalizeObitoDateInput(getFormValue('obito_data')),
                 cidade: getFormValue('obito_cidade'),
                 uf: getFormValue('obito_uf'),
                 idade: getFormValue('obito_idade'),

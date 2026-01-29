@@ -1608,18 +1608,28 @@ class ContratoForm(forms.ModelForm):
     class Meta:
         model = Contrato
         fields = "__all__"
+        labels = {
+            'valor_total_devido': 'Salvo em aberto',
+            'valor_causa': 'Saldo atualizado',
+        }
 
     valor_total_devido = MoneyDecimalField(
         required=False,
         decimal_places=2,
         max_digits=14,
+        label="Saldo em aberto",
         widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
     )
     valor_causa = MoneyDecimalField(
         required=False,
         decimal_places=2,
         max_digits=14,
+        label="Saldo atualizado",
         widget=forms.TextInput(attrs={'class': 'vTextField money-mask'})
+    )
+    data_saldo_atualizado = forms.DateField(
+        required=False,
+        widget=forms.HiddenInput()
     )
     custas = MoneyDecimalField(
         required=False,
@@ -2799,7 +2809,19 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
         parsed_date = None
         if data_value:
             try:
-                parsed_date = datetime.date.fromisoformat(data_value)
+                slash_match = re.fullmatch(r'(\d{1,2})/(\d{1,2})/(\d{4})', data_value)
+                if slash_match:
+                    day = int(slash_match.group(1))
+                    month = int(slash_match.group(2))
+                    year = int(slash_match.group(3))
+                    parsed_date = datetime.date(year, month, day)
+                elif re.fullmatch(r'\d{4}', data_value):
+                    parsed_date = datetime.date(int(data_value), 1, 1)
+                elif re.fullmatch(r'\d{4}-\d{2}', data_value):
+                    year, month = data_value.split('-')
+                    parsed_date = datetime.date(int(year), int(month), 1)
+                else:
+                    parsed_date = datetime.date.fromisoformat(data_value)
             except ValueError:
                 return JsonResponse({'error': 'Data inválida'}, status=400)
         cidade = (payload.get('cidade') or '').strip()

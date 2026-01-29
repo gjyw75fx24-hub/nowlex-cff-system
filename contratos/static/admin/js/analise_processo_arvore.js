@@ -2470,10 +2470,10 @@ function formatCnjDigits(raw) {
                 0
             );
             $ulDetalhes.append(
-                `<li><strong>Valor Total Devido:</strong> ${formatCurrency(totalDevido)}</li>`
+                `<li><strong>Saldo devedor:</strong> ${formatCurrency(totalDevido)}</li>`
             );
             $ulDetalhes.append(
-                `<li><strong>Valor da Causa:</strong> ${formatCurrency(totalCausa)}</li>`
+                `<li><strong>Saldo atualizado:</strong> ${formatCurrency(totalCausa)}</li>`
             );
             const firstContractId = contratoInfos.length ? contratoInfos[0].id : null;
             const $custasInput = $('<input type="text" class="analise-custas-input">');

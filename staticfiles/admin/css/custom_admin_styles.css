@@ -1967,6 +1967,26 @@ body.colMS {
     gap: 0.6rem;
     flex-wrap: wrap;
 }
+.nowlex-input-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+.nowlex-input-wrap input {
+    padding-right: 4.4rem;
+}
+.nowlex-updated-at {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.65rem;
+    color: #6b7280;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 0 4px;
+    border-radius: 6px;
+    pointer-events: none;
+}
 .nowlex-status {
     font-size: 0.7rem;
     color: #475569;
