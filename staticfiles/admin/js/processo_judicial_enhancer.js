@@ -1435,6 +1435,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
                 responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
+            hydrateEntryProcessMeta(entry);
             rememberOrigin(entry);
             appendEntry(entry);
         });
@@ -1466,6 +1467,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 processo_id: currentProcessId ? Number(currentProcessId) : null,
                 responsavel: responsavelInput?.value ? { id: Number(responsavelInput.value) } : null,
             };
+            hydrateEntryProcessMeta(entry);
             rememberOrigin(entry);
             appendEntry(entry);
         });
@@ -1568,20 +1570,39 @@ document.addEventListener('DOMContentLoaded', function() {
         const originalDate = originalParsed
             ? formatDateIso(originalParsed.year, originalParsed.monthIndex, originalParsed.day)
             : formatDateIso(parsed.year, parsed.monthIndex, parsed.day);
-            const entry = {
-                type,
-                id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
-                backendId: item.id || null,
-                label: item.label || (
-                    type === 'S'
+        const parteInfo = item.parte || item.parte_info || item.parteInfo || item.cadastro || item.cliente || null;
+        const parteNome = item.nome
+            || item.parte_nome
+            || item.name
+            || item.cadastro_nome
+            || item.cliente_nome
+            || item.nome_cadastro
+            || parteInfo?.nome
+            || parteInfo?.name
+            || '';
+        const parteCpf = item.cpf
+            || item.parte_cpf
+            || item.documento
+            || item.cadastro_cpf
+            || item.cliente_cpf
+            || item.cpf_cadastro
+            || parteInfo?.cpf
+            || parteInfo?.documento
+            || '';
+        const entry = {
+            type,
+            id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
+            backendId: item.id || null,
+            label: item.label || (
+                type === 'S'
                         ? 'S'
                         : (item.id ? `${item.id}` : `${parsed.day}`)
                 ),
-                nome: item.nome || item.parte_nome || item.name || '',
-                parte_nome: item.parte_nome || item.nome || item.name || '',
-                cpf: item.cpf || item.parte_cpf || item.documento || '',
-                parte_cpf: item.parte_cpf || item.cpf || item.documento || '',
-                documento: item.documento || item.cpf || item.parte_cpf || '',
+            nome: parteNome,
+            parte_nome: parteNome,
+            cpf: parteCpf,
+            parte_cpf: parteCpf,
+            documento: parteCpf || item.documento || '',
                 description: item.description
                     || item.descricao
                     || item.title
@@ -1625,6 +1646,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
             supervisor_status: item.supervisor_status || item.supervisorStatus || '',
         };
+        hydrateEntryProcessMeta(entry);
         const hasApiOrigin = Boolean(originalRaw);
         if (hasApiOrigin) {
             const key = getOriginKey(entry);
@@ -1693,21 +1715,47 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof onEntrySelect === 'function') {
             onEntrySelect(null, null);
         }
+        const navWrap = detailList?.__navWrap;
+        const navPrev = detailList?.__navPrev;
+        const navNext = detailList?.__navNext;
         const entries = type === 'T'
             ? dayData.tasksT
             : type === 'P'
                 ? dayData.tasksP
                 : dayData.tasksS;
+        if (navWrap) {
+            navWrap.style.display = 'none';
+        }
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
             return;
         }
         detailList.innerHTML = '';
+        const entryElements = [];
+        let activeIndex = -1;
+        const setActiveDetailItem = (target, index) => {
+            activeIndex = index;
+            entryElements.forEach((item) => item.classList.remove('agenda-panel__details-item--active'));
+            target?.classList.add('agenda-panel__details-item--active');
+            if (navPrev && navNext) {
+                navPrev.disabled = activeIndex <= 0;
+                navNext.disabled = activeIndex >= entryElements.length - 1;
+            }
+        };
+        const selectEntryAt = (index) => {
+            const target = entryElements[index];
+            if (!target) return;
+            target.click();
+            target.scrollIntoView({ block: 'nearest' });
+        };
         entries.forEach(entryData => {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
             entry.tabIndex = 0;
+            if (type === 'T' || type === 'P') {
+                entry.classList.add('agenda-panel__details-item--task');
+            }
             const priorityCode = (entryData.priority || '').toUpperCase();
             const priorityClass = priorityCode === 'A'
                 ? 'agenda-panel__details-item--priority-high'
@@ -1743,7 +1791,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (type !== 'S') {
                 const text = document.createElement('span');
                 text.className = 'agenda-panel__details-item-text';
-                text.textContent = entryData.description || '';
+                text.textContent = entryData.description || entryData.detail || entryData.label || '';
                 entry.appendChild(text);
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
@@ -1816,6 +1864,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             entry.addEventListener('click', () => {
+                const index = entryElements.indexOf(entry);
+                if (index !== -1) {
+                    setActiveDetailItem(entry, index);
+                }
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
                 detailCardBody.innerHTML = '';
                 if (type === 'S') {
@@ -1844,7 +1896,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (typeof onEntrySelect === 'function') {
                 onEntrySelect(entryData, type, entry);
             }
-        });
+            });
             entry.addEventListener('dblclick', () => {
                 const url = entryData.admin_url || entryData.url;
                 if (url) {
@@ -1854,6 +1906,7 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.type = type;
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
+            entryElements.push(entry);
             const canDragDetailEntry = !isCompletedMode && !(type === 'S' && entryData.expired);
             entry.draggable = Boolean(canDragDetailEntry);
             if (canDragDetailEntry) {
@@ -1875,6 +1928,23 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             detailList.appendChild(entry);
         });
+        const enableNav = (type === 'T' || type === 'P') && entryElements.length > 1;
+        if (navWrap) {
+            navWrap.style.display = enableNav ? 'inline-flex' : 'none';
+        }
+        if (navPrev && navNext) {
+            navPrev.onclick = enableNav
+                ? () => selectEntryAt(Math.max(0, activeIndex - 1))
+                : null;
+            navNext.onclick = enableNav
+                ? () => selectEntryAt(Math.min(entryElements.length - 1, activeIndex + 1))
+                : null;
+            navPrev.disabled = !enableNav;
+            navNext.disabled = !enableNav;
+        }
+        if (enableNav && entryElements.length) {
+            selectEntryAt(0);
+        }
     };
 
     const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle, onEntrySelect = null) => {
@@ -1948,6 +2018,8 @@ document.addEventListener('DOMContentLoaded', function() {
             number.textContent = dayInfo.day;
             const tagsWrapper = document.createElement('div');
             tagsWrapper.className = 'agenda-panel__day-tags';
+            const cardsWrapper = document.createElement('div');
+            cardsWrapper.className = 'agenda-panel__day-cards';
             const currentDate = formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
             const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP, ...dayInfo.tasksS]
                 .some(entry => entry.originalDate && entry.originalDate !== currentDate);
@@ -2019,18 +2091,158 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
-                dayCell.addEventListener('click', () => {
-                    resetDetailCardBody();
-                    if (dayInfo.tasksS.length) {
-                        populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
-                        recordActiveDay(dayInfo, 'S');
-                    } else if (dayInfo.tasksT.length) {
-                        populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
-                        recordActiveDay(dayInfo, 'T');
-                    } else if (dayInfo.tasksP.length) {
-                        populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
-                        recordActiveDay(dayInfo, 'P');
+            const shortenName = (value, maxWords = 2) => {
+                if (!value) return '';
+                const parts = String(value).trim().split(/\s+/).filter(Boolean);
+                if (!parts.length) return '';
+                return parts.slice(0, maxWords).join(' ');
+            };
+            const getEntryNameCpf = (entry, shortName = false) => {
+                hydrateEntryProcessMeta(entry);
+                const cardMeta = entry?.processo_id ? getParteInfoFromCard(entry.processo_id) : {};
+                const rawName = entry?.nome || entry?.name || entry?.parte_nome || cardMeta.name || '';
+                const name = shortName ? shortenName(rawName, 2) : rawName;
+                const cpfCandidates = [
+                    entry?.cpf,
+                    entry?.parte_cpf,
+                    entry?.documento,
+                    entry?.cpf_falecido,
+                    entry?.cpf_representante,
+                    cardMeta.cpf,
+                ];
+                const cpfRaw = cpfCandidates.find(Boolean) || '';
+                const digits = String(cpfRaw || '').replace(/\D/g, '');
+                const formattedCpf = digits.length === 11
+                    ? `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`
+                    : '';
+                if (!name && !formattedCpf) return '';
+                const suffix = formattedCpf ? `CPF ${formattedCpf}` : '';
+                return [name, suffix].filter(Boolean).join(' · ').trim();
+            };
+            const getEntryTaskTitle = (entry) => {
+                const candidates = [
+                    entry?.description,
+                    entry?.detail,
+                    entry?.title,
+                    entry?.titulo,
+                    entry?.label,
+                    entry?.cnj_label,
+                ];
+                const text = candidates.find(value => (value || '').trim());
+                return text ? String(text).trim() : '';
+            };
+            const buildEntryCardLabel = (entry, type, shortName = false) => {
+                if (type === 'T' || type === 'P') {
+                    return getEntryNameCpf(entry, shortName) || getEntryTaskTitle(entry) || 'Item';
+                }
+                const candidates = [
+                    entry?.description,
+                    entry?.detail,
+                    entry?.nome,
+                    entry?.parte_nome,
+                    entry?.cnj_label,
+                    entry?.label,
+                ];
+                const text = candidates.find(value => (value || '').trim());
+                return text ? String(text).trim() : 'Item';
+            };
+            const renderDayCards = () => {
+                const allEntries = [
+                    ...dayInfo.tasksT.map(entry => ({ entry, type: 'T' })),
+                    ...dayInfo.tasksP.map(entry => ({ entry, type: 'P' })),
+                    ...dayInfo.tasksS.map(entry => ({ entry, type: 'S' })),
+                ];
+                if (!allEntries.length) {
+                    return;
+                }
+                const maxCards = effectiveState.mode === 'weekly' ? 5 : 3;
+                const visibleEntries = allEntries.slice(0, maxCards);
+                visibleEntries.forEach(({ entry, type }) => {
+                    const card = document.createElement('button');
+                    card.type = 'button';
+                    card.className = `agenda-panel__day-card agenda-panel__day-card--${type.toLowerCase()}`;
+                    if (type === 'S' && entry.expired) {
+                        card.classList.add('agenda-panel__day-card--expired');
+                    }
+                    const priorityCode = (entry?.priority || '').toUpperCase();
+                    if (priorityCode === 'A') {
+                        card.classList.add('agenda-panel__day-card--priority-high');
+                    } else if (priorityCode === 'M') {
+                        card.classList.add('agenda-panel__day-card--priority-medium');
+                    } else if (priorityCode === 'B') {
+                        card.classList.add('agenda-panel__day-card--priority-low');
+                    }
+                    const typeEl = document.createElement('span');
+                    typeEl.className = 'agenda-panel__day-card-type';
+                    typeEl.textContent = type;
+                    const textEl = document.createElement('span');
+                    textEl.className = 'agenda-panel__day-card-text';
+                    const labelText = buildEntryCardLabel(entry, type, true);
+                    if (type === 'T' || type === 'P') {
+                        const taskTitle = getEntryTaskTitle(entry);
+                        const nameCpf = getEntryNameCpf(entry, true);
+                        const titleLine = taskTitle || labelText;
+                        const metaLine = nameCpf && nameCpf !== titleLine ? nameCpf : '';
+                        textEl.classList.add('agenda-panel__day-card-text--stacked');
+                        if (titleLine) {
+                            const primary = document.createElement('span');
+                            primary.className = 'agenda-panel__day-card-text-primary';
+                            primary.textContent = titleLine;
+                            textEl.appendChild(primary);
+                        }
+                        if (metaLine) {
+                            const secondary = document.createElement('span');
+                            secondary.className = 'agenda-panel__day-card-text-secondary';
+                            secondary.textContent = metaLine;
+                            textEl.appendChild(secondary);
+                        }
+                        card.title = [titleLine, metaLine].filter(Boolean).join(' · ');
                     } else {
+                        textEl.textContent = labelText;
+                        card.title = labelText;
+                    }
+                    card.append(typeEl, textEl);
+                    card.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        resetDetailCardBody();
+                        populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        recordActiveDay(dayInfo, type);
+                        setActiveDay(dayCell);
+                        const detailEntry = detailList.querySelector(`[data-entry-id="${entry.id}"]`);
+                        if (detailEntry) {
+                            detailEntry.click();
+                            detailEntry.scrollIntoView({ block: 'nearest' });
+                        }
+                    });
+                    cardsWrapper.appendChild(card);
+                });
+                const overflow = allEntries.length - visibleEntries.length;
+                if (overflow > 0) {
+                    const moreCard = document.createElement('button');
+                    moreCard.type = 'button';
+                    moreCard.className = 'agenda-panel__day-card agenda-panel__day-card--more';
+                    moreCard.textContent = `+${overflow}`;
+                    moreCard.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        dayCell.click();
+                    });
+                    cardsWrapper.appendChild(moreCard);
+                }
+            };
+            renderDayCards();
+            dayCell.append(number, tagsWrapper, cardsWrapper);
+            dayCell.addEventListener('click', () => {
+                resetDetailCardBody();
+                if (dayInfo.tasksS.length) {
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    recordActiveDay(dayInfo, 'S');
+                } else if (dayInfo.tasksT.length) {
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    recordActiveDay(dayInfo, 'T');
+                } else if (dayInfo.tasksP.length) {
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    recordActiveDay(dayInfo, 'P');
+                } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
                     detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
                     setDetailTitle?.(dayInfo.day, null);
@@ -2160,37 +2372,39 @@ document.addEventListener('DOMContentLoaded', function() {
                         <p class="agenda-panel__subtitle">Expandida para duas telas ou modal.</p>
                     </div>
                     <div class="agenda-panel__header-actions">
+                        <span class="agenda-panel__year-label" aria-live="polite"></span>
                         <button type="button" class="agenda-panel__refresh-btn" aria-label="Atualizar agenda">↻</button>
                         <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
                     </div>
                 </div>
                 <div class="agenda-panel__controls">
-                    <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
-                    <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
-                    <button type="button" class="agenda-panel__users-toggle" data-view="users" aria-pressed="false">Usuários</button>
+                    <div class="agenda-panel__controls-left">
+                        <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
+                        <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
+                        <button type="button" class="agenda-panel__users-toggle" data-view="users" aria-pressed="false">Usuários</button>
+                    </div>
+                    <div class="agenda-panel__controls-right">
+                        <div class="agenda-panel__month-heading">
+                            <strong class="agenda-panel__month-title">Janeiro 2025</strong>
+                        </div>
+                        <div class="agenda-panel__month-switches">
+                            <button type="button">Jan</button>
+                            <button type="button">Fev</button>
+                            <button type="button">Mar</button>
+                            <button type="button">Abr</button>
+                            <button type="button">Mai</button>
+                            <button type="button">Jun</button>
+                            <button type="button">Jul</button>
+                            <button type="button">Ago</button>
+                            <button type="button">Set</button>
+                            <button type="button">Out</button>
+                            <button type="button">Nov</button>
+                            <button type="button">Dez</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="agenda-panel__body">
                     <div class="agenda-panel__calendar-wrapper">
-                        <div class="agenda-panel__calendar-header">
-                        <div class="agenda-panel__month-heading">
-                            <strong class="agenda-panel__month-title">Janeiro 2025</strong>
-                            <span class="agenda-panel__year-label" aria-live="polite"></span>
-                        </div>
-                            <div class="agenda-panel__month-switches">
-                                <button type="button">Jan</button>
-                                <button type="button">Fev</button>
-                                <button type="button">Mar</button>
-                                <button type="button">Abr</button>
-                                <button type="button">Mai</button>
-                                <button type="button">Jun</button>
-                                <button type="button">Jul</button>
-                                <button type="button">Ago</button>
-                                <button type="button">Set</button>
-                                <button type="button">Out</button>
-                                <button type="button">Nov</button>
-                                <button type="button">Dez</button>
-                            </div>
-                        </div>
                         <div class="agenda-panel__calendar-inner">
                             <div class="agenda-panel__calendar-grid-wrapper">
                                 <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--prev" data-direction="prev" aria-label="Voltar">
@@ -2234,7 +2448,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="agenda-panel__footer">
                     <button type="button" class="agenda-panel__form-btn" data-form="tarefas">Tarefas</button>
                     <button type="button" class="agenda-panel__form-btn" data-form="prazos">Prazos</button>
-                    <button type="button" class="agenda-panel__split">Abrir em tela dividida</button>
+                    <button type="button" class="agenda-panel__split" aria-pressed="false">Abrir em tela cheia</button>
                 </div>
             </div>
         `;
@@ -2249,14 +2463,28 @@ document.addEventListener('DOMContentLoaded', function() {
         const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
         const monthYearEl = overlay.querySelector('.agenda-panel__year-label');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
+        const fullscreenButton = overlay.querySelector('.agenda-panel__split');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const detailTitleWrapper = overlay.querySelector('.agenda-panel__details-title');
         const detailTitleText = document.createElement('span');
         detailTitleText.className = 'agenda-panel__details-title-text';
         const detailTitleType = document.createElement('span');
         detailTitleType.className = 'agenda-panel__details-type';
+        const detailNav = document.createElement('div');
+        detailNav.className = 'agenda-panel__details-nav';
+        const detailNavPrev = document.createElement('button');
+        detailNavPrev.type = 'button';
+        detailNavPrev.className = 'agenda-panel__details-nav-btn';
+        detailNavPrev.textContent = '‹';
+        detailNavPrev.setAttribute('aria-label', 'Anterior');
+        const detailNavNext = document.createElement('button');
+        detailNavNext.type = 'button';
+        detailNavNext.className = 'agenda-panel__details-nav-btn';
+        detailNavNext.textContent = '›';
+        detailNavNext.setAttribute('aria-label', 'Próximo');
+        detailNav.append(detailNavPrev, detailNavNext);
         detailTitleWrapper.textContent = '';
-        detailTitleWrapper.append(detailTitleText, detailTitleType);
+        detailTitleWrapper.append(detailTitleText, detailTitleType, detailNav);
         const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
         const detailBarrarGroup = overlay.querySelector('.agenda-panel__details-card-barrar');
         const detailBarrarButton = overlay.querySelector('.agenda-panel__details-card-barrar-btn');
@@ -2265,6 +2493,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
         let persistedSupervisionEntryId = null;
+        if (detailList) {
+            detailList.__navWrap = detailNav;
+            detailList.__navPrev = detailNavPrev;
+            detailList.__navNext = detailNavNext;
+        }
+        const setFullscreenState = (enabled) => {
+            if (!fullscreenButton) return;
+            overlay.classList.toggle('agenda-panel-overlay--fullscreen', enabled);
+            fullscreenButton.textContent = enabled ? 'Sair da tela cheia' : 'Abrir em tela cheia';
+            fullscreenButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        };
+        fullscreenButton?.addEventListener('click', () => {
+            const isFullscreen = overlay.classList.contains('agenda-panel-overlay--fullscreen');
+            setFullscreenState(!isFullscreen);
+        });
 
         const hideDetailStatusButton = () => {
             if (!detailStatusButton) return;
@@ -2803,10 +3046,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const yearText = `${calendarState.year || new Date().getFullYear()}`;
             if (calendarState.view === 'users') {
                 monthTitleEl.textContent = 'Usuários';
-                monthYearEl?.classList.add('agenda-panel__year-label--visible');
-            } else {
-                monthTitleEl.textContent = getMonthLabel(calendarState);
+                monthTitleEl.style.display = '';
                 monthYearEl?.classList.remove('agenda-panel__year-label--visible');
+            } else {
+                monthTitleEl.textContent = '';
+                monthTitleEl.style.display = 'none';
+                monthYearEl?.classList.add('agenda-panel__year-label--visible');
             }
             if (monthYearEl) {
                 monthYearEl.textContent = yearText;
@@ -3225,13 +3470,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Botões relacionados a andamentos processuais
     const buscaAtivaInput = document.getElementById('id_busca_ativa');
     const andamentosActionsContainer = getAndamentosActionBar();
-    if (buscaAtivaInput && !document.getElementById('btn_atualizar_andamentos')) {
-        const actionHost = andamentosActionsContainer || buscaAtivaInput.parentNode;
+    if (!document.getElementById('btn_atualizar_andamentos')) {
+        const actionHost = andamentosActionsContainer || buscaAtivaInput?.parentNode;
+        if (!actionHost) {
+            return;
+        }
         const btn = document.createElement('button');
         btn.id = 'btn_atualizar_andamentos';
         btn.type = 'button';
         btn.className = 'button analise-inner-tab-button';
-        btn.innerText = '🔄 Atualizar andamentos agora';
+        btn.innerText = '🔄 Buscar andamentos agora';
 
         actionHost.appendChild(btn);
 
@@ -3243,23 +3491,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
         actionHost.appendChild(removeDuplicatesBtn);
 
-        const buscaField = buscaAtivaInput.closest('.field-busca_ativa') || buscaAtivaInput.closest('.form-row');
-        if (buscaField) {
-            buscaField.style.display = 'none';
-        }
-        buscaAtivaInput.classList.add('supervision-toggle-input');
-        const toggleWrapper = document.createElement('label');
-        toggleWrapper.className = 'protocol-toggle andamentos-busca-toggle';
-        const switchSpan = document.createElement('span');
-        switchSpan.className = 'supervision-switch';
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'supervision-label-text';
-        labelSpan.innerText = 'Busca ativa';
-        toggleWrapper.appendChild(buscaAtivaInput);
-        toggleWrapper.appendChild(switchSpan);
-        toggleWrapper.appendChild(labelSpan);
+        if (buscaAtivaInput) {
+            const buscaField = buscaAtivaInput.closest('.field-busca_ativa') || buscaAtivaInput.closest('.form-row');
+            if (buscaField) {
+                buscaField.style.display = 'none';
+            }
+            buscaAtivaInput.classList.add('supervision-toggle-input');
+            const toggleWrapper = document.createElement('label');
+            toggleWrapper.className = 'protocol-toggle andamentos-busca-toggle';
+            const switchSpan = document.createElement('span');
+            switchSpan.className = 'supervision-switch';
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'supervision-label-text';
+            labelSpan.innerText = 'Busca ativa';
+            toggleWrapper.appendChild(buscaAtivaInput);
+            toggleWrapper.appendChild(switchSpan);
+            toggleWrapper.appendChild(labelSpan);
 
-        actionHost.appendChild(toggleWrapper);
+            actionHost.appendChild(toggleWrapper);
+        }
 
         btn.addEventListener('click', () => {
             const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
@@ -3502,6 +3752,58 @@ document.addEventListener('DOMContentLoaded', function() {
         const cpf = cpfFromDataset || cpfText;
         return { name, cpf };
     };
+    const agendaProcessMetaCache = new Map();
+    const normalizeProcessId = (value) => {
+        if (value === null || value === undefined || value === '') return '';
+        return String(value);
+    };
+    const storeAgendaProcessMeta = (processoId, name, cpf) => {
+        const key = normalizeProcessId(processoId);
+        if (!key) return;
+        const current = agendaProcessMetaCache.get(key) || {};
+        const next = {
+            name: name || current.name || '',
+            cpf: cpf || current.cpf || '',
+        };
+        if (next.name || next.cpf) {
+            agendaProcessMetaCache.set(key, next);
+        }
+    };
+    const getAgendaProcessMeta = (processoId) => {
+        const key = normalizeProcessId(processoId);
+        if (!key) return {};
+        if (agendaProcessMetaCache.has(key)) {
+            return agendaProcessMetaCache.get(key) || {};
+        }
+        const info = getParteInfoFromCard(key);
+        if (info?.name || info?.cpf) {
+            agendaProcessMetaCache.set(key, info);
+        }
+        return info || {};
+    };
+    const hydrateEntryProcessMeta = (entry) => {
+        if (!entry) return entry;
+        const processoId = normalizeProcessId(entry.processo_id ?? entry.processoId);
+        if (!processoId) return entry;
+        entry.processo_id = entry.processo_id ?? entry.processoId;
+        const entryName = entry.nome || entry.name || entry.parte_nome || '';
+        const entryCpf = entry.cpf || entry.parte_cpf || entry.documento || '';
+        if (entryName || entryCpf) {
+            storeAgendaProcessMeta(processoId, entryName, entryCpf);
+            return entry;
+        }
+        const meta = getAgendaProcessMeta(processoId);
+        if (meta?.name) {
+            entry.nome = meta.name;
+            entry.parte_nome = entry.parte_nome || meta.name;
+        }
+        if (meta?.cpf) {
+            entry.cpf = meta.cpf;
+            entry.parte_cpf = entry.parte_cpf || meta.cpf;
+            entry.documento = entry.documento || meta.cpf;
+        }
+        return entry;
+    };
     const parseEnderecoString = (value) => {
         const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
         if (!value) return output;
@@ -3626,6 +3928,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function buildEntryTitleRow(entryData) {
         if (!entryData) return null;
+        hydrateEntryProcessMeta(entryData);
         const cardMeta = entryData.processo_id ? getParteInfoFromCard(entryData.processo_id) : {};
         const name = entryData.nome || entryData.name || entryData.parte_nome || cardMeta.name || '';
         const cpfCandidates = [
@@ -4757,6 +5060,155 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Função principal para configurar uma inline de parte
+    const DEMANDAS_CPF_ENDPOINT = '/api/demandas/cpf/';
+
+    const normalizeCpfDigits = (value) => String(value || '').replace(/\D/g, '');
+
+    const findEmptyContratoRow = () => {
+        const rows = Array.from(document.querySelectorAll('#contratos-group .dynamic-contratos'))
+            .filter(row => !row.classList.contains('empty-form'));
+        return rows.find(row => {
+            const numeroInput = row.querySelector('input[id$="-numero_contrato"]');
+            return numeroInput && !numeroInput.value;
+        }) || null;
+    };
+
+    const getExistingContratoNumbers = () => {
+        const numbers = new Set();
+        document.querySelectorAll('#contratos-group input[id$="-numero_contrato"]').forEach(input => {
+            const val = (input.value || '').trim();
+            if (val) numbers.add(val);
+        });
+        return numbers;
+    };
+
+    const fillContratoRow = (row, contrato) => {
+        if (!row || !contrato) return;
+        const numeroInput = row.querySelector('input[id$="-numero_contrato"]');
+        const valorTotalInput = row.querySelector('input[id$="-valor_total_devido"]');
+        const valorCausaInput = row.querySelector('input[id$="-valor_causa"]');
+        const parcelasInput = row.querySelector('input[id$="-parcelas_em_aberto"]');
+        const prescricaoInput = row.querySelector('input[id$="-data_prescricao"]');
+        if (numeroInput && contrato.numero_contrato) {
+            numeroInput.value = contrato.numero_contrato;
+            numeroInput.dispatchEvent(new Event('input', { bubbles: true }));
+            numeroInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const valorBase = contrato.valor_total_devido || contrato.valor_causa || '';
+        if (valorTotalInput) {
+            valorTotalInput.value = formatCurrencyBrl(valorBase);
+            valorTotalInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (valorCausaInput) {
+            valorCausaInput.value = formatCurrencyBrl(valorBase);
+            valorCausaInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (parcelasInput && typeof contrato.parcelas_em_aberto !== 'undefined') {
+            parcelasInput.value = contrato.parcelas_em_aberto;
+            parcelasInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (prescricaoInput && contrato.data_prescricao) {
+            prescricaoInput.value = contrato.data_prescricao;
+            prescricaoInput.dispatchEvent(new Event('input', { bubbles: true }));
+            prescricaoInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    };
+
+    const appendContratosFromDemandas = (contratos = []) => {
+        if (!contratos.length) return;
+        const addButton = document.querySelector('#contratos-group .add-row a');
+        const existing = getExistingContratoNumbers();
+        const pendentes = contratos.filter(contract => contract.numero_contrato && !existing.has(contract.numero_contrato));
+        if (!pendentes.length) return;
+        pendentes.forEach(contract => {
+            let row = findEmptyContratoRow();
+            if (!row && addButton) {
+                addButton.click();
+                const rows = Array.from(document.querySelectorAll('#contratos-group .dynamic-contratos'))
+                    .filter(r => !r.classList.contains('empty-form'));
+                row = rows[rows.length - 1] || null;
+            }
+            if (row) {
+                fillContratoRow(row, contract);
+            }
+        });
+    };
+
+    const applyDemandasDataToParte = (parteInline, data) => {
+        if (!parteInline || !data) return;
+        const nomeInput = parteInline.querySelector('[id$="-nome"]');
+        const documentoInput = parteInline.querySelector('[id$="-documento"]');
+        const tipoPessoaSelect = parteInline.querySelector('[id$="-tipo_pessoa"]');
+        const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
+        const enderecoInput = parteInline.querySelector('[id$="-endereco"]');
+        if (tipoPoloSelect && !tipoPoloSelect.value) {
+            tipoPoloSelect.value = 'PASSIVO';
+            tipoPoloSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (nomeInput && data.nome) {
+            nomeInput.value = data.nome;
+            nomeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (documentoInput && data.documento) {
+            documentoInput.value = data.documento;
+            documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
+            documentoInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (tipoPessoaSelect && data.tipo_pessoa) {
+            tipoPessoaSelect.value = data.tipo_pessoa;
+            tipoPessoaSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (enderecoInput && data.endereco) {
+            enderecoInput.value = data.endereco;
+            enderecoInput.dispatchEvent(new Event('input', { bubbles: true }));
+            enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        appendContratosFromDemandas(data.contratos || []);
+    };
+
+    const fetchDemandasCpf = async (cpfDigits, carteiraId = '') => {
+        if (!cpfDigits) {
+            throw new Error('Informe um CPF válido.');
+        }
+        const url = `${DEMANDAS_CPF_ENDPOINT}${cpfDigits}/` + (carteiraId ? `?carteira_id=${carteiraId}` : '');
+        const response = await fetch(url, { method: 'GET' });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Não foi possível buscar o CPF.');
+        }
+        const payload = await response.json();
+        if (payload.status !== 'success') {
+            throw new Error(payload.error || 'CPF não encontrado.');
+        }
+        return payload.data;
+    };
+
+    const handleDemandasCpfClick = async (button) => {
+        const row = button.closest('.form-row.field-cpf-demandas') || button.closest('.cpf-demandas-group');
+        const input = row?.querySelector('.cpf-demandas-input');
+        const parteInline = button.closest('.dynamic-partes') || button.closest('.inline-related');
+        const cpfDigits = normalizeCpfDigits(input?.value);
+        if (!cpfDigits || cpfDigits.length < 11) {
+            createSystemAlert('Demandas', 'Informe um CPF válido.');
+            return;
+        }
+        const carteiraId = document.getElementById('id_carteira')?.value || '';
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = 'Buscando...';
+        try {
+            const data = await fetchDemandasCpf(cpfDigits, carteiraId);
+            applyDemandasDataToParte(parteInline, data);
+            createSystemAlert('Demandas', 'Cadastro importado com sucesso.');
+        } catch (error) {
+            createSystemAlert('Demandas', error.message || 'Não foi possível buscar o CPF.');
+            console.error('[Demandas CPF] erro', error);
+        } finally {
+            button.disabled = false;
+            button.textContent = originalText || 'Buscar';
+        }
+    };
+
     function setupParteInline(parteInline) {
         setupDocumentoField(parteInline);
 
@@ -4792,6 +5244,55 @@ document.addEventListener('DOMContentLoaded', function() {
             tipoPoloSelect.addEventListener('change', () => updateParteDisplay(parteInline));
         }
         updateParteDisplay(parteInline); // Atualiza no carregamento inicial
+
+        let cpfRow = parteInline.querySelector('.form-row.field-cpf-demandas');
+        if (!cpfRow) {
+            const nomeField = parteInline.querySelector('.form-row.field-nome');
+            const enderecoField = parteInline.querySelector('.field-endereco');
+            const row = document.createElement('div');
+            row.className = 'form-row field-cpf-demandas';
+            row.innerHTML = `
+                <div class="flex-container">
+                    <label>CPF</label>
+                    <div class="cpf-demandas-group">
+                        <div class="cpf-demandas-actions">
+                            <input type="text" class="cpf-demandas-input" placeholder="Buscar cadastro por CPF">
+                            <button type="button" class="button cpf-demandas-btn">Buscar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (enderecoField && enderecoField.parentNode) {
+                enderecoField.parentNode.insertBefore(row, enderecoField);
+            } else if (nomeField && nomeField.parentNode) {
+                nomeField.parentNode.insertBefore(row, nomeField.nextSibling);
+            } else {
+                parteInline.appendChild(row);
+            }
+            cpfRow = row;
+        }
+
+        const input = cpfRow?.querySelector('.cpf-demandas-input');
+        const button = cpfRow?.querySelector('.cpf-demandas-btn');
+        if (input && !input.dataset.maskBound) {
+            input.dataset.maskBound = 'true';
+            input.addEventListener('input', () => {
+                input.value = maskCpfCnpj(input.value);
+            });
+        }
+        if (button && !button.dataset.fetchBound) {
+            button.dataset.fetchBound = 'true';
+        }
+    }
+
+    if (!document.body.dataset.cpfDemandasGlobal) {
+        document.body.dataset.cpfDemandasGlobal = 'true';
+        document.body.addEventListener('click', (event) => {
+            const button = event.target.closest('.cpf-demandas-btn');
+            if (!button) return;
+            event.preventDefault();
+            handleDemandasCpfClick(button);
+        });
     }
 
 

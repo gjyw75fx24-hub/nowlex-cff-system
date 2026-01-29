@@ -297,6 +297,61 @@ class DemandasImportService:
             contracts.append(mapped)
         return contracts
 
+    def _fetch_contracts_by_cpf(self, cpfs: Iterable[str]) -> List[Dict]:
+        sql = """
+            SELECT
+                c.id,
+                c.contrato,
+                c.cpf_cgc,
+                COALESCE(c.valor_aberto, 0) as valor_aberto,
+                c.data_prescricao,
+                COALESCE(c.uf, '') as uf,
+                COALESCE(c.loja_nome, c.loja, '') as loja_nome,
+                COALESCE(c.num_processo_jud, '') as num_processo_jud,
+                COALESCE(cl.nome, '') as cliente_nome,
+                cl.endereco_rua,
+                cl.endereco_numero,
+                cl.endereco_complemento,
+                cl.endereco_bairro,
+                cl.endereco_cidade,
+                cl.endereco_uf,
+                cl.endereco_cep,
+                cl.telefone_ddd,
+                cl.telefone_numero
+            FROM b6_erp_contratos c
+            LEFT JOIN b6_erp_clientes cl ON cl.cpf_cgc = c.cpf_cgc
+            WHERE c.cpf_cgc = ANY(%s)
+            ORDER BY c.cpf_cgc, c.data_prescricao
+        """
+        with connections[self.db_alias].cursor() as cursor:
+            cursor.execute(sql, [list(cpfs)])
+            rows = cursor.fetchall()
+            column_names = [desc[0] for desc in cursor.description]
+
+        contracts = []
+        for row in rows:
+            mapped = dict(zip(column_names, row))
+            cpf_value = (mapped.get("cpf_cgc") or "").strip()
+            mapped["cpf"] = cpf_value
+            uf = (mapped.get("endereco_uf") or '').strip().upper()
+            cep = _format_cep(mapped.get("endereco_cep"))
+            endereco_map = {
+                "A": _clean_street_name(mapped.get("endereco_rua"), mapped.get("endereco_numero")),
+                "B": mapped.get("endereco_numero") or '',
+                "C": mapped.get("endereco_complemento") or '',
+                "D": mapped.get("endereco_bairro") or '',
+                "E": mapped.get("endereco_cidade") or '',
+                "F": _uf_to_nome(uf),
+                "G": cep,
+                "H": uf,
+            }
+            mapped["endereco"] = _montar_texto_endereco(endereco_map)
+            mapped["telefone"] = _build_telefone(mapped)
+            mapped["contato_tipo_pessoa"] = _determine_tipo_pessoa(mapped["cpf"])
+            mapped["valor_aberto"] = Decimal(mapped.get("valor_aberto") or 0)
+            contracts.append(mapped)
+        return contracts
+
     def _fetch_parcelas_em_aberto(self, contrato_ids: List[int]) -> Dict[int, Dict[str, Decimal]]:
         if not contrato_ids:
             return {}
@@ -315,6 +370,56 @@ class DemandasImportService:
         return {
             row[0]: {"parcelas": row[1] or 0, "valor": Decimal(row[2] or 0)}
             for row in rows
+        }
+
+    def fetch_cadastro_by_cpf(self, cpf: str) -> Dict[str, object]:
+        cpf_clean = _normalize_digits(cpf)
+        if not cpf_clean:
+            return {}
+        if not self.has_carteira_connection:
+            raise DemandasImportError(
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
+            )
+        try:
+            contratos = self._fetch_contracts_by_cpf([cpf_clean])
+        except OperationalError as exc:
+            logger.exception("Falha ao buscar contratos por CPF na base da carteira")
+            raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
+        if not contratos:
+            return {}
+        contrato_ids = [c["id"] for c in contratos if c.get("id")]
+        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
+        for row in contratos:
+            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
+            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+
+        primeiro = contratos[0]
+        nome = primeiro.get("cliente_nome") or "Cliente sem nome"
+        endereco = primeiro.get("endereco") or ""
+        tipo_pessoa = primeiro.get("contato_tipo_pessoa") or _determine_tipo_pessoa(cpf_clean)
+        telefone = primeiro.get("telefone") or ""
+
+        contratos_payload = []
+        for contrato in contratos:
+            prescricao = contrato.get("data_prescricao")
+            contratos_payload.append({
+                "numero_contrato": contrato.get("contrato") or "",
+                "valor_total_devido": str(contrato.get("valor_aberto") or Decimal('0')),
+                "valor_causa": str(contrato.get("valor_aberto") or Decimal('0')),
+                "parcelas_em_aberto": contrato.get("parcelas_aberto") or 0,
+                "data_prescricao": prescricao.strftime("%Y-%m-%d") if prescricao else "",
+                "contrato_id": contrato.get("id"),
+            })
+
+        return {
+            "cpf": cpf_clean,
+            "nome": nome,
+            "documento": cpf_clean,
+            "tipo_pessoa": tipo_pessoa,
+            "endereco": endereco,
+            "telefone": telefone,
+            "contratos": contratos_payload,
         }
 
     def _build_processo(self, cpf: str, contracts: List[Dict], carteira: Optional[Carteira] = None) -> ProcessoJudicial:

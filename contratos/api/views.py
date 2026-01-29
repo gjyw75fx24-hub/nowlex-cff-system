@@ -23,6 +23,7 @@ from django.http import JsonResponse
 
 from ..models import (
     AnaliseProcesso,
+    Carteira,
     Contrato,
     Herdeiro,
     ListaDeTarefas,
@@ -32,6 +33,7 @@ from ..models import (
     Prazo,
     Tarefa,
 )
+from ..services.demandas import DemandasImportError, DemandasImportService
 from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
 from ..services.nowlex_calc import (
     NowlexCalcError,
@@ -1010,6 +1012,35 @@ class SaveManualAddressAPIView(View):
             return JsonResponse({'error': 'Dados inválidos.'}, status=400)
         except Exception as e:
             return JsonResponse({'error': f'Ocorreu um erro interno: {e}'}, status=500)
+
+
+@method_decorator(login_required, name='dispatch')
+class BuscarDadosDemandasCpfView(View):
+    """
+    Busca cadastro e contratos na base de Demandas usando CPF.
+    """
+    def get(self, request, cpf):
+        cpf_clean = re.sub(r'\D', '', str(cpf or ''))
+        if len(cpf_clean) < 11:
+            return JsonResponse({'error': 'CPF inválido.'}, status=400)
+
+        carteira_id = request.GET.get('carteira_id')
+        alias = DemandasImportService.SOURCE_ALIAS
+        if carteira_id:
+            carteira = Carteira.objects.filter(pk=carteira_id).first()
+            if carteira and carteira.fonte_alias:
+                alias = carteira.fonte_alias
+
+        service = DemandasImportService(db_alias=alias)
+        try:
+            data = service.fetch_cadastro_by_cpf(cpf_clean)
+        except DemandasImportError as exc:
+            return JsonResponse({'error': str(exc)}, status=500)
+
+        if not data:
+            return JsonResponse({'error': 'CPF não encontrado na base de demandas.'}, status=404)
+
+        return JsonResponse({'status': 'success', 'data': data})
 
 
 @method_decorator(login_required, name='dispatch')
