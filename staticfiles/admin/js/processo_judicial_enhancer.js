@@ -5061,8 +5061,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Função principal para configurar uma inline de parte
     const DEMANDAS_CPF_ENDPOINT = '/api/demandas/cpf/';
+    const DEMANDAS_CPF_PREVIEW_ENDPOINT = '/api/demandas/cpf/preview';
+    const DEMANDAS_CPF_IMPORT_ENDPOINT = '/api/demandas/cpf/import';
 
     const normalizeCpfDigits = (value) => String(value || '').replace(/\D/g, '');
+
+    const parseCpfBatch = (value) => {
+        const digits = String(value || '').split(/\s|,|;|\t|\n/);
+        const normalized = digits
+            .map(item => item.replace(/\D/g, ''))
+            .filter(item => item.length >= 11);
+        return Array.from(new Set(normalized));
+    };
+
+    const formatCpfLabel = (cpf) => {
+        const digits = String(cpf || '').replace(/\D/g, '');
+        if (digits.length !== 11) return cpf;
+        return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+    };
 
     const findEmptyContratoRow = () => {
         const rows = Array.from(document.querySelectorAll('#contratos-group .dynamic-contratos'))
@@ -5183,6 +5199,157 @@ document.addEventListener('DOMContentLoaded', function() {
         return payload.data;
     };
 
+    const fetchDemandasBatchPreview = async (cpfs, carteiraId = '') => {
+        const response = await fetch(DEMANDAS_CPF_PREVIEW_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken || '',
+            },
+            body: JSON.stringify({ cpfs, carteira_id: carteiraId || '' }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.status !== 'success') {
+            throw new Error(payload.error || 'Não foi possível gerar o preview.');
+        }
+        return payload;
+    };
+
+    const fetchDemandasBatchImport = async (cpfs, etiquetaNome, carteiraId = '') => {
+        const response = await fetch(DEMANDAS_CPF_IMPORT_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken || '',
+            },
+            body: JSON.stringify({ cpfs, etiqueta_nome: etiquetaNome, carteira_id: carteiraId || '' }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.status !== 'success') {
+            throw new Error(payload.error || 'Não foi possível importar os CPFs.');
+        }
+        return payload;
+    };
+
+    const openDemandasBatchModal = () => {
+        if (document.querySelector('.cpf-demandas-modal')) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'cpf-demandas-modal';
+        overlay.innerHTML = `
+            <div class="cpf-demandas-modal__card">
+                <div class="cpf-demandas-modal__header">
+                    <strong>Importar CPFs (lote)</strong>
+                    <button type="button" class="cpf-demandas-modal__close">×</button>
+                </div>
+                <div class="cpf-demandas-modal__body">
+                    <label>CPFs (cole da planilha)</label>
+                    <textarea class="cpf-demandas-modal__textarea" placeholder="Cole aqui os CPFs separados por linha ou vírgula"></textarea>
+                    <button type="button" class="button cpf-demandas-modal__preview-btn">Pré-visualizar</button>
+                    <div class="cpf-demandas-modal__preview"></div>
+                    <div class="cpf-demandas-modal__etiqueta">
+                        <label>Lote/Etiqueta</label>
+                        <input type="text" class="cpf-demandas-modal__etiqueta-input" placeholder="Ex: Precatórios Jan">
+                    </div>
+                </div>
+                <div class="cpf-demandas-modal__footer">
+                    <button type="button" class="button cpf-demandas-modal__import">Importar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const closeButton = overlay.querySelector('.cpf-demandas-modal__close');
+        const previewBtn = overlay.querySelector('.cpf-demandas-modal__preview-btn');
+        const importBtn = overlay.querySelector('.cpf-demandas-modal__import');
+        const textarea = overlay.querySelector('.cpf-demandas-modal__textarea');
+        const previewBox = overlay.querySelector('.cpf-demandas-modal__preview');
+        if (previewBox) {
+            previewBox.style.display = 'block';
+        }
+        const etiquetaInput = overlay.querySelector('.cpf-demandas-modal__etiqueta-input');
+
+        const close = () => overlay.remove();
+        closeButton?.addEventListener('click', close);
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+
+        const renderPreview = (rows = []) => {
+            previewBox.style.display = 'block';
+            if (!rows.length) {
+                previewBox.innerHTML = '<p>Nenhum CPF encontrado.</p>';
+                return;
+            }
+            const header = `
+                <div class="cpf-demandas-preview-row cpf-demandas-preview-row--head">
+                    <span>CPF</span>
+                    <span>Nome</span>
+                    <span>Contratos</span>
+                    <span>Total em aberto</span>
+                    <span>Prescrição</span>
+                </div>
+            `;
+            const body = rows.map(row => `
+                <div class="cpf-demandas-preview-row">
+                    <span>${row.cpf || formatCpfLabel(row.cpf_raw)}</span>
+                    <span>${row.nome || ''}</span>
+                    <span>${row.contratos || 0}</span>
+                    <span>${row.total_aberto || ''}</span>
+                    <span>${row.prescricao_ativadora || ''}</span>
+                </div>
+            `).join('');
+            previewBox.innerHTML = header + body;
+        };
+
+        previewBtn?.addEventListener('click', async () => {
+            const cpfs = parseCpfBatch(textarea?.value);
+            if (!cpfs.length) {
+                createSystemAlert('Demandas', 'Cole ao menos um CPF.');
+                return;
+            }
+            previewBtn.disabled = true;
+            previewBtn.textContent = 'Carregando...';
+            try {
+                const carteiraId = document.getElementById('id_carteira')?.value || '';
+                    const payload = await fetchDemandasBatchPreview(cpfs, carteiraId);
+                    renderPreview(payload.rows || []);
+                    previewBox.dataset.cpfs = JSON.stringify(cpfs);
+                } catch (error) {
+                    createSystemAlert('Demandas', error.message || 'Falha ao gerar preview.');
+                    previewBox.innerHTML = '';
+                    previewBox.style.display = 'none';
+                } finally {
+                    previewBtn.disabled = false;
+                    previewBtn.textContent = 'Pré-visualizar';
+                }
+            });
+
+        importBtn?.addEventListener('click', async () => {
+            const cpfs = JSON.parse(previewBox.dataset.cpfs || '[]');
+            if (!cpfs.length) {
+                createSystemAlert('Demandas', 'Faça o preview antes de importar.');
+                return;
+            }
+            const etiqueta = etiquetaInput?.value?.trim();
+            if (!etiqueta) {
+                createSystemAlert('Demandas', 'Informe um Lote/Etiqueta.');
+                return;
+            }
+            importBtn.disabled = true;
+            importBtn.textContent = 'Importando...';
+            try {
+                const carteiraId = document.getElementById('id_carteira')?.value || '';
+                const result = await fetchDemandasBatchImport(cpfs, etiqueta, carteiraId);
+                createSystemAlert('Demandas', `Importação concluída: ${result.imported || 0} importados, ${result.skipped || 0} ignorados.`);
+                close();
+            } catch (error) {
+                createSystemAlert('Demandas', error.message || 'Falha ao importar.');
+            } finally {
+                importBtn.disabled = false;
+                importBtn.textContent = 'Importar';
+            }
+        });
+    };
+
     const handleDemandasCpfClick = async (button) => {
         const row = button.closest('.form-row.field-cpf-demandas') || button.closest('.cpf-demandas-group');
         const input = row?.querySelector('.cpf-demandas-input');
@@ -5258,6 +5425,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="cpf-demandas-actions">
                             <input type="text" class="cpf-demandas-input" placeholder="Buscar cadastro por CPF">
                             <button type="button" class="button cpf-demandas-btn">Buscar</button>
+                            <button type="button" class="button cpf-demandas-batch">Lote</button>
                         </div>
                     </div>
                 </div>
@@ -5274,6 +5442,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const input = cpfRow?.querySelector('.cpf-demandas-input');
         const button = cpfRow?.querySelector('.cpf-demandas-btn');
+        let batchButton = cpfRow?.querySelector('.cpf-demandas-batch');
+        if (cpfRow && !batchButton) {
+            batchButton = document.createElement('button');
+            batchButton.type = 'button';
+            batchButton.className = 'button cpf-demandas-batch';
+            batchButton.textContent = 'Lote';
+            cpfRow.querySelector('.cpf-demandas-actions')?.appendChild(batchButton);
+        }
         if (input && !input.dataset.maskBound) {
             input.dataset.maskBound = 'true';
             input.addEventListener('input', () => {
@@ -5292,6 +5468,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!button) return;
             event.preventDefault();
             handleDemandasCpfClick(button);
+        });
+        document.body.addEventListener('click', (event) => {
+            const button = event.target.closest('.cpf-demandas-batch');
+            if (!button) return;
+            event.preventDefault();
+            openDemandasBatchModal();
         });
     }
 

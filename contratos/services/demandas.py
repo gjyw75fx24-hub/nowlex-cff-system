@@ -372,6 +372,15 @@ class DemandasImportService:
             for row in rows
         }
 
+    def _group_contracts_by_cpf(self, contracts: List[Dict]) -> Dict[str, List[Dict]]:
+        grouped = defaultdict(list)
+        for row in contracts:
+            cpf = (row.get("cpf") or row.get("cpf_cgc") or "").strip()
+            if not cpf:
+                continue
+            grouped[cpf].append(row)
+        return grouped
+
     def fetch_cadastro_by_cpf(self, cpf: str) -> Dict[str, object]:
         cpf_clean = _normalize_digits(cpf)
         if not cpf_clean:
@@ -421,6 +430,79 @@ class DemandasImportService:
             "telefone": telefone,
             "contratos": contratos_payload,
         }
+
+    def build_preview_for_cpfs(self, cpfs: Iterable[str]) -> Tuple[List[Dict[str, str]], Decimal]:
+        normalized = [_normalize_digits(cpf) for cpf in cpfs if _normalize_digits(cpf)]
+        if not normalized:
+            return [], Decimal('0')
+        if not self.has_carteira_connection:
+            raise DemandasImportError(
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
+            )
+        try:
+            contratos = self._fetch_contracts_by_cpf(normalized)
+        except OperationalError as exc:
+            logger.exception("Falha ao buscar contratos por CPF na base da carteira")
+            raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
+        if not contratos:
+            return [], Decimal('0')
+        contrato_ids = [c["id"] for c in contratos if c.get("id")]
+        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
+        for row in contratos:
+            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
+            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+
+        grouped = self._group_contracts_by_cpf(contratos)
+        rows = []
+        total_aberto_sum = Decimal('0')
+        for cpf, contracts in grouped.items():
+            nome = next((c.get('cliente_nome') for c in contracts if c.get('cliente_nome')), 'Cliente sem nome')
+            total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)
+            prescricao_dates = [c['data_prescricao'] for c in contracts if c.get('data_prescricao')]
+            prescricao_text = prescricao_dates[0].strftime('%d/%m/%Y') if prescricao_dates else ''
+            total_aberto_sum += total_aberto
+            cpf_normalized = _normalize_digits(cpf)
+            uf_endereco = ''
+            for contract in contracts:
+                uf_candidate = (contract.get('endereco_uf') or '').strip().upper()
+                if uf_candidate:
+                    uf_endereco = uf_candidate
+                    break
+            rows.append({
+                "cpf": _format_cpf(cpf),
+                "cpf_raw": cpf_normalized,
+                "nome": nome,
+                "contratos": len(contracts),
+                "total_aberto": _format_currency(total_aberto),
+                "prescricao_ativadora": prescricao_text,
+                "uf_endereco": uf_endereco,
+            })
+        return rows, total_aberto_sum
+
+    def import_cpfs(self, cpfs: Iterable[str], etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
+        normalized = [_normalize_digits(cpf) for cpf in cpfs if _normalize_digits(cpf)]
+        if not normalized:
+            return {"imported": 0, "skipped": 0}
+        if not self.has_carteira_connection:
+            raise DemandasImportError(
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
+            )
+        try:
+            contratos = self._fetch_contracts_by_cpf(normalized)
+        except OperationalError as exc:
+            logger.exception("Falha ao buscar contratos por CPF na base da carteira")
+            raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
+        if not contratos:
+            return {"imported": 0, "skipped": 0}
+        contrato_ids = [c["id"] for c in contratos if c.get("id")]
+        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
+        for row in contratos:
+            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
+            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+        grouped = self._group_contracts_by_cpf(contratos)
+        return self._apply_import(grouped, etiqueta_nome, carteira)
 
     def _build_processo(self, cpf: str, contracts: List[Dict], carteira: Optional[Carteira] = None) -> ProcessoJudicial:
         total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)

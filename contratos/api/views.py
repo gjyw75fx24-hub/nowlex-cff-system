@@ -1044,6 +1044,82 @@ class BuscarDadosDemandasCpfView(View):
 
 
 @method_decorator(login_required, name='dispatch')
+class DemandasCpfPreviewView(View):
+    """
+    Preview de CPFs (lote) usando a base de Demandas.
+    """
+    def post(self, request, *args, **kwargs):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Dados inválidos.'}, status=400)
+
+        cpfs = payload.get('cpfs') or []
+        if not isinstance(cpfs, list) or not cpfs:
+            return JsonResponse({'error': 'Informe ao menos um CPF.'}, status=400)
+
+        carteira_id = payload.get('carteira_id')
+        alias = DemandasImportService.SOURCE_ALIAS
+        carteira = None
+        if carteira_id:
+            carteira = Carteira.objects.filter(pk=carteira_id).first()
+            if carteira and carteira.fonte_alias:
+                alias = carteira.fonte_alias
+
+        service = DemandasImportService(db_alias=alias)
+        try:
+            rows, total = service.build_preview_for_cpfs(cpfs)
+        except DemandasImportError as exc:
+            return JsonResponse({'error': str(exc)}, status=500)
+
+        return JsonResponse({
+            'status': 'success',
+            'rows': rows,
+            'total_aberto': str(total),
+        })
+
+
+@method_decorator(login_required, name='dispatch')
+class DemandasCpfImportView(View):
+    """
+    Importa CPFs em lote usando base de Demandas e aplica etiqueta.
+    """
+    def post(self, request, *args, **kwargs):
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Dados inválidos.'}, status=400)
+
+        cpfs = payload.get('cpfs') or []
+        etiqueta_nome = (payload.get('etiqueta_nome') or '').strip()
+        carteira_id = payload.get('carteira_id')
+
+        if not isinstance(cpfs, list) or not cpfs:
+            return JsonResponse({'error': 'Informe ao menos um CPF.'}, status=400)
+        if not etiqueta_nome:
+            return JsonResponse({'error': 'Informe um nome para o Lote/Etiqueta.'}, status=400)
+
+        alias = DemandasImportService.SOURCE_ALIAS
+        carteira = None
+        if carteira_id:
+            carteira = Carteira.objects.filter(pk=carteira_id).first()
+            if carteira and carteira.fonte_alias:
+                alias = carteira.fonte_alias
+
+        service = DemandasImportService(db_alias=alias)
+        try:
+            result = service.import_cpfs(cpfs, etiqueta_nome, carteira)
+        except DemandasImportError as exc:
+            return JsonResponse({'error': str(exc)}, status=500)
+
+        return JsonResponse({
+            'status': 'success',
+            'imported': result.get('imported', 0),
+            'skipped': result.get('skipped', 0),
+        })
+
+
+@method_decorator(login_required, name='dispatch')
 class BuscarDadosEscavadorView(View):
     """
     Busca os dados de um processo na API do Escavador usando o número CNJ.

@@ -24,5 +24,9 @@ urlpatterns = [
     path('fetch-address/<str:cpf>/', views.FetchAddressAPIView.as_view(), name='fetch_address_api'),
     path('save-manual-address/', views.SaveManualAddressAPIView.as_view(), name='save_manual_address_api'),
     path('demandas/cpf/<str:cpf>/', views.BuscarDadosDemandasCpfView.as_view(), name='buscar_demandas_cpf'),
+    path('demandas/cpf/preview/', views.DemandasCpfPreviewView.as_view(), name='demandas_cpf_preview'),
+    path('demandas/cpf/import/', views.DemandasCpfImportView.as_view(), name='demandas_cpf_import'),
+    path('demandas/cpf/preview', views.DemandasCpfPreviewView.as_view(), name='demandas_cpf_preview_noslash'),
+    path('demandas/cpf/import', views.DemandasCpfImportView.as_view(), name='demandas_cpf_import_noslash'),
     path('processo/<int:processo_id>/nowlex-valor-causa/', views.ProcessoNowlexValorCausaAPIView.as_view(), name='processo_nowlex_valor_causa'),
 ]

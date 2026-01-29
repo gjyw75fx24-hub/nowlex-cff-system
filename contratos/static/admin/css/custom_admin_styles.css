@@ -2806,6 +2806,8 @@ a.historylink {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .cpf-demandas-label {
@@ -2818,18 +2820,115 @@ a.historylink {
     display: flex;
     gap: 6px;
     align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.cpf-demandas-actions .button {
+    border-radius: 4px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    background: var(--body-bg, #f5f5f5);
+    color: var(--body-fg, #111827);
+    border: 1px solid var(--border-color, #c7d0da);
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.15) inset;
+}
+
+.cpf-demandas-actions .button:hover {
+    background: #e9ecef;
 }
 
 .cpf-demandas-input {
-    max-width: 220px;
-    flex: 1 1 auto;
-    font-size: 10px;
+    max-width: 360px;
+    width: 360px;
+    flex: 0 0 360px;
+    font-size: 12px;
 }
 
 .dynamic-partes .form-row.field-cpf-demandas label {
     min-width: 150px;
     margin-bottom: 0;
     white-space: nowrap;
+}
+
+.cpf-demandas-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+}
+
+.cpf-demandas-modal__card {
+    background: #fff;
+    width: min(720px, 90vw);
+    border-radius: 12px;
+    box-shadow: 0 24px 40px rgba(15, 23, 42, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px;
+}
+
+.cpf-demandas-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 700;
+}
+
+.cpf-demandas-modal__close {
+    border: none;
+    background: transparent;
+    font-size: 22px;
+    cursor: pointer;
+}
+
+.cpf-demandas-modal__body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cpf-demandas-modal__textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+
+.cpf-demandas-modal__preview {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.cpf-demandas-preview-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 90px 140px 120px;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 12px;
+}
+
+.cpf-demandas-preview-row--head {
+    font-weight: 700;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.cpf-demandas-modal__etiqueta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cpf-demandas-modal__footer {
+    display: flex;
+    justify-content: flex-end;
 }
 .agenda-panel__details-item--active {
     border: 1px solid #4a63cf;
