@@ -133,6 +133,27 @@ class AgendaGeralAPIView(APIView):
             .filter(**prazo_filter)
         )
 
+        processo_ids = set(
+            list(tarefas.values_list('processo_id', flat=True))
+            + list(prazos.values_list('processo_id', flat=True))
+        )
+        processo_meta = {}
+        if processo_ids:
+            processos = (
+                ProcessoJudicial.objects
+                .filter(id__in=processo_ids)
+                .prefetch_related('partes_processuais')
+            )
+            for processo in processos:
+                partes_qs = processo.partes_processuais.order_by('tipo_polo', 'id')
+                parte_passiva = partes_qs.filter(tipo_polo='PASSIVO').first() or partes_qs.first()
+                parte_nome = parte_passiva.nome if parte_passiva else ''
+                parte_documento = parte_passiva.documento if parte_passiva else ''
+                processo_meta[processo.id] = {
+                    'nome': parte_nome,
+                    'cpf': parte_documento,
+                }
+
         tarefas_data = TarefaSerializer(tarefas, many=True).data
         for item in tarefas_data:
             item['type'] = 'T'
@@ -144,6 +165,13 @@ class AgendaGeralAPIView(APIView):
             if hasattr(raw_origin, 'isoformat'):
                 raw_origin = raw_origin.isoformat()
             item['original_date'] = (raw_origin or '')[:10]
+            meta = processo_meta.get(item.get('processo_id')) or {}
+            if meta:
+                item['nome'] = meta.get('nome', '')
+                item['parte_nome'] = meta.get('nome', '')
+                item['cpf'] = meta.get('cpf', '')
+                item['parte_cpf'] = meta.get('cpf', '')
+                item['documento'] = meta.get('cpf', '')
 
         prazos_data = PrazoSerializer(prazos, many=True).data
         for item in prazos_data:
@@ -173,6 +201,13 @@ class AgendaGeralAPIView(APIView):
             if hasattr(raw_origin, 'isoformat'):
                 raw_origin = raw_origin.isoformat()
             item['original_date'] = (raw_origin or '')[:10]
+            meta = processo_meta.get(item.get('processo_id')) or {}
+            if meta:
+                item['nome'] = meta.get('nome', '')
+                item['parte_nome'] = meta.get('nome', '')
+                item['cpf'] = meta.get('cpf', '')
+                item['parte_cpf'] = meta.get('cpf', '')
+                item['documento'] = meta.get('cpf', '')
 
         supervision_entries = self._get_supervision_entries(show_completed, request)
         agenda_items = sorted(
