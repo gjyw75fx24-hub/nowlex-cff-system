@@ -3292,7 +3292,8 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const handleAgendaPanelEscape = (event) => {
-        if (event.key !== 'Escape') {
+        const isEscape = event.key === 'Escape' || event.key === 'Esc' || event.keyCode === 27;
+        if (!isEscape) {
             return;
         }
         const checagemOverlay = document.getElementById('checagem-modal-overlay');
@@ -3303,6 +3304,13 @@ document.addEventListener('DOMContentLoaded', function() {
         closeAgendaPanel();
     };
     document.addEventListener('keydown', handleAgendaPanelEscape);
+    document.addEventListener('click', (event) => {
+        const closeTrigger = event.target.closest('.agenda-panel__close');
+        if (!closeTrigger) {
+            return;
+        }
+        closeAgendaPanel();
+    });
 
     const createAgendaFormModal = (type) => {
         if (document.querySelector(`.agenda-form-modal[data-form="${type}"]`)) {
@@ -5731,10 +5739,10 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return (cardState.questions || {})[questionKey] || {};
     };
 
-    let activeChecagemTrigger = null;
-    let modalBlocker = null;
-    let checagemOverlay = null;
-    let checagemKeyHandlerAttached = false;
+    var activeChecagemTrigger = null;
+    var modalBlocker = null;
+    var checagemOverlay = null;
+    var checagemKeyHandlerAttached = false;
 
     const removeChecagemModalBlockers = () => {
         if (modalBlocker) {
@@ -6084,7 +6092,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
     };
 
-    const closeChecagemModal = () => {
+    function closeChecagemModal() {
         if (!checagemOverlay) {
             return;
         }
@@ -6103,7 +6111,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             trigger?.focus();
         }, 0);
         destroyChecagemOverlay();
-    };
+    }
 
     const openAgendaChecagemFromEntry = (entryData, trigger) => {
         const processId = entryData?.processo_id ?? entryData?.processoId;
