@@ -3715,6 +3715,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (formsetName && (formsetName === 'tarefas' || formsetName === 'listas' || formsetName === 'prazos')) {
                 removeInlineRelatedLinks(row);
             }
+            if (formsetName === 'tarefas') {
+                initTarefasSelect2(row);
+                setupTarefasPriorityStyling(row);
+            }
         });
     }
 
@@ -3732,6 +3736,316 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
     wrapInlineTableForScroll();
+
+    const syncTarefaPriorityStyle = (row) => {
+        if (!row) return;
+        row.classList.remove('tarefa-prioridade-alta', 'tarefa-prioridade-media', 'tarefa-prioridade-baixa');
+        const select = row.querySelector('select[id$="-prioridade"]');
+        if (!select) return;
+        const rawValue = (select.value || '').toLowerCase();
+        const rawText = (select.options[select.selectedIndex]?.textContent || '').toLowerCase();
+        const value = rawText || rawValue;
+        if (value.includes('alta')) {
+            row.classList.add('tarefa-prioridade-alta');
+        } else if (value.includes('média') || value.includes('media')) {
+            row.classList.add('tarefa-prioridade-media');
+        } else if (value.includes('baixa')) {
+            row.classList.add('tarefa-prioridade-baixa');
+        } else if (rawValue === '1') {
+            row.classList.add('tarefa-prioridade-alta');
+        } else if (rawValue === '2') {
+            row.classList.add('tarefa-prioridade-media');
+        } else if (rawValue === '3') {
+            row.classList.add('tarefa-prioridade-baixa');
+        }
+    };
+
+    const getSelect2JQuery = () => {
+        const djangoJq = window.django && window.django.jQuery;
+        if (djangoJq && djangoJq.fn && djangoJq.fn.select2) {
+            return djangoJq;
+        }
+        const globalJq = window.jQuery || window.$;
+        if (globalJq && globalJq.fn && globalJq.fn.select2) {
+            return globalJq;
+        }
+        return null;
+    };
+
+    const setupTarefasPriorityStyling = (root) => {
+        const group = root ? root.closest?.('#tarefas-group') || root.querySelector?.('#tarefas-group') : document.getElementById('tarefas-group');
+        if (!group) return;
+        const tbody = group.querySelector('tbody');
+        if (!tbody) return;
+        const applyAll = () => {
+            tbody.querySelectorAll('tr.dynamic-tarefas').forEach((row) => {
+                if (row.classList.contains('empty-form')) return;
+                syncTarefaPriorityStyle(row);
+            });
+        };
+        applyAll();
+        setTimeout(() => applyAll(), 150);
+        setTimeout(() => applyAll(), 600);
+        tbody.addEventListener('change', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (target.matches('select[id$="-prioridade"]')) {
+                const row = target.closest('tr.dynamic-tarefas');
+                syncTarefaPriorityStyle(row);
+            }
+        });
+        const $select2 = getSelect2JQuery();
+        if ($select2) {
+            $select2(group).on('select2:select select2:clear', 'select[id$="-prioridade"]', function () {
+                const row = this.closest('tr.dynamic-tarefas');
+                syncTarefaPriorityStyle(row);
+            });
+        }
+        const observer = new MutationObserver(() => applyAll());
+        observer.observe(tbody, { childList: true, subtree: true });
+        setTimeout(() => applyAll(), 1200);
+    };
+    setupTarefasPriorityStyling();
+
+    const initTarefasSelect2 = (root, attempt = 0) => {
+        const $ = getSelect2JQuery();
+        if (!$) {
+            if (attempt < 12) {
+                setTimeout(() => initTarefasSelect2(root, attempt + 1), 400);
+            }
+            return false;
+        }
+        const scope = root ? $(root) : $('#tarefas-group');
+        let initialized = false;
+        scope.find('select[id$="-lista"], select[id$="-prioridade"]').each(function () {
+            const $el = $(this);
+            if (($el.attr('name') || '').includes('__prefix__')) return;
+            const hasData = !!$el.data('select2');
+            const hasContainer = $el.next('.select2').length > 0;
+            if (hasData && hasContainer) return;
+            if (hasContainer && !hasData) {
+                $el.next('.select2').remove();
+            }
+            if (!hasData) {
+                const isPrioridade = /-prioridade$/.test(this.id || '');
+                const selectClass = isPrioridade ? 'tarefas-select--prioridade' : 'tarefas-select--lista';
+                $el.select2({
+                    width: '100%',
+                    theme: 'admin-autocomplete',
+                    containerCssClass: `tarefas-select ${selectClass}`,
+                    dropdownCssClass: `tarefas-select-dropdown ${selectClass}-dropdown`,
+                    dropdownParent: document.body,
+                    minimumResultsForSearch: 0,
+                    allowClear: !isPrioridade,
+                    placeholder: !isPrioridade ? ($el.find('option:first').text() || '---------') : undefined,
+                });
+                initialized = true;
+            }
+        });
+        return initialized;
+    };
+    initTarefasSelect2();
+
+    const ensureTarefasSelect2Active = () => {
+        const group = document.getElementById('tarefas-group');
+        if (!group) return;
+        initTarefasSelect2(group);
+    };
+
+    const tarefasGroup = document.getElementById('tarefas-group');
+    if (tarefasGroup) {
+        const observer = new MutationObserver(() => {
+            if (tarefasGroup.classList.contains('active')) {
+                initTarefasSelect2(tarefasGroup);
+            }
+        });
+        observer.observe(tarefasGroup, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    document.addEventListener('pointerdown', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const selection = target.closest('#tarefas-group .select2-selection--single');
+        if (!selection) return;
+        const container = selection.closest('.select2');
+        if (!container) return;
+        const select = container.previousElementSibling;
+        if (!(select instanceof HTMLSelectElement)) return;
+        if ((select.name || '').includes('__prefix__')) return;
+        const $select2Pointer = getSelect2JQuery();
+        if (!$select2Pointer) return;
+        const $select = $select2Pointer(select);
+        if (!$select.data('select2')) {
+            initTarefasSelect2(select.closest('#tarefas-group'));
+        }
+        if ($select.data('select2')) {
+            event.preventDefault();
+            $select.select2('open');
+        }
+    }, true);
+
+    document.addEventListener('mousedown', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        if (!target.matches('#tarefas-group select[id$="-lista"], #tarefas-group select[id$="-prioridade"]')) return;
+        const $ = getSelect2JQuery();
+        if (!$) return;
+        if (!$(target).data('select2')) {
+            initTarefasSelect2(target.closest('#tarefas-group') || document);
+        }
+        if ($(target).data('select2')) {
+            event.preventDefault();
+            event.stopPropagation();
+            $(target).select2('open');
+        }
+    }, true);
+
+    const stripInlineOriginalCells = () => {
+        const selectors = [
+            '#tarefas-group td.original',
+            '#prazos-group td.original',
+        ];
+        selectors.forEach((selector) => {
+            document.querySelectorAll(selector).forEach((cell) => {
+                cell.querySelectorAll('p, .readonly').forEach((el) => el.remove());
+            });
+        });
+    };
+    stripInlineOriginalCells();
+
+    const parseInlineDate = (raw) => {
+        if (!raw) return null;
+        const trimmed = String(raw).trim();
+        if (!trimmed) return null;
+        const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+            const year = Number(isoMatch[1]);
+            const month = Number(isoMatch[2]) - 1;
+            const day = Number(isoMatch[3]);
+            return new Date(year, month, day);
+        }
+        const brMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (brMatch) {
+            const day = Number(brMatch[1]);
+            const month = Number(brMatch[2]) - 1;
+            const year = Number(brMatch[3]);
+            return new Date(year, month, day);
+        }
+        return null;
+    };
+
+    const setupInlineTasksPrazosSections = () => {
+        const groups = [
+            { id: 'tarefas-group', rowClass: 'dynamic-tarefas', doneSelector: 'input[id$="-concluida"]', dateSelector: 'input[id$="-data"]' },
+            { id: 'prazos-group', rowClass: 'dynamic-prazos', doneSelector: 'input[id$="-concluido"]', dateSelector: 'input[id$="-data_limite_0"], input[id$="-data_limite"]' },
+        ];
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const getOrCreateHeader = (group) => {
+            let header = group.querySelector('.inline-section-header');
+            if (header) return header;
+            header = document.createElement('div');
+            header.className = 'inline-section-header';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'inline-section-toggle';
+            button.dataset.collapsed = 'true';
+            header.appendChild(button);
+            const tabular = group.querySelector('.tabular');
+            if (tabular && tabular.parentNode) {
+                tabular.parentNode.insertBefore(header, tabular);
+            } else {
+                group.appendChild(header);
+            }
+            button.addEventListener('click', () => {
+                const collapsed = button.dataset.collapsed === 'true';
+                button.dataset.collapsed = collapsed ? 'false' : 'true';
+                refreshSections();
+            });
+            return header;
+        };
+
+        const refreshSections = () => {
+            groups.forEach(({ id, rowClass, doneSelector, dateSelector }) => {
+                const group = document.getElementById(id);
+                if (!group) return;
+                const tabular = group.querySelector('.tabular');
+                if (!tabular) return;
+                const tbody = tabular.querySelector('tbody');
+                if (!tbody) return;
+                const rows = Array.from(tbody.querySelectorAll(`tr.${rowClass}`));
+                const activeRows = rows.filter(row => !row.classList.contains('empty-form'));
+                let completedCount = 0;
+
+                activeRows.forEach((row) => {
+                    const doneInput = row.querySelector(doneSelector);
+                    const isDone = Boolean(doneInput && doneInput.checked);
+                    row.classList.toggle('inline-row--completed', isDone);
+                    const deleteInput = row.querySelector('input[id$="-DELETE"]');
+                    const isDeleted = Boolean(deleteInput && deleteInput.checked);
+                    row.classList.toggle('inline-row--deleted', isDeleted);
+                    const dateInput = row.querySelector(dateSelector);
+                    const rowDate = parseInlineDate(dateInput?.value || '');
+                    const isOverdue = Boolean(rowDate && rowDate < today && !isDone);
+                    row.classList.toggle('inline-row--overdue', isOverdue);
+                    if (isDone) {
+                        completedCount += 1;
+                    }
+                });
+
+                const header = getOrCreateHeader(group);
+                const button = header.querySelector('.inline-section-toggle');
+                if (!completedCount) {
+                    header.style.display = 'none';
+                    group.classList.remove('inline-group--hide-completed');
+                    return;
+                }
+                header.style.display = '';
+                const collapsed = button?.dataset.collapsed !== 'false';
+                if (button) {
+                    const label = `Concluídos (${completedCount})`;
+                    button.textContent = collapsed ? `${label} — mostrar` : `${label} — ocultar`;
+                    button.classList.toggle('inline-section-toggle--open', !collapsed);
+                }
+                group.classList.toggle('inline-group--hide-completed', collapsed);
+            });
+        };
+
+        groups.forEach(({ id, doneSelector, dateSelector }) => {
+            const group = document.getElementById(id);
+            if (!group) return;
+            const tabular = group.querySelector('.tabular');
+            if (!tabular) return;
+            const tbody = tabular.querySelector('tbody');
+            if (!tbody) return;
+            const observer = new MutationObserver(() => {
+                stripInlineOriginalCells();
+                refreshSections();
+            });
+            observer.observe(tbody, { childList: true, subtree: true });
+            tbody.addEventListener('change', (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLElement)) return;
+                if (target.matches(doneSelector) || target.matches(dateSelector)) {
+                    refreshSections();
+                }
+            });
+            tbody.addEventListener('input', (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLElement)) return;
+                if (target.matches(dateSelector)) {
+                    refreshSections();
+                }
+            });
+        });
+
+        refreshSections();
+    };
+
+    setupInlineTasksPrazosSections();
+    stripInlineOriginalCells();
 
     const makeInfoCardSticky = () => {
         const card = document.querySelector('.info-card');
