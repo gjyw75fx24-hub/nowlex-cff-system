@@ -3710,6 +3710,66 @@ document.addEventListener('DOMContentLoaded', function() {
 
     removeInlineRelatedLinks();
 
+    const ensureTarefaCommentsPanel = (row) => {
+        if (!row || row.classList.contains('empty-form')) return;
+        if (!row.classList.contains('tarefa-comments-enabled')) {
+            row.classList.add('tarefa-comments-enabled');
+        }
+        let cell = row.querySelector('td.field-tarefa-comentarios');
+        if (!cell) {
+            cell = document.createElement('td');
+            cell.className = 'field-tarefa-comentarios';
+            cell.innerHTML = `
+                <div class="tarefa-comments-panel">
+                    <div class="tarefa-comments-header">
+                        <div class="tarefa-comments-avatar"></div>
+                        <div class="tarefa-comments-header-text">
+                            <div class="tarefa-comments-name">DRA. Ana</div>
+                            <div class="tarefa-comments-time">30/01/2026 às 15:59</div>
+                        </div>
+                    </div>
+                    <div class="tarefa-comments-content">
+                        <p>Resumo do Caso: Ação Revisional nº 00171953720138180140</p>
+                        <p>Sentença improcedente, acórdão improcedente, está pendente de julgamento de embargos de declaração.</p>
+                        <p>Monitória nº 08213580720258180140</p>
+                        <p>Foi deferida nossa habilitação, agora é pagar as custas iniciais.</p>
+                    </div>
+                <div class="tarefa-comments-input-row">
+                        <div class="tarefa-comments-input">
+                            <input type="text" placeholder="Digite um comentário" disabled>
+                            <span class="tarefa-comments-icon">@</span>
+                            <span class="tarefa-comments-icon">📎</span>
+                        </div>
+                        <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
+                    </div>
+                </div>
+            `;
+            row.appendChild(cell);
+        }
+    };
+
+    const initTarefaCommentsPanels = (root = document) => {
+        const group = root.querySelector?.('#tarefas-group') || document.getElementById('tarefas-group');
+        if (!group) return;
+        group.querySelectorAll('tr.dynamic-tarefas').forEach((row) => {
+            ensureTarefaCommentsPanel(row);
+        });
+    };
+
+    const bootTarefaCommentsPanels = () => {
+        const group = document.getElementById('tarefas-group');
+        if (!group) return;
+        initTarefaCommentsPanels(group);
+        const observer = new MutationObserver(() => initTarefaCommentsPanels(group));
+        observer.observe(group, { childList: true, subtree: true });
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootTarefaCommentsPanels);
+    } else {
+        bootTarefaCommentsPanels();
+    }
+
     if (window.django && window.django.jQuery) {
         window.django.jQuery(document).on('formset:added', (event, row, formsetName) => {
             if (formsetName && (formsetName === 'tarefas' || formsetName === 'listas' || formsetName === 'prazos')) {
@@ -3718,6 +3778,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (formsetName === 'tarefas') {
                 initTarefasSelect2(row);
                 setupTarefasPriorityStyling(row);
+                initTarefaCommentsPanels(row);
             }
         });
     }

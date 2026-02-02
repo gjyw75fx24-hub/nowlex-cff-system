@@ -1407,6 +1407,11 @@ a.historylink {
     background: #e3ebf7;
 }
 
+#tarefas-group tr.dynamic-tarefas {
+    position: relative;
+    padding-right: 360px;
+}
+
 #tarefas-group tr.dynamic-tarefas:not(.empty-form) td,
 #prazos-group tr.dynamic-prazos:not(.empty-form) td {
     background: transparent;
@@ -1415,6 +1420,13 @@ a.historylink {
     display: block;
     width: 100%;
     box-sizing: border-box;
+}
+
+#tarefas-group tr.dynamic-tarefas:not(.empty-form) td:not(.field-tarefa-comentarios) {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-height: 1px;
 }
 
 #tarefas-group tr.dynamic-tarefas td.field-descricao {
@@ -1430,6 +1442,153 @@ a.historylink {
 #tarefas-group tr.dynamic-tarefas td.field-observacoes {
     grid-column: 1 / -1;
     order: 6;
+}
+
+#tarefas-group tr.dynamic-tarefas td.field-tarefa-comentarios {
+    position: static !important;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+}
+
+#tarefas-group tr.dynamic-tarefas td.field-tarefa-comentarios::before {
+    display: none;
+    content: none;
+}
+
+.tarefa-comments-panel {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    bottom: 54px;
+    width: calc(320px + 7%);
+    max-width: 360px;
+    min-width: 300px;
+    background: #f8fafc;
+    border: 1px solid #dfe4ed;
+    border-radius: 18px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 3px 16px rgba(15, 48, 86, 0.08);
+    overflow: hidden;
+}
+
+.tarefa-comments-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eef2f7;
+    margin-bottom: 10px;
+}
+
+.tarefa-comments-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #f1f3f7;
+    border: 1px solid #e2e8f0;
+}
+
+.tarefa-comments-header-text {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.tarefa-comments-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #1f2f46;
+}
+
+.tarefa-comments-time {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.tarefa-comments-content {
+    flex: 1;
+    font-size: 0.8rem;
+    color: #1f2f46;
+    line-height: 1.45;
+}
+
+.tarefa-comments-content p {
+    margin: 0 0 10px;
+}
+
+.tarefa-comments-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: auto;
+    flex-wrap: nowrap;
+}
+
+.tarefa-comments-input {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #cad6e8;
+    border-radius: 12px;
+    padding: 6px 12px;
+    background: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(203, 214, 232, 0.6);
+}
+
+.tarefa-comments-input input {
+    flex: 1;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font-size: 0.85rem;
+    color: #283240;
+}
+
+.tarefa-comments-icon {
+    font-size: 0.9rem;
+    color: #6b7280;
+}
+
+.tarefa-comments-send {
+    border: 1px solid #3c6cf5;
+    background: #ffffff;
+    color: #3c6cf5;
+    font-weight: 700;
+    border-radius: 12px;
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+    box-shadow: 0 4px 10px rgba(60, 108, 245, 0.2);
+}
+
+@media (max-width: 1100px) {
+    #tarefas-group tr.dynamic-tarefas {
+        padding-right: 0;
+    }
+
+    #tarefas-group tr.dynamic-tarefas td:not(.field-tarefa-comentarios) {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .tarefa-comments-panel {
+        position: static;
+        width: 100%;
+        bottom: auto;
+        top: auto;
+        margin-top: 12px;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(15, 48, 86, 0.08);
+    }
 }
 
 #tarefas-group tr.dynamic-tarefas td.field-descricao { grid-row: 1; }
@@ -3727,6 +3886,43 @@ body.agenda-panel-open {
 #tarefas-group tr.dynamic-tarefas td.field-concluida::before,
 #tarefas-group tr.dynamic-tarefas td.delete::before {
     display: none;
+}
+
+#tarefas-group th.column-criado_por_em {
+    display: none;
+}
+
+#tarefas-group tr.dynamic-tarefas td.field-criado_por_em {
+    position: static !important;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    pointer-events: none;
+}
+
+#tarefas-group tr.dynamic-tarefas td.field-criado_por_em > * {
+    position: absolute !important;
+    right: 18px !important;
+    bottom: 12px !important;
+    left: auto !important;
+    display: inline-block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-align: right !important;
+    white-space: nowrap;
+    max-width: calc(100% - 36px);
+    pointer-events: none;
+    z-index: 2;
+}
+
+#tarefas-group tr.dynamic-tarefas td.field-criado_por_em::before {
+    display: none;
+    content: none;
 }
 .analise-custas-input {
     border: 1px solid #cfd4da;
