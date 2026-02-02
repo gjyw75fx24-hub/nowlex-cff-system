@@ -1521,6 +1521,49 @@ a.historylink {
 
 .tarefa-comments-content p {
     margin: 0 0 10px;
+.tarefa-comments-items {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.tarefa-comments-item {
+    background: #ffffff;
+    border: 1px solid #e4e9f2;
+    border-radius: 12px;
+    padding: 10px 12px;
+    box-shadow: 0 2px 6px rgba(15, 48, 86, 0.06);
+    font-size: 0.9rem;
+    color: #13203c;
+    line-height: 1.4;
+}
+
+.tarefa-comments-item-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-bottom: 6px;
+}
+
+.tarefa-comments-item-author {
+    font-weight: 700;
+    color: #102840;
+}
+
+.tarefa-comments-item-time {
+    white-space: nowrap;
+}
+
+.tarefa-comments-empty {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    font-style: italic;
 }
 
 .tarefa-comments-input-row {

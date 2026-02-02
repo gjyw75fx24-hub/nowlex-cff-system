@@ -3710,6 +3710,105 @@ document.addEventListener('DOMContentLoaded', function() {
 
     removeInlineRelatedLinks();
 
+    const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (ch) => {
+        switch (ch) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return ch;
+        }
+    });
+    const formatCommentDatetime = (iso) => {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return '';
+        const pad = (num) => String(num).padStart(2, '0');
+        const day = pad(date.getDate());
+        const month = pad(date.getMonth() + 1);
+        const year = date.getFullYear();
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+        return `${day}/${month}/${year} às ${hours}:${minutes}`;
+    };
+    const resolveCurrentUser = () => {
+        const primary = document.querySelector('#user-tools strong');
+        if (primary && primary.textContent.trim()) {
+            return primary.textContent.trim();
+        }
+        const fallback = document.querySelector('#header-user .username');
+        if (fallback && fallback.textContent.trim()) {
+            return fallback.textContent.trim();
+        }
+        return 'Você';
+    };
+    const getCommentsForRow = (row) => {
+        try {
+            const raw = row.dataset.tarefaComments || '[]';
+            return JSON.parse(raw);
+        } catch (error) {
+            return [];
+        }
+    };
+    const setCommentsForRow = (row, comments) => {
+        row.dataset.tarefaComments = JSON.stringify(comments);
+    };
+    const renderCommentsForRow = (row) => {
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const container = panel.querySelector('.tarefa-comments-items');
+        if (!container) return;
+        const comments = getCommentsForRow(row);
+        if (comments.length === 0) {
+            container.innerHTML = '<p class="tarefa-comments-empty">Nenhum comentário ainda.</p>';
+            return;
+        }
+        container.innerHTML = comments.map((comment) => `
+            <div class="tarefa-comments-item">
+                <div class="tarefa-comments-item-header">
+                    <span class="tarefa-comments-item-author">${escapeHtml(comment.author)}</span>
+                    <span class="tarefa-comments-item-time">${escapeHtml(formatCommentDatetime(comment.timestamp))}</span>
+                </div>
+                <p>${escapeHtml(comment.text)}</p>
+            </div>
+        `).join('');
+        container.scrollTop = container.scrollHeight;
+    };
+    const attachCommentRowHandlers = (row) => {
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const input = panel.querySelector('.tarefa-comments-input input');
+        const button = panel.querySelector('.tarefa-comments-send');
+        if (!input || !button) return;
+        const updateButton = () => {
+            button.disabled = !input.value.trim();
+        };
+        input.addEventListener('input', updateButton);
+        const handleSend = () => {
+            const value = input.value.trim();
+            if (!value) return;
+            const comments = getCommentsForRow(row);
+            comments.unshift({
+                author: resolveCurrentUser(),
+                text: value,
+                timestamp: new Date().toISOString(),
+            });
+            setCommentsForRow(row, comments);
+            renderCommentsForRow(row);
+            input.value = '';
+            updateButton();
+        };
+        button.addEventListener('click', handleSend);
+        input.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+            }
+        });
+        updateButton();
+        renderCommentsForRow(row);
+    };
+
     const ensureTarefaCommentsPanel = (row) => {
         if (!row || row.classList.contains('empty-form')) return;
         if (!row.classList.contains('tarefa-comments-enabled')) {
@@ -3728,12 +3827,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="tarefa-comments-time">30/01/2026 às 15:59</div>
                         </div>
                     </div>
-                    <div class="tarefa-comments-content">
-                        <p>Resumo do Caso: Ação Revisional nº 00171953720138180140</p>
-                        <p>Sentença improcedente, acórdão improcedente, está pendente de julgamento de embargos de declaração.</p>
-                        <p>Monitória nº 08213580720258180140</p>
-                        <p>Foi deferida nossa habilitação, agora é pagar as custas iniciais.</p>
-                    </div>
+                    <div class="tarefa-comments-items"></div>
                     <div class="tarefa-comments-input-row">
                         <div class="tarefa-comments-input">
                             <input type="text" placeholder="Digite um comentário" disabled>
@@ -3746,6 +3840,11 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             row.appendChild(cell);
         }
+        if (!row.dataset.tarefaComments) {
+            setCommentsForRow(row, []);
+        }
+        renderCommentsForRow(row);
+        attachCommentRowHandlers(row);
     };
 
     const initTarefaCommentsPanels = (root = document) => {
@@ -3773,7 +3872,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.django && window.django.jQuery) {
         window.django.jQuery(document).on('formset:added', (event, row, formsetName) => {
             if (formsetName && (formsetName === 'tarefas' || formsetName === 'listas' || formsetName === 'prazos')) {
-                removeInlineRelatedLinks(row);
+            removeInlineRelatedLinks(row);
             }
             if (formsetName === 'tarefas') {
                 initTarefasSelect2(row);
