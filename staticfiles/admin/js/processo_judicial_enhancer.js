@@ -3710,6 +3710,96 @@ document.addEventListener('DOMContentLoaded', function() {
 
     removeInlineRelatedLinks();
 
+    const resolveCurrentUser = () => {
+        const label = document.querySelector('#user-tools strong');
+        if (label && label.textContent.trim()) return label.textContent.trim();
+        return 'Você';
+    };
+
+    const historyKey = 'tarefaCommentsHistory';
+    const getLocalComments = (row) => {
+        try {
+            return JSON.parse(row.dataset[historyKey] || '[]');
+        } catch {
+            return [];
+        }
+    };
+
+    const setLocalComments = (row, comments) => {
+        row.dataset[historyKey] = JSON.stringify(comments || []);
+    };
+
+    const formatLocalTimestamp = (timestamp) => {
+        if (!timestamp) return '';
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
+    const renderLocalComments = (row) => {
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const history = panel.querySelector('.tarefa-comments-history');
+        if (!history) return;
+        const comments = getLocalComments(row);
+        if (!comments.length) {
+            history.textContent = 'Nenhum comentário gravado.';
+            return;
+        }
+        history.innerHTML = comments
+            .map((comment) => `
+                <div class="tarefa-comments-history-item">
+                    <div class="tarefa-comments-history-item-header">
+                        <span class="tarefa-comments-history-item-author">${comment.author}</span>
+                        <span class="tarefa-comments-history-item-meta">${formatLocalTimestamp(comment.timestamp)}</span>
+                    </div>
+                    <p>${comment.text}</p>
+                </div>
+            `)
+            .join('');
+    };
+
+    const attachSimpleCommentHandler = (row) => {
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const input = panel.querySelector('.tarefa-comments-input input');
+        const button = panel.querySelector('.tarefa-comments-send');
+        if (!input || !button) return;
+        input.disabled = false;
+        const handleSend = () => {
+            const value = input.value.trim();
+            if (!value) return;
+            const comments = getLocalComments(row);
+            comments.unshift({
+                author: resolveCurrentUser(),
+                text: value,
+                timestamp: new Date().toISOString(),
+            });
+            setLocalComments(row, comments);
+            renderLocalComments(row);
+            input.value = '';
+            button.disabled = true;
+            input.focus();
+        };
+        input.addEventListener('input', () => {
+            button.disabled = !input.value.trim();
+        });
+        button.addEventListener('click', handleSend);
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+            }
+        });
+        button.disabled = !(input.value.trim());
+    };
+
     const ensureTarefaCommentsPanel = (row) => {
         if (!row || row.classList.contains('empty-form')) return;
         if (!row.classList.contains('tarefa-comments-enabled')) {
@@ -3728,15 +3818,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="tarefa-comments-time">30/01/2026 às 15:59</div>
                         </div>
                     </div>
-                    <div class="tarefa-comments-content">
-                        <p>Resumo do Caso: Ação Revisional nº 00171953720138180140</p>
-                        <p>Sentença improcedente, acórdão improcedente, está pendente de julgamento de embargos de declaração.</p>
-                        <p>Monitória nº 08213580720258180140</p>
-                        <p>Foi deferida nossa habilitação, agora é pagar as custas iniciais.</p>
-                    </div>
-                    <div class="tarefa-comments-input-row">
+                <div class="tarefa-comments-history"></div>
+                <div class="tarefa-comments-input-row">
                         <div class="tarefa-comments-input">
-                            <input type="text" placeholder="Digite um comentário" disabled>
+                            <input type="text" placeholder="Digite um comentário">
                             <span class="tarefa-comments-icon">@</span>
                             <span class="tarefa-comments-icon">📎</span>
                         </div>
@@ -3745,22 +3830,49 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
             row.appendChild(cell);
+            setLocalComments(row, []);
+            renderLocalComments(row);
+            attachSimpleCommentHandler(row);
+        } else {
+            renderLocalComments(row);
+            attachSimpleCommentHandler(row);
         }
+    };
+
+    const collectTarefaRows = (group) => {
+        const rows = [];
+        group.querySelectorAll('tr').forEach((row) => {
+            if (row.classList.contains('dynamic-tarefas') || row.id?.startsWith('tarefas-')) {
+                rows.push(row);
+            }
+        });
+        return rows;
     };
 
     const initTarefaCommentsPanels = (root = document) => {
         const group = root.querySelector?.('#tarefas-group') || document.getElementById('tarefas-group');
         if (!group) return;
-        group.querySelectorAll('tr.dynamic-tarefas').forEach((row) => {
-            ensureTarefaCommentsPanel(row);
-        });
+        collectTarefaRows(group).forEach((row) => ensureTarefaCommentsPanel(row));
     };
 
     const bootTarefaCommentsPanels = () => {
         const group = document.getElementById('tarefas-group');
         if (!group) return;
         initTarefaCommentsPanels(group);
-        const observer = new MutationObserver(() => initTarefaCommentsPanels(group));
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(({ addedNodes }) => {
+                addedNodes.forEach((node) => {
+                    if (!node || node.nodeType !== 1) return;
+                    if (node.classList && (node.classList.contains('dynamic-tarefas') || node.id?.startsWith('tarefas-'))) {
+                        ensureTarefaCommentsPanel(node);
+                        return;
+                    }
+                    if (typeof node.querySelectorAll === 'function') {
+                        collectTarefaRows(node).forEach((row) => ensureTarefaCommentsPanel(row));
+                    }
+                });
+            });
+        });
         observer.observe(group, { childList: true, subtree: true });
     };
 
