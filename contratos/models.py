@@ -1,6 +1,9 @@
 import uuid
 
-from django.db import models
+from django.conf import settings
+from django.db import connection, models
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 
 
 def _generate_tipo_peticao_key():
@@ -250,6 +253,8 @@ class ProcessoArquivo(models.Model):
     )
     enviado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Enviado por")
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    tarefa = models.ForeignKey('Tarefa', on_delete=models.SET_NULL, null=True, blank=True, related_name='arquivos')
+    mensagem = models.ForeignKey('TarefaMensagem', on_delete=models.SET_NULL, null=True, blank=True, related_name='anexos')
 
     class Meta:
         verbose_name = "Arquivo"
@@ -655,6 +660,15 @@ class Tarefa(models.Model):
     prioridade = models.CharField(max_length=1, choices=PRIORIDADE_CHOICES, default='M')
     concluida = models.BooleanField(default=False)
     observacoes = models.TextField(blank=True, null=True, verbose_name="Observações")
+    criado_em = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Criado em", editable=True)
+    criado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='tarefas_criadas',
+        null=True,
+        blank=True,
+        verbose_name="Criado por"
+    )
 
     def __str__(self):
         return self.descricao
@@ -663,6 +677,12 @@ class Tarefa(models.Model):
         verbose_name = "Tarefa"
         verbose_name_plural = "Tarefas"
         ordering = ['-data']
+
+@receiver(pre_delete, sender=Tarefa)
+def cleanup_tarefa_related(sender, instance, **kwargs):
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s", [instance.pk])
+        cursor.execute("DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s", [instance.pk])
 
 class Prazo(models.Model):
     ALERTA_UNIDADE_CHOICES = [
@@ -682,6 +702,27 @@ class Prazo(models.Model):
 
     def __str__(self):
         return self.titulo
+
+
+class TarefaMensagem(models.Model):
+    tarefa = models.ForeignKey(Tarefa, on_delete=models.CASCADE, related_name='mensagens')
+    autor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tarefas_mensagens'
+    )
+    texto = models.TextField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Mensagem da Tarefa"
+        verbose_name_plural = "Mensagens da Tarefa"
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f"{self.autor or 'Usuário'} em {self.criado_em:%d/%m/%Y %H:%M}"
 
 
 class BuscaAtivaConfig(models.Model):

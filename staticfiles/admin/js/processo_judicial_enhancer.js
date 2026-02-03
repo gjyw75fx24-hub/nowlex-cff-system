@@ -3716,17 +3716,137 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'Você';
     };
 
+    const getCreatedByFromRow = (row) => {
+        const hidden = row.querySelector('input[name$="-criado_por_label"]');
+        if (hidden && hidden.value) {
+            return hidden.value.trim();
+        }
+        return resolveCurrentUser();
+    };
+
+    const getCreatedAtFromRow = (row) => {
+        const hidden = row.querySelector('input[name$="-criado_em_value"]');
+        if (hidden && hidden.value) {
+            return hidden.value.trim();
+        }
+        return new Date().toISOString();
+    };
+
+    const formatNaturalCreatedAt = (iso) => {
+        if (!iso) return '';
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return iso;
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
     const historyKey = 'tarefaCommentsHistory';
-    const getLocalComments = (row) => {
+    const getCsrfToken = () => document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+    const getTarefaIdFromRow = (row) => {
+        if (!row) return '';
+        const hiddenId = row.querySelector('input[name$="-id"]');
+        if (hiddenId && hiddenId.value) return hiddenId.value;
+        return row.dataset.tarefaId || '';
+    };
+
+    const fetchCommentsForRow = async (row) => {
+        const tarefaId = getTarefaIdFromRow(row);
+        if (!tarefaId) return [];
         try {
-            return JSON.parse(row.dataset[historyKey] || '[]');
-        } catch {
+            const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
+                method: 'GET',
+                credentials: 'same-origin',
+            });
+            if (!response.ok) return [];
+            return response.json();
+        } catch (error) {
+            console.error('Erro ao buscar comentários:', error);
             return [];
         }
     };
 
-    const setLocalComments = (row, comments) => {
-        row.dataset[historyKey] = JSON.stringify(comments || []);
+    const loadCommentsForRow = async (row) => {
+        const comments = await fetchCommentsForRow(row);
+        setRowComments(row, comments);
+        renderCommentsHistory(row);
+    };
+
+    const COMMENTS_PANEL_FLAG = 'tarefaCommentsPanelInit';
+    const COMMENTS_HANDLER_FLAG = 'tarefaCommentsHandlerAttached';
+    const COMMENTS_LOADED_FLAG = 'tarefaCommentsLoaded';
+    const getArquivosTableBodies = () => {
+        const selectors = ['#arquivos-group tbody', '#processoarquivo_set-group tbody'];
+        return selectors
+            .map((selector) => document.querySelector(selector))
+            .filter(Boolean);
+    };
+
+    const buildArquivoRowFromAttachment = (attachment) => {
+        const row = document.createElement('tr');
+        row.className = 'dynamic-arquivos tarefa-comments-file-row';
+        row.dataset.fileId = attachment.id;
+        row.innerHTML = `
+            <td class="field-nome">${attachment.nome || ''}</td>
+            <td class="field-arquivo">
+                ${attachment.arquivo_url ? `<a href="${attachment.arquivo_url}" target="_blank" rel="noopener noreferrer" class="button">Visualizar</a>` : ''}
+            </td>
+            <td class="field-enviado_por">${attachment.autor?.username || ''}</td>
+            <td class="field-protocolado_no_tribunal">-</td>
+            <td class="field-criado_em">${formatLocalTimestamp(attachment.criado_em)}</td>
+            <td class="delete">&nbsp;</td>
+        `;
+        return row;
+    };
+    let pendingArquivosAttachments = [];
+    let arquivosObserverAttached = false;
+
+    const processPendingArquivosAttachments = () => {
+        if (!pendingArquivosAttachments.length) {
+            return;
+        }
+        const pending = pendingArquivosAttachments.slice();
+        pendingArquivosAttachments = [];
+        pending.forEach((attachment) => appendAttachmentToArquivos(attachment));
+    };
+
+    const observeArquivosTables = () => {
+        if (arquivosObserverAttached) {
+            return;
+        }
+        arquivosObserverAttached = true;
+        const observer = new MutationObserver(() => {
+            if (getArquivosTableBodies().length) {
+                processPendingArquivosAttachments();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        processPendingArquivosAttachments();
+    };
+
+    const appendAttachmentToArquivos = (attachment) => {
+        if (!attachment) return;
+        const bodies = getArquivosTableBodies();
+        if (!bodies.length) {
+            pendingArquivosAttachments.push(attachment);
+            return;
+        }
+        bodies.forEach((tbody) => {
+            if (tbody.querySelector(`tr[data-file-id="${attachment.id}"]`)) {
+                return;
+            }
+            const row = buildArquivoRowFromAttachment(attachment);
+            const firstDataRow = tbody.querySelector('tr.dynamic-processoarquivo, tr.dynamic-arquivos');
+            if (firstDataRow) {
+                tbody.insertBefore(row, firstDataRow);
+            } else {
+                tbody.appendChild(row);
+            }
+        });
     };
 
     const formatLocalTimestamp = (timestamp) => {
@@ -3742,54 +3862,156 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const renderLocalComments = (row) => {
+    const getRowComments = (row) => {
+        const raw = row.dataset[historyKey];
+        if (!raw) return [];
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return [];
+        }
+    };
+
+    const setRowComments = (row, comments) => {
+        row.dataset[historyKey] = JSON.stringify(comments || []);
+    };
+
+    const renderCommentsHistory = (row) => {
         const panel = row.querySelector('.tarefa-comments-panel');
         if (!panel) return;
         const history = panel.querySelector('.tarefa-comments-history');
         if (!history) return;
-        const comments = getLocalComments(row);
+        const comments = getRowComments(row);
         if (!comments.length) {
             history.textContent = 'Nenhum comentário gravado.';
             return;
         }
         history.innerHTML = comments
-            .map((comment) => `
-                <div class="tarefa-comments-history-item">
-                    <div class="tarefa-comments-history-item-header">
-                        <span class="tarefa-comments-history-item-author">${comment.author}</span>
-                        <span class="tarefa-comments-history-item-meta">${formatLocalTimestamp(comment.timestamp)}</span>
+            .map((comment) => {
+                const author = comment.autor?.username || comment.autor?.display_name || resolveCurrentUser();
+                const timestamp = formatLocalTimestamp(comment.criado_em || comment.timestamp);
+                const attachments = (comment.anexos || [])
+                    .map((attachment) => `
+                        <a class="tarefa-comments-attachment" href="${attachment.arquivo_url}" target="_blank" rel="noopener noreferrer">${attachment.nome || 'Arquivo'}</a>
+                    `)
+                    .join('');
+                return `
+                    <div class="tarefa-comments-history-item">
+                        <div class="tarefa-comments-history-item-header">
+                            <span class="tarefa-comments-history-item-author">${author}</span>
+                            <span class="tarefa-comments-history-item-meta">${timestamp}</span>
+                        </div>
+                        <p>${comment.texto || comment.text || ''}</p>
+                        ${attachments ? `<div class="tarefa-comments-attachment-list">${attachments}</div>` : ''}
                     </div>
-                    <p>${comment.text}</p>
-                </div>
-            `)
+                `;
+            })
             .join('');
     };
 
     const attachSimpleCommentHandler = (row) => {
+        if (!row || row.dataset[COMMENTS_HANDLER_FLAG] === '1') {
+            return;
+        }
         const panel = row.querySelector('.tarefa-comments-panel');
         if (!panel) return;
         const input = panel.querySelector('.tarefa-comments-input input');
         const button = panel.querySelector('.tarefa-comments-send');
         if (!input || !button) return;
         input.disabled = false;
-        const handleSend = () => {
-            const value = input.value.trim();
-            if (!value) return;
-            const comments = getLocalComments(row);
-            comments.unshift({
-                author: resolveCurrentUser(),
-                text: value,
-                timestamp: new Date().toISOString(),
-            });
-            setLocalComments(row, comments);
-            renderLocalComments(row);
-            input.value = '';
-            button.disabled = true;
-            input.focus();
+        const fileInput = panel.querySelector('.tarefa-comments-file');
+        const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
+        const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
+        const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
+        const tarefaId = getTarefaIdFromRow(row);
+        const csrfToken = getCsrfToken();
+        let pendingSend = false;
+        const updateButtonState = () => {
+            button.disabled = !(input.value.trim() || (fileInput && fileInput.files.length));
         };
-        input.addEventListener('input', () => {
-            button.disabled = !input.value.trim();
+        const showAttachmentPreview = (name) => {
+            if (!attachmentPreview) return;
+            if (name) {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = name;
+                attachmentPreview.style.display = 'flex';
+                attachmentPreview.hidden = false;
+                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !name;
+            } else {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = '';
+                attachmentPreview.style.display = 'none';
+                attachmentPreview.hidden = true;
+            }
+        };
+        const handleSend = async () => {
+            const value = input.value.trim();
+            if (!value && (!fileInput || !fileInput.files.length)) return;
+            if (!tarefaId || pendingSend) return;
+            pendingSend = true;
+            button.disabled = true;
+            console.log('tarefa-comments: sending', { tarefaId, text: value, files: fileInput?.files?.length });
+            const formData = new FormData();
+            formData.append('texto', value);
+            if (fileInput && fileInput.files.length) {
+                formData.append('arquivo', fileInput.files[0]);
+            }
+            try {
+                const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                    },
+                    body: formData,
+                    credentials: 'same-origin',
+                });
+                if (!response.ok) throw new Error('Erro ao salvar comentário');
+                const comment = await response.json();
+                const comments = getRowComments(row);
+                comments.unshift(comment);
+                setRowComments(row, comments);
+                renderCommentsHistory(row);
+                input.value = '';
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+                showAttachmentPreview('');
+                updateButtonState();
+                input.focus();
+                console.log('tarefa-comments: comment added', comment);
+                const anexos = comment.anexos || [];
+                anexos.forEach(appendAttachmentToArquivos);
+            } catch (error) {
+                console.error(error);
+            } finally {
+                pendingSend = false;
+                updateButtonState();
+                input.focus();
+                console.log('tarefa-comments: request finished', { tarefaId, pendingSend });
+            }
+        };
+        if (fileInput) {
+            const paperclipLabel = panel.querySelector('.tarefa-comments-icon[data-role="attachment"]');
+            const activateIcon = () => paperclipLabel?.classList.add('tarefa-comments-icon-active');
+            const deactivateIcon = () => paperclipLabel?.classList.remove('tarefa-comments-icon-active');
+            paperclipLabel?.addEventListener('pointerdown', () => activateIcon());
+            paperclipLabel?.addEventListener('pointerleave', () => deactivateIcon());
+            paperclipLabel?.addEventListener('blur', () => deactivateIcon());
+
+            fileInput.addEventListener('change', () => {
+            const name = fileInput.files[0]?.name || '';
+            showAttachmentPreview(name);
+            updateButtonState();
+            deactivateIcon();
         });
+        attachmentPreviewClear?.addEventListener('click', () => {
+            if (fileInput) {
+                fileInput.value = '';
+            }
+            showAttachmentPreview('');
+            updateButtonState();
+            input.focus();
+        });
+        }
+        input.addEventListener('input', updateButtonState);
         button.addEventListener('click', handleSend);
         input.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -3797,7 +4019,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 handleSend();
             }
         });
-        button.disabled = !(input.value.trim());
+        updateButtonState();
+        row.dataset[COMMENTS_HANDLER_FLAG] = '1';
     };
 
     const ensureTarefaCommentsPanel = (row) => {
@@ -3806,6 +4029,18 @@ document.addEventListener('DOMContentLoaded', function() {
             row.classList.add('tarefa-comments-enabled');
         }
         let cell = row.querySelector('td.field-tarefa-comentarios');
+        const tarefaId = getTarefaIdFromRow(row) || `new-${Math.random().toString(36).slice(2)}`;
+        const fileInputId = `tarefa-comments-file-${tarefaId}`;
+        row.dataset.tarefaCommentsFileId = fileInputId;
+        const updateHeaderText = () => {
+            if (!cell) return;
+            const nameEl = cell.querySelector('.tarefa-comments-name');
+            const timeEl = cell.querySelector('.tarefa-comments-time');
+            const createdBy = getCreatedByFromRow(row);
+            const createdAt = getCreatedAtFromRow(row);
+            if (nameEl) nameEl.textContent = createdBy || 'Criado por';
+            if (timeEl) timeEl.textContent = createdAt ? formatNaturalCreatedAt(createdAt) : '';
+        };
         if (!cell) {
             cell = document.createElement('td');
             cell.className = 'field-tarefa-comentarios';
@@ -3814,27 +4049,38 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="tarefa-comments-header">
                         <div class="tarefa-comments-avatar"></div>
                         <div class="tarefa-comments-header-text">
-                            <div class="tarefa-comments-name">DRA. Ana</div>
-                            <div class="tarefa-comments-time">30/01/2026 às 15:59</div>
+                            <div class="tarefa-comments-name">Criado por</div>
+                            <div class="tarefa-comments-time"></div>
                         </div>
                     </div>
                 <div class="tarefa-comments-history"></div>
-                <div class="tarefa-comments-input-row">
-                        <div class="tarefa-comments-input">
-                            <input type="text" placeholder="Digite um comentário">
-                            <span class="tarefa-comments-icon">@</span>
-                            <span class="tarefa-comments-icon">📎</span>
-                        </div>
-                        <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
-                    </div>
+                <div class="tarefa-comments-attachment-preview" hidden>
+                    <span class="tarefa-comments-attachment-preview-name"></span>
+                    <button type="button" class="tarefa-comments-attachment-preview-clear" aria-label="Remover anexo">×</button>
                 </div>
+                <div class="tarefa-comments-input-row">
+                <div class="tarefa-comments-input">
+                    <input type="text" placeholder="Digite um comentário">
+                    <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                    <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
+                    <span class="tarefa-comments-icon">@</span>
+                </div>
+                    <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
+                </div>
+            </div>
             `;
             row.appendChild(cell);
-            setLocalComments(row, []);
-            renderLocalComments(row);
+            updateHeaderText();
+            row.dataset[COMMENTS_PANEL_FLAG] = '1';
+            loadCommentsForRow(row);
+            row.dataset[COMMENTS_LOADED_FLAG] = '1';
             attachSimpleCommentHandler(row);
         } else {
-            renderLocalComments(row);
+            updateHeaderText();
+            if (!row.dataset[COMMENTS_LOADED_FLAG]) {
+                loadCommentsForRow(row);
+                row.dataset[COMMENTS_LOADED_FLAG] = '1';
+            }
             attachSimpleCommentHandler(row);
         }
     };
@@ -3881,6 +4127,8 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         bootTarefaCommentsPanels();
     }
+
+    observeArquivosTables();
 
     if (window.django && window.django.jQuery) {
         window.django.jQuery(document).on('formset:added', (event, row, formsetName) => {

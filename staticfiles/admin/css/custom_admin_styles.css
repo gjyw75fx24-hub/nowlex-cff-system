@@ -1462,7 +1462,7 @@ a.historylink {
     position: absolute;
     top: 16px;
     right: 20px;
-    bottom: 20px;
+    bottom: 80px;
     width: calc(320px + 7%);
     max-width: 360px;
     min-width: 300px;
@@ -1520,10 +1520,6 @@ a.historylink {
     line-height: 1.45;
 }
 
-.tarefa-comments-content p {
-    margin: 0 0 10px;
-}
-
 
 .tarefa-comments-content p {
     margin: 0 0 10px;
@@ -1570,6 +1566,23 @@ a.historylink {
     color: #102840;
 }
 
+.tarefa-comments-attachment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+
+.tarefa-comments-attachment {
+    font-size: 0.85rem;
+    color: #1d4ed8;
+    text-decoration: none;
+}
+
+.tarefa-comments-attachment:hover {
+    text-decoration: underline;
+}
+
 .tarefa-comments-history-item-meta {
     font-size: 0.7rem;
     color: #94a3b8;
@@ -1592,23 +1605,56 @@ a.historylink {
     padding-right: 16px;
 }
 
+.tarefa-comments-attachment-preview {
+    width: 100%;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: #eef2ff;
+    border: 1px solid #c3d2ff;
+    font-size: 0.85rem;
+    color: #1d4ed8;
 }
 
-.tarefa-comments-input-row {
+.tarefa-comments-attachment-preview-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tarefa-comments-attachment-preview-clear {
+    border: none;
+    background: none;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: #1d4ed8;
+    cursor: pointer;
+}
+
+.tarefa-comments-file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.85rem;
+    color: #0f172a;
+}
+
+.tarefa-comments-file-row td {
+    padding: 8px 12px;
+    background: #ffffff;
+    border-bottom: 1px solid #e0e6ef;
+}
+
+.tarefa-comments-file-row td.field-arquivo {
     display: flex;
     gap: 8px;
-    align-items: center;
-    margin-top: auto;
-    flex-wrap: nowrap;
-    flex-shrink: 0;
-    position: sticky;
-    bottom: 0;
-    padding-top: 8px;
-    padding-bottom: 10px;
-    background: #f8fafc;
-    padding-left: 16px;
-    padding-right: 16px;
 }
+
 
 .tarefa-comments-input {
     flex: 1;
@@ -1620,6 +1666,15 @@ a.historylink {
     padding: 6px 12px;
     background: #ffffff;
     box-shadow: inset 0 0 0 1px rgba(203, 214, 232, 0.6);
+}
+
+.tarefa-comments-attachment-name {
+    font-size: 0.85rem;
+    color: #4b5563;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tarefa-comments-input input {
@@ -1634,6 +1689,31 @@ a.historylink {
 .tarefa-comments-icon {
     font-size: 0.9rem;
     color: #6b7280;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tarefa-comments-icon.tarefa-comments-icon-active {
+    color: #ffffff;
+    background: #3c6cf5;
+    padding: 2px 6px;
+    border-radius: 6px;
+}
+
+.tarefa-comments-icon[data-role="attachment"] {
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tarefa-comments-attachment-clear {
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    color: #9ca3af;
+    cursor: pointer;
+    margin-left: 6px;
+    padding: 0;
+    line-height: 1;
 }
 
 .tarefa-comments-send {
@@ -1647,6 +1727,11 @@ a.historylink {
     letter-spacing: 0.04em;
     flex-shrink: 0;
     box-shadow: 0 4px 10px rgba(60, 108, 245, 0.2);
+    transition: transform 0.15s ease;
+}
+
+.tarefa-comments-send:active {
+    transform: scale(0.96);
 }
 
 @media (max-width: 1100px) {

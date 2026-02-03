@@ -32,9 +32,16 @@ from ..models import (
     ProcessoJudicial,
     Prazo,
     Tarefa,
+    TarefaMensagem,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
-from .serializers import TarefaSerializer, PrazoSerializer, UserSerializer, ListaDeTarefasSerializer
+from .serializers import (
+    TarefaSerializer,
+    PrazoSerializer,
+    UserSerializer,
+    ListaDeTarefasSerializer,
+    TarefaMensagemSerializer,
+)
 from ..services.nowlex_calc import (
     NowlexCalcError,
     create_calc,
@@ -615,6 +622,48 @@ class AgendaSupervisionBarradoAPIView(APIView):
         analise.updated_by = request.user
         analise.save(update_fields=['respostas', 'updated_by'])
         return Response({'barrado': barrado})
+
+
+class TarefaComentarioListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_tarefa(self, tarefa_id):
+        return get_object_or_404(Tarefa, pk=tarefa_id)
+
+    def get(self, request, tarefa_id):
+        tarefa = self.get_tarefa(tarefa_id)
+        serializer = TarefaMensagemSerializer(
+            tarefa.mensagens.order_by('-criado_em'),
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data)
+
+    def post(self, request, tarefa_id):
+        tarefa = self.get_tarefa(tarefa_id)
+        texto = (request.data.get('texto') or '').strip()
+        arquivo = request.FILES.get('arquivo')
+        if not texto and not arquivo:
+            return Response(
+                {'detail': 'É necessário informar texto ou arquivo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        comentario = TarefaMensagem.objects.create(
+            tarefa=tarefa,
+            autor=request.user,
+            texto=texto,
+        )
+        if arquivo:
+            processo_arquivo = ProcessoArquivo.objects.create(
+                processo=tarefa.processo,
+                tarefa=tarefa,
+                mensagem=comentario,
+                enviado_por=request.user,
+                arquivo=arquivo,
+            )
+            processo_arquivo.save()
+        serializer = TarefaMensagemSerializer(comentario, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class TarefaCreateAPIView(generics.CreateAPIView):
     """

@@ -336,3 +336,63 @@
     border-color: rgba(66, 116, 143, 0.8) !important;
     box-shadow: 0 2px 8px rgba(66, 116, 143, 0.35) !important;
 }
+
+
+#arquivos-group tr.dynamic-arquivos,
+#processoarquivo_set-group tr.dynamic-processoarquivo {
+    margin-bottom: 12px;
+    position: relative;
+}
+
+#arquivos-group tr.dynamic-arquivos td.field-nome,
+#processoarquivo_set-group tr.dynamic-processoarquivo td.field-nome {
+    display: block;
+    padding: 10px 16px;
+    width: 100%;
+    background: #f7f7fb;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.08);
+}
+
+#arquivos-group tr.dynamic-arquivos td.original,
+#processoarquivo_set-group tr.dynamic-processoarquivo td.original {
+    display: none;
+}
+
+#arquivos-group tr.dynamic-arquivos td.delete,
+#processoarquivo_set-group tr.dynamic-processoarquivo td.delete {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    width: auto;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+#arquivos-group tr.dynamic-arquivos td.delete .deletelink,
+#processoarquivo_set-group tr.dynamic-processoarquivo td.delete .deletelink {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    border: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0;
+}
+
+#arquivos-group tr.dynamic-arquivos:nth-of-type(odd) td.field-nome,
+#processoarquivo_set-group tr.dynamic-processoarquivo:nth-of-type(odd) td.field-nome {
+    background: #f8fafc;
+}
+
+#arquivos-group tr.dynamic-arquivos:nth-of-type(even) td.field-nome,
+#processoarquivo_set-group tr.dynamic-processoarquivo:nth-of-type(even) td.field-nome {
+    background: #eef0f5;
+}

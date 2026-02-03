@@ -1711,11 +1711,49 @@ class ContratoInline(admin.StackedInline):
     extra = 0
     fk_name = "processo"
 
+class TarefaInlineForm(forms.ModelForm):
+    criado_por_label = forms.CharField(required=False, widget=forms.HiddenInput())
+    criado_em_value = forms.CharField(required=False, widget=forms.HiddenInput())
+
+    class Meta:
+        model = Tarefa
+        fields = [
+            'descricao',
+            'lista',
+            'data',
+            'responsavel',
+            'prioridade',
+            'observacoes',
+            'concluida',
+            'criado_por_label',
+            'criado_em_value',
+        ]
+        widgets = {
+            'criado_por_label': forms.HiddenInput(),
+            'criado_em_value': forms.HiddenInput(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        creator = getattr(self.instance, 'criado_por', None)
+        if creator:
+            display = creator.get_full_name() or creator.username
+            self.initial['criado_por_label'] = display
+            self.fields['criado_por_label'].initial = display
+        created_at = getattr(self.instance, 'criado_em', None)
+        if created_at:
+            value = created_at.isoformat()
+            self.initial['criado_em_value'] = value
+            self.fields['criado_em_value'].initial = value
+
+
 class TarefaInline(admin.TabularInline):
+    form = TarefaInlineForm
     model = Tarefa
     extra = 0
     autocomplete_fields = ['responsavel']
     fields = ['descricao', 'lista', 'data', 'responsavel', 'prioridade', 'observacoes', 'concluida']
+    readonly_fields = ('criado_por', 'criado_em')
 
 class PrazoInlineForm(forms.ModelForm):
     class Meta:

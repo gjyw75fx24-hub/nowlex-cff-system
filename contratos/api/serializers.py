@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.urls import reverse
-from ..models import Tarefa, Prazo, ListaDeTarefas
+from ..models import Tarefa, Prazo, ListaDeTarefas, TarefaMensagem, ProcessoArquivo
 
 class UserSerializer(serializers.ModelSerializer):
     pending_tasks = serializers.IntegerField(read_only=True, default=0)
@@ -83,3 +83,29 @@ class PrazoSerializer(serializers.ModelSerializer):
             return reverse('admin:contratos_processojudicial_change', args=[obj.processo_id])
         except Exception:
             return ''
+
+
+class ProcessoArquivoSerializer(serializers.ModelSerializer):
+    arquivo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProcessoArquivo
+        fields = ['id', 'nome', 'arquivo_url', 'criado_em']
+
+    def get_arquivo_url(self, obj):
+        if obj.arquivo:
+            request = self.context.get('request')
+            url = obj.arquivo.url
+            if request and url.startswith('/'):
+                return request.build_absolute_uri(url)
+            return url
+        return ''
+
+
+class TarefaMensagemSerializer(serializers.ModelSerializer):
+    autor = UserSerializer(read_only=True)
+    anexos = ProcessoArquivoSerializer(many=True, read_only=True, default=[])
+
+    class Meta:
+        model = TarefaMensagem
+        fields = ['id', 'texto', 'autor', 'criado_em', 'anexos']
