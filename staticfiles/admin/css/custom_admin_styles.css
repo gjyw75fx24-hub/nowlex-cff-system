@@ -1524,6 +1524,11 @@ a.historylink {
     margin: 0 0 10px;
 }
 
+
+.tarefa-comments-content p {
+    margin: 0 0 10px;
+}
+
 .tarefa-comments-history {
     margin-top: 10px;
     display: flex;
@@ -1537,10 +1542,11 @@ a.historylink {
 }
 
 .tarefa-comments-history-item {
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #f8fafc;
-    border: 1px solid #d3d8e6;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid #e4e9f2;
+    box-shadow: 0 2px 6px rgba(15, 48, 86, 0.08);
 }
 
 .tarefa-comments-history-item span {
@@ -1554,12 +1560,38 @@ a.historylink {
     justify-content: space-between;
     align-items: baseline;
     gap: 8px;
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-bottom: 6px;
+}
+
+.tarefa-comments-history-item-author {
+    font-weight: 700;
+    color: #102840;
 }
 
 .tarefa-comments-history-item-meta {
     font-size: 0.7rem;
     color: #94a3b8;
     font-weight: 400;
+}
+
+.tarefa-comments-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: auto;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    padding-top: 8px;
+    padding-bottom: 10px;
+    background: #f8fafc;
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
 }
 
 .tarefa-comments-input-row {
