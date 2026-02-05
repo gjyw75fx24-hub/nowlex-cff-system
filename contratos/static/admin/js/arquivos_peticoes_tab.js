@@ -1,6 +1,35 @@
 (function () {
     'use strict';
 
+    const TIPOS_CACHE_TTL_MS = 15 * 60 * 1000;
+    const buildTiposCacheKey = (apiUrl) => `nowlex_cache_v1:tipos_peticao:${encodeURIComponent(apiUrl || '')}`;
+    const readSessionCache = (key, ttlMs) => {
+        try {
+            const storage = window.sessionStorage;
+            if (!storage) return null;
+            const raw = storage.getItem(key);
+            if (!raw) return null;
+            const payload = JSON.parse(raw);
+            if (!payload || typeof payload !== 'object') return null;
+            if (ttlMs && payload.timestamp && Date.now() - payload.timestamp > ttlMs) {
+                storage.removeItem(key);
+                return null;
+            }
+            return payload.data || null;
+        } catch (error) {
+            return null;
+        }
+    };
+    const writeSessionCache = (key, data) => {
+        try {
+            const storage = window.sessionStorage;
+            if (!storage) return;
+            storage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+        } catch (error) {
+            // ignore storage errors
+        }
+    };
+
     const getPreviewApiUrl = () => window.__tipos_peticao_preview_url || '';
     const getGenerateApiUrl = () => window.__tipos_peticao_generate_url || '';
     const getCsrfToken = () => {
@@ -370,10 +399,104 @@
         if (!apiUrl) {
             return;
         }
-                fetch(apiUrl, {
-                    method: 'GET',
-                    credentials: 'same-origin'
-                })
+        const handleTiposResponse = (data) => {
+            const types = Array.isArray(data.tipos) ? data.tipos : [];
+            tiposCache = types;
+            if (types.length === 0) {
+                optionsContainer.innerHTML = '';
+                return;
+            }
+            optionsContainer.innerHTML = '';
+            const placeholder = document.createElement('div');
+            placeholder.className = 'inline-group-subtab-option placeholder';
+            placeholder.textContent = 'Selecione um tipo';
+            placeholder.setAttribute('aria-hidden', 'true');
+            optionsContainer.appendChild(placeholder);
+            const markActive = (button) => {
+                optionsContainer.querySelectorAll('.inline-group-subtab-option').forEach(opt => {
+                    if (opt.classList.contains('placeholder')) {
+                        return;
+                    }
+                    opt.classList.toggle('active', opt === button);
+                });
+            };
+
+            types.forEach(item => {
+                const name = String(item.nome || '').trim();
+                const id = item.id || '';
+                if (!name) return;
+                const optionBtn = document.createElement('button');
+                optionBtn.type = 'button';
+                optionBtn.className = 'inline-group-subtab-option';
+                optionBtn.textContent = name;
+                optionBtn.dataset.tipoId = id;
+                optionBtn.addEventListener('click', () => {
+                    markActive(optionBtn);
+                    setActiveTipo(id, name, item);
+                    selectButton.querySelector('.inline-group-subtab-select-label').textContent = name;
+                    setHidden(true);
+                });
+                optionsContainer.appendChild(optionBtn);
+            });
+            if (selectedTipoId) {
+                const match = types.find(item => String(item.id) === String(selectedTipoId));
+                if (match) {
+                    selectedTipoItem = match;
+                    selectedTipoName = match.nome || selectedTipoName;
+                    selectButton.querySelector('.inline-group-subtab-select-label').textContent = match.nome || '';
+                    const matchedBtn = optionsContainer.querySelector(`[data-tipo-id="${match.id || ''}"]`);
+                    if (matchedBtn) {
+                        markActive(matchedBtn);
+                    }
+                }
+            }
+            const caret = selectButton.querySelector('.inline-group-subtab-select-caret');
+            const updateCaret = (isOpen) => {
+                if (!caret) {
+                    return;
+                }
+                caret.textContent = isOpen ? '▴' : '▾';
+            };
+
+            const setHidden = (hidden) => {
+                if (hidden) {
+                    optionsContainer.setAttribute('hidden', '');
+                    optionsShell.setAttribute('hidden', '');
+                } else {
+                    optionsContainer.removeAttribute('hidden');
+                    optionsShell.removeAttribute('hidden');
+                }
+                updateCaret(!hidden);
+            };
+            setHidden(true);
+
+            const closeOptions = () => setHidden(true);
+            const toggleOptions = () => {
+                const isHidden = optionsShell.hasAttribute('hidden');
+                setHidden(!isHidden);
+            };
+
+            updateCaret(!optionsShell.hasAttribute('hidden'));
+            selectButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleOptions();
+            });
+            document.addEventListener('click', () => {
+                if (!optionsShell.hasAttribute('hidden')) {
+                    closeOptions();
+                }
+            });
+        };
+        const cacheKey = buildTiposCacheKey(apiUrl);
+        const cached = readSessionCache(cacheKey, TIPOS_CACHE_TTL_MS);
+        if (cached) {
+            handleTiposResponse(cached);
+            return;
+        }
+        fetch(apiUrl, {
+            method: 'GET',
+            credentials: 'same-origin'
+        })
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Erro ao carregar');
@@ -381,92 +504,8 @@
                 return response.json();
             })
             .then(data => {
-                const types = Array.isArray(data.tipos) ? data.tipos : [];
-                tiposCache = types;
-                if (types.length === 0) {
-                    optionsContainer.innerHTML = '';
-                    return;
-                }
-                optionsContainer.innerHTML = '';
-                const placeholder = document.createElement('div');
-                placeholder.className = 'inline-group-subtab-option placeholder';
-                placeholder.textContent = 'Selecione um tipo';
-                placeholder.setAttribute('aria-hidden', 'true');
-                optionsContainer.appendChild(placeholder);
-                const markActive = (button) => {
-                    optionsContainer.querySelectorAll('.inline-group-subtab-option').forEach(opt => {
-                        if (opt.classList.contains('placeholder')) {
-                            return;
-                        }
-                        opt.classList.toggle('active', opt === button);
-                    });
-                };
-
-                types.forEach(item => {
-                    const name = String(item.nome || '').trim();
-                    const id = item.id || '';
-                    if (!name) return;
-                    const optionBtn = document.createElement('button');
-                    optionBtn.type = 'button';
-                    optionBtn.className = 'inline-group-subtab-option';
-                    optionBtn.textContent = name;
-                    optionBtn.dataset.tipoId = id;
-                    optionBtn.addEventListener('click', () => {
-                        markActive(optionBtn);
-                        setActiveTipo(id, name, item);
-                        selectButton.querySelector('.inline-group-subtab-select-label').textContent = name;
-                        setHidden(true);
-                    });
-                    optionsContainer.appendChild(optionBtn);
-                });
-                if (selectedTipoId) {
-                    const match = types.find(item => String(item.id) === String(selectedTipoId));
-                    if (match) {
-                        selectedTipoItem = match;
-                        selectedTipoName = match.nome || selectedTipoName;
-                        selectButton.querySelector('.inline-group-subtab-select-label').textContent = match.nome || '';
-                        const matchedBtn = optionsContainer.querySelector(`[data-tipo-id="${match.id || ''}"]`);
-                        if (matchedBtn) {
-                            markActive(matchedBtn);
-                        }
-                    }
-                }
-                const caret = selectButton.querySelector('.inline-group-subtab-select-caret');
-                const updateCaret = (isOpen) => {
-                    if (!caret) {
-                        return;
-                    }
-                    caret.textContent = isOpen ? '▴' : '▾';
-                };
-
-                const setHidden = (hidden) => {
-                    if (hidden) {
-                        optionsContainer.setAttribute('hidden', '');
-                        optionsShell.setAttribute('hidden', '');
-                    } else {
-                        optionsContainer.removeAttribute('hidden');
-                        optionsShell.removeAttribute('hidden');
-                    }
-                    updateCaret(!hidden);
-                };
-                setHidden(true);
-
-                const closeOptions = () => setHidden(true);
-                const toggleOptions = () => {
-                    const isHidden = optionsShell.hasAttribute('hidden');
-                    setHidden(!isHidden);
-                };
-
-                updateCaret(!optionsShell.hasAttribute('hidden'));
-                selectButton.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    toggleOptions();
-                });
-                document.addEventListener('click', () => {
-                    if (!optionsShell.hasAttribute('hidden')) {
-                        closeOptions();
-                    }
-                });
+                writeSessionCache(cacheKey, data);
+                handleTiposResponse(data);
             })
             .catch(() => {
                 console.error('Não foi possível carregar os tipos.');

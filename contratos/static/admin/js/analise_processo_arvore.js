@@ -93,6 +93,34 @@
          */
 
         const decisionTreeApiUrl = '/api/decision-tree/';
+        const DECISION_TREE_CACHE_KEY = 'nowlex_cache_v1:decision_tree_config';
+        const DECISION_TREE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+        const readSessionCache = (key, ttlMs) => {
+            try {
+                const storage = window.sessionStorage;
+                if (!storage) return null;
+                const raw = storage.getItem(key);
+                if (!raw) return null;
+                const payload = JSON.parse(raw);
+                if (!payload || typeof payload !== 'object') return null;
+                if (ttlMs && payload.timestamp && Date.now() - payload.timestamp > ttlMs) {
+                    storage.removeItem(key);
+                    return null;
+                }
+                return payload.data || null;
+            } catch (error) {
+                return null;
+            }
+        };
+        const writeSessionCache = (key, data) => {
+            try {
+                const storage = window.sessionStorage;
+                if (!storage) return;
+                storage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+            } catch (error) {
+                // ignore storage errors
+            }
+        };
         const AGENDA_PAGE_SIZE = 200;
         let agendaLoadMoreButton = null;
 
@@ -3486,6 +3514,20 @@ function formatCnjDigits(raw) {
 
         function fetchDecisionTreeConfig() {
             const deferredConfig = $.Deferred();
+            const cachedConfig = readSessionCache(DECISION_TREE_CACHE_KEY, DECISION_TREE_CACHE_TTL_MS);
+            if (cachedConfig) {
+                treeConfig = cachedConfig.tree_data || {};
+                treeResponseKeys = Array.from(
+                    new Set(
+                        Object.values(treeConfig || {})
+                            .map(question => question && question.chave)
+                            .filter(Boolean)
+                    )
+                );
+                firstQuestionKey = cachedConfig.primeira_questao_chave || null;
+                deferredConfig.resolve();
+                return deferredConfig.promise();
+            }
 
             $.ajax({
                 url: decisionTreeApiUrl,
@@ -3502,6 +3544,10 @@ function formatCnjDigits(raw) {
                             )
                         );
                         firstQuestionKey = data.primeira_questao_chave || null;
+                        writeSessionCache(DECISION_TREE_CACHE_KEY, {
+                            tree_data: treeConfig,
+                            primeira_questao_chave: firstQuestionKey
+                        });
                         deferredConfig.resolve();
                     } else {
                         console.error("Erro ao carregar configuração da árvore:", data.message);

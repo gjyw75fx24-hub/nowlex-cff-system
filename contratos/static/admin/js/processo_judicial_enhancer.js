@@ -192,74 +192,190 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // Add minimize/maximize buttons for the Dados do Processo section.
-    const setupCollapseControls = (() => {
-        let initialized = false;
-        const createControlButton = (symbol, title) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'button tertiary';
-            button.textContent = symbol;
-            button.title = title;
-            button.setAttribute('aria-label', title);
-            button.style.padding = '0 0.65rem';
-            button.style.height = '32px';
-            button.style.minWidth = '32px';
-            button.style.display = 'inline-flex';
-            button.style.alignItems = 'center';
-            button.style.justifyContent = 'center';
-            button.style.fontSize = '1.25rem';
-            button.style.lineHeight = '1';
-            return button;
+        const setupCollapseControls = (() => {
+            let initialized = false;
+            const createControlButton = (symbol, title) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'button tertiary';
+                button.textContent = symbol;
+                button.title = title;
+                button.setAttribute('aria-label', title);
+                button.style.padding = '0 0.65rem';
+                button.style.height = '32px';
+                button.style.minWidth = '32px';
+                button.style.display = 'inline-flex';
+                button.style.alignItems = 'center';
+                button.style.justifyContent = 'center';
+                button.style.fontSize = '1.25rem';
+                button.style.lineHeight = '1';
+                return button;
+            };
+            return (fieldset) => {
+                if (initialized || !fieldset || !headerElement) {
+                    return;
+                }
+                const contentNodes = Array.from(fieldset.children).filter((node) => node !== headerElement);
+                if (contentNodes.length === 0) {
+                    return;
+                }
+                contentNodes.forEach((node) => {
+                    if (typeof node.dataset.originalDisplay === 'undefined') {
+                        node.dataset.originalDisplay = node.style.display || '';
+                    }
+                });
+                const minimizeButton = createControlButton('-', 'Minimizar dados do processo');
+                const maximizeButton = createControlButton('+', 'Maximizar dados do processo');
+                const setCollapsed = (value) => {
+                    contentNodes.forEach((node) => {
+                        node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+                    });
+                    minimizeButton.disabled = value;
+                    maximizeButton.disabled = !value;
+                    headerElement.dataset.processSectionCollapsed = value ? 'true' : 'false';
+                    saveCollapsedPreference(value);
+                };
+                minimizeButton.addEventListener('click', () => setCollapsed(true));
+                maximizeButton.addEventListener('click', () => setCollapsed(false));
+                headerControls.appendChild(minimizeButton);
+                headerControls.appendChild(maximizeButton);
+                const stored = loadCollapsedPreference();
+                const initialCollapsed = stored === 'collapsed';
+                setCollapsed(initialCollapsed);
+                initialized = true;
+            };
+        })();
+
+        const initPartesSection = (() => {
+            let initialized = false;
+            return () => {
+                if (initialized) {
+                    return;
+                }
+                initialized = true;
+                document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
+            };
+        })();
+
+        const setupPartesToggle = (() => {
+            let initialized = false;
+            const storageKey = 'partes_section_collapsed';
+            const createToggleButton = (symbol, title) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'button tertiary partes-toggle-btn';
+                button.textContent = symbol;
+                button.title = title;
+                button.setAttribute('aria-label', title);
+                button.style.padding = '0 0.45rem';
+                button.style.height = '30px';
+                button.style.minWidth = '30px';
+                button.style.display = 'inline-flex';
+                button.style.alignItems = 'center';
+                button.style.justifyContent = 'center';
+                button.style.fontSize = '1.1rem';
+                button.style.lineHeight = '1';
+                return button;
+            };
+            const loadPref = () => {
+                try {
+                    return window.localStorage?.getItem(storageKey);
+                } catch {
+                    return null;
+                }
+            };
+            const savePref = (value) => {
+                try {
+                    window.localStorage?.setItem(storageKey, value ? 'true' : 'false');
+                } catch {
+                    // ignore
+                }
+            };
+            return (groupElement) => {
+                const group = groupElement || document.getElementById('partes_processuais-group');
+                if (!group || initialized) {
+                    return;
+                }
+                initialized = true;
+                const header = group.querySelector('h2');
+                const banner = document.createElement('div');
+                banner.className = 'analise-partes-banner';
+                const title = document.createElement('span');
+                title.textContent = 'Cadastro';
+                const controlsWrap = document.createElement('div');
+                controlsWrap.className = 'analise-partes-toggle';
+                const minimizeBtn = createToggleButton('-', 'Minimizar seção de Partes');
+                const maximizeBtn = createToggleButton('+', 'Expandir seção de Partes');
+                controlsWrap.appendChild(minimizeBtn);
+                controlsWrap.appendChild(maximizeBtn);
+                banner.appendChild(title);
+                banner.appendChild(controlsWrap);
+                if (header) {
+                    header.style.display = 'none';
+                }
+                group.insertAdjacentElement('afterbegin', banner);
+                const contentNodes = Array.from(group.children).filter(node => node !== banner);
+                contentNodes.forEach((node) => {
+                    if (typeof node.dataset.originalDisplay === 'undefined') {
+                        node.dataset.originalDisplay = node.style.display || '';
+                    }
+                });
+                const setCollapsed = (value) => {
+                    contentNodes.forEach((node) => {
+                        node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+                    });
+                    minimizeBtn.disabled = value;
+                    maximizeBtn.disabled = !value;
+                    group.dataset.partesCollapsed = value ? 'true' : 'false';
+                    savePref(value);
+                    if (!value) {
+                        initPartesSection();
+                    }
+                };
+                minimizeBtn.addEventListener('click', () => setCollapsed(true));
+                maximizeBtn.addEventListener('click', () => setCollapsed(false));
+                const stored = loadPref();
+                const initialCollapsed = stored === null ? true : stored === 'true';
+                setCollapsed(initialCollapsed);
+            };
+        })();
+
+        const setActiveCnjText = () => {
+            const fieldset = ensureHeaderLayout();
+            headerTitleSpan.textContent = HEADER_TITLE;
+            const collapseContainer = fieldset || headerElement?.parentElement;
+            if (collapseContainer) {
+                setupCollapseControls(collapseContainer);
+            }
+            if (window.__setActiveCnjHeader) {
+                window.__setActiveCnjHeader(HEADER_TITLE);
+            }
+            if (typeof window.__cnj_active_display !== 'undefined') {
+                window.__cnj_active_display = HEADER_TITLE;
+            }
         };
-        return (fieldset) => {
-            if (initialized || !fieldset || !headerElement) {
+
+        const watchPartesGroup = () => {
+            const group = document.getElementById('partes_processuais-group');
+            if (group) {
+                setupPartesToggle(group);
                 return;
             }
-            const contentNodes = Array.from(fieldset.children).filter((node) => node !== headerElement);
-            if (contentNodes.length === 0) {
-                return;
-            }
-            contentNodes.forEach((node) => {
-                if (typeof node.dataset.originalDisplay === 'undefined') {
-                    node.dataset.originalDisplay = node.style.display || '';
+            const observer = new MutationObserver((mutations, obs) => {
+                const found = document.getElementById('partes_processuais-group');
+                if (found) {
+                    setupPartesToggle(found);
+                    obs.disconnect();
                 }
             });
-            const minimizeButton = createControlButton('-', 'Minimizar dados do processo');
-            const maximizeButton = createControlButton('+', 'Maximizar dados do processo');
-            const setCollapsed = (value) => {
-                contentNodes.forEach((node) => {
-                    node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
-                });
-                minimizeButton.disabled = value;
-                maximizeButton.disabled = !value;
-                headerElement.dataset.processSectionCollapsed = value ? 'true' : 'false';
-                saveCollapsedPreference(value);
-            };
-            minimizeButton.addEventListener('click', () => setCollapsed(true));
-            maximizeButton.addEventListener('click', () => setCollapsed(false));
-            headerControls.appendChild(minimizeButton);
-            headerControls.appendChild(maximizeButton);
-            const stored = loadCollapsedPreference();
-            const initialCollapsed = stored === 'collapsed';
-            setCollapsed(initialCollapsed);
-            initialized = true;
+            observer.observe(document.body, { childList: true, subtree: true });
         };
-    })();
 
-    const setActiveCnjText = () => {
-        const fieldset = ensureHeaderLayout();
-        headerTitleSpan.textContent = HEADER_TITLE;
-        const collapseContainer = fieldset || headerElement?.parentElement;
-        if (collapseContainer) {
-            setupCollapseControls(collapseContainer);
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', watchPartesGroup);
+        } else {
+            watchPartesGroup();
         }
-        if (window.__setActiveCnjHeader) {
-            window.__setActiveCnjHeader(HEADER_TITLE);
-        }
-        if (typeof window.__cnj_active_display !== 'undefined') {
-            window.__cnj_active_display = HEADER_TITLE;
-        }
-    };
 
     const applyEntryState = (entry) => {
         cnjInput.value = entry.cnj;
@@ -3802,6 +3918,34 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const historyKey = 'tarefaCommentsHistory';
+    const COMMENTS_CACHE_TTL_MS = 5 * 60 * 1000;
+    const buildCommentsCacheKey = (tarefaId) => `nowlex_cache_v1:tarefa_comments:${tarefaId}`;
+    const readSessionCache = (key, ttlMs) => {
+        try {
+            const storage = window.sessionStorage;
+            if (!storage) return null;
+            const raw = storage.getItem(key);
+            if (!raw) return null;
+            const payload = JSON.parse(raw);
+            if (!payload || typeof payload !== 'object') return null;
+            if (ttlMs && payload.timestamp && Date.now() - payload.timestamp > ttlMs) {
+                storage.removeItem(key);
+                return null;
+            }
+            return payload.data || null;
+        } catch (error) {
+            return null;
+        }
+    };
+    const writeSessionCache = (key, data) => {
+        try {
+            const storage = window.sessionStorage;
+            if (!storage) return;
+            storage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+        } catch (error) {
+            // ignore storage errors
+        }
+    };
     const getCsrfToken = () => document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
     const getTarefaIdFromRow = (row) => {
         if (!row) return '';
@@ -3813,13 +3957,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const fetchCommentsForRow = async (row) => {
         const tarefaId = getTarefaIdFromRow(row);
         if (!tarefaId) return [];
+        const cacheKey = buildCommentsCacheKey(tarefaId);
+        const cached = readSessionCache(cacheKey, COMMENTS_CACHE_TTL_MS);
+        if (cached) {
+            return cached;
+        }
         try {
             const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
                 method: 'GET',
                 credentials: 'same-origin',
             });
             if (!response.ok) return [];
-            return response.json();
+            const data = await response.json();
+            writeSessionCache(cacheKey, data);
+            return data;
         } catch (error) {
             console.error('Erro ao buscar comentários:', error);
             return [];
@@ -4024,6 +4175,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const comments = getRowComments(row);
                 comments.unshift(comment);
                 setRowComments(row, comments);
+                writeSessionCache(buildCommentsCacheKey(tarefaId), comments);
                 renderCommentsHistory(row);
                 input.value = '';
                 if (fileInput) {
@@ -6465,7 +6617,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Inicialização de Inlines existentes ---
-    document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
 
     // --- Configuração para novas inlines adicionadas dinamicamente ---
     const CHECAGEM_STORAGE_KEY = 'checagem_de_sistemas_state_v1';

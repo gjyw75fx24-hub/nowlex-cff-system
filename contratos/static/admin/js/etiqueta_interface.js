@@ -123,6 +123,51 @@ function waitForJQuery() {
         }
         const csrftoken = getCookie('csrftoken');
 
+        const ETIQUETA_CACHE_TTL_MS = 5 * 60 * 1000;
+        const buildEtiquetaCacheKey = () => {
+            if (!etiquetasUrl) {
+                return null;
+            }
+            return `nowlex_cache_v1:etiquetas:${encodeURIComponent(etiquetasUrl)}`;
+        };
+        const readSessionCache = (key, ttlMs) => {
+            if (!key) return null;
+            try {
+                const storage = window.sessionStorage;
+                if (!storage) return null;
+                const raw = storage.getItem(key);
+                if (!raw) return null;
+                const payload = JSON.parse(raw);
+                if (!payload || typeof payload !== 'object') return null;
+                if (ttlMs && payload.timestamp && Date.now() - payload.timestamp > ttlMs) {
+                    storage.removeItem(key);
+                    return null;
+                }
+                return payload.data || null;
+            } catch (error) {
+                return null;
+            }
+        };
+        const writeSessionCache = (key, data) => {
+            if (!key) return;
+            try {
+                const storage = window.sessionStorage;
+                if (!storage) return;
+                storage.setItem(key, JSON.stringify({ timestamp: Date.now(), data }));
+            } catch (error) {
+                // ignore storage errors
+            }
+        };
+        const clearSessionCache = (key) => {
+            if (!key) return;
+            try {
+                const storage = window.sessionStorage;
+                storage?.removeItem(key);
+            } catch (error) {
+                // ignore storage errors
+            }
+        };
+
         function renderAplicadas() {
             aplicadasContainer.empty();
             etiquetasProcesso.forEach(etiqueta => {
@@ -151,9 +196,19 @@ function waitForJQuery() {
 
         function fetchData() {
             if (!etiquetasUrl) return;
+            const cacheKey = buildEtiquetaCacheKey();
+            const cached = readSessionCache(cacheKey, ETIQUETA_CACHE_TTL_MS);
+            if (cached) {
+                todasEtiquetas = cached.todas_etiquetas || [];
+                etiquetasProcesso = cached.etiquetas_processo || [];
+                renderAplicadas();
+                renderModalList();
+                return;
+            }
             $.get(etiquetasUrl, function(data) {
                 todasEtiquetas = data.todas_etiquetas;
                 etiquetasProcesso = data.etiquetas_processo;
+                writeSessionCache(cacheKey, data);
                 renderAplicadas();
                 renderModalList();
             });
@@ -167,7 +222,10 @@ function waitForJQuery() {
                 data: JSON.stringify({ 'etiqueta_id': etiquetaId, 'action': action }),
                 contentType: 'application/json',
                 beforeSend: xhr => xhr.setRequestHeader("X-CSRFToken", csrftoken),
-                success: () => fetchData(),
+                success: () => {
+                    clearSessionCache(buildEtiquetaCacheKey());
+                    fetchData();
+                },
                 error: () => alert('Ocorreu um erro ao atualizar a etiqueta.')
             });
         }
@@ -299,6 +357,7 @@ function waitForJQuery() {
                     if(response.status === 'created') {
                         createModal.hide();
                         if (memoryHasProcess) {
+                            clearSessionCache(buildEtiquetaCacheKey());
                             fetchData();
                         } else {
                             window.location.reload();
