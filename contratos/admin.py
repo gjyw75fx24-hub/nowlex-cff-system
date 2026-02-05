@@ -1569,6 +1569,15 @@ class AdvogadoPassivoInline(admin.StackedInline):
             formfield.widget.attrs['class'] = (css + ' money-mask').strip()
         return formfield
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        if db_field.name == 'responsavel' and hasattr(formfield, 'widget'):
+            widget = formfield.widget
+            for attr in ('can_add_related', 'can_change_related', 'can_delete_related', 'can_view_related'):
+                if hasattr(widget, attr):
+                    setattr(widget, attr, False)
+        return formfield
+
 
 
 def normalize_decimal_string(value):
