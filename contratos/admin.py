@@ -1319,6 +1319,7 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
     parameter_name = 'viabilidade_financeira'
 
     OPTIONS = [
+        ('0', mark_safe('<span class="viabilidade-option viabilidade">Viabilidade</span>')),
         (ProcessoJudicial.VIABILIDADE_VIAVEL, mark_safe('<span class="viabilidade-option viavel">Viável</span>')),
         (ProcessoJudicial.VIABILIDADE_INVIAVEL, mark_safe('<span class="viabilidade-option inviavel">Inviável</span>')),
         (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, mark_safe('<span class="viabilidade-option inconclusivo">Inconclusivo</span>')),
@@ -1331,8 +1332,10 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
             # Reconstruct the original label from the mark_safe object to get just the text
             # This is a bit hacky, but necessary because the label is already mark_safe'd
             label_text = label_html_original.split('>')[1].split('<')[0]
-            
-            count = qs.filter(viabilidade=value).count()
+            if value == '0':
+                count = qs.filter(models.Q(viabilidade="") | models.Q(viabilidade__isnull=True)).count()
+            else:
+                count = qs.filter(viabilidade=value).count()
             label_html = mark_safe(f"<span class='viabilidade-option {value}'>{label_text}</span> <span class='filter-count'>({count})</span>")
             items.append((value, label_html))
         return items
@@ -1359,6 +1362,8 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
 
     def queryset(self, request, queryset):
         val = self.value()
+        if val == '0':
+            return queryset.filter(models.Q(viabilidade="") | models.Q(viabilidade__isnull=True))
         if val:
             return queryset.filter(viabilidade=val)
         return queryset
