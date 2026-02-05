@@ -6,6 +6,7 @@ import re
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
@@ -1567,15 +1568,14 @@ class AdvogadoPassivoInline(admin.StackedInline):
         if db_field.name == 'valor_acordado':
             css = formfield.widget.attrs.get('class', '')
             formfield.widget.attrs['class'] = (css + ' money-mask').strip()
-        return formfield
-
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
-        if db_field.name == 'responsavel' and hasattr(formfield, 'widget'):
-            widget = formfield.widget
-            for attr in ('can_add_related', 'can_change_related', 'can_delete_related', 'can_view_related'):
-                if hasattr(widget, attr):
-                    setattr(widget, attr, False)
+        if db_field.name == 'responsavel':
+            if isinstance(formfield.widget, RelatedFieldWidgetWrapper):
+                formfield.widget = formfield.widget.widget
+            else:
+                widget = formfield.widget
+                for attr in ('can_add_related', 'can_change_related', 'can_delete_related', 'can_view_related'):
+                    if hasattr(widget, attr):
+                        setattr(widget, attr, False)
         return formfield
 
 
