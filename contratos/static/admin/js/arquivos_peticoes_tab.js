@@ -3,6 +3,20 @@
 
     const TIPOS_CACHE_TTL_MS = 15 * 60 * 1000;
     const buildTiposCacheKey = (apiUrl) => `nowlex_cache_v1:tipos_peticao:${encodeURIComponent(apiUrl || '')}`;
+    const DOCUMENTO_PETICOES_CSS_URL = window.__documento_peticoes_css_url || '/static/admin/css/documento_modelo_peticoes.css';
+    const ensureDocumentoPeticoesStyles = () => {
+        if (!DOCUMENTO_PETICOES_CSS_URL) {
+            return;
+        }
+        if (document.querySelector('link[data-documento-peticoes-css="1"]')) {
+            return;
+        }
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = DOCUMENTO_PETICOES_CSS_URL;
+        link.dataset.documentoPeticoesCss = '1';
+        document.head.appendChild(link);
+    };
     const readSessionCache = (key, ttlMs) => {
         try {
             const storage = window.sessionStorage;
@@ -737,6 +751,7 @@
     };
 
     async function runPreview() {
+        ensureDocumentoPeticoesStyles();
         if (!selectedTipoId) {
             setStatus('Selecione um tipo de petição antes de executar.', 'error');
             return;
@@ -883,6 +898,7 @@
         updateExecuteButtonState();
 
         const openDropdown = () => {
+            ensureDocumentoPeticoesStyles();
             dropdown.classList.add('open');
             button.setAttribute('aria-expanded', 'true');
         };
