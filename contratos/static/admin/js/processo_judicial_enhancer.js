@@ -4157,9 +4157,12 @@ document.addEventListener('DOMContentLoaded', function() {
         collectTarefaRows(group).forEach((row) => ensureTarefaCommentsPanel(row));
     };
 
-    const bootTarefaCommentsPanels = () => {
+    const startTarefaCommentsPanels = () => {
         const group = document.getElementById('tarefas-group');
-        if (!group) return;
+        if (!group || group.dataset.commentsInitialized === '1') {
+            return;
+        }
+        group.dataset.commentsInitialized = '1';
         initTarefaCommentsPanels(group);
         const observer = new MutationObserver((mutations) => {
             mutations.forEach(({ addedNodes }) => {
@@ -4178,10 +4181,42 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(group, { childList: true, subtree: true });
     };
 
+    const scheduleTarefaCommentsOnDemand = () => {
+        const group = document.getElementById('tarefas-group');
+        if (!group) return;
+
+        const attemptStart = () => {
+            if (group.dataset.commentsInitialized === '1') {
+                return;
+            }
+            if (!group.classList.contains('active')) {
+                return;
+            }
+            startTarefaCommentsPanels();
+        };
+
+        attemptStart();
+        if (group.dataset.commentsInitialized === '1') {
+            return;
+        }
+
+        const observer = new MutationObserver(() => {
+            attemptStart();
+            if (group.dataset.commentsInitialized === '1') {
+                observer.disconnect();
+            }
+        });
+        observer.observe(group, { attributes: true, attributeFilter: ['class'] });
+    };
+
+    const initializeTarefaCommentsLazy = () => {
+        scheduleTarefaCommentsOnDemand();
+    };
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bootTarefaCommentsPanels);
+        document.addEventListener('DOMContentLoaded', initializeTarefaCommentsLazy);
     } else {
-        bootTarefaCommentsPanels();
+        initializeTarefaCommentsLazy();
     }
 
     observeArquivosTables();

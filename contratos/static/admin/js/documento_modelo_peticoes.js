@@ -346,6 +346,31 @@
             }
         };
 
+        const hostGroup = widget.closest('.inline-group');
+        let docPeticoesInitialized = false;
+        const ensureDocPeticoesLoaded = () => {
+            if (docPeticoesInitialized) {
+                return;
+            }
+            docPeticoesInitialized = true;
+            loadTipos();
+            loadAnexos();
+        };
+
+        const watchDocPeticoesActivation = () => {
+            ensureDocPeticoesLoaded();
+            if (docPeticoesInitialized || !hostGroup) {
+                return;
+            }
+            const observer = new MutationObserver(() => {
+                if (hostGroup.classList.contains('active')) {
+                    ensureDocPeticoesLoaded();
+                    observer.disconnect();
+                }
+            });
+            observer.observe(hostGroup, { attributes: true, attributeFilter: ['class'] });
+        };
+
         const deleteAnexo = async (anexoId, tipoId) => {
             if (!anexosDeleteUrlTemplate) {
                 showMessage('URL de exclusão de anexos não configurada.', 'error');
@@ -642,7 +667,6 @@
             }
         });
 
-        loadTipos();
-        loadAnexos();
+        watchDocPeticoesActivation();
     });
 })();

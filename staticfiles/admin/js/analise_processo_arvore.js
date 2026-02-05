@@ -245,7 +245,11 @@
         const $saveAnalysisButton = $(
             '<button type="button" class="button analise-save-analysis-btn">Concluir Análise</button>'
         );
-        $analysisActionRow.append($saveAnalysisButton);
+        const $startAnalysisButton = $(
+            '<button type="button" class="button button-secondary analise-start-analysis-btn" title="Carregar Questionário de Análise">Começar</button>'
+        );
+        $saveAnalysisButton.prop('disabled', true);
+        $analysisActionRow.append($startAnalysisButton, $saveAnalysisButton);
         const $petitionsWrap = $(
             '<div class="petitions-wrap">' +
                 '<button class="petitions-trigger" id="petitionsTrigger" type="button" aria-expanded="false">Gerar Petições ▾</button>' +
@@ -3442,6 +3446,7 @@ function formatCnjDigits(raw) {
                 userResponses,
                 null
             );
+            markAnalysisReady();
         }
 
         /* =========================================================
@@ -4340,8 +4345,80 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
          * Eventos globais
          * ======================================================= */
 
+        let analysisBootObserver = null;
+        let analysisInitialized = false;
+
+        const attemptAnalysisBoot = ({ force = false } = {}) => {
+            if (analysisInitialized) {
+                return;
+            }
+            if (!force && !$inlineGroup.hasClass('active')) {
+                return;
+            }
+            analysisInitialized = true;
+            loadExistingResponses();
+            loadContratosFromDOM();
+            fetchDecisionTreeConfig().done(function () {
+                renderDecisionTree();
+            });
+            if (analysisBootObserver) {
+                analysisBootObserver.disconnect();
+                analysisBootObserver = null;
+            }
+        };
+
+        const ensureAnalysisBooted = () => {
+            attemptAnalysisBoot();
+            return analysisInitialized;
+        };
+
+        const scheduleAnalysisBoot = (force = false) => {
+            attemptAnalysisBoot({ force });
+            if (analysisInitialized || !$inlineGroup.length) {
+                return;
+            }
+            if (analysisBootObserver) {
+                return;
+            }
+            const observerTarget = $inlineGroup.get(0);
+            if (!observerTarget) {
+                return;
+            }
+            analysisBootObserver = new MutationObserver(() => {
+                attemptAnalysisBoot();
+                if (analysisInitialized && analysisBootObserver) {
+                    analysisBootObserver.disconnect();
+                    analysisBootObserver = null;
+                }
+            });
+            analysisBootObserver.observe(observerTarget, { attributes: true, attributeFilter: ['class'] });
+        };
+
+        let analysisReady = false;
+        const updateActionButtons = () => {
+            $saveAnalysisButton.prop('disabled', !analysisReady);
+            $startAnalysisButton.prop('disabled', analysisReady);
+        };
+
+        const markAnalysisReady = () => {
+            if (analysisReady) {
+                return;
+            }
+            analysisReady = true;
+            updateActionButtons();
+        };
+
+        $startAnalysisButton.on('click', () => {
+            $startAnalysisButton.prop('disabled', true);
+            scheduleAnalysisBoot(true);
+        });
+
         // RECARREGA JSON AO MUDAR STATUS DO CONTRATO (Q, seleção etc.)
         $(document).on('contratoStatusChange', function () {
+            ensureAnalysisBooted();
+            if (!analysisInitialized) {
+                return;
+            }
             try {
                 const data = $responseField.val();
                 userResponses = data ? JSON.parse(data) : {};
@@ -4362,12 +4439,19 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
          * Inicialização
          * ======================================================= */
 
-        loadExistingResponses();
-        loadContratosFromDOM();
+        const startAnalysisLazy = () => {
+            scheduleAnalysisBoot();
+            updateActionButtons();
+        };
 
-        fetchDecisionTreeConfig().done(function () {
-            renderDecisionTree();
-        });
+        // Carrega imediatamente os cards de análises concluídas, mesmo antes de clicar em "Começar"
+        loadExistingResponses();
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startAnalysisLazy);
+        } else {
+            startAnalysisLazy();
+        }
 
         $inlineGroup.find('.inline-related h3').hide();
 

@@ -302,6 +302,18 @@ window.addEventListener('load', function() {
         });
     })();
 
+    const dispatchTabActivated = (tabEntry) => {
+        if (!tabEntry) return;
+        const detail = {
+            title: tabEntry.title,
+            groupIds: tabEntry.groups
+                .map(group => group.id)
+                .filter(Boolean),
+            primaryGroupId: tabEntry.primaryGroup?.id || ''
+        };
+        document.dispatchEvent(new CustomEvent('cff:adminTabActivated', { detail }));
+    };
+
     function activateTab(entry, scrollPos) {
         if (!entry) return;
         tabButtons.forEach(item => item.button.classList.remove('active'));
@@ -310,6 +322,7 @@ window.addEventListener('load', function() {
         entry.button.classList.add('active');
         entry.groups.forEach(grp => grp.classList.add('active'));
         syncAdvogadoPassivo();
+        dispatchTabActivated(entry);
         // Restaura a rolagem após o reflow das abas
         window.requestAnimationFrame(() => {
             window.scrollTo({ top: scrollPos || 0, behavior: 'auto' });
