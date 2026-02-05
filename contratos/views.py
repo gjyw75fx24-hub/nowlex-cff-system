@@ -41,6 +41,7 @@ from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from django.utils.timezone import now
 from django.db.models import Q
+from django.db.models.query import QuerySet
 
 
 logger = logging.getLogger(__name__)
@@ -472,7 +473,19 @@ def _calculate_monitoria_installments(amount, target=Decimal('500'), max_install
     return min(installments, max_installments)
 
 
+def _normalize_monitoria_contracts(contracts):
+    if isinstance(contracts, QuerySet):
+        try:
+            contracts = contracts.select_related('processo')
+        except AttributeError:
+            pass
+    if contracts is None:
+        return []
+    return list(contracts)
+
+
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
+    contratos_monitoria = _normalize_monitoria_contracts(contratos_monitoria)
     dados = {}
     parte_nome = (polo_passivo.nome or '').strip()
     dados['PARTE CONTRÁRIA'] = f"[n]{parte_nome}[n]" if parte_nome else ''
@@ -1526,9 +1539,10 @@ def generate_monitoria_petition(request, processo_id=None):
 
     contratos_para_monitoria_ids = _parse_contract_ids(contratos_para_monitoria_ids)
 
-    contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
+    contratos_monitoria_qs = Contrato.objects.filter(id__in=contratos_para_monitoria_ids).select_related('processo')
+    contratos_monitoria = list(contratos_monitoria_qs)
 
-    if not contratos_monitoria.exists():
+    if not contratos_monitoria:
         return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
 
     try:
@@ -1806,8 +1820,9 @@ def generate_monitoria_docx_download(request, processo_id=None):
     if not contratos_para_monitoria_ids:
         contratos_para_monitoria_ids = analise.respostas.get('contratos_para_monitoria', [])
 
-    contratos_monitoria = Contrato.objects.filter(id__in=contratos_para_monitoria_ids)
-    if not contratos_monitoria.exists():
+    contratos_monitoria_qs = Contrato.objects.filter(id__in=contratos_para_monitoria_ids).select_related('processo')
+    contratos_monitoria = list(contratos_monitoria_qs)
+    if not contratos_monitoria:
         return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
 
     try:

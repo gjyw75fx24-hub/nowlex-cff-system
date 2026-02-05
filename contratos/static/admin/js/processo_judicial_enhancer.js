@@ -1660,16 +1660,31 @@ document.addEventListener('DOMContentLoaded', function() {
         return entry;
     };
 
+    const refreshAgendaLoadMoreButton = (state) => {
+        if (!agendaLoadMoreButton) return;
+        const shouldShow = Boolean(state && state.agendaHasMore);
+        agendaLoadMoreButton.style.display = shouldShow ? '' : 'none';
+        agendaLoadMoreButton.disabled = !shouldShow;
+    };
+
     const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null, preferApiOnly = false) => {
         const statusParam = calendarStateRef?.showCompleted ? 'completed' : 'pending';
-        const url = `/api/agenda/geral/?status=${statusParam}`;
+        if (calendarStateRef && !preferApiOnly) {
+            calendarStateRef.agendaPage = 1;
+        }
+        const apiPage = calendarStateRef?.agendaPage || 1;
+        const apiPageSize = calendarStateRef?.agendaPageSize || AGENDA_PAGE_SIZE;
+        const url = `/api/agenda/geral/?status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}`;
         fetch(url)
             .then((response) => {
                 if (!response.ok) throw new Error();
                 return response.json();
             })
             .then((data) => {
-                const apiEntries = Array.isArray(data) ? data.map(normalizeApiEntry).filter(Boolean) : [];
+                const rawEntries = Array.isArray(data.entries)
+                    ? data.entries
+                    : (Array.isArray(data) ? data : []);
+                const apiEntries = rawEntries.map(normalizeApiEntry).filter(Boolean);
                 if (preferApiOnly) {
                     entryOrigins.clear();
                 }
@@ -1697,6 +1712,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         calendarStateRef.year = first.year;
                     }
                 }
+                if (calendarStateRef) {
+                    const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
+                    calendarStateRef.agendaTotalEntries = totalEntries;
+                    calendarStateRef.agendaPageSize = apiPageSize;
+                    if (totalEntries !== null) {
+                        calendarStateRef.agendaHasMore = apiPage * apiPageSize < totalEntries;
+                    } else {
+                        calendarStateRef.agendaHasMore = apiEntries.length === apiPageSize;
+                    }
+                }
+                refreshAgendaLoadMoreButton(calendarStateRef);
                 renderFn && renderFn();
             })
             .catch(() => {
@@ -1706,6 +1732,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     filtered = inlineEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
                 }
                 applyEntriesToCalendar(filtered);
+                if (calendarStateRef) {
+                    calendarStateRef.agendaHasMore = false;
+                }
+                refreshAgendaLoadMoreButton(calendarStateRef);
                 renderFn && renderFn();
             });
     };
@@ -2415,33 +2445,36 @@ document.addEventListener('DOMContentLoaded', function() {
                                     ›
                                 </button>
                             </div>
-                            <div class="agenda-panel__details">
-                                <div class="agenda-panel__details-list">
-                                    <p class="agenda-panel__details-title">Eventos do dia</p>
-                                    <div class="agenda-panel__details-list-inner">
-                                        <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
-                                    </div>
+                        <div class="agenda-panel__details">
+                            <div class="agenda-panel__details-list">
+                                <p class="agenda-panel__details-title">Eventos do dia</p>
+                                <div class="agenda-panel__details-list-inner">
+                                    <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
                                 </div>
-                                <div class="agenda-panel__details-card">
-                                    <div class="agenda-panel__details-card-header">
-                                        <p class="agenda-panel__details-card-title">Descrição detalhada</p>
-                                        <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
+                            </div>
+                            <div class="agenda-panel__details-card">
+                                <div class="agenda-panel__details-card-header">
+                                    <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                                    <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
+                                </div>
+                                <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
+                                <div class="agenda-panel__details-card-footer">
+                                    <div class="agenda-panel__details-card-footer-row">
+                                        <div class="agenda-panel__details-card-barrar">
+                                            <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
+                                            <input type="date" class="agenda-panel__details-card-barrar-date">
+                                        </div>
+                                        <span class="agenda-panel__details-card-barrado-note"></span>
                                     </div>
-                                    <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
-                                    <div class="agenda-panel__details-card-footer">
-                                        <div class="agenda-panel__details-card-footer-row">
-                                            <div class="agenda-panel__details-card-barrar">
-                                                <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
-                                                <input type="date" class="agenda-panel__details-card-barrar-date">
-                                            </div>
-                                            <span class="agenda-panel__details-card-barrado-note"></span>
-                                        </div>
-                                        <div class="agenda-panel__details-card-analyst">
-                                            <span class="agenda-panel__details-card-analyst-text"></span>
-                                        </div>
+                                    <div class="agenda-panel__details-card-analyst">
+                                        <span class="agenda-panel__details-card-analyst-text"></span>
                                     </div>
                                 </div>
                             </div>
+                            <div class="agenda-panel__load-more">
+                                <button type="button" class="agenda-panel__load-more-btn" style="display:none;">Carregar mais atividades</button>
+                            </div>
+                        </div>
                         </div>
                     </div>
                 </div>
@@ -2493,6 +2526,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
         let persistedSupervisionEntryId = null;
+        agendaLoadMoreButton = overlay.querySelector('.agenda-panel__load-more-btn');
+        refreshAgendaLoadMoreButton(calendarState);
         if (detailList) {
             detailList.__navWrap = detailNav;
             detailList.__navPrev = detailNavPrev;
@@ -2893,9 +2928,30 @@ document.addEventListener('DOMContentLoaded', function() {
             usersLoaded: false,
             usersError: false,
             defaultUserLabel: getDefaultUserLabel(),
+            agendaPage: 1,
+            agendaPageSize: AGENDA_PAGE_SIZE,
+            agendaHasMore: false,
+            agendaTotalEntries: null,
         };
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
         let agendaEntries = getInlineEntries();
+        const loadMoreAgendaPage = () => {
+            if (!agendaLoadMoreButton || calendarState.agendaHasMore !== true) {
+                return;
+            }
+            calendarState.agendaPage = (calendarState.agendaPage || 1) + 1;
+            agendaLoadMoreButton.disabled = true;
+            hydrateAgendaFromApi([], calendarState, () => {
+                applyAgendaEntriesToState();
+                renderCalendar();
+                restoreActiveDetailControls();
+            }, (combined) => {
+                agendaEntries = combined;
+            }, true);
+        };
+        if (agendaLoadMoreButton) {
+            agendaLoadMoreButton.addEventListener('click', loadMoreAgendaPage);
+        }
         updateAgendaEntryDate = (entryId, backendId, type, targetDayInfo) => {
             if (!targetDayInfo) return;
             agendaEntries = agendaEntries.map(item => {

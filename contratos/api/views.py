@@ -122,6 +122,8 @@ class AgendaGeralAPIView(APIView):
     Retorna todas as tarefas e prazos para a Agenda Geral.
     """
     permission_classes = [IsAuthenticated]
+    DEFAULT_PAGE_SIZE = 200
+    MAX_PAGE_SIZE = 500
 
     def get(self, request):
         status_param = (request.query_params.get('status') or '').lower()
@@ -221,7 +223,28 @@ class AgendaGeralAPIView(APIView):
             tarefas_data + prazos_data + supervision_entries,
             key=lambda x: x.get('date') or ''
         )
-        return Response(agenda_items)
+
+        total_items = len(agenda_items)
+        try:
+            page = int(request.query_params.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.query_params.get('page_size', self.DEFAULT_PAGE_SIZE))
+        except (TypeError, ValueError):
+            page_size = self.DEFAULT_PAGE_SIZE
+        page = max(1, page)
+        page_size = max(10, min(page_size, self.MAX_PAGE_SIZE))
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_entries = agenda_items[start:end]
+
+        return Response({
+            'entries': paginated_entries,
+            'page': page,
+            'page_size': page_size,
+            'total_entries': total_items,
+        })
 
     def _supervision_status_labels(self):
         return SUPERVISION_STATUS_LABELS

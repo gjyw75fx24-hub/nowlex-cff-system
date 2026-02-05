@@ -2979,6 +2979,26 @@ a.historylink {
     flex-direction: column;
     gap: 12px;
 }
+.agenda-panel__load-more {
+    text-align: right;
+}
+.agenda-panel__load-more-btn {
+    border: 1px solid #417690;
+    background: #fff;
+    color: #417690;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+.agenda-panel__load-more-btn:hover:not(:disabled) {
+    background: #f0f5fa;
+}
+.agenda-panel__load-more-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
 .agenda-panel__details-list,
 .agenda-panel__details-card {
     background: #fff;

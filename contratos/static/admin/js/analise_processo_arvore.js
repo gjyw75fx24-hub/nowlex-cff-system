@@ -93,6 +93,8 @@
          */
 
         const decisionTreeApiUrl = '/api/decision-tree/';
+        const AGENDA_PAGE_SIZE = 200;
+        let agendaLoadMoreButton = null;
 
         let treeConfig = {};
         let treeResponseKeys = [];

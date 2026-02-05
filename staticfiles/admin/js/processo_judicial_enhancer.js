@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let nextButton = null;
     let addButton = null;
     let deleteButton = null;
+    const AGENDA_PAGE_SIZE = 200;
+    let agendaLoadMoreButton = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -1660,16 +1662,31 @@ document.addEventListener('DOMContentLoaded', function() {
         return entry;
     };
 
+    const refreshAgendaLoadMoreButton = (state) => {
+        if (!agendaLoadMoreButton) return;
+        const shouldShow = Boolean(state && state.agendaHasMore);
+        agendaLoadMoreButton.style.display = shouldShow ? '' : 'none';
+        agendaLoadMoreButton.disabled = !shouldShow;
+    };
+
     const hydrateAgendaFromApi = (inlineEntries = [], calendarStateRef = null, renderFn = null, setEntriesRef = null, preferApiOnly = false) => {
         const statusParam = calendarStateRef?.showCompleted ? 'completed' : 'pending';
-        const url = `/api/agenda/geral/?status=${statusParam}`;
+        if (calendarStateRef && !preferApiOnly) {
+            calendarStateRef.agendaPage = 1;
+        }
+        const apiPage = calendarStateRef?.agendaPage || 1;
+        const apiPageSize = calendarStateRef?.agendaPageSize || AGENDA_PAGE_SIZE;
+        const url = `/api/agenda/geral/?status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}`;
         fetch(url)
             .then((response) => {
                 if (!response.ok) throw new Error();
                 return response.json();
             })
             .then((data) => {
-                const apiEntries = Array.isArray(data) ? data.map(normalizeApiEntry).filter(Boolean) : [];
+                const rawEntries = Array.isArray(data.entries)
+                    ? data.entries
+                    : (Array.isArray(data) ? data : []);
+                const apiEntries = rawEntries.map(normalizeApiEntry).filter(Boolean);
                 if (preferApiOnly) {
                     entryOrigins.clear();
                 }
@@ -1697,6 +1714,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         calendarStateRef.year = first.year;
                     }
                 }
+                if (calendarStateRef) {
+                    const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
+                    calendarStateRef.agendaTotalEntries = totalEntries;
+                    calendarStateRef.agendaPageSize = apiPageSize;
+                    if (totalEntries !== null) {
+                        calendarStateRef.agendaHasMore = apiPage * apiPageSize < totalEntries;
+                    } else {
+                        calendarStateRef.agendaHasMore = apiEntries.length === apiPageSize;
+                    }
+                }
+                refreshAgendaLoadMoreButton(calendarStateRef);
                 renderFn && renderFn();
             })
             .catch(() => {
@@ -1706,6 +1734,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     filtered = inlineEntries.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
                 }
                 applyEntriesToCalendar(filtered);
+                if (calendarStateRef) {
+                    calendarStateRef.agendaHasMore = false;
+                }
+                refreshAgendaLoadMoreButton(calendarStateRef);
                 renderFn && renderFn();
             });
     };
@@ -2441,6 +2473,9 @@ document.addEventListener('DOMContentLoaded', function() {
                                         </div>
                                     </div>
                                 </div>
+                            <div class="agenda-panel__load-more">
+                                <button type="button" class="agenda-panel__load-more-btn" style="display:none;">Carregar mais atividades</button>
+                            </div>
                             </div>
                         </div>
                     </div>
