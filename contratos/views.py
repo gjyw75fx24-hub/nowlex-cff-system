@@ -474,18 +474,19 @@ def _calculate_monitoria_installments(amount, target=Decimal('500'), max_install
 
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados = {}
-    dados['PARTE CONTRÁRIA'] = polo_passivo.nome
+    parte_nome = (polo_passivo.nome or '').strip()
+    dados['PARTE CONTRÁRIA'] = f"[n]{parte_nome}[n]" if parte_nome else ''
     dados['CPF'] = polo_passivo.documento
 
     endereco_parts = parse_endereco(polo_passivo.endereco)
-    dados['A'] = endereco_parts.get('A', '')
-    dados['B'] = endereco_parts.get('B', '')
-    dados['C'] = endereco_parts.get('C', '')
-    dados['D'] = endereco_parts.get('D', '')
-    dados['E'] = endereco_parts.get('E', '')
-    dados['F'] = endereco_parts.get('F', '')
-    dados['G'] = endereco_parts.get('G', '')
-    dados['H'] = endereco_parts.get('H', '')
+    dados['A'] = _format_address_component(endereco_parts.get('A', '') or '')
+    dados['B'] = _format_address_component(endereco_parts.get('B', '') or '')
+    dados['C'] = _format_address_component(endereco_parts.get('C', '') or '')
+    dados['D'] = _format_address_component(endereco_parts.get('D', '') or '')
+    dados['E'] = _format_address_component(endereco_parts.get('E', '') or '')
+    dados['F'] = _format_address_component(endereco_parts.get('F', '') or '')
+    dados['G'] = _format_address_component(endereco_parts.get('G', '') or '')
+    dados['H'] = _format_address_component(endereco_parts.get('H', '') or '')
 
     dados['E_FORO'] = processo.vara
     dados['H_FORO'] = processo.uf
@@ -512,7 +513,12 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados['2,5% DO VALOR DA CAUSA POR EXTENSO'] = valor_custas_texto
     parcelas_custas = _calculate_monitoria_installments(valor_custas_iniciais)
     dados['X PARCELAS'] = str(parcelas_custas)
-    dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(parcelas_custas, feminine=True)
+    dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(
+        parcelas_custas,
+        feminine=True,
+        include_currency=False,
+        capitalize_first=False
+    )
 
     dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
         'January', 'janeiro').replace('February', 'fevereiro').replace('March', 'março').replace(
@@ -1364,9 +1370,44 @@ def parse_endereco(endereco_str):
         parts[key.strip()] = value
     return parts
 
+
+ADDRESS_LOWERCASE_WORDS = {
+    'a', 'à', 'ao', 'aos', 'as',
+    'da', 'das', 'de', 'do', 'dos',
+    'em', 'no', 'na', 'nos', 'nas',
+    'para', 'por', 'pelo', 'pela', 'pelos', 'pelas',
+    'e', 'com', 'sem'
+}
+_ADDRESS_TOKEN_PATTERN = re.compile(r'^([^A-Za-zÀ-ÿ]*)([A-Za-zÀ-ÿ]+)([^A-Za-zÀ-ÿ]*)$', re.UNICODE)
+
+
+def _format_address_component(value):
+    if not value:
+        return ''
+    tokens = value.split()
+    formatted = []
+    for token in tokens:
+        match = _ADDRESS_TOKEN_PATTERN.match(token)
+        if not match:
+            formatted.append(token)
+            continue
+        prefix, core, suffix = match.groups()
+        if len(core) <= 1:
+            formatted.append(token)
+            continue
+        lower_core = core.lower()
+        if lower_core in ADDRESS_LOWERCASE_WORDS:
+            normalized = lower_core
+        elif core.isupper() and len(core) <= 3:
+            normalized = core
+        else:
+            normalized = lower_core.capitalize()
+        formatted.append(f"{prefix}{normalized}{suffix}")
+    return ' '.join(formatted)
+
 # Helper para converter número para extenso (simplificado)
 # Para uma solução robusta, usar uma biblioteca ou implementar mais completo.
-def number_to_words_pt_br(num, feminine=False):
+def number_to_words_pt_br(num, feminine=False, include_currency=True, capitalize_first=True):
     try:
         num_decimal = num if isinstance(num, Decimal) else Decimal(str(num))
     except (InvalidOperation, ValueError, TypeError):
@@ -1424,18 +1465,19 @@ def number_to_words_pt_br(num, feminine=False):
     if inteiro == 0:
         words_list.append('zero')
     else:
-        chunks = []
         temp_int = inteiro
+        idx = 0
         while temp_int > 0:
-            chunks.append(temp_int % 1000)
-            temp_int //= 1000
-
-        for idx, chunk in enumerate(chunks):
+            chunk = temp_int % 1000
             if chunk > 0:
-                words_list.insert(0, _process_triplet(chunk, idx))
+                words = _process_triplet(chunk, idx)
+                if words:
+                    words_list.insert(0, words)
+            temp_int //= 1000
+            idx += 1
 
     inteiro_words = ' '.join(filter(None, words_list)) or 'zero'
-    inteiro_phrase = f"{inteiro_words} reais"
+    inteiro_phrase = f"{inteiro_words} reais" if include_currency else inteiro_words
 
     decimal_part = int(((num_decimal - inteiro) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
     if decimal_part > 0:
@@ -1443,7 +1485,7 @@ def number_to_words_pt_br(num, feminine=False):
         centavos_phrase = f"{centavos_text} centavos" if centavos_text else 'centavos'
         inteiro_phrase = f"{inteiro_phrase} e {centavos_phrase}"
 
-    return inteiro_phrase.capitalize()
+    return inteiro_phrase.capitalize() if capitalize_first else inteiro_phrase
 
 @login_required
 @require_POST
