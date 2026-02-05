@@ -14,8 +14,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let nextButton = null;
     let addButton = null;
     let deleteButton = null;
-    const AGENDA_PAGE_SIZE = 200;
-    let agendaLoadMoreButton = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -194,74 +192,190 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // Add minimize/maximize buttons for the Dados do Processo section.
-    const setupCollapseControls = (() => {
-        let initialized = false;
-        const createControlButton = (symbol, title) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'button tertiary';
-            button.textContent = symbol;
-            button.title = title;
-            button.setAttribute('aria-label', title);
-            button.style.padding = '0 0.65rem';
-            button.style.height = '32px';
-            button.style.minWidth = '32px';
-            button.style.display = 'inline-flex';
-            button.style.alignItems = 'center';
-            button.style.justifyContent = 'center';
-            button.style.fontSize = '1.25rem';
-            button.style.lineHeight = '1';
-            return button;
+        const setupCollapseControls = (() => {
+            let initialized = false;
+            const createControlButton = (symbol, title) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'button tertiary';
+                button.textContent = symbol;
+                button.title = title;
+                button.setAttribute('aria-label', title);
+                button.style.padding = '0 0.65rem';
+                button.style.height = '32px';
+                button.style.minWidth = '32px';
+                button.style.display = 'inline-flex';
+                button.style.alignItems = 'center';
+                button.style.justifyContent = 'center';
+                button.style.fontSize = '1.25rem';
+                button.style.lineHeight = '1';
+                return button;
+            };
+            return (fieldset) => {
+                if (initialized || !fieldset || !headerElement) {
+                    return;
+                }
+                const contentNodes = Array.from(fieldset.children).filter((node) => node !== headerElement);
+                if (contentNodes.length === 0) {
+                    return;
+                }
+                contentNodes.forEach((node) => {
+                    if (typeof node.dataset.originalDisplay === 'undefined') {
+                        node.dataset.originalDisplay = node.style.display || '';
+                    }
+                });
+                const minimizeButton = createControlButton('-', 'Minimizar dados do processo');
+                const maximizeButton = createControlButton('+', 'Maximizar dados do processo');
+                const setCollapsed = (value) => {
+                    contentNodes.forEach((node) => {
+                        node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+                    });
+                    minimizeButton.disabled = value;
+                    maximizeButton.disabled = !value;
+                    headerElement.dataset.processSectionCollapsed = value ? 'true' : 'false';
+                    saveCollapsedPreference(value);
+                };
+                minimizeButton.addEventListener('click', () => setCollapsed(true));
+                maximizeButton.addEventListener('click', () => setCollapsed(false));
+                headerControls.appendChild(minimizeButton);
+                headerControls.appendChild(maximizeButton);
+                const stored = loadCollapsedPreference();
+                const initialCollapsed = stored === 'collapsed';
+                setCollapsed(initialCollapsed);
+                initialized = true;
+            };
+        })();
+
+        const initPartesSection = (() => {
+            let initialized = false;
+            return () => {
+                if (initialized) {
+                    return;
+                }
+                initialized = true;
+                document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
+            };
+        })();
+
+        const setupPartesToggle = (() => {
+            let initialized = false;
+            const storageKey = 'partes_section_collapsed';
+            const createToggleButton = (symbol, title) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'button tertiary partes-toggle-btn';
+                button.textContent = symbol;
+                button.title = title;
+                button.setAttribute('aria-label', title);
+                button.style.padding = '0 0.45rem';
+                button.style.height = '30px';
+                button.style.minWidth = '30px';
+                button.style.display = 'inline-flex';
+                button.style.alignItems = 'center';
+                button.style.justifyContent = 'center';
+                button.style.fontSize = '1.1rem';
+                button.style.lineHeight = '1';
+                return button;
+            };
+            const loadPref = () => {
+                try {
+                    return window.localStorage?.getItem(storageKey);
+                } catch {
+                    return null;
+                }
+            };
+            const savePref = (value) => {
+                try {
+                    window.localStorage?.setItem(storageKey, value ? 'true' : 'false');
+                } catch {
+                    // ignore
+                }
+            };
+            return (groupElement) => {
+                const group = groupElement || document.getElementById('partes_processuais-group');
+                if (!group || initialized) {
+                    return;
+                }
+                initialized = true;
+                const header = group.querySelector('h2');
+                const banner = document.createElement('div');
+                banner.className = 'analise-partes-banner';
+                const title = document.createElement('span');
+                title.textContent = 'Cadastro';
+                const controlsWrap = document.createElement('div');
+                controlsWrap.className = 'analise-partes-toggle';
+                const minimizeBtn = createToggleButton('-', 'Minimizar seção de Partes');
+                const maximizeBtn = createToggleButton('+', 'Expandir seção de Partes');
+                controlsWrap.appendChild(minimizeBtn);
+                controlsWrap.appendChild(maximizeBtn);
+                banner.appendChild(title);
+                banner.appendChild(controlsWrap);
+                if (header) {
+                    header.style.display = 'none';
+                }
+                group.insertAdjacentElement('afterbegin', banner);
+                const contentNodes = Array.from(group.children).filter(node => node !== banner);
+                contentNodes.forEach((node) => {
+                    if (typeof node.dataset.originalDisplay === 'undefined') {
+                        node.dataset.originalDisplay = node.style.display || '';
+                    }
+                });
+                const setCollapsed = (value) => {
+                    contentNodes.forEach((node) => {
+                        node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
+                    });
+                    minimizeBtn.disabled = value;
+                    maximizeBtn.disabled = !value;
+                    group.dataset.partesCollapsed = value ? 'true' : 'false';
+                    savePref(value);
+                    if (!value) {
+                        initPartesSection();
+                    }
+                };
+                minimizeBtn.addEventListener('click', () => setCollapsed(true));
+                maximizeBtn.addEventListener('click', () => setCollapsed(false));
+                const stored = loadPref();
+                const initialCollapsed = stored === null ? true : stored === 'true';
+                setCollapsed(initialCollapsed);
+            };
+        })();
+
+        const setActiveCnjText = () => {
+            const fieldset = ensureHeaderLayout();
+            headerTitleSpan.textContent = HEADER_TITLE;
+            const collapseContainer = fieldset || headerElement?.parentElement;
+            if (collapseContainer) {
+                setupCollapseControls(collapseContainer);
+            }
+            if (window.__setActiveCnjHeader) {
+                window.__setActiveCnjHeader(HEADER_TITLE);
+            }
+            if (typeof window.__cnj_active_display !== 'undefined') {
+                window.__cnj_active_display = HEADER_TITLE;
+            }
         };
-        return (fieldset) => {
-            if (initialized || !fieldset || !headerElement) {
+
+        const watchPartesGroup = () => {
+            const group = document.getElementById('partes_processuais-group');
+            if (group) {
+                setupPartesToggle(group);
                 return;
             }
-            const contentNodes = Array.from(fieldset.children).filter((node) => node !== headerElement);
-            if (contentNodes.length === 0) {
-                return;
-            }
-            contentNodes.forEach((node) => {
-                if (typeof node.dataset.originalDisplay === 'undefined') {
-                    node.dataset.originalDisplay = node.style.display || '';
+            const observer = new MutationObserver((mutations, obs) => {
+                const found = document.getElementById('partes_processuais-group');
+                if (found) {
+                    setupPartesToggle(found);
+                    obs.disconnect();
                 }
             });
-            const minimizeButton = createControlButton('-', 'Minimizar dados do processo');
-            const maximizeButton = createControlButton('+', 'Maximizar dados do processo');
-            const setCollapsed = (value) => {
-                contentNodes.forEach((node) => {
-                    node.style.display = value ? 'none' : (node.dataset.originalDisplay || '');
-                });
-                minimizeButton.disabled = value;
-                maximizeButton.disabled = !value;
-                headerElement.dataset.processSectionCollapsed = value ? 'true' : 'false';
-                saveCollapsedPreference(value);
-            };
-            minimizeButton.addEventListener('click', () => setCollapsed(true));
-            maximizeButton.addEventListener('click', () => setCollapsed(false));
-            headerControls.appendChild(minimizeButton);
-            headerControls.appendChild(maximizeButton);
-            const stored = loadCollapsedPreference();
-            const initialCollapsed = stored === 'collapsed';
-            setCollapsed(initialCollapsed);
-            initialized = true;
+            observer.observe(document.body, { childList: true, subtree: true });
         };
-    })();
 
-    const setActiveCnjText = () => {
-        const fieldset = ensureHeaderLayout();
-        headerTitleSpan.textContent = HEADER_TITLE;
-        const collapseContainer = fieldset || headerElement?.parentElement;
-        if (collapseContainer) {
-            setupCollapseControls(collapseContainer);
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', watchPartesGroup);
+        } else {
+            watchPartesGroup();
         }
-        if (window.__setActiveCnjHeader) {
-            window.__setActiveCnjHeader(HEADER_TITLE);
-        }
-        if (typeof window.__cnj_active_display !== 'undefined') {
-            window.__cnj_active_display = HEADER_TITLE;
-        }
-    };
 
     const applyEntryState = (entry) => {
         cnjInput.value = entry.cnj;
@@ -2447,36 +2561,36 @@ document.addEventListener('DOMContentLoaded', function() {
                                     ›
                                 </button>
                             </div>
-                            <div class="agenda-panel__details">
-                                <div class="agenda-panel__details-list">
-                                    <p class="agenda-panel__details-title">Eventos do dia</p>
-                                    <div class="agenda-panel__details-list-inner">
-                                        <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
+                        <div class="agenda-panel__details">
+                            <div class="agenda-panel__details-list">
+                                <p class="agenda-panel__details-title">Eventos do dia</p>
+                                <div class="agenda-panel__details-list-inner">
+                                    <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
+                                </div>
+                            </div>
+                            <div class="agenda-panel__details-card">
+                                <div class="agenda-panel__details-card-header">
+                                    <p class="agenda-panel__details-card-title">Descrição detalhada</p>
+                                    <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
+                                </div>
+                                <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
+                                <div class="agenda-panel__details-card-footer">
+                                    <div class="agenda-panel__details-card-footer-row">
+                                        <div class="agenda-panel__details-card-barrar">
+                                            <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
+                                            <input type="date" class="agenda-panel__details-card-barrar-date">
+                                        </div>
+                                        <span class="agenda-panel__details-card-barrado-note"></span>
+                                    </div>
+                                    <div class="agenda-panel__details-card-analyst">
+                                        <span class="agenda-panel__details-card-analyst-text"></span>
                                     </div>
                                 </div>
-                                <div class="agenda-panel__details-card">
-                                    <div class="agenda-panel__details-card-header">
-                                        <p class="agenda-panel__details-card-title">Descrição detalhada</p>
-                                        <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
-                                    </div>
-                                    <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
-                                    <div class="agenda-panel__details-card-footer">
-                                        <div class="agenda-panel__details-card-footer-row">
-                                            <div class="agenda-panel__details-card-barrar">
-                                                <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
-                                                <input type="date" class="agenda-panel__details-card-barrar-date">
-                                            </div>
-                                            <span class="agenda-panel__details-card-barrado-note"></span>
-                                        </div>
-                                        <div class="agenda-panel__details-card-analyst">
-                                            <span class="agenda-panel__details-card-analyst-text"></span>
-                                        </div>
-                                    </div>
-                                </div>
+                            </div>
                             <div class="agenda-panel__load-more">
                                 <button type="button" class="agenda-panel__load-more-btn" style="display:none;">Carregar mais atividades</button>
                             </div>
-                            </div>
+                        </div>
                         </div>
                     </div>
                 </div>
@@ -2528,6 +2642,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
         let persistedSupervisionEntryId = null;
+        agendaLoadMoreButton = overlay.querySelector('.agenda-panel__load-more-btn');
+        refreshAgendaLoadMoreButton(calendarState);
         if (detailList) {
             detailList.__navWrap = detailNav;
             detailList.__navPrev = detailNavPrev;
@@ -2928,9 +3044,30 @@ document.addEventListener('DOMContentLoaded', function() {
             usersLoaded: false,
             usersError: false,
             defaultUserLabel: getDefaultUserLabel(),
+            agendaPage: 1,
+            agendaPageSize: AGENDA_PAGE_SIZE,
+            agendaHasMore: false,
+            agendaTotalEntries: null,
         };
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
         let agendaEntries = getInlineEntries();
+        const loadMoreAgendaPage = () => {
+            if (!agendaLoadMoreButton || calendarState.agendaHasMore !== true) {
+                return;
+            }
+            calendarState.agendaPage = (calendarState.agendaPage || 1) + 1;
+            agendaLoadMoreButton.disabled = true;
+            hydrateAgendaFromApi([], calendarState, () => {
+                applyAgendaEntriesToState();
+                renderCalendar();
+                restoreActiveDetailControls();
+            }, (combined) => {
+                agendaEntries = combined;
+            }, true);
+        };
+        if (agendaLoadMoreButton) {
+            agendaLoadMoreButton.addEventListener('click', loadMoreAgendaPage);
+        }
         updateAgendaEntryDate = (entryId, backendId, type, targetDayInfo) => {
             if (!targetDayInfo) return;
             agendaEntries = agendaEntries.map(item => {
@@ -6444,7 +6581,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Inicialização de Inlines existentes ---
-    document.querySelectorAll('.dynamic-partes').forEach(setupParteInline);
 
     // --- Configuração para novas inlines adicionadas dinamicamente ---
     const CHECAGEM_STORAGE_KEY = 'checagem_de_sistemas_state_v1';
