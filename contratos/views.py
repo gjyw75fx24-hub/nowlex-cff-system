@@ -8,7 +8,7 @@ from .models import (
     OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo
 )
 from .integracoes_escavador.api import buscar_processo_por_cnj
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_CEILING
 from django.db.models import Max
 from django.db import transaction
 from django.contrib.admin.views.decorators import staff_member_required
@@ -301,6 +301,23 @@ def _replace_placeholders_in_container(container, data):
         _replace_placeholders_in_paragraph(paragraph, data)
 
 
+def _delete_paragraph(paragraph):
+    if paragraph is None or paragraph._element is None:
+        return
+    parent = paragraph._element.getparent()
+    if parent is None:
+        return
+    parent.remove(paragraph._element)
+
+
+def _remove_paragraphs_containing(container, text_substring):
+    if not container or not text_substring:
+        return
+    for paragraph in list(_iter_container_paragraphs(container)):
+        if text_substring in paragraph.text:
+            _delete_paragraph(paragraph)
+
+
 def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
     if not pattern or replacement is None:
         return
@@ -444,6 +461,17 @@ def _load_template_document(slug, fallback_path=None):
     )
 
 
+def _calculate_monitoria_installments(amount, target=Decimal('500'), max_installments=10):
+    """Calcula o número de parcelas considerando o valor alvo e limite."""
+    if amount <= Decimal('0'):
+        return 1
+    installments_decimal = (amount / target).to_integral_value(rounding=ROUND_CEILING)
+    installments = int(installments_decimal)
+    if installments < 1:
+        installments = 1
+    return min(installments, max_installments)
+
+
 def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados = {}
     dados['PARTE CONTRÁRIA'] = polo_passivo.nome
@@ -475,6 +503,17 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados['VALOR DA CAUSA'] = _format_currency_brl(total_valor_causa)
     dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
 
+    custas_rate = Decimal('0.025')
+    valor_custas_iniciais = (total_valor_causa * custas_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    valor_custas_texto = number_to_words_pt_br(valor_custas_iniciais)
+    dados['2,5 % DO VALOR DA CAUSA'] = _format_currency_brl(valor_custas_iniciais)
+    dados['2,5% DO VALOR DA CAUSA'] = dados['2,5 % DO VALOR DA CAUSA']
+    dados['2,5 % DO VALOR DA CAUSA POR EXTENSO'] = valor_custas_texto
+    dados['2,5% DO VALOR DA CAUSA POR EXTENSO'] = valor_custas_texto
+    parcelas_custas = _calculate_monitoria_installments(valor_custas_iniciais)
+    dados['X PARCELAS'] = str(parcelas_custas)
+    dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(parcelas_custas, feminine=True)
+
     dados['DATA DE HOJE'] = datetime.now().strftime("%d de %B de %Y").replace(
         'January', 'janeiro').replace('February', 'fevereiro').replace('March', 'março').replace(
         'April', 'abril').replace('May', 'maio').replace('June', 'junho').replace(
@@ -483,6 +522,8 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
 
     document = _load_template_document(DocumentoModelo.SlugChoices.MONITORIA_INICIAL, None)
 
+    show_parcelamento = valor_custas_iniciais >= Decimal('1000')
+
     # Ajusta posição do rodapé para evitar cortes no PDF (mantém margens do template)
     for section in document.sections:
         try:
@@ -490,6 +531,12 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
             section.footer_distance = Cm(1.5)
         except Exception:
             pass
+
+    if not show_parcelamento:
+        _remove_paragraphs_containing(
+            document,
+            "Seja deferido o parcelamento das custas iniciais"
+        )
 
     _replace_placeholders_in_container(document, dados)
     for section in document.sections:
@@ -1319,16 +1366,18 @@ def parse_endereco(endereco_str):
 
 # Helper para converter número para extenso (simplificado)
 # Para uma solução robusta, usar uma biblioteca ou implementar mais completo.
-def number_to_words_pt_br(num):
+def number_to_words_pt_br(num, feminine=False):
     try:
         num_decimal = num if isinstance(num, Decimal) else Decimal(str(num))
     except (InvalidOperation, ValueError, TypeError):
         return str(num)
 
-    unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
+    unidades_masc = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
+    unidades_fem = ['', 'uma', 'duas', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
     dezena = ['', 'dez', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
     dez_a_dezenove = ['dez', 'onze', 'doze', 'treze', 'catorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove']
     centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos']
+    unidades = unidades_fem if feminine else unidades_masc
 
     def _num_to_words_chunk(n):
         s = ''
