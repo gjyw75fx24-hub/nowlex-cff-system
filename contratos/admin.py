@@ -2559,23 +2559,18 @@ class ProcessoJudicialAdmin(admin.ModelAdmin):
             'all': (
                 'admin/css/admin_tabs.css', 
                 'admin/css/custom_admin_styles.css',
-                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css', # <--- Adicionado
-                'admin/css/analise_processo.css', # <--- Adicionado
-                'admin/css/arquivos_peticoes_tab.css',
             )
         }
         js = (
             'admin/js/vendor/jquery/jquery.min.js', 
             'admin/js/jquery.init.js',
-            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/processo_judicial_enhancer.js', 
             'admin/js/admin_tabs.js', 
             'admin/js/processo_judicial_lazy_loader.js',
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
-            'admin/js/mapa_interativo.js',
             'admin/js/soma_contratos.js',
             'admin/js/cia_button.js',
             'admin/js/cpf_formatter.js',

@@ -136,6 +136,33 @@
     z-index: 2301;
 }
 
+.analise-partes-toggle {
+    display: flex;
+    gap: 0.4rem;
+    margin-left: auto;
+}
+
+.analise-partes-banner {
+    width: 100%;
+    border: 1px solid var(--header-bg);
+    border-radius: 0;
+    margin-top: 1rem;
+    padding: 8px;
+    background: var(--header-bg);
+    color: var(--header-link-color);
+    font-weight: 400;
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.analise-partes-banner .analise-partes-toggle {
+    margin-left: 0;
+}
+
 .checagem-modal__header {
     padding: 20px 22px 12px;
     border-bottom: 1px solid rgba(15, 58, 118, 0.15);

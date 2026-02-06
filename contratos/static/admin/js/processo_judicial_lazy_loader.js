@@ -6,9 +6,16 @@
         analise: `${STATIC_BASE}admin/js/analise_processo_arvore.js`,
         arquivos: `${STATIC_BASE}admin/js/arquivos_peticoes_tab.js`,
         tarefas: `${STATIC_BASE}admin/js/tarefas_prazos_interface.js`,
+        pickr: 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
+    };
+    const cssRegistry = {
+        analise: `${STATIC_BASE}admin/css/analise_processo.css`,
+        arquivos: `${STATIC_BASE}admin/css/arquivos_peticoes_tab.css`,
+        pickr: 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
     };
     const loaded = new Set();
     const loading = new Map();
+    const cssLoaded = new Set();
 
     const normalizeText = (value) => {
         if (!value) return '';
@@ -41,12 +48,26 @@
         return promise;
     };
 
+    const loadCssOnce = (key) => {
+        if (!cssRegistry[key]) return;
+        if (cssLoaded.has(key)) return;
+        const href = cssRegistry[key];
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.dataset.lazyCss = key;
+        document.head.appendChild(link);
+        cssLoaded.add(key);
+    };
+
     const handleTabActivation = (title = '') => {
         const normalized = normalizeText(title);
         if (normalized.includes('analise de processo')) {
+            loadCssOnce('analise');
             loadScriptOnce('analise');
         }
         if (normalized.includes('arquivo')) {
+            loadCssOnce('arquivos');
             loadScriptOnce('arquivos');
         }
         if (normalized.includes('tarefas') || normalized.includes('prazos')) {
@@ -56,5 +77,21 @@
 
     document.addEventListener('cff:adminTabActivated', (event) => {
         handleTabActivation(event?.detail?.title || '');
+    });
+
+    const shouldLoadPickr = (target) => {
+        if (!target) return false;
+        if (target.closest && target.closest('#open-etiqueta-modal')) return true;
+        if (target.closest && target.closest('#open-create-etiqueta-btn')) return true;
+        if (target.closest && target.closest('#add-new-etiqueta-btn')) return true;
+        return false;
+    };
+
+    document.addEventListener('click', (event) => {
+        if (!shouldLoadPickr(event.target)) {
+            return;
+        }
+        loadCssOnce('pickr');
+        loadScriptOnce('pickr');
     });
 })();

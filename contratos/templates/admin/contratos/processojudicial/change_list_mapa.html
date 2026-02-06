@@ -40,6 +40,54 @@
     </style>
 {% endblock %}
 
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const filterRoot = document.getElementById('changelist-filter');
+        if (!filterRoot) return;
+        const detailsList = Array.from(filterRoot.querySelectorAll('details'));
+        if (!detailsList.length) return;
+        const normalize = (value) => (value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim()
+          .toLowerCase();
+        const targetDetails = detailsList.find(details => {
+          const summary = details.querySelector('summary');
+          return summary && normalize(summary.textContent) === 'por uf';
+        });
+        if (!targetDetails) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const hasUf = params.getAll('uf').filter(Boolean).length > 0;
+        if (!hasUf) {
+          targetDetails.open = false;
+        }
+
+        const mapaUrl = "{% static 'admin/js/mapa_interativo.js' %}";
+        let mapaLoaded = false;
+        const loadMapa = () => {
+          if (mapaLoaded) return;
+          mapaLoaded = true;
+          const script = document.createElement('script');
+          script.src = mapaUrl;
+          script.async = true;
+          document.head.appendChild(script);
+        };
+
+        if (targetDetails.open) {
+          loadMapa();
+        }
+        targetDetails.addEventListener('toggle', () => {
+          if (targetDetails.open) {
+            loadMapa();
+          }
+        });
+      });
+    </script>
+{% endblock %}
+
 {# Adiciona o contêiner do mapa sem sobrescrever o conteúdo original #}
 {% block content %}
     {{ block.super }}
