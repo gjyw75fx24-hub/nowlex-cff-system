@@ -2148,7 +2148,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             use_distinct = True
         return qs, use_distinct
     fieldsets = (
-        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "vara", "tribunal")}),
+        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "vara", "tribunal", "busca_ativa")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"

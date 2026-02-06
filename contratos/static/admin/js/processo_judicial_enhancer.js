@@ -653,6 +653,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return cookieValue;
     }
     const csrftoken = getCookie('csrftoken');
+    const AGENDA_PAGE_SIZE = 200;
     const AGENDA_SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
     const AGENDA_SUPERVISION_STATUS_LABELS = {
         pendente: 'Pendente de Supervisão',
@@ -2643,7 +2644,6 @@ document.addEventListener('DOMContentLoaded', function() {
         let activeSupervisionEntry = null;
         let persistedSupervisionEntryId = null;
         agendaLoadMoreButton = overlay.querySelector('.agenda-panel__load-more-btn');
-        refreshAgendaLoadMoreButton(calendarState);
         if (detailList) {
             detailList.__navWrap = detailNav;
             detailList.__navPrev = detailNavPrev;
@@ -3049,6 +3049,7 @@ document.addEventListener('DOMContentLoaded', function() {
             agendaHasMore: false,
             agendaTotalEntries: null,
         };
+        refreshAgendaLoadMoreButton(calendarState);
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
         let agendaEntries = getInlineEntries();
         const loadMoreAgendaPage = () => {
