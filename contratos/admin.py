@@ -42,6 +42,18 @@ from .services.peticao_combo import build_preview, generate_zip, PreviewError
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
 
+
+def strip_related_widget(formfield):
+    if formfield and isinstance(formfield.widget, RelatedFieldWidgetWrapper):
+        formfield.widget = formfield.widget.widget
+    return formfield
+
+
+class NoRelatedLinksMixin:
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        return strip_related_widget(formfield)
+
 def format_polo_name(value: str) -> str:
     if not value:
         return "-"
@@ -1486,7 +1498,7 @@ class AndamentoProcessualForm(forms.ModelForm):
             'detalhes': forms.Textarea(attrs={'rows': 2, 'cols': 50}), # Proporcionalmente menor
         }
 
-class AndamentoInline(admin.TabularInline):
+class AndamentoInline(NoRelatedLinksMixin, admin.TabularInline):
     form = AndamentoProcessualForm
     model = AndamentoProcessual
     extra = 0
@@ -1518,7 +1530,7 @@ class ParteForm(forms.ModelForm):
             if default_choice[0] != '':
                 polo_field.choices = [('', '---------')] + list(polo_field.choices)
 
-class ParteInline(admin.StackedInline):
+class ParteInline(NoRelatedLinksMixin, admin.StackedInline):
     model = Parte
     form = ParteForm
     extra = 0
@@ -1541,7 +1553,7 @@ class ParteInline(admin.StackedInline):
     )
 
 
-class AdvogadoPassivoInline(admin.StackedInline):
+class AdvogadoPassivoInline(NoRelatedLinksMixin, admin.StackedInline):
     model = AdvogadoPassivo
     fk_name = "processo"
     extra = 0
@@ -1568,14 +1580,6 @@ class AdvogadoPassivoInline(admin.StackedInline):
         if db_field.name == 'valor_acordado':
             css = formfield.widget.attrs.get('class', '')
             formfield.widget.attrs['class'] = (css + ' money-mask').strip()
-        if db_field.name == 'responsavel':
-            if isinstance(formfield.widget, RelatedFieldWidgetWrapper):
-                formfield.widget = formfield.widget.widget
-            else:
-                widget = formfield.widget
-                for attr in ('can_add_related', 'can_change_related', 'can_delete_related', 'can_view_related'):
-                    if hasattr(widget, attr):
-                        setattr(widget, attr, False)
         return formfield
 
 
@@ -1719,7 +1723,7 @@ class ProcessoJudicialForm(forms.ModelForm):
             self.initial['valor_causa'] = formatted
 
 
-class ContratoInline(admin.StackedInline):
+class ContratoInline(NoRelatedLinksMixin, admin.StackedInline):
     form = ContratoForm
     model = Contrato
     extra = 0
@@ -1761,7 +1765,7 @@ class TarefaInlineForm(forms.ModelForm):
             self.fields['criado_em_value'].initial = value
 
 
-class TarefaInline(admin.TabularInline):
+class TarefaInline(NoRelatedLinksMixin, admin.TabularInline):
     form = TarefaInlineForm
     model = Tarefa
     extra = 0
@@ -1806,14 +1810,14 @@ class PrazoInlineForm(forms.ModelForm):
         return cleaned
 
 
-class PrazoInline(admin.TabularInline):
+class PrazoInline(NoRelatedLinksMixin, admin.TabularInline):
     model = Prazo
     form = PrazoInlineForm
     extra = 0
     template = 'admin/edit_inline/tabular.html'
     fields = ['titulo', 'data_limite', 'alerta_valor', 'alerta_unidade', 'responsavel', 'observacoes', 'concluido']
 
-class ProcessoArquivoInline(admin.TabularInline):
+class ProcessoArquivoInline(NoRelatedLinksMixin, admin.TabularInline):
     model = ProcessoArquivo
     extra = 0
     fields = ('nome', 'arquivo', 'enviado_por', 'protocolado_no_tribunal', 'criado_em')
@@ -1888,7 +1892,7 @@ def sanitize_supervision_respostas(respostas):
 
     return respostas
 
-class AnaliseProcessoInline(admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
+class AnaliseProcessoInline(NoRelatedLinksMixin, admin.StackedInline): # Usando StackedInline para melhor visualização do JSONField
     form = AnaliseProcessoAdminForm # Usar o formulário customizado
     model = AnaliseProcesso
     classes = ('analise-procedural-group',)
@@ -2050,7 +2054,7 @@ class ObitoFilter(admin.SimpleListFilter):
 
 
 @admin.register(ProcessoJudicial)
-class ProcessoJudicialAdmin(admin.ModelAdmin):
+class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     form = ProcessoJudicialForm
     readonly_fields = ()
     class Media:
