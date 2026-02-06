@@ -1400,6 +1400,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    const resolveResponsavelId = (responsavel) => {
+        if (!responsavel) return null;
+        if (typeof responsavel === 'number' || typeof responsavel === 'string') {
+            return responsavel;
+        }
+        return responsavel.id || responsavel.pk || responsavel.user_id || null;
+    };
+
     const shouldIncludeEntryForActiveUser = (entry, activeUserId) => {
         if (!activeUserId) {
             return true;
@@ -1407,7 +1415,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (entry?.type === 'S') {
             return true;
         }
-        return `${entry?.responsavel?.id || ''}` === `${activeUserId}`;
+        const responsavelId = entry?.responsavel_id || resolveResponsavelId(entry?.responsavel);
+        return `${responsavelId || ''}` === `${activeUserId}`;
     };
     const applyOriginFromMap = (entry) => {
         const key = getOriginKey(entry);
@@ -1706,6 +1715,23 @@ document.addEventListener('DOMContentLoaded', function() {
             || parteInfo?.cpf
             || parteInfo?.documento
             || '';
+        const responsavelRaw = item.responsavel
+            || item.responsavel_info
+            || item.responsavelInfo
+            || item.responsavel_usuario
+            || item.responsavelUsuario
+            || item.usuario
+            || item.user
+            || null;
+        const responsavelId = item.responsavel_id
+            || item.responsavelId
+            || item.responsavel_usuario_id
+            || item.usuario_id
+            || item.user_id
+            || resolveResponsavelId(responsavelRaw);
+        const responsavelObj = responsavelRaw && typeof responsavelRaw === 'object'
+            ? responsavelRaw
+            : (responsavelId ? { id: Number(responsavelId) } : null);
         const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
@@ -1734,7 +1760,8 @@ document.addEventListener('DOMContentLoaded', function() {
             year: parsed.year,
             admin_url: item.admin_url || '',
             processo_id: item.processo_id,
-            responsavel: item.responsavel || null,
+            responsavel: responsavelObj,
+            responsavel_id: responsavelId || null,
             contract_numbers: Array.isArray(item.contract_numbers)
                 ? item.contract_numbers.filter(Boolean)
                 : [],
