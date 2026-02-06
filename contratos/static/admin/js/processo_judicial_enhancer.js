@@ -6692,6 +6692,151 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         }
     };
 
+    const nowIso = () => new Date().toISOString();
+
+    const CHECAGEM_SERVER_SAVE_DELAY = 800;
+    const checagemSaveTimers = {};
+
+    const resolveChecagemApiUrl = (trigger, processoId) => {
+        const datasetUrl = trigger?.dataset?.checagemUrl;
+        if (datasetUrl) {
+            return datasetUrl;
+        }
+        const firstTriggerUrl = document.querySelector('.checagem-sistemas-trigger')?.dataset?.checagemUrl;
+        if (firstTriggerUrl) {
+            return firstTriggerUrl;
+        }
+        if (processoId) {
+            return `/admin/contratos/processojudicial/${processoId}/checagem-sistemas/`;
+        }
+        return '';
+    };
+
+    const getLocalChecagemState = (storageKey) => {
+        const state = readChecagemStorage();
+        const cardState = (state.cards || {})[storageKey] || {};
+        return {
+            questions: cardState.questions || {},
+            updated_at: cardState.updated_at || null,
+        };
+    };
+
+    const setLocalChecagemState = (storageKey, questions, updatedAt) => {
+        const state = readChecagemStorage();
+        state.cards = state.cards || {};
+        state.cards[storageKey] = {
+            questions: questions || {},
+            updated_at: updatedAt || null,
+        };
+        writeChecagemStorage(state);
+    };
+
+    const setLocalChecagemUpdatedAt = (storageKey, updatedAt) => {
+        const state = readChecagemStorage();
+        state.cards = state.cards || {};
+        const cardState = state.cards[storageKey] || {};
+        cardState.questions = cardState.questions || {};
+        cardState.updated_at = updatedAt || nowIso();
+        state.cards[storageKey] = cardState;
+        writeChecagemStorage(state);
+    };
+
+    const fetchChecagemServerState = async (url) => {
+        if (!url) {
+            return null;
+        }
+        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+            return null;
+        }
+        return response.json();
+    };
+
+    const saveChecagemServerState = async (url, payload) => {
+        if (!url) {
+            return false;
+        }
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken || '',
+                },
+                body: JSON.stringify(payload || {}),
+            });
+            return response.ok;
+        } catch (error) {
+            console.warn('Não foi possível sincronizar a checagem com o servidor:', error);
+            return false;
+        }
+    };
+
+    const syncChecagemFromServer = async (storageKey, url) => {
+        if (!url || !storageKey) {
+            return;
+        }
+        try {
+            const serverState = await fetchChecagemServerState(url);
+            if (!serverState || typeof serverState !== 'object') {
+                return;
+            }
+            const serverQuestions = serverState.questions || {};
+            const serverUpdatedAt = serverState.updated_at || null;
+            const localState = getLocalChecagemState(storageKey);
+            const localQuestions = localState.questions || {};
+            const localUpdatedAt = localState.updated_at || null;
+
+            const hasServerData = Object.keys(serverQuestions).length > 0;
+            const hasLocalData = Object.keys(localQuestions).length > 0;
+
+            if (!hasServerData && hasLocalData) {
+                await saveChecagemServerState(url, {
+                    questions: localQuestions,
+                    updated_at: localUpdatedAt || nowIso(),
+                });
+                return;
+            }
+
+            if (hasServerData && hasLocalData && localUpdatedAt && serverUpdatedAt) {
+                if (new Date(localUpdatedAt) > new Date(serverUpdatedAt)) {
+                    await saveChecagemServerState(url, {
+                        questions: localQuestions,
+                        updated_at: localUpdatedAt,
+                    });
+                    return;
+                }
+            }
+
+            if (hasServerData) {
+                setLocalChecagemState(storageKey, serverQuestions, serverUpdatedAt);
+            }
+        } catch (error) {
+            console.warn('Não foi possível carregar a checagem do servidor:', error);
+        }
+    };
+
+    const scheduleChecagemServerSave = (storageKey, url) => {
+        if (!url || !storageKey) {
+            return;
+        }
+        if (checagemSaveTimers[storageKey]) {
+            clearTimeout(checagemSaveTimers[storageKey]);
+        }
+        checagemSaveTimers[storageKey] = setTimeout(() => {
+            const localState = getLocalChecagemState(storageKey);
+            let updatedAt = localState.updated_at;
+            if (!updatedAt) {
+                updatedAt = nowIso();
+                setLocalChecagemUpdatedAt(storageKey, updatedAt);
+            }
+            saveChecagemServerState(url, {
+                questions: localState.questions || {},
+                updated_at: updatedAt,
+            });
+        }, CHECAGEM_SERVER_SAVE_DELAY);
+    };
+
     const persistChecagemQuestion = (storageKey, questionKey, updates) => {
         const state = readChecagemStorage();
         const cardKey = storageKey || 'global';
@@ -6705,6 +6850,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             ...(cardState.questions[questionKey] || {}),
             ...updates,
         };
+        cardState.updated_at = nowIso();
         writeChecagemStorage(state);
         return cardState.questions[questionKey];
     };
@@ -6805,7 +6951,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         textarea.style.height = '';
     };
 
-    const buildQuestionRow = (storageKey, question, linkIcon) => {
+    const buildQuestionRow = (storageKey, question, linkIcon, checagemUrl) => {
         const questionData = { ...getCachedQuestion(storageKey, question.key) };
         const labelValue = questionData.label || question.label;
 
@@ -6908,6 +7054,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 updated = getCachedQuestion(storageKey, question.key);
             }
             updateLinkIndicatorText(indicator, linkButton, Boolean(updated.link), updated.link);
+            scheduleChecagemServerSave(storageKey, checagemUrl);
             return updated;
         };
 
@@ -6966,7 +7113,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         return row;
     };
 
-    const renderChecagemModal = (cardContext, linkIcon) => {
+    const renderChecagemModal = (cardContext, linkIcon, checagemUrl) => {
         const overlay = ensureModal();
         const title = overlay.querySelector('.checagem-modal__title');
         const pool = overlay.querySelector('.checagem-modal__questions');
@@ -6983,7 +7130,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             const questionsWrapper = document.createElement('div');
             questionsWrapper.className = 'checagem-questions';
             section.questions.forEach((question) => {
-                questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon));
+                questionsWrapper.appendChild(buildQuestionRow(storageKey, question, linkIcon, checagemUrl));
             });
             sectionBlock.appendChild(questionsWrapper);
             pool.appendChild(sectionBlock);
@@ -7031,7 +7178,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         document.body.appendChild(modalBlocker);
     };
 
-    const openChecagemModal = (card, trigger, fallbackContext = {}) => {
+    const openChecagemModal = async (card, trigger, fallbackContext = {}) => {
         const overlay = ensureModal();
         const wasVisible = overlay.getAttribute('aria-hidden') === 'false';
         if (wasVisible && activeChecagemTrigger === trigger) {
@@ -7047,7 +7194,10 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             document
                 .querySelector('.checagem-sistemas-trigger')
                 ?.dataset?.linkIcon || '/static/images/Link_Logo.png';
-        renderChecagemModal({ cardId, cardName, processoId }, linkIcon);
+        const checagemUrl = resolveChecagemApiUrl(trigger, processoId);
+        const storageKey = resolveChecagemStorageKey({ cardId, cardName, processoId });
+        await syncChecagemFromServer(storageKey, checagemUrl);
+        renderChecagemModal({ cardId, cardName, processoId }, linkIcon, checagemUrl);
         positionChecagemModal(trigger);
         activeChecagemTrigger = trigger;
         overlay.setAttribute('aria-hidden', 'false');

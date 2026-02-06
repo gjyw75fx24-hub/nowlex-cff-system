@@ -129,6 +129,12 @@ class ProcessoJudicial(models.Model):
         verbose_name="Etiquetas"
     )
 
+    checagem_sistemas = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Checagem de Sistemas"
+    )
+
     # 🔽 CAMPO ADICIONADO PARA CONTROLE DA BUSCA ATIVA
     busca_ativa = models.BooleanField(
         default=False,

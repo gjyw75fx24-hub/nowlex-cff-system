@@ -2439,17 +2439,21 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         # Restaura o GET original para não afetar o restante do fluxo
         request.GET = original_get
         
-        # Garante uma ordenação consistente
+        # Garante uma ordenação consistente com baixo custo
         ordering = self.get_ordering(request) or ('-pk',)
-        object_list = list(queryset.order_by(*ordering).values_list('pk', flat=True))
-        
-        try:
-            current_index = object_list.index(int(object_id))
-        except ValueError:
-            current_index = -1
-
-        prev_obj_id = object_list[current_index - 1] if current_index > 0 else None
-        next_obj_id = object_list[current_index + 1] if current_index != -1 and current_index < len(object_list) - 1 else None
+        prev_obj_id = None
+        next_obj_id = None
+        ordering_fields = list(ordering) if isinstance(ordering, (list, tuple)) else [ordering]
+        if ordering_fields and all(field in ('pk', '-pk') for field in ordering_fields) and obj:
+            primary_order = ordering_fields[0]
+            if primary_order == '-pk':
+                prev_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
+                next_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
+            else:
+                prev_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
+                next_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
+            prev_obj_id = prev_obj.pk if prev_obj else None
+            next_obj_id = next_obj.pk if next_obj else None
 
         # Monta as URLs preservando os filtros
         base_url = reverse('admin:contratos_processojudicial_changelist') + "{}"
@@ -2585,6 +2589,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom_urls = [
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
+            path('<path:object_id>/checagem-sistemas/', self.admin_site.admin_view(self.checagem_sistemas_view), name='processo_checagem_sistemas'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
@@ -2594,6 +2599,39 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
+
+    def checagem_sistemas_view(self, request, object_id):
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        if not self.has_view_or_change_permission(request, processo):
+            return JsonResponse({'error': 'Permissão negada.'}, status=403)
+
+        if request.method == 'GET':
+            payload = processo.checagem_sistemas or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            return JsonResponse(payload)
+
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Dados inválidos.'}, status=400)
+
+        questions = data.get('questions')
+        if questions is None:
+            questions = {}
+        if not isinstance(questions, dict):
+            return JsonResponse({'error': 'Formato inválido.'}, status=400)
+
+        updated_at = data.get('updated_at')
+        processo.checagem_sistemas = {
+            'questions': questions,
+            'updated_at': updated_at,
+        }
+        processo.save(update_fields=['checagem_sistemas'])
+        return JsonResponse({'status': 'ok'})
 
     def delegate_bulk_view(self, request):
         if request.method != 'POST':

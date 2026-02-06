@@ -539,6 +539,7 @@
                                     class="checagem-sistemas-trigger"
                                     aria-label="Abrir Checagem de Sistemas"
                                     title="Checar sistemas externos"
+                                    {% if original.pk %}data-checagem-url="{% url 'admin:processo_checagem_sistemas' original.pk %}"{% endif %}
                                     data-link-icon="{% static 'images/Link_Logo.png' %}">
                                 <img src="{% static 'images/Checagem_de_Sistemas_Logo.png' %}" alt="Checagem de Sistemas">
                             </button>
