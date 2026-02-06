@@ -14,7 +14,7 @@ from django.contrib.auth.models import User, Group  # Importar os modelos User e
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.db import models, transaction
-from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery
+from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch
 from django.db.models.functions import Abs, Cast, Coalesce, Now
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
@@ -208,10 +208,15 @@ class EtiquetaFilter(admin.SimpleListFilter):
     template = "admin/filter_checkbox.html"
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            queryset = Etiqueta.objects.order_by('ordem', 'nome')
+            return [
+                (etiqueta.id, etiqueta.nome)
+                for etiqueta in queryset
+            ]
         queryset = Etiqueta.objects.annotate(
             processo_count=Count('processojudicial')
         ).order_by('ordem', 'nome')
-        
         return [
             (etiqueta.id, f"{etiqueta.nome} ({etiqueta.processo_count})")
             for etiqueta in queryset
@@ -731,11 +736,19 @@ def _get_app_list(request, app_label=None):
 
 admin.site.get_app_list = _get_app_list
 
+def _show_filter_counts(request):
+    return request.GET.get('show_counts') == '1'
+
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
     parameter_name = "terceiro_interessado"
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return [
+                ("sim", "Com terceiro interessado"),
+                ("nao", "Apenas dois polos"),
+            ]
         base_qs = model_admin.get_queryset(request)
         qs_counts = base_qs.annotate(num_partes=models.Count("partes_processuais"))
         count_sim = qs_counts.filter(num_partes__gt=2).count()
@@ -780,7 +793,8 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
     parameter_name = 'status'
 
     def lookups(self, request, model_admin):
-        # Conta quantos processos há por classe usando o queryset já filtrado
+        if not _show_filter_counts(request):
+            return [(s.id, s.nome) for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem')]
         qs = model_admin.get_queryset(request)
         counts = {row['status__id']: row['total'] for row in qs.values('status__id').annotate(total=models.Count('id'))}
         items = []
@@ -821,9 +835,11 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
     parameter_name = 'para_supervisionar'
 
     def lookups(self, request, model_admin):
+        label = "Enviados P/ Avaliar"
+        if not _show_filter_counts(request):
+            return (('1', label),)
         qs = model_admin.get_queryset(request)
         count = qs.filter(analise_processo__para_supervisionar=True).count()
-        label = f"Enviados P/ Avaliar"
         label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
         return (('1', label_html),)
 
@@ -897,6 +913,9 @@ class UFCountFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
+        if not _show_filter_counts(request):
+            ufs = sorted({row for row in qs.values_list('uf', flat=True) if row})
+            return [(uf, uf) for uf in ufs]
         counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
         return [(uf, mark_safe(f"{uf} <span class='filter-count'>({counts.get(uf, 0)})</span>")) for uf in sorted(counts.keys())]
 
@@ -941,6 +960,8 @@ class CarteiraCountFilter(admin.SimpleListFilter):
     parameter_name = 'carteira'
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return [(cart.id, cart.nome) for cart in Carteira.objects.order_by('nome')]
         qs = model_admin.get_queryset(request)
         counts = {row['carteira__id']: row['total'] for row in qs.values('carteira__id').annotate(total=models.Count('id')) if row['carteira__id']}
         items = []
@@ -980,6 +1001,12 @@ class NaoJudicializadoFilter(admin.SimpleListFilter):
     parameter_name = 'nao_judicializado'
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return [
+                ('1', "Sem CNJ"),
+                ('0', "Com CNJ"),
+                ('all', "Todos"),
+            ]
         qs = model_admin.get_queryset(request)
         count_sim = qs.filter(nao_judicializado=True).count()
         count_nao = qs.filter(nao_judicializado=False).count()
@@ -1034,22 +1061,27 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
     parameter_name = "delegado_para"
 
     def lookups(self, request, model_admin):
-        # Usar o queryset base para contagens para refletir o total real
+        if not _show_filter_counts(request):
+            items = [('none', "Não Delegado")]
+            users = User.objects.filter(is_staff=True, is_active=True).order_by('username')
+            user_items = []
+            for user in users:
+                full_name = user.get_full_name() or user.username
+                user_items.append((user.id, full_name))
+            user_items.sort(key=lambda x: str(x[1]).lower())
+            items.extend(user_items)
+            return items
+
         base_qs = model_admin.model.objects.all()
-        
         counts = {
-            row['delegado_para_id']: row['total'] 
+            row['delegado_para_id']: row['total']
             for row in base_qs.values('delegado_para_id').annotate(total=models.Count('id')).filter(delegado_para_id__isnull=False)
         }
-        
         count_nao_delegado = base_qs.filter(delegado_para__isnull=True).count()
-        
         items = [
             ('none', mark_safe(f"Não Delegado <span class='filter-count'>({count_nao_delegado})</span>"))
         ]
-        
         users = User.objects.filter(is_staff=True, is_active=True).order_by('username')
-        
         user_items = []
         for user in users:
             total = counts.get(user.id, 0)
@@ -1059,7 +1091,7 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
 
         user_items.sort(key=lambda x: str(x[1]).lower())
         items.extend(user_items)
-        
+
         return items
 
     def choices(self, changelist):
@@ -1134,6 +1166,8 @@ class AprovacaoFilter(admin.SimpleListFilter):
         return queryset.filter(match_q)
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
         qs = model_admin.get_queryset(request)
         items = []
         for value, label in self.OPTIONS:
@@ -1221,6 +1255,8 @@ class ProtocoladosFilter(admin.SimpleListFilter):
         return qs.filter(protocol_q & name_q).distinct()
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
         qs = model_admin.get_queryset(request)
         items = []
         for value, label in self.OPTIONS:
@@ -1339,11 +1375,11 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
     ]
 
     def lookups(self, request, model_admin):
-        qs = model_admin.get_queryset(request) # Get the base queryset
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
+        qs = model_admin.get_queryset(request)
         items = []
         for value, label_html_original in self.OPTIONS:
-            # Reconstruct the original label from the mark_safe object to get just the text
-            # This is a bit hacky, but necessary because the label is already mark_safe'd
             label_text = label_html_original.split('>')[1].split('<')[0]
             if value == '0':
                 count = qs.filter(models.Q(viabilidade="") | models.Q(viabilidade__isnull=True)).count()
@@ -1388,7 +1424,15 @@ class AcordoStatusFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         from contratos.models import AdvogadoPassivo
-        
+        if not _show_filter_counts(request):
+            return [
+                (AdvogadoPassivo.AcordoChoices.PROPOR, "Propor"),
+                (AdvogadoPassivo.AcordoChoices.PROPOSTO, "Proposto"),
+                (AdvogadoPassivo.AcordoChoices.FIRMADO, "Firmado"),
+                (AdvogadoPassivo.AcordoChoices.RECUSADO, "Recusado"),
+                ("sem", "Sem acordo"),
+            ]
+
         qs = model_admin.get_queryset(request)
         items = []
         options = (
@@ -1452,6 +1496,8 @@ class BuscaAtivaFilter(admin.SimpleListFilter):
     )
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
         qs = model_admin.get_queryset(request)
         items = []
         for value, label in self.OPTIONS:
@@ -2018,6 +2064,8 @@ class ObitoFilter(admin.SimpleListFilter):
     ]
 
     def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
         qs = model_admin.get_queryset(request)
         items = []
         for value, label in self.OPTIONS:
@@ -2025,7 +2073,6 @@ class ObitoFilter(admin.SimpleListFilter):
                 count = qs.filter(partes_processuais__obito=True).distinct().count()
             else: # 'nao'
                 count = qs.exclude(partes_processuais__obito=True).distinct().count()
-            
             label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
             items.append((value, label_html))
         return items
@@ -2550,12 +2597,19 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return redirect
         extra_context = extra_context or {}
         changelist = self.get_changelist_instance(request)
-        queryset = changelist.get_queryset(request)
-        
+        result_list = changelist.result_list
+        if hasattr(result_list, 'prefetch_related'):
+            result_list = result_list.prefetch_related(
+                Prefetch('etiquetas', queryset=Etiqueta.objects.order_by('ordem', 'nome'))
+            )
+
         etiquetas_data = {}
-        for processo in queryset:
-            etiquetas = processo.etiquetas.order_by('ordem', 'nome').values('nome', 'cor_fundo', 'cor_fonte')
-            etiquetas_data[processo.pk] = list(etiquetas)
+        for processo in result_list:
+            etiquetas = [
+                {'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}
+                for etiqueta in processo.etiquetas.all()
+            ]
+            etiquetas_data[processo.pk] = etiquetas
         
         extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
         extra_context['delegar_users'] = User.objects.order_by('username')
