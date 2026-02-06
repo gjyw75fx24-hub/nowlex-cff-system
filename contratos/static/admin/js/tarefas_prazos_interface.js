@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function() {
+const initTarefasPrazosInterface = () => {
     console.log("Módulo Tarefas/Prazos carregado.");
 
     // Lógica para mover os botões para a posição correta na interface do admin
@@ -79,4 +79,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // - Lógica para carregar listas de tarefas
     // - Lógica para submeter os formulários via API (fetch)
     // - Lógica para carregar e filtrar a agenda
-});
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTarefasPrazosInterface);
+} else {
+    initTarefasPrazosInterface();
+}

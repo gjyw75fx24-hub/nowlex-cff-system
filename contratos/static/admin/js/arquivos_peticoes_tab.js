@@ -924,10 +924,15 @@
         document.dispatchEvent(new CustomEvent('arquivosPeticao:executeReady'));
     };
 
-    window.addEventListener('load', function () {
+    const initArquivosPeticoesTab = () => {
         tryAttachSubtab();
         initBaseSelectionObserver();
         // In case tabs load after, wait a bit
         setTimeout(tryAttachSubtab, 200);
-    });
+    };
+    if (document.readyState === 'complete') {
+        initArquivosPeticoesTab();
+    } else {
+        window.addEventListener('load', initArquivosPeticoesTab);
+    }
 })();

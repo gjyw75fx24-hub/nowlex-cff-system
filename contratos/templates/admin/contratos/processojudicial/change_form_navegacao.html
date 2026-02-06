@@ -3,15 +3,11 @@
 
 {% block extrahead %}
 {{ block.super }}
-<!-- PDF.js para renderização de PDFs em canvas -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-// Configuração do PDF.js
-if (typeof pdfjsLib !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-}
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
 window.__documento_peticoes_css_url = "{% static 'admin/css/documento_modelo_peticoes.css' %}";
+window.__pdfjs_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+window.__pdfjs_worker_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 window.__tipos_peticao_preview_url = "{{ tipos_peticao_preview_url|default:'' }}";
 window.__tipos_peticao_generate_url = "{{ tipos_peticao_generate_url|default:'' }}";
@@ -344,6 +340,35 @@ document.addEventListener('DOMContentLoaded', function() {
   let scale = 1.5;
   let canvas = null;
   let ctx = null;
+  let pdfJsLoader = null;
+
+  const loadPdfJs = () => {
+    if (window.pdfjsLib) {
+      if (window.__pdfjs_worker_url) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfjs_worker_url;
+      }
+      return Promise.resolve(window.pdfjsLib);
+    }
+    if (pdfJsLoader) return pdfJsLoader;
+    const src = window.__pdfjs_url || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    const workerSrc = window.__pdfjs_worker_url || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfJsLoader = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => {
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+          resolve(window.pdfjsLib);
+        } else {
+          reject(new Error('PDF.js não carregou corretamente.'));
+        }
+      };
+      script.onerror = () => reject(new Error('Falha ao carregar PDF.js'));
+      document.head.appendChild(script);
+    });
+    return pdfJsLoader;
+  };
 
   function renderFile(href) {
     console.log('[DEBUG] renderFile chamado com href:', href);
@@ -375,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     modal.style.display = 'flex';
     console.log('[DEBUG] Modal aberto, fazendo fetch do PDF...');
 
-    fetch(href).then(res => {
+    loadPdfJs().then(() => fetch(href)).then(res => {
       console.log('[DEBUG] Fetch resposta:', res.status, res.statusText);
       if (!res.ok) throw new Error('Falha ao carregar PDF: ' + res.status);
       return res.arrayBuffer();
