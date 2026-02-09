@@ -6329,6 +6329,7 @@ document.addEventListener('DOMContentLoaded', function() {
         obitoModal = document.createElement('div');
         obitoModal.className = 'obito-modal';
         obitoModal.setAttribute('aria-hidden', 'true');
+        obitoModal.style.display = 'none';
         obitoModal.innerHTML = `
             <div class="obito-modal__panel">
                 <div class="obito-modal__header" style="display:flex; justify-content:space-between; align-items:center;">
@@ -6371,6 +6372,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(obitoModal);
         const closeHandler = () => {
             obitoModal.setAttribute('aria-hidden', 'true');
+            obitoModal.style.display = 'none';
         };
         obitoModal.querySelector('.obito-modal__close')?.addEventListener('click', closeHandler);
         obitoModal.querySelector('.obito-modal__cancel')?.addEventListener('click', closeHandler);
@@ -6415,6 +6417,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setFieldValue(idadeInput, card.dataset.obitoIdade || '');
         modal.dataset.parteId = card.dataset.parteId || '';
         modal.setAttribute('aria-hidden', 'false');
+        modal.style.display = 'flex';
         dateInput?.focus();
         if (modal.dataset.parteId) {
             fetch(buildObitoUrl(modal.dataset.parteId), {
@@ -6438,6 +6441,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const hideObitoModal = () => {
         if (obitoModal) {
             obitoModal.setAttribute('aria-hidden', 'true');
+            obitoModal.style.display = 'none';
         }
     };
     const updateCardObitoData = (card, payload = {}) => {
