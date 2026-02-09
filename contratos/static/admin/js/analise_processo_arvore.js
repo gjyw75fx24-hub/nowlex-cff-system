@@ -17,7 +17,7 @@
  * ✅ Cálculo de prescrição (5 anos)
  * ✅ Observações livres (notebook)
  * ✅ Observações do supervisor
- * ✅ Status de supervisão (Pendente/Aprovado/Reprovado)
+ * ✅ Status de supervisão (Pendente/Pré-aprovado/Aprovado/Reprovado)
  * ✅ Sistema de "Barrado" com datas
  * ✅ Múltiplos cards de processos vinculados
  * ✅ Dados básicos do processo
@@ -27,7 +27,7 @@
  * SISTEMA DE SUPERVISÃO:
  * ----------------------
  * - Tab "Supervisionar" exclusiva para supervisores
- * - Alternância de status (Pendente → Aprovado → Reprovado → Pendente)
+ * - Alternância de status (Pendente → Pré-aprovado → Aprovado → Reprovado → Pendente)
  * - Campo de observações do supervisor
  * - Sistema de "Barrado" com data de início e retorno
  * - Botão "Concluir Revisão"
@@ -67,6 +67,10 @@
     'use strict';
 
     $(document).ready(function () {
+        if (window.__analiseProcessoArvoreInitialized) {
+            return;
+        }
+        window.__analiseProcessoArvoreInitialized = true;
         console.log("analise_processo_arvore.js carregado.");
         const savedScroll = sessionStorage.getItem('scrollPosition');
         if ('scrollRestoration' in history) {
@@ -140,14 +144,16 @@
             style: 'currency',
             currency: 'BRL'
         });
-        const SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
+        const SUPERVISION_STATUS_SEQUENCE = ['pendente', 'pre_aprovado', 'aprovado', 'reprovado'];
         const SUPERVISION_STATUS_LABELS = {
             pendente: 'Pendente de Supervisão',
+            pre_aprovado: 'Pré-aprovado',
             aprovado: 'Aprovado',
             reprovado: 'Reprovado'
         };
         const SUPERVISION_STATUS_CLASSES = {
             pendente: 'status-pendente',
+            pre_aprovado: 'status-pre-aprovado',
             aprovado: 'status-aprovado',
             reprovado: 'status-reprovado'
         };
@@ -322,7 +328,6 @@
         );
         const $tabWrapper = $('<div class="analise-inner-tab-wrapper"></div>').append(
             $tabTopRow,
-            $analysisActionRow,
             $tabPanels,
             $hiddenButtons
         );
@@ -386,7 +391,7 @@
         activateInnerTab(initialTab);
 
         const $dynamicQuestionsContainer = $('<div class="dynamic-questions-container"></div>');
-        $analysisPanel.append($dynamicQuestionsContainer);
+        $analysisPanel.append($analysisActionRow, $dynamicQuestionsContainer);
 
         const $formattedResponsesContainer = $('<div class="formatted-responses-container"></div>');
         $analysisPanel.append($formattedResponsesContainer);

@@ -654,14 +654,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const csrftoken = getCookie('csrftoken');
     const AGENDA_PAGE_SIZE = 200;
-    const AGENDA_SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado'];
+    const AGENDA_SUPERVISION_STATUS_SEQUENCE = ['pendente', 'pre_aprovado', 'aprovado', 'reprovado'];
     const AGENDA_SUPERVISION_STATUS_LABELS = {
         pendente: 'Pendente de Supervisão',
+        pre_aprovado: 'Pré-aprovado',
         aprovado: 'Aprovado',
         reprovado: 'Reprovado',
     };
     const AGENDA_SUPERVISION_STATUS_CLASSES = {
         pendente: 'status-pendente',
+        pre_aprovado: 'status-pre-aprovado',
         aprovado: 'status-aprovado',
         reprovado: 'status-reprovado',
     };

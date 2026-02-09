@@ -53,9 +53,10 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 
-SUPERVISION_STATUS_SEQUENCE = ['pendente', 'aprovado', 'reprovado']
+SUPERVISION_STATUS_SEQUENCE = ['pendente', 'pre_aprovado', 'aprovado', 'reprovado']
 SUPERVISION_STATUS_LABELS = {
     'pendente': 'Pendente de Supervisão',
+    'pre_aprovado': 'Pré-aprovado',
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
@@ -402,7 +403,7 @@ class AgendaGeralAPIView(APIView):
         }
 
     def _get_supervision_entries(self, show_completed, request):
-        pending_statuses = {'pendente'}
+        pending_statuses = {'pendente', 'pre_aprovado'}
         completed_statuses = {'aprovado', 'reprovado'}
         target_statuses = completed_statuses if show_completed else pending_statuses
 

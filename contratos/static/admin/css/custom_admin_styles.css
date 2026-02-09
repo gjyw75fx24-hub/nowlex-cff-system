@@ -1108,6 +1108,10 @@ a.historylink {
     background: #f3f4f6;
     color: #475569;
 }
+.supervisor-status-badge.status-pre-aprovado {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
 .supervisor-status-badge.status-aprovado {
     background: #e0f2e9;
     color: #165c4d;
@@ -3118,6 +3122,9 @@ a.historylink {
 }
 .agenda-panel__details-card-status-btn.status-pendente {
     background: #f6c343;
+}
+.agenda-panel__details-card-status-btn.status-pre-aprovado {
+    background: #0d6efd;
 }
 .agenda-panel__details-card-status-btn.status-aprovado {
     background: #198754;

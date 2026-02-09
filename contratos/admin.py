@@ -1132,6 +1132,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
     title = "Aprovação"
     parameter_name = "aprovacao"
     OPTIONS = [
+        ("pre_aprovado", "Pré-aprovados"),
         ("aprovado", "Aprovados"),
         ("reprovado", "Reprovados"),
         ("barrado", "Barrados"),
@@ -1140,6 +1141,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
     PATH_KEYS = ("processos_vinculados", "saved_processos_vinculados")
     MATCH_CONDITIONS = {
         "aprovado": '@.supervisor_status == "aprovado" && @.barrado.ativo != true',
+        "pre_aprovado": '@.supervisor_status == "pre_aprovado" && @.barrado.ativo != true',
         "reprovado": '@.supervisor_status == "reprovado" && @.barrado.ativo != true',
         "barrado": '@.barrado.ativo == true',
     }

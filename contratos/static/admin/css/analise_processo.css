@@ -411,6 +411,11 @@
     color: #ffffff !important;
 }
 
+.status-pre-aprovado {
+    background: #0d6efd !important;
+    color: #ffffff !important;
+}
+
 .status-aprovado {
     background: #198754 !important;
     color: #ffffff !important;
