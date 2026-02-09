@@ -814,7 +814,18 @@ document.addEventListener('DOMContentLoaded', function() {
       card.appendChild(actions);
       overlay.appendChild(card);
       document.body.appendChild(overlay);
-      return { overlay, btnSim, btnCancelar };
+      const handleKeydown = (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          btnSim.click();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          btnCancelar.click();
+        }
+      };
+      document.addEventListener('keydown', handleKeydown);
+      btnSim.focus();
+      return { overlay, btnSim, btnCancelar, handleKeydown };
     };
 
     const appendRemoveButton = (row, container) => {
@@ -846,9 +857,10 @@ document.addEventListener('DOMContentLoaded', function() {
       const fileName = (row.querySelector('input[name$="-nome"]')?.value || nomeCell?.textContent || 'arquivo').trim();
       btn.addEventListener('click', (event) => {
         event.preventDefault();
-        const { overlay, btnSim, btnCancelar } = createConfirmOverlay(`Confirmar deletar o arquivo "${fileName}"?`);
+        const { overlay, btnSim, btnCancelar, handleKeydown } = createConfirmOverlay(`Confirmar deletar o arquivo "${fileName}"?`);
         const cleanUp = () => {
           overlay.remove();
+          document.removeEventListener('keydown', handleKeydown);
           btnSim.removeEventListener('click', simHandler);
           btnCancelar.removeEventListener('click', cancelHandler);
         };

@@ -261,6 +261,8 @@ class ProcessoArquivo(models.Model):
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
     tarefa = models.ForeignKey('Tarefa', on_delete=models.SET_NULL, null=True, blank=True, related_name='arquivos')
     mensagem = models.ForeignKey('TarefaMensagem', on_delete=models.SET_NULL, null=True, blank=True, related_name='anexos')
+    prazo = models.ForeignKey('Prazo', on_delete=models.SET_NULL, null=True, blank=True, related_name='arquivos')
+    prazo_mensagem = models.ForeignKey('PrazoMensagem', on_delete=models.SET_NULL, null=True, blank=True, related_name='anexos')
 
     class Meta:
         verbose_name = "Arquivo"
@@ -650,6 +652,26 @@ class ListaDeTarefas(models.Model):
         verbose_name_plural = "Listas de Tarefas"
         ordering = ['nome']
 
+class TarefaLote(models.Model):
+    descricao = models.CharField(max_length=255, verbose_name="Descrição")
+    criado_em = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Criado em")
+    criado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='tarefas_lotes',
+        null=True,
+        blank=True,
+        verbose_name="Criado por"
+    )
+
+    def __str__(self):
+        return self.descricao
+
+    class Meta:
+        verbose_name = "Lote de Tarefas"
+        verbose_name_plural = "Lotes de Tarefas"
+        ordering = ['-criado_em']
+
 class Tarefa(models.Model):
     PRIORIDADE_CHOICES = [
         ('B', 'Baixa'),
@@ -657,7 +679,8 @@ class Tarefa(models.Model):
         ('A', 'Alta'),
     ]
 
-    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='tarefas')
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='tarefas', null=True, blank=True)
+    lote = models.ForeignKey('TarefaLote', on_delete=models.SET_NULL, null=True, blank=True, related_name='tarefas')
     descricao = models.CharField(max_length=255, verbose_name="Descrição")
     lista = models.ForeignKey(ListaDeTarefas, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Lista")
     data = models.DateField(verbose_name="Data")
@@ -696,7 +719,7 @@ class Prazo(models.Model):
         ('H', 'Horas antes'),
     ]
 
-    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='prazos')
+    processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='prazos', null=True, blank=True)
     titulo = models.CharField(max_length=255, verbose_name="Título")
     data_limite = models.DateTimeField(verbose_name="Data Limite")
     data_limite_origem = models.DateField(blank=True, null=True, verbose_name="Data limite de origem")
@@ -708,6 +731,27 @@ class Prazo(models.Model):
 
     def __str__(self):
         return self.titulo
+
+
+class PrazoMensagem(models.Model):
+    prazo = models.ForeignKey(Prazo, on_delete=models.CASCADE, related_name='mensagens')
+    autor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='prazos_mensagens'
+    )
+    texto = models.TextField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Mensagem do Prazo"
+        verbose_name_plural = "Mensagens do Prazo"
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f"{self.autor or 'Usuário'} em {self.criado_em:%d/%m/%Y %H:%M}"
 
 
 class TarefaMensagem(models.Model):

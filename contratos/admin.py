@@ -2619,8 +2619,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     class Media:
         css = {
             'all': (
-                'admin/css/admin_tabs.css', 
-                'admin/css/custom_admin_styles.css',
+                'admin/css/admin_tabs.css',
+                'admin/css/custom_admin_styles.css?v=20260209b',
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css', # <--- Adicionado
             )
@@ -2628,7 +2628,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         js = (
             'admin/js/vendor/jquery/jquery.min.js', 
             'admin/js/jquery.init.js',
-            'admin/js/processo_judicial_enhancer.js', 
+            'admin/js/processo_judicial_enhancer.js?v=20260209b',
             'admin/js/admin_tabs.js', 
             'admin/js/processo_judicial_lazy_loader.js',
             'admin/js/etiqueta_interface.js',

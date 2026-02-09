@@ -55,10 +55,40 @@ const initTarefasPrazosInterface = () => {
         }
     }
 
+    const getAgendaApi = () => window.nowlexAgenda || null;
     // Adiciona eventos para abrir os modais
-    if (openModalButtons.agenda) openModalButtons.agenda.addEventListener('click', () => openModal(modals.agenda));
-    if (openModalButtons.novaTarefa) openModalButtons.novaTarefa.addEventListener('click', (e) => { e.preventDefault(); openModal(modals.novaTarefa); });
-    if (openModalButtons.novoPrazo) openModalButtons.novoPrazo.addEventListener('click', (e) => { e.preventDefault(); openModal(modals.novoPrazo); });
+    if (openModalButtons.agenda) {
+        openModalButtons.agenda.addEventListener('click', () => {
+            const api = getAgendaApi();
+            if (api?.openPanel) {
+                api.openPanel();
+                return;
+            }
+            openModal(modals.agenda);
+        });
+    }
+    if (openModalButtons.novaTarefa) {
+        openModalButtons.novaTarefa.addEventListener('click', (e) => {
+            e.preventDefault();
+            const api = getAgendaApi();
+            if (api?.openForm) {
+                api.openForm('tarefas');
+                return;
+            }
+            openModal(modals.novaTarefa);
+        });
+    }
+    if (openModalButtons.novoPrazo) {
+        openModalButtons.novoPrazo.addEventListener('click', (e) => {
+            e.preventDefault();
+            const api = getAgendaApi();
+            if (api?.openForm) {
+                api.openForm('prazos');
+                return;
+            }
+            openModal(modals.novoPrazo);
+        });
+    }
 
     // Adiciona eventos para fechar os modais (botões 'x' e 'cancelar')
     document.querySelectorAll('.agenda-modal-close').forEach(button => {

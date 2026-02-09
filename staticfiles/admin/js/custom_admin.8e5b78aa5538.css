@@ -1,0 +1,23 @@
+/* Alinha os campos Nome e CPF/CNPJ nos inlines de Parte */
+.form-row.field-nome, .form-row.field-documento {
+    display: inline-block;
+    vertical-align: top;
+    width: 48%;
+}
+
+/* Corrige layout da linha do campo UF */
+.form-row.field-uf {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px; /* Espaço entre o input e o botão */
+}
+
+/* Estiliza o botão com espaçamento suave */
+#btn_preencher_uf {
+    padding: 4px 10px;
+    font-size: 12px;
+    margin: 0;
+}
+
+/* Remove a classe custom-uf-btn — está duplicada e confusa */

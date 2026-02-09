@@ -667,6 +667,22 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
+    let agendaLoadMoreButton = null;
+    const isAgendaDebugEnabled = () => {
+        try {
+            return window.localStorage?.getItem('agenda_debug') === '1';
+        } catch {
+            return false;
+        }
+    };
+    const agendaDebug = (payload) => {
+        if (!isAgendaDebugEnabled()) return;
+        window.nowlexAgenda = window.nowlexAgenda || {};
+        const current = window.nowlexAgenda.__debug || {};
+        const next = { ...current, ...payload };
+        window.nowlexAgenda.__debug = next;
+        console.debug('Agenda Geral debug', payload);
+    };
 
     function clearInlineDuplicateValidationErrors() {
         document.querySelectorAll('.dynamic-andamento').forEach(row => {
@@ -1070,7 +1086,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const parseDateInputValue = (value) => {
         if (!value) return null;
-        const normalized = value.trim();
+        const normalized = String(value).trim();
         const isoMatch = normalized.match(/(\d{4})-(\d{2})-(\d{2})/);
         if (isoMatch) {
             return {
@@ -1436,6 +1452,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     let updateAgendaEntryDate = () => {};
     let moveAgendaEntries = () => {};
+    let restoreActiveEntryReference = () => {};
 
     const getTypeKey = (type) => {
         if (type === 'P') return 'tasksP';
@@ -1818,58 +1835,88 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const apiPage = calendarStateRef?.agendaPage || 1;
         const apiPageSize = calendarStateRef?.agendaPageSize || AGENDA_PAGE_SIZE;
-        const url = `/api/agenda/geral/?status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}`;
-        fetch(url)
+        const url = `/api/agenda/geral/?format=json&status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}`;
+        fetch(url, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { 'Accept': 'application/json' },
+        })
             .then((response) => {
-                if (!response.ok) throw new Error();
+                if (!response.ok) throw new Error('Resposta inválida da agenda geral');
                 return response.json();
             })
             .then((data) => {
-                const rawEntries = Array.isArray(data.entries)
-                    ? data.entries
-                    : (Array.isArray(data) ? data : []);
-                const apiEntries = rawEntries.map(normalizeApiEntry).filter(Boolean);
-                if (preferApiOnly) {
-                    entryOrigins.clear();
-                }
-                const combined = preferApiOnly ? apiEntries : mergeEntriesByBackend(apiEntries, inlineEntries);
-                resetCalendarMonths();
-                if (setEntriesRef) {
-                    setEntriesRef(combined);
-                }
-                restoreActiveEntryReference(combined);
-                let filtered = combined;
-                const activeUserId = calendarStateRef?.activeUser?.id;
-                if (activeUserId) {
-                    filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
-                }
-                if (calendarStateRef?.focused && currentProcessId) {
-                    filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
-                }
-                applyEntriesToCalendar(filtered);
-                if (calendarStateRef && filtered.length) {
-                    const first = filtered
-                        .slice()
-                        .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
-                    if (first) {
-                        calendarStateRef.monthIndex = first.monthIndex;
-                        calendarStateRef.year = first.year;
+                try {
+                    const rawEntries = Array.isArray(data.entries)
+                        ? data.entries
+                        : (Array.isArray(data) ? data : []);
+                    const apiEntries = rawEntries.map(normalizeApiEntry).filter(Boolean);
+                    agendaDebug({
+                        fetchedUrl: url,
+                        rawEntries: rawEntries.length,
+                        apiEntries: apiEntries.length,
+                        totalEntries: typeof data.total_entries === 'number' ? data.total_entries : null,
+                    });
+                    if (calendarStateRef) {
+                        calendarStateRef.lastApiEntries = apiEntries;
                     }
-                }
-                if (calendarStateRef) {
-                    const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
-                    calendarStateRef.agendaTotalEntries = totalEntries;
-                    calendarStateRef.agendaPageSize = apiPageSize;
-                    if (totalEntries !== null) {
-                        calendarStateRef.agendaHasMore = apiPage * apiPageSize < totalEntries;
-                    } else {
-                        calendarStateRef.agendaHasMore = apiEntries.length === apiPageSize;
+                    if (preferApiOnly) {
+                        entryOrigins.clear();
                     }
+                    const combined = preferApiOnly ? apiEntries : mergeEntriesByBackend(apiEntries, inlineEntries);
+                    resetCalendarMonths();
+                    if (setEntriesRef) {
+                        setEntriesRef(combined);
+                    }
+                    restoreActiveEntryReference(combined);
+                    let filtered = combined;
+                    const activeUserId = calendarStateRef?.activeUser?.id;
+                    if (activeUserId) {
+                        filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
+                    }
+                    if (calendarStateRef?.focused && currentProcessId) {
+                        filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
+                    }
+                    applyEntriesToCalendar(filtered);
+                    if (calendarStateRef && filtered.length) {
+                        const first = filtered
+                            .slice()
+                            .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
+                        if (first) {
+                            calendarStateRef.monthIndex = first.monthIndex;
+                            calendarStateRef.year = first.year;
+                        }
+                    }
+                    if (calendarStateRef) {
+                        const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
+                        calendarStateRef.agendaTotalEntries = totalEntries;
+                        calendarStateRef.agendaPageSize = apiPageSize;
+                        if (totalEntries !== null) {
+                            calendarStateRef.agendaHasMore = apiPage * apiPageSize < totalEntries;
+                        } else {
+                            calendarStateRef.agendaHasMore = apiEntries.length === apiPageSize;
+                        }
+                    }
+                    refreshAgendaLoadMoreButton(calendarStateRef);
+                    renderFn && renderFn();
+                } catch (err) {
+                    agendaDebug({ error: err?.message || String(err) });
+                    console.error('Agenda Geral: falha ao processar dados', err);
+                    throw err;
                 }
-                refreshAgendaLoadMoreButton(calendarStateRef);
-                renderFn && renderFn();
             })
-            .catch(() => {
+            .catch((err) => {
+                if (err) {
+                    agendaDebug({ error: err?.message || String(err) });
+                    console.error('Agenda Geral: falha ao carregar', err);
+                }
+                if (calendarStateRef && !calendarStateRef._agendaRetry) {
+                    calendarStateRef._agendaRetry = true;
+                    setTimeout(() => {
+                        hydrateAgendaFromApi(inlineEntries, calendarStateRef, renderFn, setEntriesRef, preferApiOnly);
+                    }, 700);
+                    return;
+                }
                 resetCalendarMonths();
                 let filtered = inlineEntries;
                 if (calendarStateRef?.focused && currentProcessId) {
@@ -2963,7 +3010,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateDetailBarrarControls(activeSupervisionEntry, 'S');
         };
 
-        const restoreActiveEntryReference = (entries) => {
+        restoreActiveEntryReference = (entries) => {
             if (!persistedSupervisionEntryId) return;
             const collection = Array.isArray(entries) ? entries : agendaEntries;
             const restored = collection.find(item => item && item.id === persistedSupervisionEntryId);
@@ -3204,6 +3251,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const applyAgendaEntriesToState = () => {
         resetCalendarMonths();
         let entriesToApply = agendaEntries;
+        if ((!entriesToApply || !entriesToApply.length) && calendarState.lastApiEntries?.length) {
+            entriesToApply = calendarState.lastApiEntries;
+        }
+        agendaDebug({ appliedEntries: entriesToApply.length });
         const activeUserId = calendarState.activeUser?.id;
         if (activeUserId) {
             entriesToApply = entriesToApply.filter(entry =>
@@ -3362,6 +3413,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             applyAgendaEntriesToState();
             renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle, handleDetailEntrySelect);
+            agendaDebug({
+                renderedTags: overlay.querySelectorAll('.agenda-panel__day-tag').length,
+                renderedCards: overlay.querySelectorAll('.agenda-panel__day-card').length,
+            });
             renderSummaryBar(calendarState.lastAppliedEntries || []);
         };
         if (focusToggle) {
@@ -3372,12 +3427,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderCalendar();
             });
         }
-        const refreshAgendaData = () => {
+        const refreshAgendaData = (forceApiOnly = false) => {
             if (refreshButton) {
                 refreshButton.disabled = true;
             }
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
-            const preferApiOnly = calendarState.showCompleted || false;
+            const preferApiOnly = forceApiOnly || calendarState.showCompleted || !currentProcessId;
         hydrateAgendaFromApi(inline, calendarState, () => {
             applyAgendaEntriesToState();
             renderCalendar();
@@ -3479,6 +3534,18 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
         renderCalendar();
+        const isChangeList = document.body.classList.contains('change-list');
+        if (!currentProcessId || isChangeList) {
+            setTimeout(() => {
+                refreshAgendaData(true);
+            }, 120);
+            setTimeout(() => {
+                const hasTags = overlay.querySelector('.agenda-panel__day-tag');
+                if (!hasTags) {
+                    refreshAgendaData(true);
+                }
+            }, 900);
+        }
     };
 
     const closeAgendaPanel = () => {
@@ -3512,37 +3579,751 @@ document.addEventListener('DOMContentLoaded', function() {
         closeAgendaPanel();
     });
 
-    const createAgendaFormModal = (type) => {
-        if (document.querySelector(`.agenda-form-modal[data-form="${type}"]`)) {
+    const agendaBulkCache = {
+        users: null,
+        lists: null,
+        usersPromise: null,
+        listsPromise: null,
+    };
+
+    const getSelectedProcessIds = () => {
+        const rows = document.querySelectorAll('#result_list input.action-select:checked');
+        if (!rows.length) return [];
+        const ids = [];
+        rows.forEach((input) => {
+            const value = Number.parseInt(input.value, 10);
+            if (Number.isFinite(value)) {
+                ids.push(value);
+            }
+        });
+        return ids;
+    };
+
+    const getCurrentUserLabel = () => {
+        const userTools = document.getElementById('user-tools');
+        if (!userTools) return 'Você';
+        const text = userTools.textContent || '';
+        const match = text.trim().split(/\s+/)[0];
+        return match || 'Você';
+    };
+
+    const fetchAgendaUsersList = () => {
+        if (agendaBulkCache.usersPromise) {
+            return agendaBulkCache.usersPromise;
+        }
+        agendaBulkCache.usersPromise = fetch('/api/agenda/users/')
+            .then((response) => {
+                if (!response.ok) throw new Error('Falha ao carregar usuários');
+                return response.json();
+            })
+            .then((data) => {
+                agendaBulkCache.users = Array.isArray(data) ? data : [];
+                return agendaBulkCache.users;
+            })
+            .catch(() => {
+                agendaBulkCache.users = [];
+                return agendaBulkCache.users;
+            });
+        return agendaBulkCache.usersPromise;
+    };
+
+    const fetchListaDeTarefas = () => {
+        if (agendaBulkCache.listsPromise) {
+            return agendaBulkCache.listsPromise;
+        }
+        agendaBulkCache.listsPromise = fetch('/api/listas-de-tarefas/')
+            .then((response) => {
+                if (!response.ok) throw new Error('Falha ao carregar listas');
+                return response.json();
+            })
+            .then((data) => {
+                agendaBulkCache.lists = Array.isArray(data) ? data : [];
+                return agendaBulkCache.lists;
+            })
+            .catch(() => {
+                agendaBulkCache.lists = [];
+                return agendaBulkCache.lists;
+            });
+        return agendaBulkCache.listsPromise;
+    };
+
+    const buildBulkCommentPanel = (fileInputId) => {
+        const nameLabel = getCurrentUserLabel();
+        const timeLabel = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+        return `
+            <div class="tarefa-comments-panel">
+                <div class="tarefa-comments-header">
+                    <div class="tarefa-comments-avatar"></div>
+                    <div class="tarefa-comments-header-text">
+                        <div class="tarefa-comments-name">${nameLabel}</div>
+                        <div class="tarefa-comments-time">${timeLabel}</div>
+                    </div>
+                </div>
+                <div class="tarefa-comments-history">Nenhum comentário gravado.</div>
+                <div class="tarefa-comments-attachment-preview" hidden>
+                    <span class="tarefa-comments-attachment-preview-name"></span>
+                    <button type="button" class="tarefa-comments-attachment-preview-clear" aria-label="Remover anexo">×</button>
+                </div>
+                <div class="tarefa-comments-input-row">
+                    <div class="tarefa-comments-input">
+                        <input type="text" placeholder="Digite um comentário">
+                        <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                        <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
+                        <span class="tarefa-comments-icon">@</span>
+                    </div>
+                    <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
+                </div>
+            </div>
+        `;
+    };
+
+    const buildAgendaBulkForm = (type) => {
+        const commentFileId = `agenda-bulk-comment-${type}-${Math.random().toString(36).slice(2)}`;
+        if (type === 'tarefas') {
+            return `
+                <div class="agenda-bulk-info">
+                    <span class="agenda-bulk-info__label">Processos selecionados:</span>
+                    <strong class="agenda-bulk-info__count" data-bulk-count>0</strong>
+                    <span class="agenda-bulk-info__note" data-bulk-note></span>
+                </div>
+                <div id="tarefas-group" class="agenda-bulk-group">
+                    <table class="agenda-bulk-table">
+                        <tbody>
+                            <tr class="dynamic-tarefas tarefa-prioridade-media">
+                                <td class="field-descricao">
+                                    <div class="fieldBox">
+                                        <input type="text" class="vTextField" data-field="descricao">
+                                    </div>
+                                </td>
+                                <td class="field-lista">
+                                    <div class="fieldBox">
+                                        <select data-field="lista" id="agenda-bulk-tarefa-lista">
+                                            <option value="">---------</option>
+                                        </select>
+                                    </div>
+                                </td>
+                                <td class="field-data">
+                                    <div class="fieldBox">
+                                        <input type="date" class="vDateField" data-field="data">
+                                    </div>
+                                </td>
+                                <td class="field-responsavel">
+                                    <div class="fieldBox">
+                                        <select data-field="responsavel" id="agenda-bulk-tarefa-responsavel">
+                                            <option value="">---------</option>
+                                        </select>
+                                    </div>
+                                </td>
+                                <td class="field-prioridade">
+                                    <div class="fieldBox">
+                                        <select data-field="prioridade" id="agenda-bulk-tarefa-prioridade">
+                                            <option value="B">Baixa</option>
+                                            <option value="M" selected>Média</option>
+                                            <option value="A">Alta</option>
+                                        </select>
+                                    </div>
+                                </td>
+                                <td class="field-observacoes">
+                                    <div class="fieldBox">
+                                        <textarea data-field="observacoes" placeholder="Observações"></textarea>
+                                    </div>
+                                </td>
+                                <td class="field-concluida">
+                                    <div class="fieldBox">
+                                        <label>
+                                            <input type="checkbox" data-field="concluida"> Concluir
+                                        </label>
+                                    </div>
+                                </td>
+                                <td class="field-tarefa-comentarios">
+                                    ${buildBulkCommentPanel(commentFileId)}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        return `
+            <div class="agenda-bulk-info">
+                <span class="agenda-bulk-info__label">Processos selecionados:</span>
+                <strong class="agenda-bulk-info__count" data-bulk-count>0</strong>
+                <span class="agenda-bulk-info__note" data-bulk-note></span>
+            </div>
+            <div id="prazos-group" class="agenda-bulk-group">
+                <table class="agenda-bulk-table">
+                    <tbody>
+                        <tr class="dynamic-prazos">
+                            <td class="field-titulo">
+                                <div class="fieldBox">
+                                    <input type="text" class="vTextField" data-field="titulo">
+                                </div>
+                            </td>
+                            <td class="field-responsavel">
+                                <div class="fieldBox">
+                                    <select data-field="responsavel" id="agenda-bulk-prazo-responsavel">
+                                        <option value="">---------</option>
+                                    </select>
+                                </div>
+                            </td>
+                            <td class="field-data_limite">
+                                <div class="fieldBox">
+                                    <div class="datetime">
+                                        <input type="date" class="vDateField" data-field="data_limite_date">
+                                        <input type="time" class="vTimeField" data-field="data_limite_time">
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="field-alerta_valor">
+                                <div class="fieldBox">
+                                    <input type="number" min="1" value="1" data-field="alerta_valor">
+                                </div>
+                            </td>
+                            <td class="field-alerta_unidade">
+                                <div class="fieldBox">
+                                    <select data-field="alerta_unidade">
+                                        <option value="D" selected>Dias antes</option>
+                                        <option value="H">Horas antes</option>
+                                    </select>
+                                </div>
+                            </td>
+                            <td class="field-observacoes">
+                                <div class="fieldBox">
+                                    <textarea data-field="observacoes" placeholder="Observações"></textarea>
+                                </div>
+                            </td>
+                            <td class="field-concluido">
+                                <div class="fieldBox">
+                                    <label>
+                                        <input type="checkbox" data-field="concluido"> Concluir
+                                    </label>
+                                </div>
+                            </td>
+                            <td class="field-prazo-comentarios">
+                                ${buildBulkCommentPanel(commentFileId)}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+    };
+
+    const applyAgendaBulkPriorityStyle = (row) => {
+        if (!row) return;
+        row.classList.remove('tarefa-prioridade-alta', 'tarefa-prioridade-media', 'tarefa-prioridade-baixa');
+        const select = row.querySelector('select[data-field="prioridade"]');
+        if (!select) return;
+        const rawValue = (select.value || '').toUpperCase();
+        const rawText = (select.options[select.selectedIndex]?.textContent || '').toLowerCase();
+        const setRowColors = (bg, border) => {
+            row.style.setProperty('background', bg, 'important');
+            row.style.setProperty('border-color', border, 'important');
+        };
+        if (rawValue === 'A' || rawText.includes('alta')) {
+            row.classList.add('tarefa-prioridade-alta');
+            setRowColors('#fde8e8', 'rgba(220, 38, 38, 0.35)');
+        } else if (rawValue === 'M' || rawText.includes('média') || rawText.includes('media')) {
+            row.classList.add('tarefa-prioridade-media');
+            setRowColors('#fff3e0', 'rgba(249, 115, 22, 0.35)');
+        } else if (rawValue === 'B' || rawText.includes('baixa')) {
+            row.classList.add('tarefa-prioridade-baixa');
+            setRowColors('#e8f7ee', 'rgba(22, 163, 74, 0.35)');
+        } else {
+            row.classList.add('tarefa-prioridade-media');
+            setRowColors('#fff3e0', 'rgba(249, 115, 22, 0.35)');
+        }
+    };
+
+    const setupAgendaBulkPriorityWatch = (modal) => {
+        if (!modal || modal.dataset.bulkPriorityBound === '1') {
             return;
         }
+        modal.dataset.bulkPriorityBound = '1';
+        const row = modal.querySelector('#tarefas-group tr.dynamic-tarefas');
+        if (!row) return;
+        const select = row.querySelector('select[data-field="prioridade"]');
+        const apply = () => applyAgendaBulkPriorityStyle(row);
+        const ensureDefault = () => {
+            if (!row.classList.contains('tarefa-prioridade-alta')
+                && !row.classList.contains('tarefa-prioridade-media')
+                && !row.classList.contains('tarefa-prioridade-baixa')) {
+                row.classList.add('tarefa-prioridade-media');
+            }
+            apply();
+        };
+        if (select) {
+            select.addEventListener('change', apply);
+            if (window.jQuery && typeof window.jQuery === 'function') {
+                window.jQuery(select).on('select2:select select2:clear', apply);
+            }
+        }
+        const observer = new MutationObserver((mutations) => {
+            if (mutations.some(mutation => mutation.type === 'childList')) {
+                apply();
+            }
+        });
+        observer.observe(modal, { childList: true, subtree: true });
+        modal._bulkPriorityObserver = observer;
+        ensureDefault();
+        setTimeout(ensureDefault, 0);
+        setTimeout(ensureDefault, 200);
+        setTimeout(ensureDefault, 600);
+    };
+
+    const setupBulkCommentControls = (modal) => {
+        if (!modal) return;
+        const input = modal.querySelector('.tarefa-comments-input input');
+        const fileInput = modal.querySelector('.tarefa-comments-file');
+        const sendButton = modal.querySelector('.tarefa-comments-send');
+        const history = modal.querySelector('.tarefa-comments-history');
+        const preview = modal.querySelector('.tarefa-comments-attachment-preview');
+        const previewName = modal.querySelector('.tarefa-comments-attachment-preview-name');
+        const previewClear = modal.querySelector('.tarefa-comments-attachment-preview-clear');
+
+        const updateButtonState = () => {
+            const hasText = (input?.value || '').trim().length > 0;
+            const hasFile = !!fileInput?.files?.length;
+            if (sendButton) {
+                sendButton.disabled = !(hasText || hasFile);
+            }
+        };
+
+        const showPreview = (file) => {
+            if (!preview || !previewName) return;
+            if (file) {
+                preview.hidden = false;
+                previewName.textContent = file.name;
+            } else {
+                preview.hidden = true;
+                previewName.textContent = '';
+            }
+        };
+
+        if (fileInput) {
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files?.[0] || null;
+                showPreview(file);
+                updateButtonState();
+            });
+        }
+
+        if (previewClear) {
+            previewClear.addEventListener('click', () => {
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+                showPreview(null);
+                updateButtonState();
+            });
+        }
+
+        if (sendButton) {
+            sendButton.addEventListener('click', () => {
+                const text = (input?.value || '').trim();
+                const file = fileInput?.files?.[0] || null;
+                if (!text && !file) return;
+                modal.dataset.pendingCommentText = text;
+                modal._pendingCommentFile = file;
+                if (history) {
+                    history.textContent = text || (file ? `Anexo: ${file.name}` : '');
+                }
+                if (input) input.value = '';
+                if (fileInput) fileInput.value = '';
+                showPreview(null);
+                updateButtonState();
+            });
+        }
+
+        updateButtonState();
+    };
+
+    const fillAgendaBulkSelects = (modal, type) => {
+        if (!modal) return;
+        const responsavelSelect = modal.querySelector('[data-field="responsavel"]');
+        if (responsavelSelect) {
+            fetchAgendaUsersList().then((users) => {
+                responsavelSelect.innerHTML = '<option value="">---------</option>';
+                users.forEach((user) => {
+                    const label = user.first_name || user.last_name
+                        ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                        : (user.username || `Usuário ${user.id}`);
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = label;
+                    responsavelSelect.appendChild(option);
+                });
+            });
+        }
+        if (type === 'tarefas') {
+            const listaSelect = modal.querySelector('[data-field="lista"]');
+            if (listaSelect) {
+                fetchListaDeTarefas().then((lists) => {
+                    listaSelect.innerHTML = '<option value="">---------</option>';
+                    lists.forEach((item) => {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.textContent = item.nome;
+                        listaSelect.appendChild(option);
+                    });
+                });
+            }
+            const prioridadeSelect = modal.querySelector('[data-field="prioridade"]');
+            if (prioridadeSelect && typeof initTarefasSelect2 === 'function') {
+                initTarefasSelect2(modal.querySelector('#tarefas-group'));
+            }
+        }
+    };
+
+    const updateAgendaBulkInfo = (modal, processIds) => {
+        const countEl = modal.querySelector('[data-bulk-count]');
+        const noteEl = modal.querySelector('[data-bulk-note]');
+        const count = processIds.length;
+        if (countEl) countEl.textContent = `${count}`;
+        if (noteEl) {
+            noteEl.textContent = count > 0
+                ? `${count === 1 ? 'processo selecionado' : 'processos selecionados'}`
+                : 'tarefa/prazo geral (sem processo)';
+        }
+    };
+
+    const collectBulkCommentPayload = (modal) => {
+        const stagedText = (modal.dataset.pendingCommentText || '').trim();
+        const inputText = (modal.querySelector('.tarefa-comments-input input')?.value || '').trim();
+        const text = stagedText || inputText;
+        const file = modal._pendingCommentFile || modal.querySelector('.tarefa-comments-file')?.files?.[0] || null;
+        return { text, file };
+    };
+
+    const formatBulkHistoryDate = (iso) => {
+        if (!iso) return '';
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return iso;
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
+    const renderBulkHistoryList = (modal, items) => {
+        const body = modal.querySelector('.agenda-bulk-history__body');
+        if (!body) return;
+        body.innerHTML = '';
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'agenda-bulk-history__empty';
+            empty.textContent = 'Nenhuma tarefa em lote encontrada.';
+            body.appendChild(empty);
+            return;
+        }
+        const list = document.createElement('div');
+        list.className = 'agenda-bulk-history__list';
+        items.forEach((item) => {
+            const label = document.createElement('label');
+            label.className = 'agenda-bulk-history__item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'agenda-bulk-history__checkbox';
+            checkbox.value = item.id;
+            checkbox.setAttribute('data-batch-id', item.id);
+
+            const name = document.createElement('span');
+            name.className = 'agenda-bulk-history__name';
+            name.textContent = item.descricao || 'Tarefa em lote';
+
+            const meta = document.createElement('span');
+            meta.className = 'agenda-bulk-history__meta';
+            meta.textContent = formatBulkHistoryDate(item.criado_em);
+
+            const count = document.createElement('span');
+            count.className = 'agenda-bulk-history__count';
+            const total = Number(item.total || 0);
+            const concluidas = Number(item.concluidas || 0);
+            if (total > 0 && concluidas > 0 && concluidas < total) {
+                count.textContent = `${concluidas}/${total} concluídas`;
+            } else if (total > 0 && concluidas >= total) {
+                count.textContent = `Concluídas (${total})`;
+            } else if (total > 0) {
+                count.textContent = `${total} tarefas`;
+            } else {
+                count.textContent = 'Sem tarefas';
+            }
+
+            label.appendChild(checkbox);
+            label.appendChild(name);
+            label.appendChild(meta);
+            label.appendChild(count);
+            list.appendChild(label);
+        });
+        body.appendChild(list);
+    };
+
+    const loadBulkHistory = async (modal) => {
+        const body = modal.querySelector('.agenda-bulk-history__body');
+        if (!body) return;
+        body.innerHTML = '<div class="agenda-bulk-history__loading">Carregando...</div>';
+        try {
+            const response = await fetch('/api/tarefas/bulk/history/', {
+                method: 'GET',
+                credentials: 'same-origin',
+            });
+            if (!response.ok) {
+                throw new Error('Falha ao carregar histórico.');
+            }
+            const data = await response.json();
+            const items = Array.isArray(data) ? data : [];
+            renderBulkHistoryList(modal, items);
+        } catch (error) {
+            body.innerHTML = '<div class="agenda-bulk-history__empty">Não foi possível carregar o histórico.</div>';
+        }
+    };
+
+    const getSelectedBulkHistoryIds = (modal) => {
+        return Array.from(modal.querySelectorAll('.agenda-bulk-history__checkbox:checked'))
+            .map((input) => Number.parseInt(input.value, 10))
+            .filter((value) => Number.isFinite(value));
+    };
+
+    const applyBulkHistoryAction = async (modal, action) => {
+        const ids = getSelectedBulkHistoryIds(modal);
+        if (!ids.length) {
+            createSystemAlert('Agenda Geral', 'Selecione ao menos um lote.');
+            return;
+        }
+        if (action === 'delete') {
+            const confirmed = window.confirm('Excluir todas as tarefas dos lotes selecionados?');
+            if (!confirmed) return;
+        }
+        const buttons = modal.querySelectorAll('.agenda-bulk-history__action');
+        buttons.forEach((btn) => { btn.disabled = true; });
+        try {
+            const response = await fetch('/api/tarefas/bulk/history/action/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken || '',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ action, ids }),
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || 'Falha ao aplicar ação.');
+            }
+            const data = await response.json().catch(() => ({}));
+            if (action === 'delete') {
+                createSystemAlert('Agenda Geral', `Tarefas excluídas (${data.deleted || 0}).`);
+            } else {
+                createSystemAlert('Agenda Geral', `Tarefas concluídas (${data.updated || 0}).`);
+            }
+            loadBulkHistory(modal);
+        } catch (error) {
+            createSystemAlert('Agenda Geral', error.message || 'Falha ao aplicar ação.');
+        } finally {
+            buttons.forEach((btn) => { btn.disabled = false; });
+        }
+    };
+
+    const openBulkHistoryModal = () => {
+        const existing = document.querySelector('.agenda-bulk-history-modal');
+        if (existing) existing.remove();
         const modal = document.createElement('div');
-        modal.className = 'agenda-form-modal';
+        modal.className = 'agenda-bulk-history-modal';
+        modal.innerHTML = `
+            <div class="agenda-bulk-history__card">
+                <div class="agenda-bulk-history__header">
+                    <strong>Histórico de tarefas em lote</strong>
+                    <button type="button" class="agenda-bulk-history__close">×</button>
+                </div>
+                <div class="agenda-bulk-history__body"></div>
+                <div class="agenda-bulk-history__footer">
+                    <button type="button" class="agenda-bulk-history__action" data-action="concluir">Concluir selecionadas</button>
+                    <button type="button" class="agenda-bulk-history__action agenda-bulk-history__action--danger" data-action="delete">Excluir selecionadas</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const close = () => modal.remove();
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) close();
+        });
+        modal.querySelector('.agenda-bulk-history__close').addEventListener('click', close);
+        modal.querySelector('[data-action="concluir"]').addEventListener('click', () => applyBulkHistoryAction(modal, 'concluir'));
+        modal.querySelector('[data-action="delete"]').addEventListener('click', () => applyBulkHistoryAction(modal, 'delete'));
+        const handleEscClose = (event) => {
+            if (event.key === 'Escape' || event.key === 'Esc') {
+                close();
+            }
+        };
+        document.addEventListener('keydown', handleEscClose);
+        const originalRemove = modal.remove.bind(modal);
+        modal.remove = () => {
+            document.removeEventListener('keydown', handleEscClose);
+            originalRemove();
+        };
+        loadBulkHistory(modal);
+    };
+
+    const submitAgendaBulkForm = async (modal, type, processIds) => {
+        const getFieldValue = (name) => modal.querySelector(`[data-field="${name}"]`)?.value || '';
+        const getFieldChecked = (name) => !!modal.querySelector(`[data-field="${name}"]`)?.checked;
+
+        if (type === 'tarefas') {
+            const descricao = getFieldValue('descricao').trim();
+            const data = getFieldValue('data');
+            const responsavel = getFieldValue('responsavel');
+            const lista = getFieldValue('lista');
+            const prioridade = getFieldValue('prioridade') || 'M';
+            const observacoes = getFieldValue('observacoes').trim();
+            const concluida = getFieldChecked('concluida');
+            const commentPayload = collectBulkCommentPayload(modal);
+
+            if (!descricao) {
+                createSystemAlert('Agenda Geral', 'Informe a descrição da tarefa.');
+                return;
+            }
+            if (!data) {
+                createSystemAlert('Agenda Geral', 'Informe a data da tarefa.');
+                return;
+            }
+            if (!processIds.length && !responsavel) {
+                createSystemAlert('Agenda Geral', 'Selecione um responsável para criar tarefa geral.');
+                return;
+            }
+            if (commentPayload.file && !processIds.length) {
+                createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
+                return;
+            }
+
+            const payload = {
+                processo_ids: processIds,
+                descricao,
+                data,
+                responsavel_id: responsavel || null,
+                lista_id: lista || null,
+                prioridade,
+                observacoes,
+                concluida,
+                comentario_texto: commentPayload.text || '',
+            };
+            const formData = new FormData();
+            formData.append('payload', JSON.stringify(payload));
+            if (commentPayload.file) {
+                formData.append('arquivo', commentPayload.file);
+            }
+            const submitBtn = modal.querySelector('.agenda-form-modal__submit');
+            if (submitBtn) submitBtn.disabled = true;
+            try {
+                const response = await fetch('/api/tarefas/bulk/', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken || '' },
+                    body: formData,
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.detail || 'Falha ao salvar tarefas.');
+                }
+                createSystemAlert('Agenda Geral', 'Tarefa(s) criada(s) com sucesso.');
+                modal.remove();
+            } catch (err) {
+                createSystemAlert('Agenda Geral', err.message || 'Falha ao salvar tarefas.');
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+            return;
+        }
+
+        const titulo = getFieldValue('titulo').trim();
+        const dataDate = getFieldValue('data_limite_date');
+        const dataTime = getFieldValue('data_limite_time') || '00:00';
+        const responsavel = getFieldValue('responsavel');
+        const alertaValor = getFieldValue('alerta_valor') || '1';
+        const alertaUnidade = getFieldValue('alerta_unidade') || 'D';
+        const observacoes = getFieldValue('observacoes').trim();
+        const concluido = getFieldChecked('concluido');
+        const commentPayload = collectBulkCommentPayload(modal);
+
+        if (!titulo) {
+            createSystemAlert('Agenda Geral', 'Informe o título do prazo.');
+            return;
+        }
+        if (!dataDate) {
+            createSystemAlert('Agenda Geral', 'Informe a data do prazo.');
+            return;
+        }
+        if (!processIds.length && !responsavel) {
+            createSystemAlert('Agenda Geral', 'Selecione um responsável para criar prazo geral.');
+            return;
+        }
+        if (commentPayload.file && !processIds.length) {
+            createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
+            return;
+        }
+
+        const payload = {
+            processo_ids: processIds,
+            titulo,
+            data_limite: `${dataDate}T${dataTime}`,
+            alerta_valor: alertaValor,
+            alerta_unidade: alertaUnidade,
+            responsavel_id: responsavel || null,
+            observacoes,
+            concluido,
+            comentario_texto: commentPayload.text || '',
+        };
+        const formData = new FormData();
+        formData.append('payload', JSON.stringify(payload));
+        if (commentPayload.file) {
+            formData.append('arquivo', commentPayload.file);
+        }
+        const submitBtn = modal.querySelector('.agenda-form-modal__submit');
+        if (submitBtn) submitBtn.disabled = true;
+        try {
+            const response = await fetch('/api/prazos/bulk/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken || '' },
+                body: formData,
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || 'Falha ao salvar prazos.');
+            }
+            createSystemAlert('Agenda Geral', 'Prazo(s) criado(s) com sucesso.');
+            modal.remove();
+        } catch (err) {
+            createSystemAlert('Agenda Geral', err.message || 'Falha ao salvar prazos.');
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    };
+
+    const createAgendaFormModal = (type, processIds) => {
+        const existing = document.querySelector(`.agenda-form-modal[data-form="${type}"]`);
+        if (existing) {
+            existing.remove();
+        }
+        const modal = document.createElement('div');
+        modal.className = 'agenda-form-modal agenda-form-modal--bulk';
         modal.dataset.form = type;
+        const headerActions = type === 'tarefas'
+            ? `
+                <div class="agenda-form-modal__header-actions">
+                    <button type="button" class="agenda-form-modal__history">Histórico</button>
+                    <button type="button" class="agenda-form-modal__close">×</button>
+                </div>
+            `
+            : '<button type="button" class="agenda-form-modal__close">×</button>';
         modal.innerHTML = `
             <div class="agenda-form-modal__card">
                 <div class="agenda-form-modal__header">
                     <strong>${type === 'tarefas' ? 'Nova Tarefa' : 'Novo Prazo'}</strong>
-                    <button type="button" class="agenda-form-modal__close">×</button>
+                    ${headerActions}
                 </div>
                 <div class="agenda-form-modal__body">
-                    <label>Contrato / processo
-                        <input type="text" placeholder="Informe o contrato ou processo">
-                    </label>
-                    <label>${type === 'tarefas' ? 'Descrição' : 'Título'}
-                        <textarea placeholder="Digite ${type === 'tarefas' ? 'a descrição da tarefa' : 'o título do prazo'}"></textarea>
-                    </label>
-                    <div class="agenda-form-modal__row">
-                        <label>Data
-                            <input type="date">
-                        </label>
-                        <label>Hora
-                            <input type="time" step="600">
-                        </label>
-                    </div>
-                    <label>Responsável
-                        <input type="text" placeholder="Selecione responsável">
-                    </label>
+                    ${buildAgendaBulkForm(type)}
                 </div>
                 <div class="agenda-form-modal__footer">
                     <button type="button" class="agenda-form-modal__submit">Salvar</button>
@@ -3550,9 +4331,59 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             </div>
         `;
+        modal._processIds = Array.isArray(processIds) ? processIds : [];
         document.body.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.remove();
+                return;
+            }
+            const closeBtn = event.target.closest('.agenda-form-modal__close');
+            if (closeBtn) {
+                event.preventDefault();
+                modal.remove();
+            }
+        });
+        modal.addEventListener('click', (event) => {
+            if (event.target.closest('.agenda-form-modal__close')) {
+                modal.remove();
+            }
+        });
+        const handleEscClose = (event) => {
+            if (event.key === 'Escape' || event.key === 'Esc') {
+                modal.remove();
+            }
+        };
+        document.addEventListener('keydown', handleEscClose);
+        modal.addEventListener('remove', () => {
+            document.removeEventListener('keydown', handleEscClose);
+        });
+        updateAgendaBulkInfo(modal, modal._processIds);
+        setupBulkCommentControls(modal);
+        fillAgendaBulkSelects(modal, type);
+        if (type === 'tarefas') {
+            setupAgendaBulkPriorityWatch(modal);
+        }
+        const historyButton = modal.querySelector('.agenda-form-modal__history');
+        if (historyButton) {
+            historyButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                openBulkHistoryModal();
+            });
+        }
         modal.querySelector('.agenda-form-modal__close').addEventListener('click', () => modal.remove());
         modal.querySelector('.agenda-form-modal__cancel').addEventListener('click', () => modal.remove());
+        const originalRemove = modal.remove.bind(modal);
+        modal.remove = () => {
+            document.removeEventListener('keydown', handleEscClose);
+            if (modal._bulkPriorityObserver) {
+                modal._bulkPriorityObserver.disconnect();
+            }
+            originalRemove();
+        };
+        modal.querySelector('.agenda-form-modal__submit').addEventListener('click', () => {
+            submitAgendaBulkForm(modal, type, modal._processIds || []);
+        });
     };
 
     const openAgendaPanel = () => {
@@ -3560,8 +4391,13 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const openAgendaForm = (type) => {
-        createAgendaFormModal(type);
+        const processIds = getSelectedProcessIds();
+        createAgendaFormModal(type, processIds);
     };
+
+    window.nowlexAgenda = window.nowlexAgenda || {};
+    window.nowlexAgenda.openPanel = openAgendaPanel;
+    window.nowlexAgenda.openForm = openAgendaForm;
 
     const attachAgendaActions = () => {
         const placeholder = document.querySelector('.agenda-placeholder-card');
@@ -3680,124 +4516,123 @@ document.addEventListener('DOMContentLoaded', function() {
     const andamentosActionsContainer = getAndamentosActionBar();
     if (!document.getElementById('btn_atualizar_andamentos')) {
         const actionHost = andamentosActionsContainer || buscaAtivaInput?.parentNode;
-        if (!actionHost) {
-            return;
-        }
-        const btn = document.createElement('button');
-        btn.id = 'btn_atualizar_andamentos';
-        btn.type = 'button';
-        btn.className = 'button analise-inner-tab-button';
-        btn.innerText = '🔄 Buscar andamentos agora';
+        if (actionHost) {
+            const btn = document.createElement('button');
+            btn.id = 'btn_atualizar_andamentos';
+            btn.type = 'button';
+            btn.className = 'button analise-inner-tab-button';
+            btn.innerText = '🔄 Buscar andamentos agora';
 
-        actionHost.appendChild(btn);
+            actionHost.appendChild(btn);
 
-        const removeDuplicatesBtn = document.createElement('button');
-        removeDuplicatesBtn.id = 'btn_remover_andamentos_duplicados';
-        removeDuplicatesBtn.type = 'button';
-        removeDuplicatesBtn.className = 'button analise-inner-tab-button';
-        removeDuplicatesBtn.innerText = '🧹 Limpar duplicados';
+            const removeDuplicatesBtn = document.createElement('button');
+            removeDuplicatesBtn.id = 'btn_remover_andamentos_duplicados';
+            removeDuplicatesBtn.type = 'button';
+            removeDuplicatesBtn.className = 'button analise-inner-tab-button';
+            removeDuplicatesBtn.innerText = '🧹 Limpar duplicados';
 
-        actionHost.appendChild(removeDuplicatesBtn);
+            actionHost.appendChild(removeDuplicatesBtn);
 
-        if (buscaAtivaInput) {
-            const buscaField = buscaAtivaInput.closest('.field-busca_ativa') || buscaAtivaInput.closest('.form-row');
-            if (buscaField) {
-                buscaField.style.display = 'none';
-            }
-            buscaAtivaInput.classList.add('supervision-toggle-input');
-            const toggleWrapper = document.createElement('label');
-            toggleWrapper.className = 'protocol-toggle andamentos-busca-toggle';
-            const switchSpan = document.createElement('span');
-            switchSpan.className = 'supervision-switch';
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'supervision-label-text';
-            labelSpan.innerText = 'Busca ativa';
-            toggleWrapper.appendChild(buscaAtivaInput);
-            toggleWrapper.appendChild(switchSpan);
-            toggleWrapper.appendChild(labelSpan);
+            if (buscaAtivaInput) {
+                const buscaField = buscaAtivaInput.closest('.field-busca_ativa') || buscaAtivaInput.closest('.form-row');
+                if (buscaField) {
+                    buscaField.style.display = 'none';
+                }
+                buscaAtivaInput.classList.add('supervision-toggle-input');
+                const toggleWrapper = document.createElement('label');
+                toggleWrapper.className = 'protocol-toggle andamentos-busca-toggle';
+                const switchSpan = document.createElement('span');
+                switchSpan.className = 'supervision-switch';
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'supervision-label-text';
+                labelSpan.innerText = 'Busca ativa';
+                toggleWrapper.appendChild(buscaAtivaInput);
+                toggleWrapper.appendChild(switchSpan);
+                toggleWrapper.appendChild(labelSpan);
 
-            actionHost.appendChild(toggleWrapper);
-        }
-
-        btn.addEventListener('click', () => {
-            const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
-            if (!match) {
-                createSystemAlert('CFF System', 'Salve o processo antes de atualizar andamentos.');
-                return;
-            }
-            const objectId = match[1];
-            const originalText = btn.innerText;
-            btn.disabled = true;
-            btn.innerText = 'Buscando andamentos...';
-
-            fetch(`/admin/contratos/processojudicial/${objectId}/atualizar-andamentos/`, {
-                method: 'POST',
-                headers: { 'X-CSRFToken': csrftoken }
-            }).then(resp => {
-                if (!resp.ok) throw new Error('Erro ao acionar atualização.');
-                window.location.reload();
-            }).catch(err => {
-                createSystemAlert('CFF System', err.message || 'Falha ao atualizar andamentos.');
-            }).finally(() => {
-                btn.disabled = false;
-                btn.innerText = originalText;
-            });
-        });
-        removeDuplicatesBtn.addEventListener('click', async () => {
-            const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
-            if (!match) {
-                createSystemAlert('CFF System', 'Salve o processo antes de remover duplicados.');
-                return;
+                actionHost.appendChild(toggleWrapper);
             }
 
-            const objectId = match[1];
-            const originalText = removeDuplicatesBtn.innerText;
-            removeDuplicatesBtn.disabled = true;
-            removeDuplicatesBtn.innerText = 'Removendo duplicados...';
-            const inlineRemoved = deduplicateInlineAndamentos();
+            btn.addEventListener('click', () => {
+                const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+                if (!match) {
+                    createSystemAlert('CFF System', 'Salve o processo antes de atualizar andamentos.');
+                    return;
+                }
+                const objectId = match[1];
+                const originalText = btn.innerText;
+                btn.disabled = true;
+                btn.innerText = 'Buscando andamentos...';
 
-            try {
-                const response = await fetch(`/admin/contratos/processojudicial/${objectId}/remover-andamentos-duplicados/`, {
+                fetch(`/admin/contratos/processojudicial/${objectId}/atualizar-andamentos/`, {
                     method: 'POST',
-                    headers: { 'X-CSRFToken': csrftoken },
+                    headers: { 'X-CSRFToken': csrftoken }
+                }).then(resp => {
+                    if (!resp.ok) throw new Error('Erro ao acionar atualização.');
+                    window.location.reload();
+                }).catch(err => {
+                    createSystemAlert('CFF System', err.message || 'Falha ao atualizar andamentos.');
+                }).finally(() => {
+                    btn.disabled = false;
+                    btn.innerText = originalText;
                 });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(data.message || 'Erro ao remover duplicados.');
+            });
+            removeDuplicatesBtn.addEventListener('click', async () => {
+                const match = window.location.pathname.match(/processojudicial\/(\d+)\/change/);
+                if (!match) {
+                    createSystemAlert('CFF System', 'Salve o processo antes de remover duplicados.');
+                    return;
                 }
-                const removed = data.removed || 0;
-                const defaultServerMessage = removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.';
-                const serverMessage = data.message || defaultServerMessage;
-                const messageParts = [];
-                if (inlineRemoved > 0) {
-                    messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
-                }
-                if (removed > 0) {
-                    messageParts.push(serverMessage);
-                } else if (inlineRemoved === 0) {
-                    messageParts.push(serverMessage);
-                }
-                if (!messageParts.length) {
-                    messageParts.push('Nenhum andamento duplicado encontrado.');
-                }
-                createSystemAlert('CFF System', messageParts.join(' '));
 
-                if (inlineRemoved === 0 && removed > 0) {
-                    const redirectUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
-                    window.location.assign(redirectUrl);
+                const objectId = match[1];
+                const originalText = removeDuplicatesBtn.innerText;
+                removeDuplicatesBtn.disabled = true;
+                removeDuplicatesBtn.innerText = 'Removendo duplicados...';
+                const inlineRemoved = deduplicateInlineAndamentos();
+
+                try {
+                    const response = await fetch(`/admin/contratos/processojudicial/${objectId}/remover-andamentos-duplicados/`, {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': csrftoken },
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data.message || 'Erro ao remover duplicados.');
+                    }
+                    const removed = data.removed || 0;
+                    const defaultServerMessage = removed ? `${removed} andamento(s) duplicado(s) removido(s).` : 'Não foram encontrados andamentos duplicados.';
+                    const serverMessage = data.message || defaultServerMessage;
+                    const messageParts = [];
+                    if (inlineRemoved > 0) {
+                        messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                    }
+                    if (removed > 0) {
+                        messageParts.push(serverMessage);
+                    } else if (inlineRemoved === 0) {
+                        messageParts.push(serverMessage);
+                    }
+                    if (!messageParts.length) {
+                        messageParts.push('Nenhum andamento duplicado encontrado.');
+                    }
+                    createSystemAlert('CFF System', messageParts.join(' '));
+
+                    if (inlineRemoved === 0 && removed > 0) {
+                        const redirectUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+                        window.location.assign(redirectUrl);
+                    }
+                } catch (err) {
+                    const messageParts = [];
+                    messageParts.push(err.message || 'Falha ao remover duplicados.');
+                    if (inlineRemoved > 0) {
+                        messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
+                    }
+                    createSystemAlert('CFF System', messageParts.join(' '));
+                } finally {
+                    removeDuplicatesBtn.disabled = false;
+                    removeDuplicatesBtn.innerText = originalText;
                 }
-            } catch (err) {
-                const messageParts = [];
-                messageParts.push(err.message || 'Falha ao remover duplicados.');
-                if (inlineRemoved > 0) {
-                    messageParts.push(`${inlineRemoved} andamento(s) duplicado(s) foram marcados para remoção no formulário. Salve para confirmar a exclusão.`);
-                }
-                createSystemAlert('CFF System', messageParts.join(' '));
-            } finally {
-                removeDuplicatesBtn.disabled = false;
-                removeDuplicatesBtn.innerText = originalText;
-            }
-        });
+            });
+        }
     }
 
     const excluirBtn = document.getElementById('btn_excluir_andamentos_selecionados');
@@ -4399,6 +5234,429 @@ document.addEventListener('DOMContentLoaded', function() {
         initializeTarefaCommentsLazy();
     }
 
+    const prazoHistoryKey = 'prazoCommentsHistory';
+    const PRAZO_COMMENTS_CACHE_TTL_MS = 5 * 60 * 1000;
+    const PRAZO_COMMENTS_PANEL_FLAG = 'prazoCommentsPanelInit';
+    const PRAZO_COMMENTS_HANDLER_FLAG = 'prazoCommentsHandlerAttached';
+    const PRAZO_COMMENTS_LOADED_FLAG = 'prazoCommentsLoaded';
+
+    const buildPrazoCommentsCacheKey = (prazoId) => `nowlex_cache_v1:prazo_comments:${prazoId}`;
+
+    const getPrazoIdFromRow = (row) => {
+        if (!row) return '';
+        const hiddenId = row.querySelector('input[name$="-id"]') || row.querySelector('input[id$="-id"]');
+        if (hiddenId && hiddenId.value) return hiddenId.value;
+        const candidate = row.querySelector('[name^="prazos-"][name$="-titulo"], [name^="prazos-"][name$="-data_limite_0"], [name^="prazos-"][name$="-responsavel"]');
+        const prefixMatch = candidate?.name?.match(/^(prazos-\d+)-/);
+        if (prefixMatch) {
+            const prefix = prefixMatch[1];
+            const fallbackByName = document.querySelector(`input[name="${prefix}-id"]`);
+            if (fallbackByName && fallbackByName.value) return fallbackByName.value;
+            const fallbackById = document.getElementById(`id_${prefix}-id`);
+            if (fallbackById && fallbackById.value) return fallbackById.value;
+        }
+        const match = row.id && row.id.match(/prazos-(\d+)/);
+        if (match) {
+            const fallback = document.getElementById(`id_prazos-${match[1]}-id`);
+            if (fallback && fallback.value) return fallback.value;
+        }
+        return row.dataset.prazoId || '';
+    };
+
+    const ensurePrazoId = (row) => {
+        const prazoId = getPrazoIdFromRow(row);
+        if (prazoId) {
+            row.dataset.prazoId = prazoId;
+        }
+        return prazoId;
+    };
+
+    const getPrazoRowComments = (row) => {
+        const raw = row.dataset[prazoHistoryKey];
+        if (!raw) return [];
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return [];
+        }
+    };
+
+    const setPrazoRowComments = (row, comments) => {
+        row.dataset[prazoHistoryKey] = JSON.stringify(comments || []);
+    };
+
+    const fetchPrazoCommentsForRow = async (row) => {
+        const prazoId = getPrazoIdFromRow(row);
+        if (!prazoId) return [];
+        const cacheKey = buildPrazoCommentsCacheKey(prazoId);
+        const cached = readSessionCache(cacheKey, PRAZO_COMMENTS_CACHE_TTL_MS);
+        if (cached) {
+            return cached;
+        }
+        try {
+            const response = await fetch(`/api/prazos/${prazoId}/comentarios/`, {
+                method: 'GET',
+                credentials: 'same-origin',
+            });
+            if (!response.ok) return [];
+            const data = await response.json();
+            writeSessionCache(cacheKey, data);
+            return data;
+        } catch (error) {
+            console.error('Erro ao buscar comentários do prazo:', error);
+            return [];
+        }
+    };
+
+    const renderPrazoCommentsHistory = (row) => {
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const history = panel.querySelector('.tarefa-comments-history');
+        if (!history) return;
+        const comments = getPrazoRowComments(row);
+        if (!comments.length) {
+            history.textContent = 'Nenhum comentário gravado.';
+            return;
+        }
+        history.innerHTML = comments
+            .map((comment) => {
+                const author = comment.autor?.username || comment.autor?.display_name || resolveCurrentUser();
+                const timestamp = formatLocalTimestamp(comment.criado_em || comment.timestamp);
+                const attachments = (comment.anexos || [])
+                    .map((attachment) => `
+                        <a class="tarefa-comments-attachment" href="${attachment.arquivo_url}" target="_blank" rel="noopener noreferrer">${attachment.nome || 'Arquivo'}</a>
+                    `)
+                    .join('');
+                return `
+                    <div class="tarefa-comments-history-item">
+                        <div class="tarefa-comments-history-item-header">
+                            <span class="tarefa-comments-history-item-author">${author}</span>
+                            <span class="tarefa-comments-history-item-meta">${timestamp}</span>
+                        </div>
+                        <p>${comment.texto || comment.text || ''}</p>
+                        ${attachments ? `<div class="tarefa-comments-attachment-list">${attachments}</div>` : ''}
+                    </div>
+                `;
+            })
+            .join('');
+    };
+
+    const loadPrazoCommentsForRow = async (row) => {
+        const prazoId = ensurePrazoId(row);
+        if (!prazoId) return false;
+        const comments = await fetchPrazoCommentsForRow(row);
+        setPrazoRowComments(row, comments);
+        renderPrazoCommentsHistory(row);
+        return true;
+    };
+
+    const attachPrazoCommentHandler = (row) => {
+        if (!row || row.dataset[PRAZO_COMMENTS_HANDLER_FLAG] === '1') {
+            return;
+        }
+        const panel = row.querySelector('.tarefa-comments-panel');
+        if (!panel) return;
+        const input = panel.querySelector('.tarefa-comments-input input');
+        const button = panel.querySelector('.tarefa-comments-send');
+        if (!input || !button) return;
+        input.disabled = false;
+        const fileInput = panel.querySelector('.tarefa-comments-file');
+        const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
+        const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
+        const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
+        const csrfToken = getCsrfToken();
+        let pendingSend = false;
+        const updateButtonState = () => {
+            const prazoId = ensurePrazoId(row);
+            button.disabled = !prazoId || !(input.value.trim() || (fileInput && fileInput.files.length));
+        };
+        const showAttachmentPreview = (name) => {
+            if (!attachmentPreview) return;
+            if (name) {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = name;
+                attachmentPreview.style.display = 'flex';
+                attachmentPreview.hidden = false;
+                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !name;
+            } else {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = '';
+                attachmentPreview.style.display = 'none';
+                attachmentPreview.hidden = true;
+            }
+        };
+        const handleSend = async () => {
+            const value = input.value.trim();
+            if (!value && (!fileInput || !fileInput.files.length)) return;
+            const prazoId = ensurePrazoId(row);
+            if (!prazoId) {
+                console.warn('prazo-comments: prazo ainda sem ID, salve o prazo antes de comentar');
+                return;
+            }
+            if (!prazoId || pendingSend) return;
+            pendingSend = true;
+            button.disabled = true;
+            const formData = new FormData();
+            formData.append('texto', value);
+            if (fileInput && fileInput.files.length) {
+                formData.append('arquivo', fileInput.files[0]);
+            }
+            try {
+                const response = await fetch(`/api/prazos/${prazoId}/comentarios/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken,
+                    },
+                    credentials: 'same-origin',
+                    body: formData,
+                });
+                if (!response.ok) {
+                    console.error('Erro ao salvar comentário do prazo', { status: response.status });
+                    throw new Error('Erro ao salvar comentário do prazo');
+                }
+                const comment = await response.json();
+                const comments = getPrazoRowComments(row);
+                comments.unshift(comment);
+                setPrazoRowComments(row, comments);
+                writeSessionCache(buildPrazoCommentsCacheKey(prazoId), comments);
+                renderPrazoCommentsHistory(row);
+                input.value = '';
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+                showAttachmentPreview('');
+                updateButtonState();
+                input.focus();
+                const anexos = comment.anexos || [];
+                anexos.forEach(appendAttachmentToArquivos);
+            } catch (error) {
+                console.error(error);
+            } finally {
+                pendingSend = false;
+                updateButtonState();
+                input.focus();
+            }
+        };
+        if (fileInput) {
+            const paperclipLabel = panel.querySelector('.tarefa-comments-icon[data-role="attachment"]');
+            const activateIcon = () => paperclipLabel?.classList.add('tarefa-comments-icon-active');
+            const deactivateIcon = () => paperclipLabel?.classList.remove('tarefa-comments-icon-active');
+            paperclipLabel?.addEventListener('pointerdown', () => activateIcon());
+            paperclipLabel?.addEventListener('pointerleave', () => deactivateIcon());
+            paperclipLabel?.addEventListener('blur', () => deactivateIcon());
+
+            fileInput.addEventListener('change', () => {
+                const name = fileInput.files[0]?.name || '';
+                showAttachmentPreview(name);
+                updateButtonState();
+                deactivateIcon();
+            });
+            attachmentPreviewClear?.addEventListener('click', () => {
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+                showAttachmentPreview('');
+                updateButtonState();
+                input.focus();
+            });
+        }
+        input.addEventListener('input', updateButtonState);
+        button.addEventListener('click', handleSend);
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+            }
+        });
+        updateButtonState();
+        row.dataset[PRAZO_COMMENTS_HANDLER_FLAG] = '1';
+    };
+
+    const ensurePrazoCommentsPanel = (row) => {
+        if (!row || row.classList.contains('empty-form')) return;
+        if (!row.classList.contains('prazo-comments-enabled')) {
+            row.classList.add('prazo-comments-enabled');
+        }
+        let cell = row.querySelector('td.field-prazo-comentarios');
+        const prazoId = ensurePrazoId(row);
+        const fileInputId = `prazo-comments-file-${prazoId || `new-${Math.random().toString(36).slice(2)}`}`;
+        row.dataset.prazoCommentsFileId = fileInputId;
+        const updateHeaderText = () => {
+            if (!cell) return;
+            const nameEl = cell.querySelector('.tarefa-comments-name');
+            const timeEl = cell.querySelector('.tarefa-comments-time');
+            const createdBy = getCreatedByFromRow(row);
+            const createdAt = getCreatedAtFromRow(row);
+            if (nameEl) nameEl.textContent = createdBy || 'Criado por';
+            if (timeEl) timeEl.textContent = createdAt ? formatNaturalCreatedAt(createdAt) : '';
+        };
+        if (!cell) {
+            cell = document.createElement('td');
+            cell.className = 'field-prazo-comentarios';
+            cell.innerHTML = `
+                <div class="tarefa-comments-panel">
+                    <div class="tarefa-comments-header">
+                        <div class="tarefa-comments-avatar"></div>
+                        <div class="tarefa-comments-header-text">
+                            <div class="tarefa-comments-name">Criado por</div>
+                            <div class="tarefa-comments-time"></div>
+                        </div>
+                    </div>
+                    <div class="tarefa-comments-history"></div>
+                    <div class="tarefa-comments-attachment-preview" hidden>
+                        <span class="tarefa-comments-attachment-preview-name"></span>
+                        <button type="button" class="tarefa-comments-attachment-preview-clear" aria-label="Remover anexo">×</button>
+                    </div>
+                    <div class="tarefa-comments-input-row">
+                        <div class="tarefa-comments-input">
+                            <input type="text" placeholder="Digite um comentário">
+                            <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                            <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
+                            <span class="tarefa-comments-icon">@</span>
+                        </div>
+                        <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
+                    </div>
+                </div>
+            `;
+            row.appendChild(cell);
+            updateHeaderText();
+            row.dataset[PRAZO_COMMENTS_PANEL_FLAG] = '1';
+            loadPrazoCommentsForRow(row).then((loaded) => {
+                if (loaded) {
+                    row.dataset[PRAZO_COMMENTS_LOADED_FLAG] = '1';
+                }
+            });
+            attachPrazoCommentHandler(row);
+        } else {
+            updateHeaderText();
+            if (!row.dataset[PRAZO_COMMENTS_LOADED_FLAG]) {
+                loadPrazoCommentsForRow(row).then((loaded) => {
+                    if (loaded) {
+                        row.dataset[PRAZO_COMMENTS_LOADED_FLAG] = '1';
+                    }
+                });
+            }
+            attachPrazoCommentHandler(row);
+        }
+    };
+
+    const collectPrazoRows = (group) => {
+        const rows = [];
+        group.querySelectorAll('tr').forEach((row) => {
+            if (row.classList.contains('dynamic-prazos') || row.id?.startsWith('prazos-')) {
+                rows.push(row);
+            }
+        });
+        return rows;
+    };
+
+    const initPrazoCommentsPanels = (root = document) => {
+        const group = root.querySelector?.('#prazos-group') || document.getElementById('prazos-group');
+        if (!group) return;
+        collectPrazoRows(group).forEach((row) => ensurePrazoCommentsPanel(row));
+    };
+
+    const startPrazoCommentsPanels = () => {
+        const group = document.getElementById('prazos-group');
+        if (!group || group.dataset.commentsInitialized === '1') {
+            return;
+        }
+        group.dataset.commentsInitialized = '1';
+        initPrazoCommentsPanels(group);
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(({ addedNodes }) => {
+                addedNodes.forEach((node) => {
+                    if (!node || node.nodeType !== 1) return;
+                    if (node.classList && (node.classList.contains('dynamic-prazos') || node.id?.startsWith('prazos-'))) {
+                        ensurePrazoCommentsPanel(node);
+                        return;
+                    }
+                    if (typeof node.querySelectorAll === 'function') {
+                        collectPrazoRows(node).forEach((row) => ensurePrazoCommentsPanel(row));
+                    }
+                });
+            });
+        });
+        observer.observe(group, { childList: true, subtree: true });
+    };
+
+    const schedulePrazoCommentsOnDemand = () => {
+        const group = document.getElementById('prazos-group');
+        if (!group) return;
+
+        const attemptStart = () => {
+            if (group.dataset.commentsInitialized === '1') {
+                return;
+            }
+            if (!group.classList.contains('active')) {
+                return;
+            }
+            startPrazoCommentsPanels();
+        };
+
+        attemptStart();
+        if (group.dataset.commentsInitialized === '1') {
+            return;
+        }
+
+        const observer = new MutationObserver(() => {
+            attemptStart();
+            if (group.dataset.commentsInitialized === '1') {
+                observer.disconnect();
+            }
+        });
+        observer.observe(group, { attributes: true, attributeFilter: ['class'] });
+    };
+
+    const stripPrazoDatetimeShortcuts = (root = document) => {
+        const group = root.querySelector?.('#prazos-group') || document.getElementById('prazos-group');
+        if (!group) return;
+        group.querySelectorAll('.field-data_limite .datetimeshortcuts').forEach((shortcuts) => {
+            shortcuts.querySelectorAll('a').forEach((link) => {
+                const text = (link.textContent || '').trim().toLowerCase();
+                if (text === 'hoje' || text === 'agora') {
+                    link.remove();
+                }
+            });
+            Array.from(shortcuts.childNodes).forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE && node.textContent.replace(/\s/g, '') === '|') {
+                    node.remove();
+                }
+            });
+        });
+        group.querySelectorAll('.field-data_limite .datetime').forEach((datetime) => {
+            Array.from(datetime.childNodes).forEach((node) => {
+                if (node.nodeType !== Node.TEXT_NODE) return;
+                const normalized = (node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                if (normalized === 'data:' || normalized.startsWith('data:')) {
+                    node.remove();
+                }
+            });
+        });
+    };
+
+    const schedulePrazoDatetimeCleanup = () => {
+        const group = document.getElementById('prazos-group');
+        if (!group || group.dataset.prazoDatetimeCleanup === '1') return;
+        group.dataset.prazoDatetimeCleanup = '1';
+        const runCleanup = () => {
+            stripPrazoDatetimeShortcuts(group);
+            requestAnimationFrame(() => stripPrazoDatetimeShortcuts(group));
+        };
+        runCleanup();
+        const observer = new MutationObserver(() => runCleanup());
+        observer.observe(group, { childList: true, subtree: true });
+    };
+
+    const initializePrazoCommentsLazy = () => {
+        schedulePrazoCommentsOnDemand();
+        schedulePrazoDatetimeCleanup();
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializePrazoCommentsLazy);
+    } else {
+        initializePrazoCommentsLazy();
+    }
+
     observeArquivosTables();
 
     if (window.django && window.django.jQuery) {
@@ -4410,6 +5668,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 initTarefasSelect2(row);
                 setupTarefasPriorityStyling(row);
                 initTarefaCommentsPanels(row);
+            }
+            if (formsetName === 'prazos') {
+                initPrazoCommentsPanels(row);
+                stripPrazoDatetimeShortcuts(row);
             }
         });
     }

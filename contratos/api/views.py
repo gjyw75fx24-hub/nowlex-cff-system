@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 from rest_framework import generics, status
 from rest_framework.views import APIView
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.decorators import login_required
@@ -31,7 +32,9 @@ from ..models import (
     ProcessoArquivo,
     ProcessoJudicial,
     Prazo,
+    PrazoMensagem,
     Tarefa,
+    TarefaLote,
     TarefaMensagem,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
@@ -41,6 +44,7 @@ from .serializers import (
     UserSerializer,
     ListaDeTarefasSerializer,
     TarefaMensagemSerializer,
+    PrazoMensagemSerializer,
 )
 from ..services.nowlex_calc import (
     NowlexCalcError,
@@ -122,6 +126,7 @@ class AgendaGeralAPIView(APIView):
     Retorna todas as tarefas e prazos para a Agenda Geral.
     """
     permission_classes = [IsAuthenticated]
+    renderer_classes = [JSONRenderer]
     DEFAULT_PAGE_SIZE = 200
     MAX_PAGE_SIZE = 500
 
@@ -239,12 +244,13 @@ class AgendaGeralAPIView(APIView):
         end = start + page_size
         paginated_entries = agenda_items[start:end]
 
-        return Response({
+        payload = {
             'entries': paginated_entries,
             'page': page,
             'page_size': page_size,
             'total_entries': total_items,
-        })
+        }
+        return JsonResponse(payload, json_dumps_params={'ensure_ascii': False})
 
     def _supervision_status_labels(self):
         return SUPERVISION_STATUS_LABELS
@@ -412,6 +418,8 @@ class AgendaGeralAPIView(APIView):
 
         for analise in AnaliseProcesso.objects.select_related('processo_judicial', 'updated_by'):
             respostas = analise.respostas or {}
+            if not isinstance(respostas, dict):
+                continue
             for source in ('saved_processos_vinculados', 'processos_vinculados'):
                 raw_cards = respostas.get(source) or []
                 if not isinstance(raw_cards, list):
@@ -507,6 +515,9 @@ class AgendaGeralAPIView(APIView):
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
             viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
+            card = card_info.get('card')
+            if not isinstance(card, dict):
+                card = {}
             entries.append({
                 'type': 'S',
                 'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
@@ -688,6 +699,48 @@ class TarefaComentarioListCreateAPIView(APIView):
         serializer = TarefaMensagemSerializer(comentario, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
+class PrazoComentarioListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_prazo(self, prazo_id):
+        return get_object_or_404(Prazo, pk=prazo_id)
+
+    def get(self, request, prazo_id):
+        prazo = self.get_prazo(prazo_id)
+        serializer = PrazoMensagemSerializer(
+            prazo.mensagens.order_by('-criado_em'),
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data)
+
+    def post(self, request, prazo_id):
+        prazo = self.get_prazo(prazo_id)
+        texto = (request.data.get('texto') or '').strip()
+        arquivo = request.FILES.get('arquivo')
+        if not texto and not arquivo:
+            return Response(
+                {'detail': 'É necessário informar texto ou arquivo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        comentario = PrazoMensagem.objects.create(
+            prazo=prazo,
+            autor=request.user,
+            texto=texto,
+        )
+        if arquivo:
+            processo_arquivo = ProcessoArquivo.objects.create(
+                processo=prazo.processo,
+                prazo=prazo,
+                prazo_mensagem=comentario,
+                enviado_por=request.user,
+                arquivo=arquivo,
+            )
+            processo_arquivo.save()
+        serializer = PrazoMensagemSerializer(comentario, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 class TarefaCreateAPIView(generics.CreateAPIView):
     """
     API para criar uma nova tarefa para um processo.
@@ -709,6 +762,294 @@ class PrazoCreateAPIView(generics.CreateAPIView):
     def perform_create(self, serializer):
         processo = get_object_or_404(ProcessoJudicial, pk=self.kwargs.get('processo_id'))
         serializer.save(processo=processo)
+
+def _bulk_payload_from_request(request):
+    payload_raw = request.data.get('payload') if hasattr(request, 'data') else None
+    if payload_raw:
+        try:
+            payload = json.loads(payload_raw)
+        except json.JSONDecodeError:
+            payload = {}
+    else:
+        payload = request.data if isinstance(request.data, dict) else {}
+    return payload or {}
+
+def _coerce_id_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return []
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            value = value.split(',')
+    if not isinstance(value, (list, tuple)):
+        value = [value]
+    ids = []
+    for item in value:
+        try:
+            ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    # remover duplicados preservando ordem
+    seen = set()
+    unique = []
+    for item in ids:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+def _parse_date_value(value):
+    if not value:
+        return None
+    if isinstance(value, date_cls):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).date()
+        except ValueError:
+            try:
+                return datetime.strptime(value, '%Y-%m-%d').date()
+            except ValueError:
+                return None
+    return None
+
+def _parse_datetime_value(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    else:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_default_timezone())
+    return dt
+
+class TarefaBulkCreateAPIView(APIView):
+    """
+    API para criar tarefas em lote (com ou sem processos selecionados).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        payload = _bulk_payload_from_request(request)
+        processo_ids = _coerce_id_list(payload.get('processo_ids'))
+        descricao = (payload.get('descricao') or '').strip()
+        data = _parse_date_value(payload.get('data'))
+        responsavel_id = payload.get('responsavel_id') or None
+        lista_id = payload.get('lista_id') or None
+        prioridade = (payload.get('prioridade') or 'M').strip().upper()[:1] or 'M'
+        observacoes = (payload.get('observacoes') or '').strip()
+        concluida = bool(payload.get('concluida'))
+        comentario_texto = (payload.get('comentario_texto') or '').strip()
+        arquivo = request.FILES.get('arquivo')
+
+        if not descricao:
+            return Response({'detail': 'Informe a descrição da tarefa.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not data:
+            return Response({'detail': 'Informe a data da tarefa.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not processo_ids and not responsavel_id:
+            return Response({'detail': 'Selecione um responsável para criar tarefa geral.'}, status=status.HTTP_400_BAD_REQUEST)
+        if arquivo and not processo_ids:
+            return Response({'detail': 'Anexo exige pelo menos um processo selecionado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        processos = ProcessoJudicial.objects.filter(id__in=processo_ids) if processo_ids else []
+        processo_map = {proc.id: proc for proc in processos}
+        if processo_ids and len(processo_map) != len(processo_ids):
+            return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        responsavel = User.objects.filter(id=responsavel_id).first() if responsavel_id else None
+        lista = ListaDeTarefas.objects.filter(id=lista_id).first() if lista_id else None
+
+        lote = TarefaLote.objects.create(
+            descricao=descricao,
+            criado_por=request.user,
+        )
+
+        created_tasks = []
+        targets = processo_ids if processo_ids else [None]
+        for processo_id in targets:
+            processo = processo_map.get(processo_id) if processo_id else None
+            tarefa = Tarefa.objects.create(
+                processo=processo,
+                lote=lote,
+                descricao=descricao,
+                lista=lista,
+                data=data,
+                responsavel=responsavel,
+                prioridade=prioridade,
+                concluida=concluida,
+                observacoes=observacoes,
+                criado_por=request.user,
+            )
+            created_tasks.append(tarefa)
+            if comentario_texto or arquivo:
+                comentario = TarefaMensagem.objects.create(
+                    tarefa=tarefa,
+                    autor=request.user,
+                    texto=comentario_texto or '',
+                )
+                if arquivo and processo:
+                    arquivo.seek(0)
+                    ProcessoArquivo.objects.create(
+                        processo=processo,
+                        tarefa=tarefa,
+                        mensagem=comentario,
+                        enviado_por=request.user,
+                        arquivo=arquivo,
+                    )
+
+        return Response({
+            'created': len(created_tasks),
+            'ids': [task.id for task in created_tasks],
+        }, status=status.HTTP_201_CREATED)
+
+class TarefaBulkHistoryAPIView(APIView):
+    """
+    Lista lotes de tarefas criadas em lote para o usuário atual.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        lotes = TarefaLote.objects.all()
+        if not request.user.is_superuser:
+            lotes = lotes.filter(criado_por=request.user)
+        lotes = (
+            lotes.annotate(
+                total=Count('tarefas', distinct=True),
+                concluidas=Count('tarefas', filter=Q(tarefas__concluida=True), distinct=True),
+            )
+            .order_by('-criado_em')[:50]
+        )
+        data = []
+        for lote in lotes:
+            data.append({
+                'id': lote.id,
+                'descricao': lote.descricao,
+                'criado_em': lote.criado_em.isoformat() if lote.criado_em else None,
+                'total': lote.total,
+                'concluidas': lote.concluidas,
+            })
+        return Response(data)
+
+class TarefaBulkHistoryActionAPIView(APIView):
+    """
+    Ações em lote para tarefas criadas em lote (concluir ou excluir).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        payload = _bulk_payload_from_request(request)
+        action = (payload.get('action') or '').strip().lower()
+        lote_ids = _coerce_id_list(payload.get('ids'))
+        if not lote_ids:
+            return Response({'detail': 'Selecione ao menos um lote.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        lotes = TarefaLote.objects.filter(id__in=lote_ids)
+        if not request.user.is_superuser:
+            lotes = lotes.filter(criado_por=request.user)
+        allowed_ids = list(lotes.values_list('id', flat=True))
+        if not allowed_ids:
+            return Response({'detail': 'Nenhum lote encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        tarefas_qs = Tarefa.objects.filter(lote_id__in=allowed_ids)
+        if action in ('concluir', 'concluida', 'concluidas', 'finalizar'):
+            updated = tarefas_qs.update(concluida=True)
+            return Response({'updated': updated, 'action': 'concluir'})
+        if action in ('delete', 'deletar', 'excluir', 'remover'):
+            deleted = tarefas_qs.count()
+            tarefas_qs.delete()
+            lotes.filter(id__in=allowed_ids).delete()
+            return Response({'deleted': deleted, 'action': 'delete'})
+
+        return Response({'detail': 'Ação inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+class PrazoBulkCreateAPIView(APIView):
+    """
+    API para criar prazos em lote (com ou sem processos selecionados).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        payload = _bulk_payload_from_request(request)
+        processo_ids = _coerce_id_list(payload.get('processo_ids'))
+        titulo = (payload.get('titulo') or '').strip()
+        data_limite = _parse_datetime_value(payload.get('data_limite'))
+        alerta_valor = payload.get('alerta_valor')
+        alerta_unidade = (payload.get('alerta_unidade') or 'D').strip().upper()[:1] or 'D'
+        responsavel_id = payload.get('responsavel_id') or None
+        observacoes = (payload.get('observacoes') or '').strip()
+        concluido = bool(payload.get('concluido'))
+        comentario_texto = (payload.get('comentario_texto') or '').strip()
+        arquivo = request.FILES.get('arquivo')
+
+        if not titulo:
+            return Response({'detail': 'Informe o título do prazo.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not data_limite:
+            return Response({'detail': 'Informe a data do prazo.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not processo_ids and not responsavel_id:
+            return Response({'detail': 'Selecione um responsável para criar prazo geral.'}, status=status.HTTP_400_BAD_REQUEST)
+        if arquivo and not processo_ids:
+            return Response({'detail': 'Anexo exige pelo menos um processo selecionado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            alerta_valor = int(alerta_valor) if alerta_valor is not None else 1
+        except (TypeError, ValueError):
+            alerta_valor = 1
+
+        processos = ProcessoJudicial.objects.filter(id__in=processo_ids) if processo_ids else []
+        processo_map = {proc.id: proc for proc in processos}
+        if processo_ids and len(processo_map) != len(processo_ids):
+            return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        responsavel = User.objects.filter(id=responsavel_id).first() if responsavel_id else None
+
+        created_prazos = []
+        targets = processo_ids if processo_ids else [None]
+        for processo_id in targets:
+            processo = processo_map.get(processo_id) if processo_id else None
+            prazo = Prazo.objects.create(
+                processo=processo,
+                titulo=titulo,
+                data_limite=data_limite,
+                alerta_valor=alerta_valor,
+                alerta_unidade=alerta_unidade,
+                responsavel=responsavel,
+                observacoes=observacoes,
+                concluido=concluido,
+            )
+            created_prazos.append(prazo)
+            if comentario_texto or arquivo:
+                comentario = PrazoMensagem.objects.create(
+                    prazo=prazo,
+                    autor=request.user,
+                    texto=comentario_texto or '',
+                )
+                if arquivo and processo:
+                    arquivo.seek(0)
+                    ProcessoArquivo.objects.create(
+                        processo=processo,
+                        prazo=prazo,
+                        prazo_mensagem=comentario,
+                        enviado_por=request.user,
+                        arquivo=arquivo,
+                    )
+
+        return Response({
+            'created': len(created_prazos),
+            'ids': [prazo.id for prazo in created_prazos],
+        }, status=status.HTTP_201_CREATED)
 
 class UserSearchAPIView(generics.ListAPIView):
     """

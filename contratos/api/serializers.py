@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.urls import reverse
-from ..models import Tarefa, Prazo, ListaDeTarefas, TarefaMensagem, ProcessoArquivo
+from ..models import Tarefa, Prazo, ListaDeTarefas, TarefaMensagem, PrazoMensagem, ProcessoArquivo
 
 class UserSerializer(serializers.ModelSerializer):
     pending_tasks = serializers.IntegerField(read_only=True, default=0)
@@ -108,4 +108,13 @@ class TarefaMensagemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TarefaMensagem
+        fields = ['id', 'texto', 'autor', 'criado_em', 'anexos']
+
+
+class PrazoMensagemSerializer(serializers.ModelSerializer):
+    autor = UserSerializer(read_only=True)
+    anexos = ProcessoArquivoSerializer(many=True, read_only=True, default=[])
+
+    class Meta:
+        model = PrazoMensagem
         fields = ['id', 'texto', 'autor', 'criado_em', 'anexos']

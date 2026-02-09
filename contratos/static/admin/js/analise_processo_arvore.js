@@ -882,7 +882,18 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 overlay.appendChild(dialog);
                 document.body.appendChild(overlay);
 
+                const handleKeydown = event => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        okBtn.click();
+                    } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelBtn.click();
+                    }
+                };
+
                 const cleanup = () => {
+                    document.removeEventListener('keydown', handleKeydown);
                     overlay.remove();
                 };
 
@@ -894,6 +905,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     cleanup();
                     resolve(true);
                 });
+                document.addEventListener('keydown', handleKeydown);
+                okBtn.focus();
             });
         }
 

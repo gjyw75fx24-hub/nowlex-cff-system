@@ -1,0 +1,175 @@
+/* static/admin/css/admin_tabs.css */
+
+.inline-group-tabs {
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+.inline-group-tabs button {
+    background-color: #f7f7f7;
+    border: 1px solid #ccc;
+    padding: 8px 15px;
+    cursor: pointer;
+    margin-right: 5px;
+    border-radius: 5px 5px 0 0;
+    font-weight: bold;
+    color: #555;
+}
+
+.inline-group-tabs button.active {
+    background-color: #fff;
+    border-bottom-color: #fff;
+    color: #000;
+}
+
+.inline-group-tabs button.has-errors {
+    border-color: #ba2121;
+    color: #ba2121;
+    position: relative;
+}
+
+.inline-group-tabs button.has-errors::after {
+    content: '•';
+    color: #ba2121;
+    margin-left: 6px;
+    font-size: 16px;
+    line-height: 1;
+}
+
+/* Esconde todos os inlines por padrão */
+.inline-group {
+    display: none;
+}
+
+/* Mostra apenas o inline que tem a classe 'active' */
+.inline-group.active {
+    display: block;
+}
+
+/* Aba falsa e caderno flutuante de Observações */
+.inline-group-tabs .fake-observacoes-tab {
+    background-color: #fffbea;
+    border: 1px solid #d9c46b;
+    color: #6a5b23;
+}
+
+.inline-group-tabs .fake-observacoes-tab:hover {
+    background-color: #fff4c2;
+}
+
+.notebook-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10500;
+    padding: 16px;
+    pointer-events: none; /* permite clicar na página enquanto o caderno está aberto */
+}
+
+.notebook-overlay.open {
+    display: flex;
+}
+
+.notebook {
+    background: #fff7d0;
+    border: 2px solid #ffeebb !important;
+    border-radius: 12px;
+    width: min(600px, 90vw);
+    min-height: 360px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    pointer-events: auto;
+}
+
+.notebook-header {
+    padding: 10px 14px;
+    background: #ffeebb;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: bold;
+    color: #3b2b05;
+    cursor: move;
+}
+
+.notebook-close {
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    cursor: pointer;
+    color: #3b2b05;
+}
+.notebook-textarea {
+    flex: 1;
+    width: 100%;
+    min-height: 220px;
+    border: none;
+    padding: 20px 14px 12px;
+    font-family: "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background: #fff8d9;
+    color: #2f2310;
+    outline: none;
+    resize: none;
+    box-sizing: border-box;
+    border-radius: 0 0 12px 12px;
+}
+
+.notebook-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 16px 16px;
+    border-radius: 0 0 12px 12px;
+    background: #fff8d9;
+    position: relative;
+    overflow: hidden;
+}
+.notebook-message {
+    margin: 0 16px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: none;
+}
+.notebook-message.visible {
+    display: block;
+}
+
+.notebook-message.success {
+    background: #198754;
+    color: #ffffff;
+}
+
+.notebook-message.error {
+    background: #f8d7da;
+    color: #842029;
+}
+.notebook-footer {
+    padding: 0 16px 16px;
+    display: flex;
+    justify-content: flex-end;
+    background: #fff8d9;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 0 0 12px 12px;
+}
+.notebook-save-btn {
+    background: #0d6efd;
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 20px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.35);
+}
