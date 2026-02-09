@@ -27,6 +27,23 @@ function waitForJQuery() {
 
         const etiquetasUrl = memoryHasProcess ? `/admin/contratos/processojudicial/${processoId}/etiquetas/` : null;
         const criarEtiquetaUrl = `/admin/contratos/processojudicial/etiquetas/criar/`;
+        const bulkEtiquetasUrl = `/admin/contratos/processojudicial/etiquetas/bulk/`;
+        const openModalBtn = $('#open-etiqueta-modal');
+        const bulkFlagRaw = typeof openModalBtn.data('bulk') !== 'undefined'
+            ? openModalBtn.data('bulk')
+            : openModalBtn.attr('data-bulk');
+        const isBulkMode = String(bulkFlagRaw) === '1';
+        let bulkProcessIds = [];
+        const resolveBulkProcessIds = () => {
+            if (typeof window.nowlexEtiquetaBulkIds === 'function') {
+                const ids = window.nowlexEtiquetaBulkIds();
+                return Array.isArray(ids) ? ids : [];
+            }
+            if (Array.isArray(window.nowlexEtiquetaBulkIds)) {
+                return window.nowlexEtiquetaBulkIds;
+            }
+            return [];
+        };
 
         // --- Seletores de Elementos ---
         const modal = $('#etiqueta-modal');
@@ -50,12 +67,14 @@ function waitForJQuery() {
                 // --- Posicionamento ---
         function positionElements() {
             // ================== INÍCIO DA SOLUÇÃO FINAL ==================
+            if (isBulkMode) {
+                aplicadasContainer.hide();
+                return;
+            }
 
             // 1. Seleciona os elementos principais
             const mainHeader = $('#content h1').first();
             const contentDiv = $('#content');
-            const openModalBtn = $('#open-etiqueta-modal');
-            const aplicadasContainer = $('#etiquetas-aplicadas-container');
 
             // 2. Lógica original para posicionar o botão "Inserir Etiquetas"
             if (mainHeader.length && contentDiv.length) {
@@ -169,6 +188,10 @@ function waitForJQuery() {
         };
 
         function renderAplicadas() {
+            if (isBulkMode) {
+                aplicadasContainer.hide();
+                return;
+            }
             aplicadasContainer.empty();
             etiquetasProcesso.forEach(etiqueta => {
                 const tag = $(`<span class="etiqueta-badge" style="background-color: ${etiqueta.cor_fundo}; color: ${etiqueta.cor_fonte};">${etiqueta.nome}<button class="remove-etiqueta-btn" data-id="${etiqueta.id}" title="Remover">&times;</button></span>`);
@@ -214,7 +237,36 @@ function waitForJQuery() {
             });
         }
 
+        function fetchDataBulk() {
+            bulkProcessIds = resolveBulkProcessIds();
+            if (!bulkProcessIds.length) return;
+            $.get(bulkEtiquetasUrl, { ids: bulkProcessIds.join(',') }, function(data) {
+                todasEtiquetas = data.todas_etiquetas || [];
+                etiquetasProcesso = data.etiquetas_processo || [];
+                renderModalList();
+            });
+        }
+
+        function handleEtiquetaChangeBulk(etiquetaId, action) {
+            if (!bulkProcessIds.length) return;
+            $.ajax({
+                url: bulkEtiquetasUrl,
+                type: 'POST',
+                data: JSON.stringify({ ids: bulkProcessIds, etiqueta_id: etiquetaId, action }),
+                contentType: 'application/json',
+                beforeSend: xhr => xhr.setRequestHeader("X-CSRFToken", csrftoken),
+                success: () => {
+                    fetchDataBulk();
+                },
+                error: () => alert('Ocorreu um erro ao atualizar a etiqueta.')
+            });
+        }
+
         function handleEtiquetaChange(etiquetaId, action) {
+            if (isBulkMode) {
+                handleEtiquetaChangeBulk(etiquetaId, action);
+                return;
+            }
             if (!etiquetasUrl) return;
             $.ajax({
                 url: etiquetasUrl,
@@ -233,12 +285,31 @@ function waitForJQuery() {
         // --- Event Handlers ---
         $('#content').on('click', '#open-etiqueta-modal', function(e) {
             e.preventDefault();
-            const buttonRect = this.getBoundingClientRect();
             const modalContent = modal.find('> div');
-            const modalWidth = modalContent.outerWidth();
-            let leftPosition = buttonRect.right - modalWidth;
-            if (leftPosition < 0) leftPosition = 10;
-            modalContent.css({ 'top': buttonRect.bottom + window.scrollY + 5 + 'px', 'left': leftPosition + window.scrollX + 'px' });
+            if (isBulkMode) {
+                bulkProcessIds = resolveBulkProcessIds();
+                if (!bulkProcessIds.length) {
+                    alert('Selecione ao menos um processo.');
+                    return;
+                }
+                modalContent.css({
+                    'top': '50%',
+                    'left': '50%',
+                    'transform': 'translate(-50%, -50%)'
+                });
+                fetchDataBulk();
+            } else {
+                const buttonRect = this.getBoundingClientRect();
+                const modalWidth = modalContent.outerWidth();
+                let leftPosition = buttonRect.right - modalWidth;
+                if (leftPosition < 0) leftPosition = 10;
+                modalContent.css({
+                    'top': buttonRect.bottom + window.scrollY + 5 + 'px',
+                    'left': leftPosition + window.scrollX + 'px',
+                    'transform': ''
+                });
+                fetchData();
+            }
             modal.show();
         });
 
@@ -356,7 +427,9 @@ function waitForJQuery() {
                 success: response => {
                     if(response.status === 'created') {
                         createModal.hide();
-                        if (memoryHasProcess) {
+                        if (isBulkMode) {
+                            fetchDataBulk();
+                        } else if (memoryHasProcess) {
                             clearSessionCache(buildEtiquetaCacheKey());
                             fetchData();
                         } else {

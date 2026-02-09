@@ -196,6 +196,8 @@
     </script>
 {{ block.super }}
 
+    {% include "admin/contratos/etiqueta/_modals.html" with bulk_mode=True button_label="Inserir Etiquetas" %}
+
     <!-- Modal de delegação em massa -->
     <div id="delegate-modal" style="display:none; position: fixed; z-index: 2000; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.2); align-items: center; justify-content: center;">
         <div style="background:#fff; padding:16px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.2); min-width:280px; max-width:90%;">

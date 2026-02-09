@@ -908,6 +908,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="agenda-placeholder-card__actions">
                         <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
                         <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="prazos">Prazos</button>
+                        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="etiquetas">Etiquetas</button>
                     </div>
                 </div>
             </div>
@@ -3599,6 +3600,24 @@ document.addEventListener('DOMContentLoaded', function() {
         return ids;
     };
 
+    const openEtiquetasBulkModal = () => {
+        const ids = getSelectedProcessIds();
+        if (!ids.length) {
+            createSystemAlert('Agenda Geral', 'Selecione ao menos um processo.');
+            return;
+        }
+        if (typeof window.nowlexEtiquetaBulkIds !== 'function') {
+            window.nowlexEtiquetaBulkIds = () => getSelectedProcessIds();
+        }
+        const trigger = document.getElementById('open-etiqueta-modal');
+        if (trigger) {
+            trigger.setAttribute('data-bulk', '1');
+            trigger.click();
+            return;
+        }
+        createSystemAlert('Agenda Geral', 'Modal de etiquetas indisponível.');
+    };
+
     const getCurrentUserLabel = () => {
         const userTools = document.getElementById('user-tools');
         if (!userTools) return 'Você';
@@ -4414,6 +4433,10 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 const type = btn.getAttribute('data-agenda-action');
+                if (type === 'etiquetas') {
+                    openEtiquetasBulkModal();
+                    return;
+                }
                 openAgendaForm(type);
             });
         });

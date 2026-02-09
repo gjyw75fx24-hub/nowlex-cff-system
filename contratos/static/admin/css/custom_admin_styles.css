@@ -1180,14 +1180,17 @@ a.historylink {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px;
+    padding: 6px;
+    --agenda-icon-offset: 39px;
     border-radius: 9px;
     background: linear-gradient(135deg, #0d2f44, #115a78);
     box-shadow: 0 4px 12px rgba(19, 43, 66, 0.35);
     color: #f4fbff;
     border: 1px solid rgba(255, 255, 255, 0.18);
     flex-wrap: wrap;
-    width: 100%;
+    width: calc(100% - 6px);
+    margin-right: 6px;
+    margin-left: 6px;
     box-sizing: border-box;
     min-height: 102px;
     padding-bottom: 10px;
@@ -1241,19 +1244,23 @@ a.historylink {
 }
 
 .agenda-placeholder-card__actions {
-    display: flex;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
     margin-top: 12px;
+    width: 100%;
 }
 .agenda-placeholder-card__btn {
     border: none;
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
-    font-size: 0.72rem;
-    padding: 6px 12px;
+    font-size: 0.68rem;
+    padding: 6px 6px;
     border-radius: 8px;
     cursor: pointer;
     transition: background 0.2s ease;
+    width: 100%;
+    text-align: center;
 }
 .agenda-placeholder-card__btn:hover {
     background: rgba(255, 255, 255, 0.25);

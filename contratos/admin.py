@@ -2643,6 +2643,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom_urls = [
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
+            path('etiquetas/bulk/', self.admin_site.admin_view(self.etiquetas_bulk_view), name='processo_etiquetas_bulk'),
             path('<path:object_id>/checagem-sistemas/', self.admin_site.admin_view(self.checagem_sistemas_view), name='processo_checagem_sistemas'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
@@ -2705,6 +2706,71 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 return JsonResponse({'error': 'Usuário inválido'}, status=400)
         updated = self.model.objects.filter(pk__in=pk_list).update(delegado_para=user)
         return JsonResponse({'updated': updated})
+
+    def etiquetas_bulk_view(self, request):
+        if not self.has_change_permission(request):
+            return JsonResponse({'error': 'Permissão negada.'}, status=403)
+
+        def _parse_ids(value):
+            if value is None:
+                return []
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    return []
+                value = value.split(',')
+            if not isinstance(value, (list, tuple)):
+                value = [value]
+            ids = []
+            for item in value:
+                try:
+                    ids.append(int(item))
+                except (TypeError, ValueError):
+                    continue
+            return ids
+
+        if request.method == 'GET':
+            ids_raw = request.GET.get('ids')
+            pk_list = _parse_ids(ids_raw)
+            if not pk_list:
+                return JsonResponse({'error': 'Nenhum processo selecionado.'}, status=400)
+            processos = ProcessoJudicial.objects.filter(pk__in=pk_list)
+            if processos.count() != len(pk_list):
+                return JsonResponse({'error': 'Um ou mais processos não foram encontrados.'}, status=400)
+
+            todas_etiquetas = list(Etiqueta.objects.order_by('ordem', 'nome').values('id', 'nome', 'cor_fundo', 'cor_fonte'))
+            etiquetas_ids = None
+            for processo in processos:
+                ids_set = set(processo.etiquetas.values_list('id', flat=True))
+                etiquetas_ids = ids_set if etiquetas_ids is None else (etiquetas_ids & ids_set)
+            etiquetas_ids = etiquetas_ids or set()
+            etiquetas_processo = list(Etiqueta.objects.filter(id__in=etiquetas_ids).values('id', 'nome', 'cor_fundo', 'cor_fonte'))
+            return JsonResponse({'todas_etiquetas': todas_etiquetas, 'etiquetas_processo': etiquetas_processo})
+
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido'}, status=405)
+
+        try:
+            data = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Dados inválidos.'}, status=400)
+
+        pk_list = _parse_ids(data.get('ids'))
+        etiqueta_id = data.get('etiqueta_id')
+        action = data.get('action')
+        if not pk_list:
+            return JsonResponse({'error': 'Nenhum processo selecionado.'}, status=400)
+        if not etiqueta_id:
+            return JsonResponse({'error': 'Etiqueta inválida.'}, status=400)
+        etiqueta = get_object_or_404(Etiqueta, pk=etiqueta_id)
+        processos = ProcessoJudicial.objects.filter(pk__in=pk_list)
+        if action == 'add':
+            etiqueta.processojudicial_set.add(*processos)
+            return JsonResponse({'status': 'added', 'updated': processos.count()})
+        if action == 'remove':
+            etiqueta.processojudicial_set.remove(*processos)
+            return JsonResponse({'status': 'removed', 'updated': processos.count()})
+        return JsonResponse({'error': 'Ação inválida.'}, status=400)
 
     def etiquetas_view(self, request, object_id):
         processo = get_object_or_404(ProcessoJudicial, pk=object_id)
