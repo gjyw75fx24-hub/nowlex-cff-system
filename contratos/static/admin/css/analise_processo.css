@@ -80,6 +80,30 @@
     color: #333;
 }
 
+.analise-type-badge {
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.analise-completar-badge {
+    margin-left: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    color: #9a3412;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
 .analise-summary-card-header button {
     margin-left: 10px;
     padding: 5px 10px;
@@ -96,6 +120,14 @@
 }
 .analise-toggle-btn:hover {
     background-color: #0056b3;
+}
+
+.analise-summary-card-copy {
+    background-color: #6c757d;
+    color: white;
+}
+.analise-summary-card-copy:hover {
+    background-color: #545b62;
 }
 
 .analise-edit-btn {
@@ -168,6 +200,45 @@
     font-size: 0.95rem;
     color: #2d3a4b;
     line-height: 1.45;
+}
+
+.cff-analysis-type-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1700;
+}
+
+.cff-analysis-type-modal {
+    width: min(520px, calc(100vw - 32px));
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    padding: 20px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cff-analysis-type-modal h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.cff-analysis-type-select {
+    width: 100%;
+    min-height: 38px;
+}
+
+.cff-analysis-type-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
 }
 .cff-dialog-link {
     color: #0b73d6;

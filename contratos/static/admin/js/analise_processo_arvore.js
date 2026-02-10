@@ -97,6 +97,7 @@
          */
 
         const decisionTreeApiUrl = '/api/decision-tree/';
+        const analysisTypesApiUrl = '/api/analysis-types/';
         const DECISION_TREE_CACHE_KEY = 'nowlex_cache_v1:decision_tree_config';
         const DECISION_TREE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
         const readSessionCache = (key, ttlMs) => {
@@ -132,6 +133,11 @@
         let treeResponseKeys = [];
         let userResponses = {};
         let firstQuestionKey = null;
+        let activeAnalysisType = null;
+        let analysisTypesById = {};
+        let showOnlyPendingCompletion = false;
+        let decisionTreeFetchSeq = 0;
+        let decisionTreeLatestSeq = 0;
         const currentProcessoId =
             $('input[name="object_id"]').val() ||
             (window.location.pathname.match(/processojudicial\/([^/]+)/) || [])[1] ||
@@ -483,11 +489,12 @@
             return 'Monitória Jurídica';
         }
 
-        function restoreTreeFromGeneralSnapshot() {
-            const snapshot = getGeneralCardSnapshot();
-            if (!snapshot || !snapshot.responses) {
-                return;
-            }
+	        function restoreTreeFromGeneralSnapshot() {
+	            analysisHasStarted = true;
+	            const snapshot = getGeneralCardSnapshot();
+	            if (!snapshot || !snapshot.responses) {
+	                return;
+	            }
             ensureUserResponsesShape();
 
             const keysToRestore = Array.from(
@@ -1181,6 +1188,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             if (!card) {
                 return null;
             }
+
+            // Esta sincronização é específica do fluxo de "Não Judicializado" em Monitórias.
+            // Em outros tipos (ex.: Passivas), não deve sobrescrever campos do card (como supervisão).
+            const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+            if (!isMonitoria || !isCardNonJudicialized(card)) {
+                return card;
+            }
+
             const monitoriaIds = Array.from(
                 new Set(
                     (userResponses.contratos_para_monitoria || [])
@@ -1227,9 +1242,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     : null;
 
             if (editingIndex !== null) {
+                // Só sincroniza automaticamente o fluxo especial de "Não Judicializado" (Monitórias).
+                // Para Passivas e demais tipos, as edições já estão em processos_vinculados[0].
                 syncEditingCardWithCurrentResponses();
             }
             let snapshots = buildSnapshotsFromProcessosVinculados();
+            if (editingIndex !== null && Array.isArray(snapshots) && snapshots.length > 1) {
+                // Em modo de edição, só deve atualizar o card em edição.
+                snapshots = [snapshots[0]];
+            }
             if (!snapshots.length) {
                 const fallback = captureActiveAnalysisSnapshot();
                 if (fallback) {
@@ -1241,6 +1262,13 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
 
             const timestamp = new Date().toISOString();
+            const analysisTypeSnapshot = activeAnalysisType && activeAnalysisType.id != null ? {
+                id: activeAnalysisType.id,
+                nome: activeAnalysisType.nome,
+                slug: activeAnalysisType.slug,
+                hashtag: activeAnalysisType.hashtag,
+                versao: activeAnalysisType.versao
+            } : null;
 
             const snapshotsToPersist = snapshots.slice();
             if (
@@ -1252,6 +1280,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const snapshotToUpdate = snapshotsToPersist.shift();
                 snapshotToUpdate.saved_at = timestamp;
                 snapshotToUpdate.updated_at = timestamp;
+                if (analysisTypeSnapshot) {
+                    snapshotToUpdate.analysis_type = analysisTypeSnapshot;
+                }
                 snapshotToUpdate.general_card_snapshot =
                     savedCards[editingIndex].general_card_snapshot || false;
                 savedCards[editingIndex] = snapshotToUpdate;
@@ -1260,6 +1291,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             snapshotsToPersist.forEach(snapshot => {
                 snapshot.saved_at = timestamp;
                 snapshot.updated_at = timestamp;
+                if (analysisTypeSnapshot) {
+                    snapshot.analysis_type = analysisTypeSnapshot;
+                }
                 appendProcessCardToHistory(snapshot);
             });
 
@@ -1357,10 +1391,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const updatedCard = deepClone(cardData);
             ensureSupervisionFields(updatedCard);
             savedCards[editIndex] = updatedCard;
-            if (!Array.isArray(userResponses.processos_vinculados)) {
-                userResponses.processos_vinculados = [];
-            }
-            userResponses.processos_vinculados[editIndex] = updatedCard;
+            // Durante edição, mantemos o card ativo em processos_vinculados[0]
+            // (evita array esparso que quebra a atualização do snapshot ao concluir).
+            userResponses.processos_vinculados = [updatedCard];
         }
 
         function showEditModeIndicator(cnj, cardIndex) {
@@ -1425,12 +1458,13 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             );
         }
 
-        function restoreTreeFromCard(cardIndex) {
-            const parsedIndex = Number(cardIndex);
-            if (!Number.isFinite(parsedIndex)) {
-                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
-                return;
-            }
+	        function restoreTreeFromCard(cardIndex) {
+	            analysisHasStarted = true;
+	            const parsedIndex = Number(cardIndex);
+	            if (!Number.isFinite(parsedIndex)) {
+	                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
+	                return;
+	            }
             cardIndex = parsedIndex;
     
             console.log('=== INICIANDO EDIÇÃO DO CARD ===', cardIndex);
@@ -1444,52 +1478,79 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 return;
             }
 
-            console.log('Card encontrado:', cardData);
+            const cardTipoId = cardData && cardData.analysis_type && cardData.analysis_type.id != null
+                ? String(cardData.analysis_type.id)
+                : '';
+            const currentTipoId = activeAnalysisType && activeAnalysisType.id != null
+                ? String(activeAnalysisType.id)
+                : '';
 
-            clearTreeResponsesForNewAnalysis();
-            userResponses.processos_vinculados = [deepClone(cardData)];
-            ensureUserResponsesShape();
-    
-            const savedResponses = cardData.tipo_de_acao_respostas || {};
+            const proceedRestore = () => {
+                console.log('Card encontrado:', cardData);
 
-            console.log('🔍 Verificando primeira pergunta...');
-            if (!savedResponses.hasOwnProperty('judicializado_pela_massa') || !savedResponses.judicializado_pela_massa) {
-                console.log('⚠️ Primeira pergunta faltando!');
-                if (savedResponses.tipo_de_acao && savedResponses.tipo_de_acao.trim() !== '') {
-                    console.log('→ Tem tipo_de_acao =', savedResponses.tipo_de_acao);
-                    console.log('→ Inferindo: judicializado_pela_massa = "SIM"');
-                    savedResponses.judicializado_pela_massa = 'SIM';
-                    userResponses.judicializado_pela_massa = 'SIM';
-                } else if (savedResponses.propor_monitoria) {
-                    console.log('→ Tem propor_monitoria =', savedResponses.propor_monitoria);
-                    console.log('→ Inferindo: judicializado_pela_massa = "NÃO"');
-                    savedResponses.judicializado_pela_massa = 'NÃO';
-                    userResponses.judicializado_pela_massa = 'NÃO';
-                } else {
-                    console.log('→ Nenhuma pista, usando padrão = "NÃO"');
-                    savedResponses.judicializado_pela_massa = 'NÃO';
-                    userResponses.judicializado_pela_massa = 'NÃO';
+                clearTreeResponsesForNewAnalysis();
+                userResponses.processos_vinculados = [deepClone(cardData)];
+                ensureUserResponsesShape();
+
+                const savedResponses = cardData.tipo_de_acao_respostas || {};
+                const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+
+                if (isMonitoria) {
+                    console.log('🔍 Verificando primeira pergunta...');
+                    if (!savedResponses.hasOwnProperty('judicializado_pela_massa') || !savedResponses.judicializado_pela_massa) {
+                        console.log('⚠️ Primeira pergunta faltando!');
+                        if (savedResponses.tipo_de_acao && savedResponses.tipo_de_acao.trim() !== '') {
+                            console.log('→ Tem tipo_de_acao =', savedResponses.tipo_de_acao);
+                            console.log('→ Inferindo: judicializado_pela_massa = "SIM"');
+                            savedResponses.judicializado_pela_massa = 'SIM';
+                            userResponses.judicializado_pela_massa = 'SIM';
+                        } else if (savedResponses.propor_monitoria) {
+                            console.log('→ Tem propor_monitoria =', savedResponses.propor_monitoria);
+                            console.log('→ Inferindo: judicializado_pela_massa = "NÃO"');
+                            savedResponses.judicializado_pela_massa = 'NÃO';
+                            userResponses.judicializado_pela_massa = 'NÃO';
+                        } else {
+                            console.log('→ Nenhuma pista, usando padrão = "NÃO"');
+                            savedResponses.judicializado_pela_massa = 'NÃO';
+                            userResponses.judicializado_pela_massa = 'NÃO';
+                        }
+                        console.log('✅ Primeira pergunta inferida:', savedResponses.judicializado_pela_massa);
+                    } else {
+                        console.log('✅ Primeira pergunta já existe:', savedResponses.judicializado_pela_massa);
+                    }
                 }
-                console.log('✅ Primeira pergunta inferida:', savedResponses.judicializado_pela_massa);
+
+                console.log('Respostas salvas:', savedResponses);
+
+                Object.keys(savedResponses).forEach(key => {
+                    userResponses[key] = deepClone(savedResponses[key]);
+                    console.log(`Carregando: ${key} =`, savedResponses[key]);
+                });
+
+                if (isMonitoria) {
+                    const contratoArray = parseContractsField(cardData.contratos);
+                    userResponses.contratos_para_monitoria = contratoArray;
+                    userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
+                }
+
+                console.log('UserResponses completo:', userResponses);
+
+                console.log('Renderizando árvore...');
+                renderDecisionTree();
+            };
+
+	            const cardTipoVersao = cardData && cardData.analysis_type ? cardData.analysis_type.versao : null;
+
+	            if (cardTipoId && cardTipoId !== currentTipoId) {
+	                fetchDecisionTreeConfig({ tipoId: cardTipoId, tipoVersao: cardTipoVersao, forceReload: false })
+	                    .done(proceedRestore)
+	                    .fail(() => {
+	                        console.error('Falha ao carregar Tipo de Análise do card:', cardTipoId);
+	                        proceedRestore();
+	                    });
             } else {
-                console.log('✅ Primeira pergunta já existe:', savedResponses.judicializado_pela_massa);
+                proceedRestore();
             }
-    
-            console.log('Respostas salvas:', savedResponses);
-    
-            Object.keys(savedResponses).forEach(key => {
-                userResponses[key] = deepClone(savedResponses[key]);
-                console.log(`Carregando: ${key} =`, savedResponses[key]);
-            });
-
-            const contratoArray = parseContractsField(cardData.contratos);
-            userResponses.contratos_para_monitoria = contratoArray;
-            userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
-
-            console.log('UserResponses completo:', userResponses);
-
-            console.log('Renderizando árvore...');
-            renderDecisionTree();
 
             setTimeout(() => {
                 console.log('=== INICIANDO POPULAÇÃO EM CASCATA ===');
@@ -1719,8 +1780,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }, 800); // Aumentado para aguardar todos os delays escalonados
         }
 
-        function startNewAnalysis(options = {}) {
-            ensureUserResponsesShape();
+	        function startNewAnalysis(options = {}) {
+	            analysisHasStarted = true;
+	            ensureUserResponsesShape();
 
             hasUserActivatedCardSelection = false;
 
@@ -1761,7 +1823,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 supervisionado: snapshot.responses && snapshot.responses.supervisionado,
                 supervisor_status: snapshot.responses && snapshot.responses.supervisor_status,
                 barrado: snapshot.responses && snapshot.responses.barrado ? { ...snapshot.responses.barrado } : { ativo: false, inicio: null, retorno_em: null },
-                general_card_snapshot: true
+                general_card_snapshot: true,
+                analysis_type: activeAnalysisType && activeAnalysisType.id != null ? {
+                    id: activeAnalysisType.id,
+                    nome: activeAnalysisType.nome,
+                    slug: activeAnalysisType.slug,
+                    hashtag: activeAnalysisType.hashtag,
+                    versao: activeAnalysisType.versao
+                } : null
             };
             if (existingGeneralIndex > -1) {
                 savedCards.splice(existingGeneralIndex, 1);
@@ -2382,6 +2451,77 @@ function formatCnjDigits(raw) {
             return String(value);
         }
 
+        function formatDateIsoToBr(value) {
+            const raw = String(value || '').trim();
+            const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) return raw;
+            return `${match[3]}/${match[2]}/${match[1]}`;
+        }
+
+        function getTreeDataForSnapshotAnalysisType(analysisType) {
+            const tipo = analysisType && typeof analysisType === 'object' ? analysisType : null;
+            const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
+            const tipoVersao = tipo && tipo.versao != null ? String(tipo.versao) : '';
+            if (!tipoId) return null;
+            const cacheKeyBase = `${DECISION_TREE_CACHE_KEY}:${tipoId}`;
+            const cacheKey = tipoVersao ? `${cacheKeyBase}:v${tipoVersao}` : cacheKeyBase;
+            const cached = readSessionCache(cacheKey, DECISION_TREE_CACHE_TTL_MS);
+            if (cached && cached.tree_data) {
+                return cached.tree_data || null;
+            }
+            return null;
+        }
+
+        function getAnsweredFieldEntriesFromTree(processo, options = {}) {
+            if (!processo || typeof processo !== 'object') {
+                return [];
+            }
+            const excludeFields = Array.isArray(options.excludeFields)
+                ? options.excludeFields
+                : [];
+            const treeData = options.treeData || treeConfig || {};
+            const responses = (processo && processo.tipo_de_acao_respostas) || processo || {};
+
+            const keysOrdered = Object.keys(treeData || {})
+                .filter(Boolean)
+                .filter(k => {
+                    const q = treeData[k];
+                    if (!q) return false;
+                    if (excludeFields.includes(k)) return false;
+                    if (q.tipo_campo === 'PROCESSO_VINCULADO') return false;
+                    if (q.tipo_campo === 'CONTRATOS_MONITORIA') return false;
+                    // evita ruídos específicos de monitória
+                    if (k === 'contratos_para_monitoria') return false;
+                    if (k === 'ativar_botao_monitoria') return false;
+                    return true;
+                })
+                .sort((a, b) => {
+                    const oa = treeData[a]?.ordem ?? 9999;
+                    const ob = treeData[b]?.ordem ?? 9999;
+                    return oa - ob;
+                });
+
+            const entries = [];
+            keysOrdered.forEach(key => {
+                let value = responses[key];
+                if (value === undefined || value === null || value === '') {
+                    return;
+                }
+                const q = treeData[key];
+                let displayValue = value;
+                if (q?.tipo_campo === 'DATA') {
+                    displayValue = formatDateIsoToBr(value);
+                }
+                entries.push({
+                    label: q?.texto_pergunta || key,
+                    value: formatAnsweredValue(key, displayValue, {
+                        contractInfos: options.contractInfos
+                    })
+                });
+            });
+            return entries;
+        }
+
         function getAnsweredFieldEntries(processo, options = {}) {
             if (!processo || typeof processo !== 'object') {
                 return [];
@@ -2509,6 +2649,11 @@ function formatCnjDigits(raw) {
                 );
             }
 
+            const tipoSnapshotText = normalizeDecisionText(
+                (processo?.analysis_type?.slug || processo?.analysis_type?.nome || activeAnalysisType?.slug || activeAnalysisType?.nome || '')
+            );
+            const isPassivasSnapshot = tipoSnapshotText.includes('PASSIV');
+
             const totalDevido = contratoInfos.reduce(
                 (acc, c) => acc + (c.valor_total_devido || 0),
                 0
@@ -2521,12 +2666,23 @@ function formatCnjDigits(raw) {
                 (acc, c) => acc + (c.custas || 0),
                 0
             );
-            $ulDetalhes.append(
-                `<li><strong>Saldo devedor:</strong> ${formatCurrency(totalDevido)}</li>`
-            );
-            $ulDetalhes.append(
-                `<li><strong>Saldo atualizado:</strong> ${formatCurrency(totalCausa)}</li>`
-            );
+            if (!isPassivasSnapshot) {
+                $ulDetalhes.append(
+                    `<li><strong>Saldo devedor:</strong> ${formatCurrency(totalDevido)}</li>`
+                );
+                $ulDetalhes.append(
+                    `<li><strong>Saldo atualizado:</strong> ${formatCurrency(totalCausa)}</li>`
+                );
+            } else {
+                const valorCausaProcesso = parseCurrencyValue(processo?.valor_causa);
+                const valorCausaDisplay =
+                    valorCausaProcesso != null
+                        ? formatCurrency(valorCausaProcesso)
+                        : formatCurrency(0);
+                $ulDetalhes.append(
+                    `<li><strong>Valor da causa:</strong> ${valorCausaDisplay}</li>`
+                );
+            }
             const firstContractId = contratoInfos.length ? contratoInfos[0].id : null;
             const $custasInput = $('<input type="text" class="analise-custas-input">');
             $custasInput.val(formatCurrency(totalCustas));
@@ -2540,12 +2696,24 @@ function formatCnjDigits(raw) {
             $custasLine.append($custasInput);
             $ulDetalhes.append($custasLine);
 
-            const fieldEntries = getAnsweredFieldEntries(processo, {
-                excludeFields: options.excludeFields || [],
-                contractInfos: monitoriaInfos
-            });
+            const snapshotTreeData = isPassivasSnapshot
+                ? (getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || treeConfig || {})
+                : null;
+
+            const fieldEntries = isPassivasSnapshot
+                ? getAnsweredFieldEntriesFromTree(processo, {
+                    excludeFields: options.excludeFields || [],
+                    contractInfos: monitoriaInfos,
+                    treeData: snapshotTreeData
+                })
+                : getAnsweredFieldEntries(processo, {
+                    excludeFields: options.excludeFields || [],
+                    contractInfos: monitoriaInfos
+                });
             if (fieldEntries.length) {
-                const $liAcao = $('<li><strong>Resultado da Análise:</strong><ul></ul></li>');
+                const $liAcao = $(
+                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`
+                );
                 const $ulAcao = $liAcao.find('ul');
                 fieldEntries.forEach(entry => {
                     $ulAcao.append(
@@ -2890,6 +3058,18 @@ function formatCnjDigits(raw) {
 
             ensureUserResponsesShape();
 
+            const isCardPendingCompletion = (processo) => {
+                const cardType = processo && processo.analysis_type;
+                if (!cardType || cardType.id == null) {
+                    return false;
+                }
+                const latest = analysisTypesById[String(cardType.id)];
+                if (!latest || latest.versao == null || cardType.versao == null) {
+                    return false;
+                }
+                return Number(cardType.versao) < Number(latest.versao);
+            };
+
             const generalSnapshot = getGeneralCardSnapshot();
             const generalSnapshotReady = generalSnapshot &&
                 Array.isArray(generalSnapshot.contracts) &&
@@ -2942,9 +3122,27 @@ function formatCnjDigits(raw) {
 
             /* ---------- Cards de Processos CNJ vinculados ---------- */
 
-            const processosVinculados = getCombinedProcessCardsForSummary();
-            if (Array.isArray(processosVinculados) && processosVinculados.length > 0) {
-                processosVinculados.forEach((processo, idx) => {
+            const combinedCards = getCombinedProcessCardsForSummary();
+            const pendingCount = Array.isArray(combinedCards)
+                ? combinedCards.filter(isCardPendingCompletion).length
+                : 0;
+            if (pendingCount > 0) {
+                const $filterBtn = $(
+                    `<button type="button" class="button button-secondary analise-filter-completar">${showOnlyPendingCompletion ? 'Mostrar Todas' : 'Completar Análise'} (${pendingCount})</button>`
+                );
+                $filterBtn.on('click', () => {
+                    showOnlyPendingCompletion = !showOnlyPendingCompletion;
+                    displayFormattedResponses();
+                });
+                $headerContainer.append($filterBtn);
+            }
+
+            const processosVinculados = Array.isArray(combinedCards) ? combinedCards : [];
+            const visibleProcessos = showOnlyPendingCompletion
+                ? processosVinculados.filter(isCardPendingCompletion)
+                : processosVinculados;
+            if (Array.isArray(visibleProcessos) && visibleProcessos.length > 0) {
+                visibleProcessos.forEach((processo, idx) => {
                     if (
                         processo &&
                         typeof processo.cnj === 'string' &&
@@ -2964,6 +3162,22 @@ function formatCnjDigits(raw) {
                     $headerVinculado.append(
                         `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
                     );
+                    const tipoAnaliseNome = processo && processo.analysis_type && processo.analysis_type.nome
+                        ? String(processo.analysis_type.nome).trim()
+                        : '';
+                    if (tipoAnaliseNome) {
+                        const $tipoBadge = $(`<small class="analise-type-badge" title="Tipo de Análise">${tipoAnaliseNome}</small>`);
+                        $headerVinculado.append($tipoBadge);
+                    }
+                    const latestTipo = processo && processo.analysis_type && processo.analysis_type.id != null
+                        ? analysisTypesById[String(processo.analysis_type.id)]
+                        : null;
+                    const cardVersao = processo && processo.analysis_type ? Number(processo.analysis_type.versao) : NaN;
+                    const latestVersao = latestTipo ? Number(latestTipo.versao) : NaN;
+                    if (Number.isFinite(cardVersao) && Number.isFinite(latestVersao) && cardVersao < latestVersao) {
+                        const $pendingBadge = $('<small class="analise-completar-badge" title="Há atualização pendente neste tipo de análise">Completar</small>');
+                        $headerVinculado.append($pendingBadge);
+                    }
                     const summaryStatus = buildSummaryStatusMetadata(processo, {
                         showAlways: Boolean(processo.supervisionado)
                     });
@@ -2978,6 +3192,8 @@ function formatCnjDigits(raw) {
                     }
                     const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
                     $headerVinculado.append($toggleBtnVinculado);
+                    const $copyBtn = $('<button type="button" class="analise-summary-card-copy" title="Copiar referência para colar no caderno">Copiar</button>');
+                    $headerVinculado.append($copyBtn);
                     const $deleteBtn = $('<button type="button" class="analise-summary-card-delete" title="Excluir esta análise">✕</button>');
                     $headerVinculado.append($deleteBtn);
                     const $editBtn = $('<button type="button" class="analise-summary-card-edit" title="Editar esta análise">Editar</button>');
@@ -2988,6 +3204,36 @@ function formatCnjDigits(raw) {
                     $editBtn.attr('data-saved-index', savedIndexAttr);
                     $editBtn.attr('data-cnj', snapshot.cnj || '');
                     $editBtn.attr('data-visual-index', String(cardIndex));
+                    $copyBtn.on('click', function (event) {
+                        event.stopPropagation();
+                        const tipoHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
+                            ? String(processo.analysis_type.hashtag).trim()
+                            : '';
+                        const contratosLine = snapshot.contractIds && snapshot.contractIds.length
+                            ? `Contratos: ${snapshot.contractIds.join(', ')}`
+                            : '';
+                        const text = [tipoHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
+                            .filter(Boolean)
+                            .join('\n');
+                        const finish = () => showCffSystemDialog('Referência copiada para colar no caderno.', 'success');
+                        if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(text).then(finish).catch(() => {
+                                showCffSystemDialog('Não foi possível copiar automaticamente. Copie manualmente.', 'warning');
+                            });
+                        } else {
+                            try {
+                                const textarea = document.createElement('textarea');
+                                textarea.value = text;
+                                document.body.appendChild(textarea);
+                                textarea.select();
+                                document.execCommand('copy');
+                                textarea.remove();
+                                finish();
+                            } catch (e) {
+                                showCffSystemDialog('Não foi possível copiar automaticamente. Copie manualmente.', 'warning');
+                            }
+                        }
+                    });
                     $deleteBtn.on('click', function () {
                         const tryMarkDeletion = (card) => {
                             if (card && card.nj_label && isCardNonJudicialized(card)) {
@@ -3530,10 +3776,16 @@ function formatCnjDigits(raw) {
          * Carregar árvore do backend
          * ======================================================= */
 
-        function fetchDecisionTreeConfig() {
-            const deferredConfig = $.Deferred();
-            const cachedConfig = readSessionCache(DECISION_TREE_CACHE_KEY, DECISION_TREE_CACHE_TTL_MS);
-            if (cachedConfig) {
+	        function fetchDecisionTreeConfig() {
+	            const options = arguments.length ? (arguments[0] || {}) : {};
+	            const tipoId = options.tipoId != null ? String(options.tipoId) : '';
+	            const tipoVersao = options.tipoVersao != null ? String(options.tipoVersao) : '';
+	            const cacheKeyBase = tipoId ? `${DECISION_TREE_CACHE_KEY}:${tipoId}` : DECISION_TREE_CACHE_KEY;
+	            const cacheKey = tipoVersao ? `${cacheKeyBase}:v${tipoVersao}` : cacheKeyBase;
+	            const forceReload = Boolean(options.forceReload);
+	            const deferredConfig = $.Deferred();
+	            const cachedConfig = !forceReload ? readSessionCache(cacheKey, DECISION_TREE_CACHE_TTL_MS) : null;
+            if (cachedConfig && cachedConfig.tree_data) {
                 treeConfig = cachedConfig.tree_data || {};
                 treeResponseKeys = Array.from(
                     new Set(
@@ -3543,15 +3795,24 @@ function formatCnjDigits(raw) {
                     )
                 );
                 firstQuestionKey = cachedConfig.primeira_questao_chave || null;
+                activeAnalysisType = cachedConfig.analysis_type || null;
                 deferredConfig.resolve();
                 return deferredConfig.promise();
             }
 
+            const seq = ++decisionTreeFetchSeq;
+            decisionTreeLatestSeq = seq;
+
             $.ajax({
                 url: decisionTreeApiUrl,
                 method: 'GET',
+                data: tipoId ? { tipo_id: tipoId } : {},
                 dataType: 'json',
                 success: function (data) {
+                    if (seq !== decisionTreeLatestSeq) {
+                        deferredConfig.reject();
+                        return;
+                    }
                     if (data.status === 'success') {
                         treeConfig = data.tree_data || {};
                         treeResponseKeys = Array.from(
@@ -3562,9 +3823,11 @@ function formatCnjDigits(raw) {
                             )
                         );
                         firstQuestionKey = data.primeira_questao_chave || null;
-                        writeSessionCache(DECISION_TREE_CACHE_KEY, {
+                        activeAnalysisType = data.analysis_type || null;
+                        writeSessionCache(cacheKey, {
                             tree_data: treeConfig,
-                            primeira_questao_chave: firstQuestionKey
+                            primeira_questao_chave: firstQuestionKey,
+                            analysis_type: activeAnalysisType
                         });
                         deferredConfig.resolve();
                     } else {
@@ -3587,12 +3850,93 @@ function formatCnjDigits(raw) {
             return deferredConfig.promise();
         }
 
+        function fetchAnalysisTypes() {
+            const deferred = $.Deferred();
+            $.ajax({
+                url: analysisTypesApiUrl,
+                method: 'GET',
+                dataType: 'json',
+                success: function (data) {
+                    if (data && data.status === 'success' && Array.isArray(data.types)) {
+                        analysisTypesById = {};
+                        data.types.forEach(tipo => {
+                            if (tipo && tipo.id != null) {
+                                analysisTypesById[String(tipo.id)] = tipo;
+                            }
+                        });
+                        deferred.resolve(data.types);
+                        return;
+                    }
+                    deferred.reject();
+                },
+                error: function () {
+                    deferred.reject();
+                }
+            });
+            return deferred.promise();
+        }
+
+        function promptSelectAnalysisType(types) {
+            const deferred = $.Deferred();
+            const list = (types || []).filter(Boolean);
+            if (list.length === 0) {
+                deferred.reject();
+                return deferred.promise();
+            }
+            if (list.length === 1) {
+                deferred.resolve(list[0]);
+                return deferred.promise();
+            }
+
+            const overlay = document.createElement('div');
+            overlay.className = 'cff-analysis-type-overlay';
+            overlay.innerHTML = `
+                <div class="cff-analysis-type-modal" role="dialog" aria-modal="true">
+                    <h3>Selecione o Tipo de Análise</h3>
+                    <select class="cff-analysis-type-select"></select>
+                    <div class="cff-analysis-type-actions">
+                        <button type="button" class="button button-secondary cff-analysis-type-cancel">Cancelar</button>
+                        <button type="button" class="button cff-analysis-type-confirm">Continuar</button>
+                    </div>
+                </div>
+            `;
+            const select = overlay.querySelector('.cff-analysis-type-select');
+            list.forEach(tipo => {
+                const opt = document.createElement('option');
+                opt.value = String(tipo.id);
+                opt.textContent = tipo.nome || tipo.slug || `Tipo ${tipo.id}`;
+                select.appendChild(opt);
+            });
+            if (activeAnalysisType && activeAnalysisType.id != null) {
+                select.value = String(activeAnalysisType.id);
+            }
+            const cleanup = () => {
+                overlay.remove();
+            };
+            overlay.querySelector('.cff-analysis-type-cancel').addEventListener('click', () => {
+                cleanup();
+                deferred.reject({ cancelled: true });
+            });
+            overlay.querySelector('.cff-analysis-type-confirm').addEventListener('click', () => {
+                const selectedId = select.value;
+                const selected = analysisTypesById[selectedId] || list.find(t => String(t.id) === String(selectedId));
+                cleanup();
+                if (selected) deferred.resolve(selected);
+                else deferred.reject();
+            });
+            document.body.appendChild(overlay);
+            return deferred.promise();
+        }
+
         /* =========================================================
          * Renderização da árvore (RAIZ)
          * ======================================================= */
 
-        function renderDecisionTree() {
-            $dynamicQuestionsContainer.empty();
+	        function renderDecisionTree() {
+	            if (analysisTypeSelectionInProgress || !analysisHasStarted) {
+	                return;
+	            }
+	            $dynamicQuestionsContainer.empty();
 
             if (!firstQuestionKey || !treeConfig[firstQuestionKey]) {
                 $dynamicQuestionsContainer.html(
@@ -3614,10 +3958,234 @@ function formatCnjDigits(raw) {
          * Validação Data de Trânsito (5 anos) + Nó "Análise de Prescrição"
          * ======================================================= */
 
-        function handleDataTransitoValidation(dataTransitoKey, selectedDate, currentResponses, cardIndex = null) {
-            if (dataTransitoKey !== 'data_de_transito') return;
+        function normalizeDecisionText(value) {
+            return String(value || '')
+                .trim()
+                .toUpperCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '');
+        }
 
+        function findQuestionKeyByLabelContains(predicateFn) {
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const q = treeConfig[k];
+                    if (!q) return false;
+                    const label = String(q.texto_pergunta || '').toLowerCase();
+                    return predicateFn(label, q, k);
+                }) || null
+            );
+        }
+
+        function findCumprimentoSentencaQuestionKey() {
+            if (treeConfig && treeConfig['cumprimento_de_sentenca']) {
+                return 'cumprimento_de_sentenca';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('cumprimento') && label.includes('senten');
+            });
+            if (foundByLabel) return foundByLabel;
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k =>
+                    normalizeDecisionText(k).includes('CUMPRIMENTO')
+                ) || null
+            );
+        }
+
+        function findTransitDateQuestionKey() {
+            if (treeConfig && treeConfig['data_de_transito']) {
+                return 'data_de_transito';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'DATA') return false;
+                return (
+                    label.includes('data do trânsito') ||
+                    label.includes('data do transito') ||
+                    label.includes('data de trânsito') ||
+                    label.includes('data de transito')
+                );
+            });
+            if (foundByLabel) return foundByLabel;
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const keyLower = String(k || '').toLowerCase();
+                    return keyLower.includes('transito') && keyLower.includes('data');
+                }) || null
+            );
+        }
+
+        function findProcedenciaQuestionKey() {
+            if (treeConfig && treeConfig['procedencia']) return 'procedencia';
+            return findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('proced');
+            });
+        }
+
+        function findJulgamentoQuestionKey() {
+            if (treeConfig && treeConfig['julgamento']) return 'julgamento';
+            return findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('julg');
+            });
+        }
+
+        function isIniciarCsOptionEl(optEl) {
+            const value = normalizeDecisionText(optEl?.value || '');
+            const text = normalizeDecisionText(optEl?.textContent || '');
+            const normalized = `${value} ${text}`;
+            return normalized.includes('CS') && normalized.includes('INICI');
+        }
+
+        function getProcedenciaScore(responses) {
+            const key = findProcedenciaQuestionKey();
+            const raw = key ? responses?.[key] : '';
+            const text = normalizeDecisionText(raw);
+            if (!text) return { score: null, label: null };
+            if (text.includes('NAO JULGAD')) return { score: null, label: 'NAO_JULGADO' };
+            if (text.includes('IMPROCED')) return { score: 100, label: 'IMPROCEDENTE' };
+            if (text.includes('PARCIAL')) return { score: 50, label: 'PARCIAL' };
+            if (text.includes('INTEGRAL')) return { score: 0, label: 'INTEGRAL' };
+            return { score: null, label: 'OUTRO' };
+        }
+
+        function getJulgamentoStatus(responses) {
+            const key = findJulgamentoQuestionKey();
+            const raw = key ? responses?.[key] : '';
+            const text = normalizeDecisionText(raw);
+            if (!text) return { status: null };
+            if (text.includes('NAO JULGAD')) return { status: 'NAO_JULGADO' };
+            if (text.includes('SEM') && text.includes('MERIT')) return { status: 'SEM_MERITO' };
+            return { status: 'COM_MERITO_OU_OUTRO' };
+        }
+
+        function getTransitDateValue(responses) {
+            const key = findTransitDateQuestionKey();
+            if (!key) return null;
+            const val = responses ? responses[key] : null;
+            return val || null;
+        }
+
+        function updateCumprimentoSentencaEligibility(currentResponses, cardIndex = null) {
             const prefix = cardIndex !== null ? `card_${cardIndex}_` : '';
+
+            let $scope;
+            if (cardIndex !== null) {
+                $scope = $dynamicQuestionsContainer.find(
+                    `.processo-card[data-card-index="${cardIndex}"]`
+                );
+                if (!$scope.length) $scope = $dynamicQuestionsContainer;
+            } else {
+                $scope = $dynamicQuestionsContainer;
+            }
+
+            $scope.find('.cs-eligibility-aviso').remove();
+
+            const tipoText = normalizeDecisionText(
+                (activeAnalysisType && (activeAnalysisType.slug || activeAnalysisType.nome)) || ''
+            );
+            const isPassivas = tipoText.includes('PASSIV');
+            if (!isPassivas) return;
+
+            const cumprimentoKey = findCumprimentoSentencaQuestionKey();
+            if (!cumprimentoKey) return;
+
+            const $cumprimentoField = $scope.find(
+                `select[name="${prefix}${cumprimentoKey}"]`
+            );
+            if (!$cumprimentoField.length) return;
+
+            const transitValue = getTransitDateValue(currentResponses);
+            let transitTooOld = false;
+            if (transitValue) {
+                const dataSelecionada = new Date(transitValue);
+                if (!isNaN(dataSelecionada.getTime())) {
+                    const cincoAnosAtras = new Date();
+                    cincoAnosAtras.setFullYear(cincoAnosAtras.getFullYear() - 5);
+                    transitTooOld = dataSelecionada < cincoAnosAtras;
+                }
+            }
+
+            const procedencia = getProcedenciaScore(currentResponses);
+            const julgamento = getJulgamentoStatus(currentResponses);
+
+            const shouldDisableCs = Boolean(transitTooOld);
+            const disableReason = 'Prescrição: trânsito em julgado há mais de 5 anos.';
+
+            const warnings = [];
+            if (procedencia.score === 0) {
+                warnings.push(
+                    '⚠️ Procedência integral (desfavorável à B6): selecionar “Iniciar CS” aqui deve significar preparar defesa/impugnação no cumprimento de sentença.'
+                );
+            } else if (procedencia.score === 50) {
+                warnings.push(
+                    '⚠️ Procedência parcial: permitir “Iniciar CS”, mas revisar se há parte favorável executável e qual será a estratégia (defesa/execução).'
+                );
+            } else if (procedencia.score === null) {
+                warnings.push(
+                    '⚠️ Procedência não informada (ou “Não julgado”): revise antes de decidir por “Iniciar CS”.'
+                );
+            }
+            if (julgamento.status === 'SEM_MERITO') {
+                warnings.push(
+                    '⚠️ Julgamento sem mérito: em regra não há título executivo de mérito; confirme o cabimento de CS/medida correlata.'
+                );
+            } else if (julgamento.status === 'NAO_JULGADO') {
+                warnings.push(
+                    '⚠️ Julgamento “Não julgado”: confirme o estágio processual antes de decidir por CS.'
+                );
+            }
+
+            const $iniciarCsOptions = $cumprimentoField
+                .find('option')
+                .filter(function () {
+                    return isIniciarCsOptionEl(this);
+                });
+
+            $iniciarCsOptions.each(function () {
+                if (shouldDisableCs) {
+                    $(this).prop('disabled', true).attr('title', disableReason);
+                } else {
+                    if (!transitTooOld) {
+                        $(this).prop('disabled', false).removeAttr('title');
+                    }
+                }
+            });
+
+            const selectedOpt = $cumprimentoField.find('option:selected').get(0);
+            if (selectedOpt && isIniciarCsOptionEl(selectedOpt) && shouldDisableCs) {
+                $cumprimentoField.val('');
+                currentResponses[cumprimentoKey] = '';
+                saveResponses();
+            }
+
+            if (!shouldDisableCs && warnings.length) {
+                $cumprimentoField.after(
+                    `<p class="errornote cs-eligibility-aviso">${warnings.join('<br>')}</p>`
+                );
+            }
+        }
+
+	        function handleDataTransitoValidation(dataTransitoKey, selectedDate, currentResponses, cardIndex = null) {
+	            const transitQuestion = treeConfig ? treeConfig[dataTransitoKey] : null;
+	            const keyLower = String(dataTransitoKey || '').toLowerCase();
+	            const labelLower = String(transitQuestion?.texto_pergunta || '').toLowerCase();
+
+	            const isTransitDateField =
+	                keyLower === 'data_de_transito' ||
+	                labelLower.includes('data do trânsito') ||
+	                labelLower.includes('data do transito') ||
+	                labelLower.includes('data de trânsito') ||
+	                labelLower.includes('data de transito') ||
+	                (keyLower.includes('transito') && (keyLower.includes('data') || labelLower.includes('data')));
+
+	            if (!isTransitDateField) return;
+
+	            const prefix = cardIndex !== null ? `card_${cardIndex}_` : '';
 
             // limpa avisos apenas dentro do escopo correto
             let $scope;
@@ -3630,16 +4198,24 @@ function formatCnjDigits(raw) {
                 $scope = $dynamicQuestionsContainer;
             }
 
-            $scope.find('.data-transito-aviso').remove();
-            $scope.find('.analise-prescricao-node').remove();
+	            $scope.find('.data-transito-aviso').remove();
+	            $scope.find('.analise-prescricao-node').remove();
 
-            const $cumprimentoField = $scope.find(`select[name="${prefix}cumprimento_de_sentenca"]`);
-            const $iniciarCsOption = $cumprimentoField.find('option[value="INICIAR CS"]');
+	            const cumprimentoKey = findCumprimentoSentencaQuestionKey();
+	            const $cumprimentoField = cumprimentoKey
+	                ? $scope.find(`select[name="${prefix}${cumprimentoKey}"]`)
+	                : $();
 
-            if (!selectedDate) {
-                $iniciarCsOption.prop('disabled', false).removeAttr('title');
-                return;
-            }
+	            const $iniciarCsOption = $cumprimentoField.length
+	                ? $cumprimentoField.find('option').filter(function () {
+	                    return isIniciarCsOptionEl(this);
+	                })
+	                : $();
+
+	            if (!selectedDate) {
+	                $iniciarCsOption.prop('disabled', false).removeAttr('title');
+	                return;
+	            }
 
             const dataSelecionada = new Date(selectedDate);
             if (isNaN(dataSelecionada.getTime())) {
@@ -3649,21 +4225,29 @@ function formatCnjDigits(raw) {
             const cincoAnosAtras = new Date();
             cincoAnosAtras.setFullYear(cincoAnosAtras.getFullYear() - 5);
 
-            if (dataSelecionada < cincoAnosAtras) {
-                // PRESCRIÇÃO PRESUMIDA DA PRETENSÃO EXECUTÓRIA
-                $iniciarCsOption
-                    .prop('disabled', true)
-                    .attr('title', 'Prescrição: Trânsito em julgado há mais de 5 anos.');
+	            if (dataSelecionada < cincoAnosAtras) {
+	                // PRESCRIÇÃO PRESUMIDA DA PRETENSÃO EXECUTÓRIA
+	                $iniciarCsOption
+	                    .prop('disabled', true)
+	                    .attr('title', 'Prescrição: Trânsito em julgado há mais de 5 anos.');
 
-                $cumprimentoField.after(
-                    '<p class="errornote data-transito-aviso">⚠️ Prescrição: trânsito em julgado há mais de 5 anos. Em regra, não é adequado iniciar cumprimento de sentença.</p>'
-                );
+	                if ($cumprimentoField.length) {
+	                    $cumprimentoField.after(
+	                        '<p class="errornote data-transito-aviso">⚠️ Prescrição: trânsito em julgado há mais de 5 anos. Em regra, não é adequado iniciar cumprimento de sentença.</p>'
+	                    );
+	                } else {
+	                    $scope.append(
+	                        '<p class="errornote data-transito-aviso">⚠️ Prescrição: trânsito em julgado há mais de 5 anos. Verifique risco de prescrição para cumprimento de sentença.</p>'
+	                    );
+	                }
 
-                const $csRow = $scope.find('.form-row[data-question-key="cumprimento_de_sentenca"]');
+	                const $csRow = cumprimentoKey
+	                    ? $scope.find(`.form-row[data-question-key="${cumprimentoKey}"]`)
+	                    : $();
 
-                if ($csRow.length) {
-                    const texto = `
-                        <div class="analise-prescricao-node">
+	                if ($csRow.length) {
+	                    const texto = `
+	                        <div class="analise-prescricao-node">
                             <strong>Análise de Prescrição do Cumprimento de Sentença</strong>
                             <p>
                                 A data de trânsito em julgado informada é anterior a 5 anos da data atual.
@@ -3678,18 +4262,25 @@ function formatCnjDigits(raw) {
                             </ul>
                         </div>
                     `;
-                    $csRow.append(texto);
-                }
+	                    $csRow.append(texto);
+	                }
 
-                if ($cumprimentoField.val() === 'INICIAR CS') {
-                    $cumprimentoField.val('');
-                    currentResponses['cumprimento_de_sentenca'] = '';
-                    saveResponses();
-                }
-            } else {
-                $iniciarCsOption.prop('disabled', false).removeAttr('title');
-            }
-        }
+	                if ($cumprimentoField.length) {
+	                    const selectedOpt = $cumprimentoField.find('option:selected').get(0);
+	                    if (selectedOpt && isIniciarCsOptionEl(selectedOpt)) {
+	                        $cumprimentoField.val('');
+	                        if (cumprimentoKey) {
+	                            currentResponses[cumprimentoKey] = '';
+	                        }
+	                        saveResponses();
+	                    }
+	                }
+	            } else {
+	                $iniciarCsOption.prop('disabled', false).removeAttr('title');
+	            }
+
+                updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
+	        }
 
         /* =========================================================
          * Renderização genérica de perguntas
@@ -3699,9 +4290,70 @@ function formatCnjDigits(raw) {
             const question = treeConfig[questionKey];
             if (!question) return;
 
-            const isQuitado = areAnySelectedContractsQuitado();
+	            const getNextQuestionKeyByOrder = (currentKey) => {
+	                const current = treeConfig[currentKey];
+	                const currentOrder = current && typeof current.ordem === 'number' ? current.ordem : null;
+	                if (currentOrder === null) {
+	                    return null;
+	                }
+	                let best = null;
+	                Object.keys(treeConfig || {}).forEach((key) => {
+	                    const candidate = treeConfig[key];
+	                    if (!candidate || typeof candidate.ordem !== 'number') {
+	                        return;
+	                    }
+	                    if (candidate.ordem <= currentOrder) {
+	                        return;
+	                    }
+	                    if (!best || candidate.ordem < best.ordem) {
+	                        best = { key, ordem: candidate.ordem };
+	                    }
+	                });
+	                return best ? best.key : null;
+	            };
+
+	            const isIniciarCsOption = (text) => {
+	                const normalized = String(text || '')
+	                    .trim()
+	                    .toUpperCase()
+	                    .normalize('NFD')
+	                    .replace(/[\u0300-\u036f]/g, '');
+	                return normalized.includes('CS') && normalized.includes('INICI');
+	            };
+
+	            const isCumprimentoSentencaQuestion = (q) => {
+	                if (!q) return false;
+	                const key = String(q.chave || '').toLowerCase();
+	                const label = String(q.texto_pergunta || '').toLowerCase();
+	                if (label.includes('cumprimento') && label.includes('senten')) return true;
+	                if (key.includes('cumprimento') && key.includes('senten')) return true;
+	                return false;
+	            };
+
+	            const getTransitDateValue = (responses) => {
+	                const keys = Object.keys(treeConfig || {});
+	                for (const key of keys) {
+	                    const q = treeConfig[key];
+	                    if (!q || q.tipo_campo !== 'DATA') continue;
+	                    const labelLower = String(q.texto_pergunta || '').toLowerCase();
+	                    const keyLower = String(q.chave || key || '').toLowerCase();
+	                    const looksLikeTransit =
+	                        labelLower.includes('data do trânsito') ||
+	                        labelLower.includes('data do transito') ||
+	                        labelLower.includes('data de trânsito') ||
+	                        labelLower.includes('data de transito') ||
+	                        (keyLower.includes('transito') && keyLower.includes('data'));
+	                    if (!looksLikeTransit) continue;
+	                    const val = responses ? responses[q.chave] : null;
+	                    if (val) return val;
+	                }
+	                return null;
+	            };
+
+	            const isQuitado = areAnySelectedContractsQuitado();
             let $questionDiv;
             let $inputElement;
+            let $nextHint = null;
 
             const prefix = cardIndex !== null ? `card_${cardIndex}_` : '';
             const fieldId = `id_${prefix}${question.chave}`;
@@ -3724,10 +4376,32 @@ function formatCnjDigits(raw) {
                 return;
             }
 
-            if (question.tipo_campo === 'PROCESSO_VINCULADO') {
-                renderProcessoVinculadoEditor(question.chave, $container);
-                return;
-            }
+	            if (question.tipo_campo === 'PROCESSO_VINCULADO') {
+	                renderProcessoVinculadoEditor(question.chave, $container);
+
+	                // Em Passivas, o PROCESSO_VINCULADO é o "container" da análise: as demais questões
+	                // devem aparecer dentro dos cards (por CNJ). Não renderiza questões fora do card.
+	                const tipoText = normalizeDecisionText(
+	                    (activeAnalysisType && (activeAnalysisType.slug || activeAnalysisType.nome)) || ''
+	                );
+	                const isPassivas = tipoText.includes('PASSIV');
+	                if (isPassivas) {
+	                    return;
+	                }
+
+	                const autoNextFromOptions = Array.isArray(question.opcoes)
+	                    ? (question.opcoes.find(opt => opt && opt.proxima_questao_chave) || null)
+	                    : null;
+	                const autoNext =
+	                    question.proxima_questao_chave ||
+	                    (autoNextFromOptions ? autoNextFromOptions.proxima_questao_chave : null);
+	                const resolvedNext =
+	                    (autoNext && treeConfig[autoNext]) ? autoNext : getNextQuestionKeyByOrder(questionKey);
+	                if (resolvedNext) {
+	                    renderQuestion(resolvedNext, $container, currentResponses, cardIndex);
+	                }
+	                return;
+	            }
 
             if (question.tipo_campo !== 'CONTRATOS_MONITORIA') {
                 $questionDiv = $(
@@ -3736,30 +4410,59 @@ function formatCnjDigits(raw) {
                 $container.append($questionDiv);
             }
 
-            switch (question.tipo_campo) {
-                case 'OPCOES':
-                    $inputElement = $(
-                        `<select id="${fieldId}" name="${fieldName}"><option value="">---</option></select>`
-                    );
-                    (question.opcoes || []).forEach(function (opcao) {
-                        const isSelected = currentResponses[question.chave] === opcao.texto_resposta;
-                        let disabled = false;
+	            switch (question.tipo_campo) {
+	                case 'OPCOES':
+	                    const transitValue = getTransitDateValue(currentResponses);
+	                    const shouldDisableIniciarCs = isCumprimentoSentencaQuestion(question) && Boolean(transitValue);
+	                    let transitTooOld = false;
+	                    if (shouldDisableIniciarCs) {
+	                        const dataSelecionada = new Date(transitValue);
+	                        if (!isNaN(dataSelecionada.getTime())) {
+	                            const cincoAnosAtras = new Date();
+	                            cincoAnosAtras.setFullYear(cincoAnosAtras.getFullYear() - 5);
+	                            transitTooOld = dataSelecionada < cincoAnosAtras;
+	                        }
+	                    }
 
-                        if (
-                            isQuitado &&
-                            ((question.chave === 'repropor_monitoria' &&
-                                opcao.texto_resposta === 'SIM') ||
-                                (question.chave === 'cumprimento_de_sentenca' &&
-                                    opcao.texto_resposta === 'INICIAR CS'))
-                        ) {
-                            disabled = true;
-                        }
+	                    $inputElement = $(
+	                        `<select id="${fieldId}" name="${fieldName}"><option value="">---</option></select>`
+	                    );
+	                    (question.opcoes || []).forEach(function (opcao) {
+	                        const isSelected = currentResponses[question.chave] === opcao.texto_resposta;
+	                        let disabled = false;
 
-                        $inputElement.append(
-                            `<option value="${opcao.texto_resposta}" ${isSelected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${opcao.texto_resposta}</option>`
-                        );
-                    });
-                    break;
+	                        if (
+	                            isQuitado &&
+	                            ((question.chave === 'repropor_monitoria' &&
+	                                opcao.texto_resposta === 'SIM') ||
+	                                (question.chave === 'cumprimento_de_sentenca' &&
+	                                    opcao.texto_resposta === 'INICIAR CS'))
+	                        ) {
+	                            disabled = true;
+	                        }
+	                        if (!disabled && transitTooOld && isIniciarCsOption(opcao.texto_resposta)) {
+	                            disabled = true;
+	                        }
+
+	                        $inputElement.append(
+	                            `<option value="${opcao.texto_resposta}" ${isSelected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${opcao.texto_resposta}</option>`
+	                        );
+	                    });
+	                    if (transitTooOld) {
+	                        $inputElement.find('option').each(function () {
+	                            const optText = $(this).text();
+	                            if (isIniciarCsOption(optText)) {
+	                                $(this).attr('title', 'Prescrição: Trânsito em julgado há mais de 5 anos.');
+	                            }
+	                        });
+	                        const selectedText = $inputElement.find('option:selected').text();
+	                        if (selectedText && isIniciarCsOption(selectedText)) {
+	                            $inputElement.val('');
+	                            currentResponses[question.chave] = '';
+	                            saveResponses();
+	                        }
+	                    }
+	                    break;
 
                 case 'CONTRATOS_MONITORIA':
                     const $heading = $(
@@ -3792,6 +4495,41 @@ function formatCnjDigits(raw) {
                         `<${tag} type="${type}" id="${fieldId}" name="${fieldName}" ${tag === 'textarea' ? 'rows="4"' : ''
                         }></${tag}>`
                     ).val(currentResponses[question.chave] || '');
+
+                    // Controle discreto para avançar (evita depender de TAB/blur)
+                    const hasExplicitNext = Boolean(question.proxima_questao_chave);
+                    const canFallbackByOrder = Boolean(getNextQuestionKeyByOrder(questionKey));
+                    if (hasExplicitNext || canFallbackByOrder) {
+                        $nextHint = $(
+                            `<button type="button" class="cff-next-hint" aria-label="Avançar para a próxima questão">Próximo &rsaquo;</button>`
+                        );
+                        $nextHint.on('click', function () {
+                            const val = $inputElement.val();
+                            currentResponses[question.chave] = val;
+                            saveResponses();
+                            renderNextQuestion(
+                                questionKey,
+                                val,
+                                $container,
+                                currentResponses,
+                                cardIndex
+                            );
+
+                            // tenta focar o primeiro campo renderizado após avançar
+                            setTimeout(() => {
+                                const $rows = $container.find('.form-row');
+                                const $currentRow = $rows
+                                    .filter(`[data-question-key="${questionKey}"]`)
+                                    .last();
+                                const idx = $rows.index($currentRow);
+                                if (idx >= 0) {
+                                    const $nextRow = $rows.eq(idx + 1);
+                                    const $focusable = $nextRow.find('input, select, textarea').first();
+                                    if ($focusable.length) $focusable.trigger('focus');
+                                }
+                            }, 0);
+                        });
+                    }
                     break;
                 }
 
@@ -3822,9 +4560,18 @@ function formatCnjDigits(raw) {
                     currentResponses,
                     cardIndex
                 );
+
+                // aplica regras de elegibilidade do CS (procedência/julgamento/prescrição)
+                updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
             });
 
             $questionDiv.append($inputElement);
+            if ($nextHint) {
+                $questionDiv.append($nextHint);
+            }
+
+            // garante que regras de CS sejam aplicadas ao renderizar o campo
+            updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
 
             if (currentResponses[question.chave]) {
                 renderNextQuestion(
@@ -3851,21 +4598,13 @@ function formatCnjDigits(raw) {
             const $targetContainer =
                 cardIndex !== null ? $parentContainer : $dynamicQuestionsContainer;
 
-            $targetContainer.find('.form-row').each(function () {
-                const qKey = $(this).data('question-key');
-                if (
-                    qKey &&
-                    treeConfig[qKey] &&
-                    treeConfig[currentQuestionKey] &&
-                    treeConfig[qKey].ordem > treeConfig[currentQuestionKey].ordem
-                ) {
-                    delete currentResponses[qKey];
-                    if (qKey === 'selecionar_contratos_monitoria') {
-                        currentResponses.contratos_para_monitoria = [];
-                    }
-                    $(this).remove();
+            const clearResponsesForKey = (qKey) => {
+                if (!qKey) return;
+                delete currentResponses[qKey];
+                if (qKey === 'selecionar_contratos_monitoria') {
+                    currentResponses.contratos_para_monitoria = [];
                 }
-            });
+            };
 
             if (
                 cardIndex === null &&
@@ -3886,9 +4625,12 @@ function formatCnjDigits(raw) {
             let nextQuestionKey = null;
 
             if (currentQuestion.tipo_campo === 'OPCOES') {
-                const selectedOption = (currentQuestion.opcoes || []).find(
-                    opt => opt.texto_resposta === selectedResponseText
-                );
+                const selectedNormalized = normalizeDecisionText(selectedResponseText);
+                const selectedOption = (currentQuestion.opcoes || []).find(opt => {
+                    if (!opt) return false;
+                    const optNormalized = normalizeDecisionText(opt.texto_resposta);
+                    return optNormalized === selectedNormalized;
+                });
                 if (selectedOption) {
                     nextQuestionKey = selectedOption.proxima_questao_chave;
                 }
@@ -3896,26 +4638,97 @@ function formatCnjDigits(raw) {
                 nextQuestionKey = currentQuestion.proxima_questao_chave;
             }
 
-            if (nextQuestionKey) {
-                renderQuestion(
-                    nextQuestionKey,
-                    $targetContainer,
-                    currentResponses,
-                    cardIndex
-                );
+            // Remove blocos "abaixo" da pergunta atual baseado na ordem DOM, e evita duplicação
+            // quando o próximo nó tem ordem menor (ex.: Sucumbências -> Cumprimento de Sentença).
+            const $currentRow = $targetContainer
+                .find(`.form-row[data-question-key="${currentQuestionKey}"]`)
+                .last();
+            const $allRows = $targetContainer.find('.form-row');
+            const currentIndex = $currentRow.length ? $allRows.index($currentRow) : -1;
+            const $afterRows =
+                currentIndex >= 0 ? $allRows.slice(currentIndex + 1) : $allRows;
+
+            const immediateNextKey = $afterRows.first().data('question-key');
+
+            if (nextQuestionKey && immediateNextKey === nextQuestionKey) {
+                // Mantém o próximo bloco já renderizado e remove apenas o que vem depois,
+                // preservando valor selecionado e evitando duplicatas.
+                const $rowsToRemove = $afterRows.slice(1);
+                $rowsToRemove.each(function () {
+                    const qKey = $(this).data('question-key');
+                    clearResponsesForKey(qKey);
+                });
+                $rowsToRemove.remove();
+
+                saveResponses();
+                updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
+                return;
+            }
+
+            // Caso contrário, remove tudo que estiver renderizado após a pergunta atual
+            $afterRows.each(function () {
+                const qKey = $(this).data('question-key');
+                clearResponsesForKey(qKey);
+            });
+            $afterRows.remove();
+
+	            if (nextQuestionKey) {
+	                if (!treeConfig[nextQuestionKey]) {
+	                    if (currentQuestion.tipo_campo !== 'OPCOES') {
+	                        const fallback = (() => {
+	                            const currentOrder = typeof currentQuestion.ordem === 'number' ? currentQuestion.ordem : null;
+	                            if (currentOrder === null) return null;
+	                            let best = null;
+	                            Object.keys(treeConfig || {}).forEach((key) => {
+	                                const candidate = treeConfig[key];
+	                                if (!candidate || typeof candidate.ordem !== 'number') return;
+	                                if (candidate.ordem <= currentOrder) return;
+	                                if (!best || candidate.ordem < best.ordem) {
+	                                    best = { key, ordem: candidate.ordem };
+	                                }
+	                            });
+	                            return best ? best.key : null;
+	                        })();
+	                        if (fallback) {
+	                            renderQuestion(
+	                                fallback,
+	                                $targetContainer,
+	                                currentResponses,
+	                                cardIndex
+	                            );
+	                        } else {
+	                            saveResponses();
+	                        }
+	                        return;
+	                    }
+	                    $targetContainer.append(
+	                        '<p class="errornote">Configuração inválida: a próxima questão não existe neste Tipo de Análise.</p>'
+	                    );
+	                    saveResponses();
+	                    return;
+	                }
+	                renderQuestion(
+	                    nextQuestionKey,
+	                    $targetContainer,
+	                    currentResponses,
+	                    cardIndex
+	                );
             } else {
                 saveResponses();
             }
 
             // sempre que passarmos por "transitado" ou "procedencia", checa a data
             if (['transitado', 'procedencia'].includes(currentQuestionKey)) {
+                const transitKey = findTransitDateQuestionKey() || 'data_de_transito';
                 handleDataTransitoValidation(
-                    'data_de_transito',
-                    currentResponses['data_de_transito'],
+                    transitKey,
+                    currentResponses ? currentResponses[transitKey] : null,
                     currentResponses,
                     cardIndex
                 );
             }
+
+            updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
         }
 
         /* =========================================================
@@ -3955,6 +4768,70 @@ function formatCnjDigits(raw) {
                 userResponses[questionKey] = [];
             }
 
+            const tipoText = normalizeDecisionText(
+                (activeAnalysisType && (activeAnalysisType.slug || activeAnalysisType.nome)) || ''
+            );
+            const isPassivas = tipoText.includes('PASSIV');
+
+            const ensureDefaultCard = () => {
+                if (!isPassivas) return;
+                if (userResponses[questionKey].length > 0) return;
+
+                userResponses[questionKey].push({
+                    cnj: '',
+                    valor_causa: null,
+                    contratos: [],
+                    tipo_de_acao_respostas: {},
+                    supervisionado: false,
+                    supervisor_status: 'pendente',
+                    barrado: {
+                        ativo: false,
+                        inicio: null,
+                        retorno_em: null
+                    }
+                });
+            };
+
+            const migrateRootResponsesToFirstCard = () => {
+                if (!isPassivas) return;
+                if (!userResponses[questionKey].length) return;
+
+                const firstCard = userResponses[questionKey][0];
+                if (!firstCard || typeof firstCard !== 'object') return;
+                firstCard.tipo_de_acao_respostas = firstCard.tipo_de_acao_respostas || {};
+
+                // Migra apenas se o card ainda não tem respostas (evita sobrescrever).
+                const alreadyHasAny = Object.keys(firstCard.tipo_de_acao_respostas || {}).some(k => {
+                    const v = firstCard.tipo_de_acao_respostas[k];
+                    return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0);
+                });
+                if (alreadyHasAny) return;
+
+                const keysToMove = Object.keys(treeConfig || {}).filter(k => {
+                    if (k === questionKey) return false;
+                    const q = treeConfig[k];
+                    if (!q) return false;
+                    // Só move campos simples/OPCOES usados no fluxo Passivas.
+                    return q.tipo_campo !== 'PROCESSO_VINCULADO' && q.tipo_campo !== 'CONTRATOS_MONITORIA';
+                });
+
+                let movedAny = false;
+                keysToMove.forEach(k => {
+                    if (userResponses[k] !== undefined) {
+                        firstCard.tipo_de_acao_respostas[k] = userResponses[k];
+                        delete userResponses[k];
+                        movedAny = true;
+                    }
+                });
+
+                if (movedAny) {
+                    saveResponses();
+                }
+            };
+
+            ensureDefaultCard();
+            migrateRootResponsesToFirstCard();
+
             $cardsContainer.empty();
 
             userResponses[questionKey].forEach((cardData, index) => {
@@ -3970,6 +4847,7 @@ function formatCnjDigits(raw) {
             $addCardButton.on('click', function () {
                 const newCardData = {
                     cnj: '',
+                    valor_causa: null,
                     contratos: [],
                     tipo_de_acao_respostas: {},
                     supervisionado: false,
@@ -4004,6 +4882,11 @@ function formatCnjDigits(raw) {
             cardData.contratos = Array.isArray(cardData.contratos)
                 ? cardData.contratos
                 : [];
+            if (cardData.valor_causa !== undefined && cardData.valor_causa !== null) {
+                cardData.valor_causa = parseCurrencyValue(cardData.valor_causa);
+            } else {
+                cardData.valor_causa = null;
+            }
             cardData.supervisionado = Boolean(cardData.supervisionado);
             cardData.supervisor_status = cardData.supervisor_status || 'pendente';
             cardData.barrado = cardData.barrado || {};
@@ -4023,6 +4906,7 @@ function formatCnjDigits(raw) {
             const $titleWrapper = $(
                 `<div class="processo-card-title"><span>Processo CNJ: <strong>${cardLabel}</strong></span></div>`
             );
+            const $cnjLabelStrong = $titleWrapper.find('strong');
             const $hashtagBtn = $(
                 `<button type="button" class="processo-cnj-hashtag" aria-label="Mencionar processo CNJ #${indexLabel}">#${indexLabel}</button>`
             );
@@ -4054,15 +4938,26 @@ function formatCnjDigits(raw) {
                        placeholder="0000000-00.0000.0.00.0000">
             `).val(formatCnjDigits(cardData.cnj || ''));
 
+            const $valorCausaInput = $(`
+                <input type="text"
+                       class="vTextField processo-valor-causa-input"
+                       placeholder="Valor da causa"
+                       inputmode="decimal"
+                       aria-label="Valor da causa">
+            `).val(cardData.valor_causa !== null ? formatCurrency(cardData.valor_causa) : '');
+
             $cnjInput.on('input', function () {
                 const formatted = formatCnjDigits($(this).val());
                 $(this).val(formatted);
+                cardData.cnj = formatted;
+                $cnjLabelStrong.text(formatted ? formatted : 'Não informado');
             });
 
             $cnjInput.on('blur', function () {
                 const formatted = formatCnjDigits($(this).val());
                 $(this).val(formatted);
                 cardData.cnj = formatted;
+                $cnjLabelStrong.text(formatted ? formatted : 'Não informado');
                 if (formatted && !isValidCnj(formatted)) {
                     alert('CNJ inválido. Verifique o formato (0000000-00.0000.0.00.0000).');
                 }
@@ -4070,11 +4965,33 @@ function formatCnjDigits(raw) {
             });
 
             $cnjInputRow.append($cnjInput);
+            const $valorCausaWrapper = $('<div class="valor-causa-wrapper"></div>');
+            const $valorCausaSuffix = $('<span class="valor-causa-suffix">Valor da causa</span>');
+            const refreshValorCausaSuffix = () => {
+                const hasValue = Boolean(String($valorCausaInput.val() || '').trim());
+                $valorCausaWrapper.toggleClass('has-value', hasValue);
+            };
+            $valorCausaWrapper.append($valorCausaInput).append($valorCausaSuffix);
+            $cnjInputRow.append($valorCausaWrapper);
             const $removeBtnInline = $(
                 '<button type="button" class="button button-secondary processo-card-remove-inline">×</button>'
             );
             $cnjInputRow.append($removeBtnInline);
             $cnjWrapper.append($cnjInputRow);
+            const syncValorCausa = () => {
+                cardData.valor_causa = parseCurrencyValue($valorCausaInput.val());
+                saveResponses();
+            };
+            $valorCausaInput.on('change', syncValorCausa);
+            $valorCausaInput.on('input', refreshValorCausaSuffix);
+            $valorCausaInput.on('blur', function () {
+                const parsed = parseCurrencyValue($(this).val());
+                cardData.valor_causa = parsed;
+                $(this).val(parsed !== null ? formatCurrency(parsed) : '');
+                refreshValorCausaSuffix();
+                saveResponses();
+            });
+            refreshValorCausaSuffix();
             $removeBtnInline.on('click', function () {
                 if (!confirm('Remover este processo vinculado?')) return;
                 const arr = userResponses[parentQuestionKey] || [];
@@ -4085,28 +5002,26 @@ function formatCnjDigits(raw) {
             });
             $body.append($cnjWrapper);
 
-            // Contratos vinculados a esse processo
+            // Contratos vinculados a esse processo (opcional)
             const $contratosWrapper = $('<div class="field-contratos-vinculados"></div>');
-            $contratosWrapper.append(
-                '<label>Contratos vinculados a este processo</label>'
-            );
+            const $details = $(`
+                <details class="processo-contratos-details">
+                    <summary>Contratos vinculados a este processo (opcional)</summary>
+                    <div class="processo-contratos-details-body"></div>
+                </details>
+            `);
+            const $detailsBody = $details.find('.processo-contratos-details-body');
 
-            const contratosStatus = userResponses.contratos_status || {};
-            const selectedInInfoCard = allAvailableContratos.filter(
-                c => contratosStatus[c.id] && contratosStatus[c.id].selecionado
-            );
-
-            const listaParaExibir =
-                selectedInInfoCard.length > 0 ? selectedInInfoCard : allAvailableContratos;
+            const listaParaExibir = Array.isArray(allAvailableContratos) ? allAvailableContratos : [];
 
             if (listaParaExibir.length === 0) {
-                $contratosWrapper.append(
-                    '<p>Nenhum contrato disponível. Selecione primeiro nos "Dados Básicos".</p>'
+                $detailsBody.append(
+                    '<p>Nenhum contrato disponível. Verifique a aba "Contratos" ou salve o cadastro.</p>'
                 );
             } else {
                 listaParaExibir.forEach(contrato => {
                     const idStr = String(contrato.id);
-                    const isChecked = cardData.contratos
+                    const isChecked = (cardData.contratos || [])
                         .map(String)
                         .includes(idStr);
 
@@ -4122,12 +5037,14 @@ function formatCnjDigits(raw) {
 
                     $chk.on('change', function () {
                         const val = $(this).val(); // string
+                        const current = Array.isArray(cardData.contratos) ? cardData.contratos : [];
                         if ($(this).is(':checked')) {
-                            if (!cardData.contratos.map(String).includes(val)) {
-                                cardData.contratos.push(val);
+                            if (!current.map(String).includes(val)) {
+                                current.push(val);
                             }
+                            cardData.contratos = current;
                         } else {
-                            cardData.contratos = cardData.contratos
+                            cardData.contratos = current
                                 .map(String)
                                 .filter(id => id !== val);
                         }
@@ -4135,10 +5052,11 @@ function formatCnjDigits(raw) {
                     });
 
                     $row.append($chk).append($lbl);
-                    $contratosWrapper.append($row);
+                    $detailsBody.append($row);
                 });
             }
 
+            $contratosWrapper.append($details);
             $body.append($contratosWrapper);
 
             // Sub-árvore processual dentro do card
@@ -4193,17 +5111,9 @@ function formatCnjDigits(raw) {
                 console.log('1️⃣ Sincronizando card com saved...');
                 syncEditingCardWithSaved(cardData);
 
-                if (!Array.isArray(userResponses.processos_vinculados)) {
-                    userResponses.processos_vinculados = [];
-                }
-                const editIndex =
-                    Number.isFinite(userResponses._editing_card_index) &&
-                    userResponses._editing_card_index >= 0
-                        ? Number(userResponses._editing_card_index)
-                        : null;
-                if (editIndex !== null) {
-                    userResponses.processos_vinculados[editIndex] = cardData;
-                }
+                // Mantém o card ativo sempre em processos_vinculados[0]
+                // (evita array esparso que impede atualizar o snapshot ao concluir).
+                userResponses.processos_vinculados = [cardData];
 
                 console.log('───────────────────────────────────────────────────');
                 console.log('2️⃣ Salvando respostas...');
@@ -4478,7 +5388,14 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                             supervisionado: true,
                             supervisor_status: 'pendente',
                             barrado: { ativo: false, inicio: null, retorno_em: null },
-                            awaiting_supervision_confirm: false
+                            awaiting_supervision_confirm: false,
+                            analysis_type: activeAnalysisType && activeAnalysisType.id != null ? {
+                                id: activeAnalysisType.id,
+                                nome: activeAnalysisType.nome,
+                                slug: activeAnalysisType.slug,
+                                hashtag: activeAnalysisType.hashtag,
+                                versao: activeAnalysisType.versao
+                            } : null
                         };
                         assignNjLabelToCard(card);
                         userResponses.processos_vinculados = userResponses.processos_vinculados.filter(p => p.cnj !== 'Não Judicializado');
@@ -4506,8 +5423,14 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
          * Eventos globais
          * ======================================================= */
 
-        let analysisBootObserver = null;
-        let analysisInitialized = false;
+		        let analysisBootObserver = null;
+		        let analysisInitialized = false;
+		        let analysisTypeSelectionInProgress = false;
+		        let analysisHasStarted = false;
+
+        const isDecisionTreeReady = () => {
+            return Boolean(firstQuestionKey && treeConfig && treeConfig[firstQuestionKey]);
+        };
 
         const attemptAnalysisBoot = ({ force = false } = {}) => {
             if (analysisInitialized) {
@@ -4519,9 +5442,6 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             analysisInitialized = true;
             loadExistingResponses();
             loadContratosFromDOM();
-            fetchDecisionTreeConfig().done(function () {
-                renderDecisionTree();
-            });
             if (analysisBootObserver) {
                 analysisBootObserver.disconnect();
                 analysisBootObserver = null;
@@ -4555,24 +5475,107 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             analysisBootObserver.observe(observerTarget, { attributes: true, attributeFilter: ['class'] });
         };
 
-        let analysisReady = false;
-        const updateActionButtons = () => {
-            $saveAnalysisButton.prop('disabled', !analysisReady);
-            $startAnalysisButton.prop('disabled', analysisReady);
-        };
+		        let analysisReady = false;
+		        const updateActionButtons = () => {
+		            $saveAnalysisButton.prop('disabled', !analysisReady);
+		            if (analysisTypeSelectionInProgress) {
+		                $startAnalysisButton.prop('disabled', true);
+		                $startAnalysisButton.text('Carregando...');
+		                return;
+		            }
 
-        const markAnalysisReady = () => {
-            if (analysisReady) {
-                return;
-            }
-            analysisReady = true;
-            updateActionButtons();
-        };
+		            const canChangeType = analysisReady && isDecisionTreeReady();
+		            $startAnalysisButton.prop('disabled', false);
+		            $startAnalysisButton.text(canChangeType ? 'Alterar tipo' : 'Começar');
+		        };
 
-        $startAnalysisButton.on('click', () => {
-            $startAnalysisButton.prop('disabled', true);
-            scheduleAnalysisBoot(true);
-        });
+	        const resetDecisionTreeState = () => {
+	            treeConfig = {};
+	            treeResponseKeys = [];
+	            firstQuestionKey = null;
+	            activeAnalysisType = null;
+	        };
+
+		        const markAnalysisReady = () => {
+		            if (analysisTypeSelectionInProgress || !analysisHasStarted) {
+		                return;
+		            }
+		            if (analysisReady) {
+		                return;
+		            }
+		            analysisReady = true;
+		            updateActionButtons();
+		        };
+
+		        const runSelectAnalysisTypeFlow = () => {
+		            analysisReady = false;
+		            analysisHasStarted = false;
+		            analysisTypeSelectionInProgress = true;
+		            resetDecisionTreeState();
+		            updateActionButtons();
+
+		            scheduleAnalysisBoot(true);
+
+		            $dynamicQuestionsContainer.empty().html('<p>Selecione o tipo de análise...</p>');
+
+		            fetchAnalysisTypes()
+		                .then(types => promptSelectAnalysisType(types))
+		                .then(selectedType => {
+		                    $dynamicQuestionsContainer.html('<p>Carregando tipo de análise...</p>');
+		                    return fetchDecisionTreeConfig({ tipoId: selectedType.id, tipoVersao: selectedType.versao, forceReload: false })
+		                        .then(() => {
+		                            analysisTypeSelectionInProgress = false;
+		                            analysisHasStarted = true;
+		                            updateActionButtons();
+		                            const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+		                            startNewAnalysis({ skipGeneralSnapshot: !isMonitoria, suppressSummary: true });
+		                        });
+		                })
+		                .fail((reason) => {
+		                    analysisTypeSelectionInProgress = false;
+		                    analysisReady = false;
+		                    updateActionButtons();
+
+		                    if (reason && reason.cancelled) {
+		                        $dynamicQuestionsContainer.empty();
+		                        return;
+		                    }
+		                    $dynamicQuestionsContainer.html(
+		                        '<p class="errornote">Não foi possível iniciar a Análise (falha ao carregar tipos ou árvore).</p>'
+		                    );
+		                });
+		        };
+
+		        $startAnalysisButton.on('click', () => {
+		            ensureAnalysisBooted();
+		            const isChanging = analysisReady && isDecisionTreeReady();
+
+		            if (!isChanging) {
+		                runSelectAnalysisTypeFlow();
+		                return;
+		            }
+
+		            const isEditingCard = userResponses && userResponses._editing_card_index != null;
+		            const hasDataToDiscard = isEditingCard || hasActiveAnalysisResponses();
+		            if (!hasDataToDiscard) {
+		                runSelectAnalysisTypeFlow();
+		                return;
+		            }
+
+		            showCffConfirmDialog(
+		                'Alterar o Tipo de Análise?\n\nIsso vai descartar as respostas em andamento desta análise.\n\nOs cards já concluídos não serão alterados.'
+		            ).then(confirmar => {
+		                if (!confirmar) {
+		                    updateActionButtons();
+		                    return;
+		                }
+		                delete userResponses._editing_card_index;
+		                clearTreeResponsesForNewAnalysis();
+		                saveResponses();
+		                displayFormattedResponses();
+		                runSelectAnalysisTypeFlow();
+		            });
+		        });
 
         // RECARREGA JSON AO MUDAR STATUS DO CONTRATO (Q, seleção etc.)
         $(document).on('contratoStatusChange', function () {
@@ -4590,7 +5593,9 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 
             ensureUserResponsesShape();
             loadContratosFromDOM();
-            renderDecisionTree();
+            if (isDecisionTreeReady()) {
+                renderDecisionTree();
+            }
             updateContractStars();
             updateGenerateButtonState();
             displayFormattedResponses();
@@ -4607,6 +5612,9 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 
         // Carrega imediatamente os cards de análises concluídas, mesmo antes de clicar em "Começar"
         loadExistingResponses();
+        fetchAnalysisTypes().done(() => {
+            displayFormattedResponses();
+        });
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', startAnalysisLazy);

@@ -7,6 +7,7 @@ import re
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
@@ -16,6 +17,7 @@ from django.contrib.humanize.templatetags.humanize import intcomma
 from django.db import models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch
 from django.db.models.functions import Abs, Cast, Coalesce, Now
+from django.db.utils import OperationalError, ProgrammingError
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, render
@@ -30,11 +32,12 @@ logger = logging.getLogger(__name__)
 
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
-    Carteira, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
+    Carteira, CarteiraUsuarioAcesso, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     Parte, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
-    QuestaoAnalise, StatusProcessual, Tarefa, TipoPeticao, TipoPeticaoAnexoContinua,
+    QuestaoAnalise, StatusProcessual, Tarefa, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
 )
+from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .widgets import EnderecoWidget
 from .forms import DemandasAnaliseForm
 from .services.demandas import DemandasImportError, DemandasImportService, _format_currency, _format_cpf
@@ -97,6 +100,14 @@ class UserForm(forms.Form):
         empty_label="Nenhum (Remover Delegação)"
     )
 
+class CarteiraBulkForm(forms.Form):
+    carteira = forms.ModelChoiceField(
+        queryset=Carteira.objects.order_by('nome'),
+        required=False,
+        empty_label="(Remover carteira)",
+        label="Carteira",
+    )
+
 
 # --- Supervisor helpers e admin personalizado -------------------------------
 SUPERVISOR_GROUP_NAME = "Supervisor"
@@ -121,9 +132,18 @@ class SupervisorUserCreationForm(UserCreationForm):
         model = User
         fields = UserCreationForm.Meta.fields
 
+    carteiras_permitidas = forms.ModelMultipleChoiceField(
+        required=False,
+        label="Carteiras",
+        queryset=Carteira.objects.order_by('nome'),
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Selecione as carteiras que este usuário pode acessar. Em branco = sem restrição (compatibilidade).",
+    )
+
     def save(self, commit=True):
         user = super().save(commit=False)
         user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
         if commit:
             user.save()
             self.save_m2m()
@@ -143,10 +163,23 @@ class SupervisorUserChangeForm(UserChangeForm):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
             self.fields['is_supervisor'].initial = is_user_supervisor(self.instance)
+            if 'carteiras_permitidas' in self.fields:
+                self.fields['carteiras_permitidas'].initial = list(
+                    Carteira.objects.filter(usuario_acessos__usuario=self.instance).values_list('id', flat=True)
+                )
+
+    carteiras_permitidas = forms.ModelMultipleChoiceField(
+        required=False,
+        label="Carteiras",
+        queryset=Carteira.objects.order_by('nome'),
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Selecione as carteiras que este usuário pode acessar. Em branco = sem restrição (compatibilidade).",
+    )
 
     def save(self, commit=True):
         user = super().save(commit=False)
         user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
         if commit:
             user.save()
             self.save_m2m()
@@ -164,14 +197,14 @@ class SupervisorUserAdmin(DjangoUserAdmin):
         (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
         (
             _('Permissions'),
-            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor')}
+            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor', 'carteiras_permitidas')}
         ),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'password1', 'password2', 'is_supervisor'),
+            'fields': ('username', 'password1', 'password2', 'is_supervisor', 'carteiras_permitidas'),
         }),
     )
 
@@ -186,6 +219,21 @@ class SupervisorUserAdmin(DjangoUserAdmin):
         if supervisor_flag is None:
             supervisor_flag = request.POST.get('is_supervisor') in ('on', 'True', '1', 'true')
         self._sync_supervisor_flag(form.instance, bool(supervisor_flag))
+
+        carteiras = getattr(form.instance, '_carteiras_permitidas', None)
+        if carteiras is None:
+            carteiras = form.cleaned_data.get('carteiras_permitidas', [])
+        carteira_ids = [c.id for c in (carteiras or []) if getattr(c, 'id', None)]
+        CarteiraUsuarioAcesso.objects.filter(usuario=form.instance).exclude(
+            carteira_id__in=carteira_ids
+        ).delete()
+        existing = set(
+            CarteiraUsuarioAcesso.objects.filter(usuario=form.instance).values_list('carteira_id', flat=True)
+        )
+        for carteira_id in carteira_ids:
+            if carteira_id in existing:
+                continue
+            CarteiraUsuarioAcesso.objects.create(usuario=form.instance, carteira_id=carteira_id)
 
     def response_change(self, request, obj):
         if '_continue' not in request.POST and '_addanother' not in request.POST:
@@ -580,10 +628,49 @@ def configuracao_analise_view(request):
 
 def configuracao_analise_tipos_view(request):
     context = admin.site.each_context(request)
+    tipos = []
+    try:
+        tipos = list(
+            TipoAnaliseObjetiva.objects.all().order_by('-ativo', 'nome')
+        )
+    except (ProgrammingError, OperationalError):
+        tipos = []
+        messages.warning(
+            request,
+            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
+            "Rode as migrações para habilitar a funcionalidade."
+        )
     context.update({
         "title": "Tipos de Análise",
+        "tipos_analise_objetiva": tipos,
+        "is_supervisor": is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False)),
     })
     return render(request, "admin/contratos/configuracao_analise_tipos.html", context)
+
+def configuracao_analise_tipo_objetiva_view(request, tipo_id: int):
+    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    try:
+        tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
+    except (ProgrammingError, OperationalError):
+        messages.warning(
+            request,
+            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
+            "Rode as migrações para habilitar a funcionalidade."
+        )
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+    except TipoAnaliseObjetiva.DoesNotExist:
+        messages.error(request, "Tipo de análise não encontrado.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    context = admin.site.each_context(request)
+    context.update({
+        "title": tipo.nome,
+        "tipo": tipo,
+    })
+    return render(request, "admin/contratos/configuracao_analise_tipo_objetiva.html", context)
 
 def configuracao_analise_novas_monitorias_view(request):
     context = admin.site.each_context(request)
@@ -676,6 +763,11 @@ def _get_admin_urls():
             name="contratos_configuracao_analise_tipos",
         ),
         path(
+            "contratos/configuracao-analise/tipos/<int:tipo_id>/",
+            admin.site.admin_view(configuracao_analise_tipo_objetiva_view),
+            name="contratos_configuracao_analise_tipo_objetiva",
+        ),
+        path(
             "contratos/configuracao-analise/tipos/novas-monitorias/",
             admin.site.admin_view(configuracao_analise_novas_monitorias_view),
             name="contratos_configuracao_analise_novas_monitorias",
@@ -700,7 +792,7 @@ def _get_app_list(request, app_label=None):
         insertion_index = None
         filtered_models = []
         for idx, model in enumerate(app.get("models", [])):
-            if model.get("object_name") in {"QuestaoAnalise", "OpcaoResposta"}:
+            if model.get("object_name") in {"QuestaoAnalise", "OpcaoResposta", "TipoAnaliseObjetiva"}:
                 if insertion_index is None:
                     insertion_index = idx
                 continue
@@ -1953,8 +2045,10 @@ class AnaliseProcessoInline(NoRelatedLinksMixin, admin.StackedInline): # Usando 
     template = 'admin/contratos/analiseprocesso/stacked.html'
 
     class Media:
-        css = {'all': ('admin/css/analise_processo.css',)}
-        js = ('admin/js/analise_processo_arvore.js',)
+        # A Análise do Processo é carregada via `processo_judicial_lazy_loader.js`
+        # quando a aba "Análise de Processo" é ativada.
+        css = {'all': ()}
+        js = ()
 
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
@@ -2155,7 +2249,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
-    actions = ['excluir_andamentos_selecionados', 'delegate_processes']
+    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk']
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
@@ -2204,6 +2298,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         entries_payload = form.cleaned_data.get('cnj_entries_data')
+        # Se o payload não veio no POST (ex.: usuário apenas clicou em "Salvar" sem tocar na UI dos CNJs),
+        # não devemos apagar os campos atuais nem os números CNJ existentes.
+        if entries_payload in (None, ''):
+            return super().save_model(request, obj, form, change)
         entries = self._parse_cnj_entries(entries_payload)
         active_entry = self._get_active_entry(entries, form.cleaned_data.get('cnj_active_index'))
         if not entries:
@@ -2211,7 +2309,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             obj.uf = ''
             obj.valor_causa = None
             obj.status = None
-            obj.carteira = None
             obj.vara = ''
             obj.tribunal = ''
         if active_entry:
@@ -2229,6 +2326,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        qs = filter_processos_queryset_for_user(qs, request.user)
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
         last_logs = LogEntry.objects.filter(
             content_type=ct,
@@ -2239,6 +2337,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
         )
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser and not is_user_supervisor(request.user):
+            actions.pop('change_carteira_bulk', None)
+        return actions
 
     def _build_cnj_entries_context(self, obj):
         if not obj:
@@ -2622,24 +2726,24 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         css = {
             'all': (
                 'admin/css/admin_tabs.css',
-                'admin/css/custom_admin_styles.css?v=20260209b',
+                'admin/css/custom_admin_styles.css?v=20260210m',
                 'admin/css/cia_button.css',
-                'admin/css/endereco_widget.css', # <--- Adicionado
+                'admin/css/endereco_widget.css',  # <--- Adicionado
             )
         }
         js = (
-            'admin/js/vendor/jquery/jquery.min.js', 
+            'admin/js/vendor/jquery/jquery.min.js',
             'admin/js/jquery.init.js',
-            'admin/js/processo_judicial_enhancer.js?v=20260209b',
-            'admin/js/admin_tabs.js', 
-            'admin/js/processo_judicial_lazy_loader.js',
+            'admin/js/processo_judicial_enhancer.js?v=20260210c',
+            'admin/js/admin_tabs.js',
+            'admin/js/processo_judicial_lazy_loader.js?v=20260210m',
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/soma_contratos.js',
             'admin/js/cia_button.js',
             'admin/js/cpf_formatter.js',
             'admin/js/info_card_manager.js',
-         )
+        )
 
     def get_urls(self):
         urls = super().get_urls()
@@ -2920,9 +3024,47 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return HttpResponseRedirect(f'delegate-select-user/?ids={selected_ids}')
     delegate_processes.short_description = "Delegar processos selecionados"
 
+    def change_carteira_bulk(self, request, queryset):
+        if not request.user.is_superuser and not is_user_supervisor(request.user):
+            self.message_user(request, "Ação disponível apenas para Supervisor.", messages.ERROR)
+            return None
+
+        selected_ids = request.POST.getlist(ACTION_CHECKBOX_NAME)
+
+        if request.method == 'POST' and request.POST.get('apply'):
+            form = CarteiraBulkForm(request.POST)
+            if form.is_valid():
+                carteira = form.cleaned_data.get('carteira')
+                updated = queryset.update(carteira=carteira)
+                carteira_label = carteira.nome if carteira else "Sem carteira"
+                self.message_user(
+                    request,
+                    f"{updated} cadastro(s) atualizado(s) para a carteira: {carteira_label}.",
+                    messages.SUCCESS,
+                )
+                return HttpResponseRedirect(request.get_full_path())
+        else:
+            form = CarteiraBulkForm()
+
+        context = {
+            'title': 'Alterar carteira (em lote)',
+            'form': form,
+            'opts': self.model._meta,
+            'app_label': self.model._meta.app_label,
+            'action_name': 'change_carteira_bulk',
+            'selected_ids': selected_ids,
+            'media': self.media,
+        }
+        return render(request, 'admin/contratos/processojudicial/change_carteira_bulk.html', context)
+    change_carteira_bulk.short_description = "Alterar carteira (Supervisor)"
+
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":
             kwargs["queryset"] = StatusProcessual.objects.filter(ativo=True, ordem__gte=0)
+        if db_field.name == 'carteira' and request and request.user and not request.user.is_superuser:
+            allowed = get_user_allowed_carteira_ids(request.user)
+            if allowed:
+                kwargs['queryset'] = Carteira.objects.filter(id__in=allowed).order_by('nome')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description="X")
@@ -3115,17 +3257,60 @@ class OpcaoRespostaInline(admin.TabularInline):
     # Autocomplete para facilitar a seleção da próxima questão
     autocomplete_fields = ['proxima_questao']
 
+@admin.register(TipoAnaliseObjetiva)
+class TipoAnaliseObjetivaAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'slug', 'hashtag', 'ativo', 'versao', 'atualizado_em', 'atualizado_por')
+    list_filter = ('ativo',)
+    search_fields = ('nome', 'slug', 'hashtag')
+    list_editable = ('ativo',)
+    readonly_fields = ('versao', 'criado_em', 'atualizado_em', 'atualizado_por')
+    fields = ('nome', 'slug', 'hashtag', 'ativo', 'versao', 'criado_em', 'atualizado_em', 'atualizado_por')
+
+    def _allowed(self, request):
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'pk', None):
+            return False
+        if user.is_superuser or is_user_supervisor(user):
+            return True
+        return user.has_perms({
+            'contratos.view_tipoanaliseobjetiva',
+            'contratos.add_tipoanaliseobjetiva',
+            'contratos.change_tipoanaliseobjetiva',
+            'contratos.delete_tipoanaliseobjetiva',
+        })
+
+    def has_module_permission(self, request):
+        return self._allowed(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_add_permission(self, request):
+        return self._allowed(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def save_model(self, request, obj, form, change):
+        obj.atualizado_por = request.user
+        super().save_model(request, obj, form, change)
+        if change and form.changed_data:
+            obj.bump_version(user=request.user)
+
 @admin.register(QuestaoAnalise) # Referência por string
 class QuestaoAnaliseAdmin(admin.ModelAdmin):
-    list_display = ('texto_pergunta', 'chave', 'tipo_campo', 'is_primeira_questao', 'ordem')
-    list_filter = ('tipo_campo', 'is_primeira_questao')
-    search_fields = ('texto_pergunta', 'chave',)
-    list_editable = ('is_primeira_questao', 'ordem')
+    list_display = ('texto_pergunta', 'chave', 'tipo_analise', 'tipo_campo', 'ativo', 'is_primeira_questao', 'ordem')
+    list_filter = ('tipo_analise', 'tipo_campo', 'ativo', 'is_primeira_questao')
+    search_fields = ('texto_pergunta', 'chave', 'tipo_analise__nome')
+    list_editable = ('ativo', 'is_primeira_questao', 'ordem')
     inlines = [OpcaoRespostaInline]
     
     fieldsets = (
         (None, {
-            "fields": ('texto_pergunta', 'tipo_campo', 'ordem')
+            "fields": ('tipo_analise', 'texto_pergunta', 'chave', 'tipo_campo', 'ordem', 'ativo')
         }),
         ("Ponto de Partida", {
             "classes": ('collapse',),
@@ -3134,7 +3319,157 @@ class QuestaoAnaliseAdmin(admin.ModelAdmin):
         }),
     )
 
+    def _allowed(self, request):
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'pk', None):
+            return False
+        if user.is_superuser or is_user_supervisor(user):
+            return True
+        return user.has_perms({
+            'contratos.view_questaoanalise',
+            'contratos.add_questaoanalise',
+            'contratos.change_questaoanalise',
+            'contratos.delete_questaoanalise',
+        })
+
+    def has_module_permission(self, request):
+        return self._allowed(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_add_permission(self, request):
+        return self._allowed(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def save_model(self, request, obj, form, change):
+        if obj.tipo_analise_id and not (obj.chave or '').strip():
+            base = normalize_label_title(obj.tipo_analise.slug or obj.tipo_analise.nome or 'tipo')
+            base_slug = re.sub(r'[^a-z0-9]+', '-', (base or '').lower()).strip('-')[:18] or 'tipo'
+            question_slug = re.sub(r'[^a-z0-9]+', '-', (obj.texto_pergunta or '').lower()).strip('-')[:24] or 'pergunta'
+            candidate = f"{base_slug}-{question_slug}"[:50].strip('-')
+            if not candidate:
+                candidate = f"tipo-{obj.tipo_analise_id}"
+            unique = candidate
+            counter = 2
+            while QuestaoAnalise.objects.filter(chave=unique).exclude(pk=obj.pk).exists():
+                suffix = f"-{counter}"
+                unique = (candidate[: max(1, 50 - len(suffix))] + suffix).strip('-')
+                counter += 1
+            obj.chave = unique
+
+        super().save_model(request, obj, form, change)
+        if obj.is_primeira_questao and obj.tipo_analise_id:
+            QuestaoAnalise.objects.filter(
+                tipo_analise_id=obj.tipo_analise_id,
+                is_primeira_questao=True,
+            ).exclude(pk=obj.pk).update(is_primeira_questao=False)
+        elif obj.tipo_analise_id:
+            has_any_first = QuestaoAnalise.objects.filter(
+                tipo_analise_id=obj.tipo_analise_id,
+                is_primeira_questao=True,
+                ativo=True,
+            ).exists()
+            if not has_any_first:
+                QuestaoAnalise.objects.filter(pk=obj.pk).update(is_primeira_questao=True)
+
+        if obj.tipo_analise_id and (not change or form.changed_data):
+            try:
+                obj.tipo_analise.bump_version(user=request.user)
+            except Exception:
+                pass
+
+    def save_formset(self, request, form, formset, change):
+        super().save_formset(request, form, formset, change)
+        try:
+            instance = form.instance
+            tipo = getattr(instance, 'tipo_analise', None)
+            if not tipo:
+                return
+            has_inline_changes = bool(
+                getattr(formset, 'new_objects', None)
+                or getattr(formset, 'changed_objects', None)
+                or getattr(formset, 'deleted_objects', None)
+            )
+            if has_inline_changes:
+                tipo.bump_version(user=request.user)
+        except Exception:
+            return
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        if request.GET.get('tipo_analise'):
+            initial['tipo_analise'] = request.GET.get('tipo_analise')
+        for key in ('ativo', 'ordem'):
+            if key in request.GET:
+                initial[key] = request.GET.get(key)
+        if request.GET.get('is_primeira_questao') in ('1', 'true', 'True', 'on', 'SIM', 'sim'):
+            initial['is_primeira_questao'] = True
+        return initial
+
+    def delete_model(self, request, obj):
+        tipo = getattr(obj, 'tipo_analise', None)
+        super().delete_model(request, obj)
+        if tipo:
+            try:
+                tipo.bump_version(user=request.user)
+            except Exception:
+                pass
+
 @admin.register(OpcaoResposta) # Referência por string
 class OpcaoRespostaAdmin(admin.ModelAdmin):
-    list_display = ('questao_origem', 'texto_resposta', 'proxima_questao')
+    list_display = ('questao_origem', 'texto_resposta', 'proxima_questao', 'ativo')
+    list_filter = ('ativo', 'questao_origem__tipo_analise')
+    list_editable = ('ativo',)
+
+    def _allowed(self, request):
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'pk', None):
+            return False
+        if user.is_superuser or is_user_supervisor(user):
+            return True
+        return user.has_perms({
+            'contratos.view_opcaoresposta',
+            'contratos.add_opcaoresposta',
+            'contratos.change_opcaoresposta',
+            'contratos.delete_opcaoresposta',
+        })
+
+    def has_module_permission(self, request):
+        return self._allowed(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_add_permission(self, request):
+        return self._allowed(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._allowed(request)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        tipo = getattr(obj.questao_origem, 'tipo_analise', None)
+        if tipo and (not change or form.changed_data):
+            try:
+                tipo.bump_version(user=request.user)
+            except Exception:
+                pass
+
+    def delete_model(self, request, obj):
+        tipo = getattr(obj.questao_origem, 'tipo_analise', None)
+        super().delete_model(request, obj)
+        if tipo:
+            try:
+                tipo.bump_version(user=request.user)
+            except Exception:
+                pass
         

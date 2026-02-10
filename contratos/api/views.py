@@ -38,6 +38,7 @@ from ..models import (
     TarefaMensagem,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
+from ..permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .serializers import (
     TarefaSerializer,
     PrazoSerializer,
@@ -105,7 +106,10 @@ class AgendaAPIView(APIView):
 
     def get(self, request, processo_id):
         try:
-            processo = ProcessoJudicial.objects.get(pk=processo_id)
+            processo = get_object_or_404(
+                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
+                pk=processo_id,
+            )
             tarefas = Tarefa.objects.filter(processo=processo)
             prazos = Prazo.objects.filter(processo=processo)
             
@@ -147,6 +151,10 @@ class AgendaGeralAPIView(APIView):
             .select_related('processo', 'responsavel')
             .filter(**prazo_filter)
         )
+        allowed_carteiras = get_user_allowed_carteira_ids(request.user)
+        if allowed_carteiras not in (None, []) and allowed_carteiras:
+            tarefas = tarefas.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
+            prazos = prazos.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
 
         processo_ids = set(
             list(tarefas.values_list('processo_id', flat=True))
@@ -155,7 +163,7 @@ class AgendaGeralAPIView(APIView):
         processo_meta = {}
         if processo_ids:
             processos = (
-                ProcessoJudicial.objects
+                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user)
                 .filter(id__in=processo_ids)
                 .prefetch_related('partes_processuais')
             )
@@ -865,7 +873,20 @@ class TarefaBulkCreateAPIView(APIView):
         if arquivo and not processo_ids:
             return Response({'detail': 'Anexo exige pelo menos um processo selecionado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        processos = ProcessoJudicial.objects.filter(id__in=processo_ids) if processo_ids else []
+        processos = []
+        if processo_ids:
+            allowed = get_user_allowed_carteira_ids(request.user)
+            base_qs = ProcessoJudicial.objects.filter(id__in=processo_ids)
+            filtered_qs = filter_processos_queryset_for_user(base_qs, request.user)
+            if allowed not in (None, []) and allowed:
+                global_ids = set(base_qs.values_list('id', flat=True))
+                filtered_ids = set(filtered_qs.values_list('id', flat=True))
+                missing_ids = set(map(int, processo_ids)) - global_ids
+                if missing_ids:
+                    return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
+                if filtered_ids != global_ids:
+                    return Response({'detail': 'Você não tem acesso a um ou mais processos selecionados.'}, status=status.HTTP_403_FORBIDDEN)
+            processos = list(filtered_qs)
         processo_map = {proc.id: proc for proc in processos}
         if processo_ids and len(processo_map) != len(processo_ids):
             return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1009,7 +1030,20 @@ class PrazoBulkCreateAPIView(APIView):
         except (TypeError, ValueError):
             alerta_valor = 1
 
-        processos = ProcessoJudicial.objects.filter(id__in=processo_ids) if processo_ids else []
+        processos = []
+        if processo_ids:
+            allowed = get_user_allowed_carteira_ids(request.user)
+            base_qs = ProcessoJudicial.objects.filter(id__in=processo_ids)
+            filtered_qs = filter_processos_queryset_for_user(base_qs, request.user)
+            if allowed not in (None, []) and allowed:
+                global_ids = set(base_qs.values_list('id', flat=True))
+                filtered_ids = set(filtered_qs.values_list('id', flat=True))
+                missing_ids = set(map(int, processo_ids)) - global_ids
+                if missing_ids:
+                    return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
+                if filtered_ids != global_ids:
+                    return Response({'detail': 'Você não tem acesso a um ou mais processos selecionados.'}, status=status.HTTP_403_FORBIDDEN)
+            processos = list(filtered_qs)
         processo_map = {proc.id: proc for proc in processos}
         if processo_ids and len(processo_map) != len(processo_ids):
             return Response({'detail': 'Um ou mais processos não foram encontrados.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1138,10 +1172,11 @@ class HerdeiroAPIView(APIView):
         processo_id = request.query_params.get('processo_id')
         processo = None
         if processo_id:
-            try:
-                processo = ProcessoJudicial.objects.get(pk=processo_id)
-            except ProcessoJudicial.DoesNotExist:
-                processo = None
+            processo = (
+                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user)
+                .filter(pk=processo_id)
+                .first()
+            )
         if parte_id:
             try:
                 parte = Parte.objects.select_related('processo').get(pk=parte_id)
@@ -1178,10 +1213,11 @@ class HerdeiroAPIView(APIView):
         processo_id = request.data.get('processo_id')
         processo = None
         if processo_id:
-            try:
-                processo = ProcessoJudicial.objects.get(pk=processo_id)
-            except ProcessoJudicial.DoesNotExist:
-                processo = None
+            processo = (
+                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user)
+                .filter(pk=processo_id)
+                .first()
+            )
         if parte_id:
             try:
                 parte = Parte.objects.select_related('processo').get(pk=parte_id)
@@ -1448,7 +1484,10 @@ class SaveManualAddressAPIView(View):
             processos_ids = Parte.objects.filter(documento=cpf).values_list('processo_id', flat=True).distinct()
             
             # Atualiza todos os processos encontrados
-            updated_count = ProcessoJudicial.objects.filter(id__in=processos_ids).update(endereco=endereco_formatado)
+            updated_count = filter_processos_queryset_for_user(
+                ProcessoJudicial.objects.filter(id__in=processos_ids),
+                request.user,
+            ).update(endereco=endereco_formatado)
 
             if updated_count > 0:
                 message = f'Endereço atualizado para {updated_count} processo(s) com este CPF.'

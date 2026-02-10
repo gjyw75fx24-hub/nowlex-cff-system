@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import connection, models
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
+from django.utils.text import slugify
+from django.utils import timezone
 
 
 def _generate_tipo_peticao_key():
@@ -46,6 +48,31 @@ class Carteira(models.Model):
 
     def __str__(self):
         return self.nome
+
+
+class CarteiraUsuarioAcesso(models.Model):
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='carteira_acessos',
+        verbose_name='Usuário',
+    )
+    carteira = models.ForeignKey(
+        Carteira,
+        on_delete=models.CASCADE,
+        related_name='usuario_acessos',
+        verbose_name='Carteira',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+
+    class Meta:
+        verbose_name = "Acesso à Carteira (Usuário)"
+        verbose_name_plural = "Acessos à Carteira (Usuários)"
+        unique_together = ('usuario', 'carteira')
+        ordering = ['usuario_id', 'carteira_id']
+
+    def __str__(self):
+        return f"{self.usuario} → {self.carteira}"
 
 class StatusProcessual(models.Model):
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome do Status")
@@ -800,6 +827,57 @@ class BuscaAtivaConfig(models.Model):
 
 # --- Modelos para o Motor da Árvore de Decisão de Análise ---
 
+class TipoAnaliseObjetiva(models.Model):
+    nome = models.CharField(max_length=120, unique=True, verbose_name="Nome")
+    slug = models.SlugField(
+        max_length=140,
+        unique=True,
+        blank=True,
+        verbose_name="Slug",
+        help_text="Identificador interno usado na seleção do tipo de análise."
+    )
+    hashtag = models.CharField(
+        max_length=160,
+        blank=True,
+        verbose_name="Hashtag",
+        help_text="Usado nas Observações (ex.: #causa-passiva). Se vazio, será gerado automaticamente."
+    )
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
+    versao = models.PositiveIntegerField(default=1, verbose_name="Versão")
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+    atualizado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tipos_analise_atualizados",
+        verbose_name="Atualizado por"
+    )
+
+    class Meta:
+        verbose_name = "Tipo de Análise Objetiva"
+        verbose_name_plural = "Tipos de Análise Objetiva"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.nome)[:140]
+        if not self.hashtag:
+            self.hashtag = f"#{self.slug}" if self.slug else ""
+        super().save(*args, **kwargs)
+
+    def bump_version(self, user=None):
+        self.versao = (self.versao or 0) + 1
+        self.atualizado_em = timezone.now()
+        if user and getattr(user, "pk", None):
+            self.atualizado_por = user
+        self.save(update_fields=["versao", "atualizado_em", "atualizado_por"])
+
+
 class QuestaoAnalise(models.Model):
     TIPO_CAMPO_CHOICES = [
         ('OPCOES', 'Opções (dropdown)'),
@@ -810,6 +888,14 @@ class QuestaoAnalise(models.Model):
         ('CONTRATOS_MONITORIA', 'Seleção de Contratos para Monitória'),
     ]
     
+    tipo_analise = models.ForeignKey(
+        TipoAnaliseObjetiva,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="questoes",
+        verbose_name="Tipo de Análise"
+    )
     texto_pergunta = models.CharField(max_length=255, verbose_name="Texto da Pergunta/Critério")
     chave = models.CharField(max_length=50, unique=True, blank=True, null=True, verbose_name="Chave de Referência (Slug)")
     tipo_campo = models.CharField(max_length=20, choices=TIPO_CAMPO_CHOICES, default='OPCOES', verbose_name="Tipo de Campo de Resposta")
@@ -819,6 +905,7 @@ class QuestaoAnalise(models.Model):
         help_text="Marque apenas uma questão como a primeira. Será o ponto de partida da árvore."
     )
     ordem = models.PositiveIntegerField(default=10, verbose_name="Ordem de Exibição")
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
 
     class Meta:
         verbose_name = "Questão da Análise"
@@ -844,11 +931,25 @@ class OpcaoResposta(models.Model):
         related_name='veio_de_opcao',
         verbose_name="Próxima Questão (se esta opção for escolhida)"
     )
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
     
     class Meta:
         verbose_name = "Opção de Resposta"
         verbose_name_plural = "2. Opções de Respostas"
         ordering = ['questao_origem', 'texto_resposta']
+
+    def clean(self):
+        super().clean()
+        if not self.proxima_questao_id:
+            return
+        origem_tipo_id = getattr(self.questao_origem, 'tipo_analise_id', None)
+        prox_tipo_id = getattr(self.proxima_questao, 'tipo_analise_id', None)
+        if origem_tipo_id and prox_tipo_id and origem_tipo_id != prox_tipo_id:
+            raise ValidationError({
+                'proxima_questao': (
+                    'A próxima questão deve pertencer ao mesmo Tipo de Análise da questão de origem.'
+                )
+            })
 
     def __str__(self):
         return f"{self.questao_origem.texto_pergunta[:30]}... -> {self.questao_origem}" # Corrigido para mostrar a origem

@@ -7,6 +7,7 @@ app_name = 'contratos'
 urlpatterns = [
     path('', views.lista_processos, name='lista_processos'),
     path('processo/<int:pk>/', views.detalhe_processo, name='detalhe_processo'),
+    path('api/analysis-types/', views.get_analysis_types, name='get_analysis_types'),
     path('api/decision-tree/', views.get_decision_tree_data, name='get_decision_tree_data'), # <-- Nova URL
     path('api/processo/<int:processo_id>/contratos/', views.get_processo_contratos_api, name='get_processo_contratos_api'), # <-- Nova URL
     path('processo/<int:processo_id>/gerar-monitoria/', views.generate_monitoria_petition, name='generate_monitoria_petition'),

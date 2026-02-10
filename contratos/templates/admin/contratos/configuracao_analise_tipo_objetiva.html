@@ -1,0 +1,37 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+    <div class="module">
+        <table class="admin-config-table">
+            <tbody>
+                <tr>
+                    <th scope="row">
+                        <a href="{% url 'admin:contratos_tipoanaliseobjetiva_change' tipo.id %}">Editar tipo</a>
+                    </th>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="{% url 'admin:contratos_questaoanalise_add' %}?tipo_analise={{ tipo.id }}&is_primeira_questao=1&ativo=1&ordem=1">+ Criar primeira pergunta</a>
+                    </th>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="{% url 'admin:contratos_questaoanalise_add' %}?tipo_analise={{ tipo.id }}&ativo=1">+ Criar nova pergunta</a>
+                    </th>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="{% url 'admin:contratos_questaoanalise_changelist' %}?tipo_analise__id__exact={{ tipo.id }}">1. Questões da Análise</a>
+                    </th>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="{% url 'admin:contratos_opcaoresposta_changelist' %}?questao_origem__tipo_analise__id__exact={{ tipo.id }}">2. Opções de Respostas</a>
+                    </th>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

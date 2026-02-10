@@ -2,14 +2,15 @@
     'use strict';
 
     const STATIC_BASE = window.__static_url || '/static/';
+    const CACHE_BUST = '20260210m';
     const scriptRegistry = {
-        analise: `${STATIC_BASE}admin/js/analise_processo_arvore.js`,
+        analise: `${STATIC_BASE}admin/js/analise_processo_arvore.js?v=${CACHE_BUST}`,
         arquivos: `${STATIC_BASE}admin/js/arquivos_peticoes_tab.js`,
         tarefas: `${STATIC_BASE}admin/js/tarefas_prazos_interface.js`,
         pickr: 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
     };
     const cssRegistry = {
-        analise: `${STATIC_BASE}admin/css/analise_processo.css`,
+        analise: `${STATIC_BASE}admin/css/analise_processo.css?v=${CACHE_BUST}`,
         arquivos: `${STATIC_BASE}admin/css/arquivos_peticoes_tab.css`,
         pickr: 'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
     };

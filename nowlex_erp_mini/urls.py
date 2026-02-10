@@ -27,4 +27,5 @@ urlpatterns = [
     # API na raiz para compatibilidade com frontend
     path('api/', include('contratos.api.urls', namespace='api_root')),
     path('api/decision-tree/', contratos_views.get_decision_tree_data, name='decision_tree_root'),
+    path('api/analysis-types/', contratos_views.get_analysis_types, name='analysis_types_root'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

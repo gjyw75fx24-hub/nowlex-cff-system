@@ -7,9 +7,31 @@
             <tbody>
                 <tr>
                     <th scope="row">
+                        {% if is_supervisor %}
+                        <a href="{% url 'admin:contratos_tipoanaliseobjetiva_add' %}">+ Configurar Novo Tipo de Análise Objetiva</a>
+                        {% else %}
+                        <span style="color: #6b7280;">+ Configurar Novo Tipo de Análise Objetiva (somente supervisor)</span>
+                        {% endif %}
+                    </th>
+                </tr>
+                <tr>
+                    <th scope="row">
                         <a href="{% url 'admin:contratos_configuracao_analise_novas_monitorias' %}">Novas Monitórias</a>
                     </th>
                 </tr>
+                {% for tipo in tipos_analise_objetiva %}
+                    {% if tipo.slug != 'novas-monitorias' %}
+                        <tr>
+                            <th scope="row">
+                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva' tipo.id %}">{{ tipo.nome }}</a>
+                                {% if not tipo.ativo %}
+                                    <small style="color: #6b7280;">(inativo)</small>
+                                {% endif %}
+                            </th>
+                        </tr>
+                    {% endif %}
+                {% empty %}
+                {% endfor %}
             </tbody>
         </table>
     </div>

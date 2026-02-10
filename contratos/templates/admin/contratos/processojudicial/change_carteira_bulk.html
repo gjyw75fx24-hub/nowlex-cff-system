@@ -1,0 +1,47 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=app_label %}">{{ app_label|capfirst|escape }}</a>
+    &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+    &rsaquo; {% translate "Alterar Carteira" %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <form action="" method="post">{% csrf_token %}
+        <p>{% translate "Selecione a carteira para aplicar aos cadastros selecionados:" %}</p>
+        {% if selected_ids %}
+            <p>Selecionados: <strong>{{ selected_ids|length }}</strong></p>
+        {% endif %}
+
+        <fieldset class="module aligned">
+            {% for field in form %}
+                <div class="form-row">
+                    {{ field.errors }}
+                    {{ field.label_tag }}
+                    {{ field }}
+                    {% if field.help_text %}
+                        <p class="help">{{ field.help_text }}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </fieldset>
+
+        {% for id in selected_ids %}
+            <input type="hidden" name="_selected_action" value="{{ id }}">
+        {% endfor %}
+        <input type="hidden" name="action" value="{{ action_name }}">
+        <input type="hidden" name="apply" value="1">
+
+        <div class="submit-row">
+            <input type="submit" value="{% translate 'Aplicar' %}" class="default">
+            <a class="button cancel-link" href="{% url opts|admin_urlname:'changelist' %}">{% translate "Cancelar" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+

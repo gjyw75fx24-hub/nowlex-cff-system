@@ -5,8 +5,9 @@ from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
 from .models import (
     ProcessoJudicial, StatusProcessual, QuestaoAnalise,
-    OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo
+    OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo, TipoAnaliseObjetiva
 )
+from .permissoes import filter_processos_queryset_for_user
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_CEILING
 from django.db.models import Max
@@ -42,6 +43,7 @@ from django.utils.text import slugify
 from django.utils.timezone import now
 from django.db.models import Q
 from django.db.models.query import QuerySet
+from django.db.utils import OperationalError, ProgrammingError
 
 
 logger = logging.getLogger(__name__)
@@ -1230,7 +1232,10 @@ def lista_processos(request):
     """
     Busca todos os processos no banco e os envia para o template de lista.
     """
-    processos = ProcessoJudicial.objects.all().order_by('-id')
+    processos = filter_processos_queryset_for_user(
+        ProcessoJudicial.objects.all(),
+        request.user,
+    ).order_by('-id')
     contexto = {
         'processos': processos
     }
@@ -1242,7 +1247,10 @@ def detalhe_processo(request, pk):
     """
     Busca um processo específico pelo seu ID (pk) e envia para o template de detalhe.
     """
-    processo = get_object_or_404(ProcessoJudicial, pk=pk)
+    processo = get_object_or_404(
+        filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
+        pk=pk,
+    )
     contratos_do_processo = processo.contratos.all()
     
     contexto = {
@@ -1253,19 +1261,73 @@ def detalhe_processo(request, pk):
 
 @login_required
 @require_GET
+def get_analysis_types(request):
+    try:
+        tipos = TipoAnaliseObjetiva.objects.filter(ativo=True).order_by('nome')
+    except (ProgrammingError, OperationalError):
+        return JsonResponse({'status': 'success', 'types': []})
+    return JsonResponse({
+        'status': 'success',
+        'types': [
+            {
+                'id': tipo.id,
+                'nome': tipo.nome,
+                'slug': tipo.slug,
+                'hashtag': tipo.hashtag,
+                'versao': tipo.versao,
+            }
+            for tipo in tipos
+        ]
+    })
+
+
+@login_required
+@require_GET
 def get_decision_tree_data(request):
     """
     Retorna a estrutura da árvore de decisão (questões e opções) como JSON,
     mesclando a configuração nativa com as do banco de dados.
     """
+    tipo_id = request.GET.get('tipo_id')
+    tipo_slug = request.GET.get('tipo_slug')
+    tipo = None
+    if tipo_id:
+        try:
+            tipo = TipoAnaliseObjetiva.objects.get(pk=int(tipo_id))
+        except (ProgrammingError, OperationalError):
+            return JsonResponse({'status': 'error', 'message': 'Tipos de análise ainda não disponíveis. Rode as migrações.'}, status=400)
+        except (TipoAnaliseObjetiva.DoesNotExist, ValueError, TypeError):
+            return JsonResponse({'status': 'error', 'message': 'Tipo de análise inválido.'}, status=400)
+    elif tipo_slug:
+        try:
+            tipo = TipoAnaliseObjetiva.objects.filter(slug=tipo_slug).first()
+        except (ProgrammingError, OperationalError):
+            return JsonResponse({'status': 'error', 'message': 'Tipos de análise ainda não disponíveis. Rode as migrações.'}, status=400)
+
+    if not tipo:
+        try:
+            tipo = (
+                TipoAnaliseObjetiva.objects.filter(slug='novas-monitorias').first()
+                or TipoAnaliseObjetiva.objects.filter(ativo=True).order_by('nome').first()
+            )
+        except (ProgrammingError, OperationalError):
+            return JsonResponse({'status': 'error', 'message': 'Tipos de análise ainda não disponíveis. Rode as migrações.'}, status=400)
+
+    if not tipo:
+        return JsonResponse({'status': 'error', 'message': 'Nenhum tipo de análise configurado.'}, status=404)
+
     # 1. Inicia com a configuração nativa
     # Cria uma cópia profunda para evitar modificar o dicionário original
-    current_tree_config = copy.deepcopy(DECISION_TREE_CONFIG)
+    current_tree_config = copy.deepcopy(DECISION_TREE_CONFIG) if tipo.slug == 'novas-monitorias' else {}
     
     primeira_questao_chave_db = None
 
     # 2. Mescla/Sobrescreve com as questões configuradas no banco de dados
-    db_questoes = QuestaoAnalise.objects.all().prefetch_related('opcoes')
+    db_questoes = (
+        QuestaoAnalise.objects
+        .filter(tipo_analise=tipo, ativo=True)
+        .prefetch_related('opcoes')
+    )
     for questao_db in db_questoes:
         if not questao_db.chave: # Chave é essencial para mesclar
             continue
@@ -1280,14 +1342,37 @@ def get_decision_tree_data(request):
             'opcoes': []
         }
 
-        for opcao_db in questao_db.opcoes.all().order_by('texto_resposta'):
+        for opcao_db in questao_db.opcoes.filter(ativo=True).all().order_by('id'):
+            prox = opcao_db.proxima_questao
+            prox_same_tipo = bool(
+                prox
+                and getattr(prox, 'tipo_analise_id', None)
+                and getattr(questao_db, 'tipo_analise_id', None)
+                and prox.tipo_analise_id == questao_db.tipo_analise_id
+            )
             o_data = {
                 'id': opcao_db.id,
                 'texto_resposta': opcao_db.texto_resposta,
-                'proxima_questao_id': opcao_db.proxima_questao.id if opcao_db.proxima_questao else None,
-                'proxima_questao_chave': opcao_db.proxima_questao.chave if opcao_db.proxima_questao and opcao_db.proxima_questao.chave else None,
+                'proxima_questao_id': prox.id if (prox and prox_same_tipo) else None,
+                'proxima_questao_chave': prox.chave if (prox and prox_same_tipo and prox.chave) else None,
+                'proxima_questao_texto': prox.texto_pergunta if (prox and prox_same_tipo) else None,
             }
             q_data['opcoes'].append(o_data)
+
+        # Para campos que não são dropdown, aceita um "fluxo linear" usando a primeira opção
+        # que apontar uma próxima questão.
+        if questao_db.tipo_campo != 'OPCOES':
+            next_opt = next(
+                (
+                    o
+                    for o in q_data.get('opcoes', [])
+                    if o and o.get('proxima_questao_chave')
+                ),
+                None,
+            )
+            if next_opt:
+                q_data['proxima_questao_chave'] = next_opt.get('proxima_questao_chave')
+                q_data['proxima_questao_texto'] = next_opt.get('proxima_questao_texto')
         
         # Se a questão já existe na config nativa, sobrescreve seus campos
         # e mescla as opções. Caso contrário, adiciona a questão.
@@ -1300,6 +1385,10 @@ def get_decision_tree_data(request):
                 'is_primeira_questao': q_data['is_primeira_questao'],
                 'ordem': q_data['ordem'],
             })
+            if q_data.get('proxima_questao_chave'):
+                current_tree_config[questao_db.chave]['proxima_questao_chave'] = q_data.get('proxima_questao_chave')
+                if q_data.get('proxima_questao_texto'):
+                    current_tree_config[questao_db.chave]['proxima_questao_texto'] = q_data.get('proxima_questao_texto')
             # Substitui as opções pelas do banco de dados
             current_tree_config[questao_db.chave]['opcoes'] = q_data['opcoes']
         else:
@@ -1324,6 +1413,13 @@ def get_decision_tree_data(request):
 
     return JsonResponse({
         'status': 'success',
+        'analysis_type': {
+            'id': tipo.id,
+            'nome': tipo.nome,
+            'slug': tipo.slug,
+            'hashtag': tipo.hashtag,
+            'versao': tipo.versao,
+        },
         'primeira_questao_chave': final_primeira_questao_chave,
         'tree_data': current_tree_config
     })
