@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import re
+from typing import Optional
 
 from django import forms
 from django.contrib import admin, messages
@@ -18,7 +19,7 @@ from django.db import models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch
 from django.db.models.functions import Abs, Cast, Coalesce, Now
 from django.db.utils import OperationalError, ProgrammingError
-from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
+from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
@@ -629,10 +630,12 @@ def configuracao_analise_view(request):
 def configuracao_analise_tipos_view(request):
     context = admin.site.each_context(request)
     tipos = []
+    tipo_monitoria = None
     try:
         tipos = list(
             TipoAnaliseObjetiva.objects.all().order_by('-ativo', 'nome')
         )
+        tipo_monitoria = next((t for t in tipos if t.slug == 'novas-monitorias'), None)
     except (ProgrammingError, OperationalError):
         tipos = []
         messages.warning(
@@ -643,6 +646,7 @@ def configuracao_analise_tipos_view(request):
     context.update({
         "title": "Tipos de Análise",
         "tipos_analise_objetiva": tipos,
+        "tipo_monitoria": tipo_monitoria,
         "is_supervisor": is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False)),
     })
     return render(request, "admin/contratos/configuracao_analise_tipos.html", context)
@@ -671,6 +675,267 @@ def configuracao_analise_tipo_objetiva_view(request, tipo_id: int):
         "tipo": tipo,
     })
     return render(request, "admin/contratos/configuracao_analise_tipo_objetiva.html", context)
+
+def configuracao_analise_tipo_objetiva_export_view(request, tipo_id: int):
+    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    try:
+        tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
+    except (ProgrammingError, OperationalError):
+        messages.warning(
+            request,
+            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
+            "Rode as migrações para habilitar a funcionalidade."
+        )
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+    except TipoAnaliseObjetiva.DoesNotExist:
+        messages.error(request, "Tipo de análise não encontrado.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    questoes = (
+        QuestaoAnalise.objects.filter(tipo_analise=tipo)
+        .prefetch_related("opcoes", "opcoes__proxima_questao")
+        .order_by("ordem", "id")
+    )
+    payload = {
+        "tipo": {
+            "nome": tipo.nome,
+            "slug": tipo.slug,
+            "hashtag": tipo.hashtag,
+            "ativo": bool(tipo.ativo),
+            "versao": int(tipo.versao or 1),
+        },
+        "questoes": [],
+    }
+    for questao in questoes:
+        opcoes = (
+            OpcaoResposta.objects.filter(questao_origem=questao)
+            .select_related("proxima_questao")
+            .order_by("id")
+        )
+        payload["questoes"].append(
+            {
+                "texto_pergunta": questao.texto_pergunta,
+                "chave": questao.chave,
+                "tipo_campo": questao.tipo_campo,
+                "ordem": int(questao.ordem or 0),
+                "ativo": bool(questao.ativo),
+                "is_primeira_questao": bool(questao.is_primeira_questao),
+                "opcoes": [
+                    {
+                        "texto_resposta": opcao.texto_resposta,
+                        "ativo": bool(opcao.ativo),
+                        "proxima_questao_chave": (
+                            opcao.proxima_questao.chave if opcao.proxima_questao_id else None
+                        ),
+                    }
+                    for opcao in opcoes
+                ],
+            }
+        )
+
+    filename = f"{tipo.slug or 'tipo_analise'}.json"
+    response = HttpResponse(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        content_type="application/json; charset=utf-8",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: bool = False):
+    tipo_data = payload.get("tipo") or {}
+    questoes_data = payload.get("questoes") or []
+
+    slug = (tipo_data.get("slug") or "").strip()
+    nome = (tipo_data.get("nome") or "").strip()
+    if not slug or not nome:
+        raise ValueError("JSON inválido: tipo.slug e tipo.nome são obrigatórios.")
+
+    hashtag = (tipo_data.get("hashtag") or "").strip()
+    ativo = bool(tipo_data.get("ativo", True))
+
+    tipo, created = TipoAnaliseObjetiva.objects.get_or_create(
+        slug=slug,
+        defaults={
+            "nome": nome,
+            "hashtag": hashtag,
+            "ativo": ativo,
+            "versao": int(tipo_data.get("versao") or 1),
+        },
+    )
+
+    changed = False
+    if tipo.nome != nome:
+        tipo.nome = nome
+        changed = True
+    if hashtag and tipo.hashtag != hashtag:
+        tipo.hashtag = hashtag
+        changed = True
+    if tipo.ativo != ativo:
+        tipo.ativo = ativo
+        changed = True
+    tipo.save()
+
+    questoes_by_chave = {q.chave: q for q in QuestaoAnalise.objects.filter(tipo_analise=tipo)}
+    incoming_chaves = set()
+
+    for qd in questoes_data:
+        chave = (qd.get("chave") or "").strip()
+        if not chave:
+            raise ValueError("JSON inválido: toda questão deve ter 'chave'.")
+        incoming_chaves.add(chave)
+
+        conflito = QuestaoAnalise.objects.filter(chave=chave).exclude(tipo_analise=tipo).exists()
+        if conflito:
+            raise ValueError(f"Conflito: já existe uma questão com chave '{chave}' em outro Tipo de Análise.")
+
+        defaults = {
+            "tipo_analise": tipo,
+            "texto_pergunta": qd.get("texto_pergunta") or "",
+            "tipo_campo": qd.get("tipo_campo") or "OPCOES",
+            "ordem": int(qd.get("ordem") or 0),
+            "ativo": bool(qd.get("ativo", True)),
+            "is_primeira_questao": bool(qd.get("is_primeira_questao", False)),
+        }
+
+        questao = questoes_by_chave.get(chave)
+        if questao is None:
+            questao = QuestaoAnalise.objects.create(chave=chave, **defaults)
+            questoes_by_chave[chave] = questao
+            changed = True
+        else:
+            for field, value in defaults.items():
+                if getattr(questao, field) != value:
+                    setattr(questao, field, value)
+                    changed = True
+            questao.save()
+
+    for chave, questao in list(questoes_by_chave.items()):
+        if chave in incoming_chaves:
+            continue
+        if questao.ativo:
+            questao.ativo = False
+            questao.is_primeira_questao = False
+            questao.save(update_fields=["ativo", "is_primeira_questao"])
+            changed = True
+
+    primeiras = list(
+        QuestaoAnalise.objects.filter(tipo_analise=tipo, is_primeira_questao=True, ativo=True).order_by("ordem", "id")
+    )
+    if len(primeiras) > 1:
+        keep = primeiras[0]
+        QuestaoAnalise.objects.filter(tipo_analise=tipo, is_primeira_questao=True, ativo=True).exclude(pk=keep.pk).update(
+            is_primeira_questao=False
+        )
+        changed = True
+
+    pending_next = []  # (opcao, prox_chave)
+    for qd in questoes_data:
+        chave = (qd.get("chave") or "").strip()
+        questao = questoes_by_chave.get(chave)
+        if not questao:
+            continue
+        desired = qd.get("opcoes") or []
+        desired_texts = []
+        for od in desired:
+            texto = (od.get("texto_resposta") or "").strip()
+            if not texto:
+                continue
+            desired_texts.append(texto)
+            opcao, opt_created = OpcaoResposta.objects.get_or_create(
+                questao_origem=questao,
+                texto_resposta=texto,
+                defaults={"ativo": bool(od.get("ativo", True)), "proxima_questao": None},
+            )
+            if opt_created:
+                changed = True
+            else:
+                ativo_od = bool(od.get("ativo", True))
+                if opcao.ativo != ativo_od:
+                    opcao.ativo = ativo_od
+                    changed = True
+                opcao.save()
+            pending_next.append((opcao, (od.get("proxima_questao_chave") or "").strip() or None))
+
+        for opcao in OpcaoResposta.objects.filter(questao_origem=questao):
+            if opcao.texto_resposta in desired_texts:
+                continue
+            if opcao.ativo:
+                opcao.ativo = False
+                opcao.proxima_questao = None
+                opcao.save(update_fields=["ativo", "proxima_questao"])
+                changed = True
+
+    for opcao, prox_chave in pending_next:
+        prox_obj = questoes_by_chave.get(prox_chave) if prox_chave else None
+        if opcao.proxima_questao_id != (prox_obj.id if prox_obj else None):
+            opcao.proxima_questao = prox_obj
+            opcao.save(update_fields=["proxima_questao"])
+            changed = True
+
+    if bump_version and changed:
+        tipo.bump_version(user=user)
+
+    return tipo, created, changed
+
+def configuracao_analise_tipo_objetiva_import_view(request, tipo_id: Optional[int] = None):
+    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    tipo_target = None
+    if tipo_id is not None:
+        try:
+            tipo_target = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
+        except TipoAnaliseObjetiva.DoesNotExist:
+            tipo_target = None
+
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Importar Tipo de Análise (JSON)",
+        "tipo_target": tipo_target,
+    })
+
+    if request.method != 'POST':
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+
+    upload = request.FILES.get("json_file")
+    if not upload:
+        messages.error(request, "Selecione um arquivo JSON.")
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+
+    try:
+        raw = upload.read().decode("utf-8")
+        payload = json.loads(raw or "{}")
+    except Exception:
+        messages.error(request, "JSON inválido.")
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+
+    bump_version = request.POST.get("bump_version") in ("on", "1", "true", "True")
+
+    try:
+        tipo, created, changed = _sync_tipo_objetiva_from_payload(payload, user=request.user, bump_version=bump_version)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+
+    if tipo_target and tipo_target.id != tipo.id:
+        messages.error(
+            request,
+            f"Este import é para '{tipo_target.slug}', mas o JSON é de '{tipo.slug}'.",
+        )
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+
+    if created:
+        messages.success(request, f"Tipo '{tipo.nome}' importado (criado) com sucesso.")
+    else:
+        messages.success(
+            request,
+            f"Tipo '{tipo.nome}' importado com sucesso. Alterações: {'sim' if changed else 'não'}.",
+        )
+    return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
 
 def configuracao_analise_novas_monitorias_view(request):
     context = admin.site.each_context(request)
@@ -766,6 +1031,21 @@ def _get_admin_urls():
             "contratos/configuracao-analise/tipos/<int:tipo_id>/",
             admin.site.admin_view(configuracao_analise_tipo_objetiva_view),
             name="contratos_configuracao_analise_tipo_objetiva",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/<int:tipo_id>/export/",
+            admin.site.admin_view(configuracao_analise_tipo_objetiva_export_view),
+            name="contratos_configuracao_analise_tipo_objetiva_export",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/import/",
+            admin.site.admin_view(configuracao_analise_tipo_objetiva_import_view),
+            name="contratos_configuracao_analise_tipo_objetiva_import",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/<int:tipo_id>/import/",
+            admin.site.admin_view(configuracao_analise_tipo_objetiva_import_view),
+            name="contratos_configuracao_analise_tipo_objetiva_import_for",
         ),
         path(
             "contratos/configuracao-analise/tipos/novas-monitorias/",

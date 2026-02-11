@@ -9,6 +9,9 @@
                     <th scope="row">
                         {% if is_supervisor %}
                         <a href="{% url 'admin:contratos_tipoanaliseobjetiva_add' %}">+ Configurar Novo Tipo de Análise Objetiva</a>
+                        <small style="margin-left: 10px;">
+                            <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_import' %}" style="color:#6b7280;">Importar</a>
+                        </small>
                         {% else %}
                         <span style="color: #6b7280;">+ Configurar Novo Tipo de Análise Objetiva (somente supervisor)</span>
                         {% endif %}
@@ -17,6 +20,14 @@
                 <tr>
                     <th scope="row">
                         <a href="{% url 'admin:contratos_configuracao_analise_novas_monitorias' %}">Novas Monitórias</a>
+                        {% if is_supervisor and tipo_monitoria %}
+                            <small style="margin-left: 8px;">
+                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo_monitoria.id %}" style="color:#6b7280;">Exportar</a>
+                            </small>
+                            <small style="margin-left: 8px;">
+                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_import_for' tipo_monitoria.id %}" style="color:#6b7280;">Importar</a>
+                            </small>
+                        {% endif %}
                     </th>
                 </tr>
                 {% for tipo in tipos_analise_objetiva %}
@@ -24,6 +35,14 @@
                         <tr>
                             <th scope="row">
                                 <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva' tipo.id %}">{{ tipo.nome }}</a>
+                                {% if is_supervisor %}
+                                    <small style="margin-left: 8px;">
+                                        <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo.id %}" style="color:#6b7280;">Exportar</a>
+                                    </small>
+                                    <small style="margin-left: 8px;">
+                                        <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_import_for' tipo.id %}" style="color:#6b7280;">Importar</a>
+                                    </small>
+                                {% endif %}
                                 {% if not tipo.ativo %}
                                     <small style="color: #6b7280;">(inativo)</small>
                                 {% endif %}
