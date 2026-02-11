@@ -598,6 +598,47 @@
             );
         }
 
+        function getProcessoVinculadoQuestionKey() {
+            if (!treeConfig || typeof treeConfig !== 'object') {
+                return null;
+            }
+            const direct = treeConfig.processos_vinculados;
+            if (direct && direct.tipo_campo === 'PROCESSO_VINCULADO') {
+                return 'processos_vinculados';
+            }
+            const keys = Object.keys(treeConfig);
+            for (const key of keys) {
+                const q = treeConfig[key];
+                if (q && q.tipo_campo === 'PROCESSO_VINCULADO') {
+                    return key;
+                }
+            }
+            return null;
+        }
+
+        function syncProcessoVinculadoResponseKey(questionKey) {
+            const key = questionKey || getProcessoVinculadoQuestionKey();
+            if (!key) return;
+
+            if (!Array.isArray(userResponses[key])) {
+                userResponses[key] = [];
+            }
+            if (!Array.isArray(userResponses.processos_vinculados)) {
+                userResponses.processos_vinculados = [];
+            }
+
+            // Mantém um único array compartilhado, porque outras partes do sistema
+            // assumem `userResponses.processos_vinculados` (resumo/edição/supervisão).
+            if (key !== 'processos_vinculados') {
+                const preferred =
+                    userResponses.processos_vinculados.length
+                        ? userResponses.processos_vinculados
+                        : userResponses[key];
+                userResponses[key] = preferred;
+                userResponses.processos_vinculados = preferred;
+            }
+        }
+
         function getMonitoriaContractIds(options = {}) {
             const {
                 includeGeneralSnapshot = false,
@@ -1139,14 +1180,20 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             );
             const responses = deepClone(processo.tipo_de_acao_respostas || {});
             const cnjFormatted = processo.cnj ? formatCnjDigits(processo.cnj) : '';
+            const valorCausa =
+                processo.valor_causa === undefined || processo.valor_causa === null
+                    ? null
+                    : parseCurrencyValue(processo.valor_causa);
             const barrado = processo.barrado
                 ? deepClone(processo.barrado)
                 : { ativo: false, inicio: null, retorno_em: null };
             delete responses.processos_vinculados;
             return {
                 cnj: cnjFormatted || 'Não informado',
+                valor_causa: valorCausa,
                 contratos: contractIds,
                 tipo_de_acao_respostas: responses,
+                analysis_type: processo.analysis_type ? deepClone(processo.analysis_type) : null,
                 supervisionado: Boolean(processo.supervisionado),
                 supervisor_status: processo.supervisor_status || 'pendente',
                 awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
@@ -1490,6 +1537,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                 clearTreeResponsesForNewAnalysis();
                 userResponses.processos_vinculados = [deepClone(cardData)];
+                syncProcessoVinculadoResponseKey();
                 ensureUserResponsesShape();
 
                 const savedResponses = cardData.tipo_de_acao_respostas || {};
@@ -2352,11 +2400,31 @@ function formatCnjDigits(raw) {
             let matches = [];
             if (mentionType === 'cnj') {
                 let capturing = false;
-                entriesToReview.forEach(entry => {
+                entriesToReview.forEach((entry, idx) => {
                     const lowerRaw = (entry.raw || '').toLowerCase();
                     const hasTargetCnj = normalizedCnjDigits
                         ? entry.raw.replace(/\D/g, '').includes(normalizedCnjDigits)
                         : lowerRaw.includes((normalizedTarget || '').toLowerCase());
+                    // Se o usuário escreveu uma hashtag/nota logo acima do "CNJ:", o split pode ter separado
+                    // em dois blocos. Para exibir no post-it amarelo, reanexa o bloco anterior ao bloco do CNJ.
+                    let effectiveEntry = entry;
+                    if (hasTargetCnj && idx > 0) {
+                        const prev = entriesToReview[idx - 1];
+                        const prevRaw = (prev && prev.raw) ? String(prev.raw) : '';
+                        const prevHasCnj = Boolean(extractCnjDigits(prevRaw));
+                        const prevHasMentionLines =
+                            prev && Array.isArray(prev.mentionLines) && prev.mentionLines.length > 0;
+                        const prevHasMeaningfulContent =
+                            prev && Array.isArray(prev.contentLines) && prev.contentLines.some(line => line.trim());
+                        const prevHasHashtag = /(^|\n)\s*#\S+/m.test(prevRaw);
+                        // Reanexa se o bloco anterior parece ser "conteúdo solto" (sem CNJ/contratos/#NJ),
+                        // pois é comum o usuário escrever o texto e depois inserir a menção.
+                        // Também cobre o caso do bloco ser apenas a hashtag do tipo.
+                        if (!prevHasCnj && !prevHasMentionLines && (prevHasMeaningfulContent || prevHasHashtag)) {
+                            effectiveEntry = parseRawEntry(`${prevRaw}\n${entry.raw}`);
+                        }
+                    }
+
                     if (hasTargetCnj) {
                         capturing = true;
                     } else if (
@@ -2367,7 +2435,7 @@ function formatCnjDigits(raw) {
                         capturing = false;
                     }
                     if (capturing) {
-                        matches.push(entry);
+                        matches.push(effectiveEntry);
                     }
                 });
             } else {
@@ -4404,7 +4472,9 @@ function formatCnjDigits(raw) {
             }
 
 	            if (question.tipo_campo === 'PROCESSO_VINCULADO') {
-	                renderProcessoVinculadoEditor(question.chave, $container);
+                    syncProcessoVinculadoResponseKey(question.chave);
+                    const resolvedKey = getProcessoVinculadoQuestionKey() || question.chave;
+	                renderProcessoVinculadoEditor(resolvedKey, $container);
 
 	                // Em Passivas, o PROCESSO_VINCULADO é o "container" da análise: as demais questões
 	                // devem aparecer dentro dos cards (por CNJ). Não renderiza questões fora do card.
