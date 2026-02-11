@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import connection, models
+from django.db.utils import ProgrammingError
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 from django.utils.text import slugify
@@ -737,8 +738,19 @@ class Tarefa(models.Model):
 @receiver(pre_delete, sender=Tarefa)
 def cleanup_tarefa_related(sender, instance, **kwargs):
     with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s", [instance.pk])
-        cursor.execute("DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s", [instance.pk])
+        # Alguns ambientes não possuem tabelas legadas (ex.: `contratos_tarefahistorico`).
+        # A exclusão deve ser best-effort para não quebrar o fluxo do admin.
+        for sql in (
+            "DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s",
+            "DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s",
+        ):
+            try:
+                cursor.execute(sql, [instance.pk])
+            except ProgrammingError as exc:
+                msg = str(exc).lower()
+                if "does not exist" in msg or "nao existe" in msg or "não existe" in msg:
+                    continue
+                raise
 
 class Prazo(models.Model):
     ALERTA_UNIDADE_CHOICES = [
