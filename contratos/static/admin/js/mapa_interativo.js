@@ -38,7 +38,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!mapa) return;
 
     const urlParams = new URLSearchParams(window.location.search);
-    const ufAtivas = new Set(urlParams.getAll("uf").filter(Boolean));
+    const ufAtivas = new Set(
+        String(urlParams.get("uf") || "")
+            .split(",")
+            .map(v => v.trim().toUpperCase())
+            .filter(Boolean)
+    );
 
     const ufsComProcessos = new Set();
     ufList.querySelectorAll('a').forEach(link => {
@@ -53,14 +58,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const toggleUF = (uf) => {
         const ufUpper = uf.toUpperCase();
         const current = new URLSearchParams(window.location.search);
-        const values = new Set(current.getAll('uf').map(value => value.toUpperCase()).filter(Boolean));
+        const raw = (current.get('uf') || '').trim();
+        const values = new Set(raw ? raw.split(',').map(value => value.trim().toUpperCase()).filter(Boolean) : []);
         if (values.has(ufUpper)) {
             values.delete(ufUpper);
         } else {
             values.add(ufUpper);
         }
         current.delete('uf');
-        values.forEach(v => current.append('uf', v));
+        if (values.size) current.set('uf', Array.from(values).sort().join(','));
         const newSearch = current.toString();
         window.location.search = newSearch ? `?${newSearch}` : window.location.pathname;
     };

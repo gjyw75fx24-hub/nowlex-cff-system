@@ -60,7 +60,7 @@
         if (!targetDetails) return;
 
         const params = new URLSearchParams(window.location.search);
-        const hasUf = params.getAll('uf').filter(Boolean).length > 0;
+        const hasUf = String(params.get('uf') || '').split(',').map(v => v.trim()).filter(Boolean).length > 0;
         if (!hasUf) {
           targetDetails.open = false;
         }

@@ -1742,36 +1742,73 @@ class UFCountFilter(admin.SimpleListFilter):
     title = 'UF'
     parameter_name = 'uf'
 
+    @staticmethod
+    def _parse_selected(values):
+        if values is None:
+            raw_list = []
+        elif isinstance(values, (list, tuple)):
+            raw_list = [v for v in values if v]
+        else:
+            raw_list = [values] if values else []
+
+        # Compat: aceita uf=RS,SC (string única) e uf=RS&uf=SC (repetido)
+        if len(raw_list) == 1 and ',' in raw_list[0]:
+            raw_list = [v.strip() for v in raw_list[0].split(',') if v.strip()]
+
+        return sorted({str(v).strip().upper() for v in raw_list if str(v).strip()})
+
+    @classmethod
+    def _get_selected_ufs(cls, request):
+        return cls._parse_selected(request.GET.getlist('uf'))
+
     def lookups(self, request, model_admin):
         qs = model_admin.get_queryset(request)
         if not _show_filter_counts(request):
             ufs = sorted({row for row in qs.values_list('uf', flat=True) if row})
-            return [(uf, uf) for uf in ufs]
+            # Inclui um wrapper identificável para que JS/CSS possa mirar apenas este filtro,
+            # sem "pegar" links de outros filtros (o Django preserva `uf=...` nas URLs).
+            return [(uf, mark_safe(f"<span class='uf-choice'>{uf}</span>")) for uf in ufs]
         counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
-        return [(uf, mark_safe(f"{uf} <span class='filter-count'>({counts.get(uf, 0)})</span>")) for uf in sorted(counts.keys())]
+        return [
+            (
+                uf,
+                mark_safe(
+                    f"<span class='uf-choice'>{uf}</span> "
+                    f"<span class='filter-count'>({counts.get(uf, 0)})</span>"
+                ),
+            )
+            for uf in sorted(counts.keys())
+        ]
 
     def choices(self, changelist):
-        current = self.value()
+        current_values = set(self._parse_selected(self.value()))
         all_query = changelist.get_query_string(
             {'_skip_saved_filters': '1'},
             remove=[self.parameter_name, 'o', '_skip_saved_filters']
         )
         yield {
-            'selected': current is None,
+            'selected': not current_values,
             'query_string': all_query,
             'display': 'Todos',
         }
         for value, label in self.lookup_choices:
-            selected = value == current
+            value_upper = str(value).upper()
+            selected = value_upper in current_values
+            next_values = set(current_values)
             if selected:
+                next_values.discard(value_upper)
+            else:
+                next_values.add(value_upper)
+
+            if next_values:
                 query_string = changelist.get_query_string(
-                    {'_skip_saved_filters': '1'},
-                    remove=[self.parameter_name, 'o']
+                    {self.parameter_name: ",".join(sorted(next_values))},
+                    remove=['o', '_skip_saved_filters']
                 )
             else:
                 query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=['o', '_skip_saved_filters']
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o']
                 )
             yield {
                 'selected': selected,
@@ -1780,7 +1817,7 @@ class UFCountFilter(admin.SimpleListFilter):
             }
 
     def queryset(self, request, queryset):
-        values = request.GET.getlist(self.parameter_name)
+        values = self._get_selected_ufs(request)
         if values:
             return queryset.filter(uf__in=values)
         return queryset
@@ -2064,10 +2101,40 @@ class AprovacaoFilter(admin.SimpleListFilter):
 class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
     title = "Por Análise"
     parameter_name = "tipo_analise"
+    exclude_parameter_name = "tipo_analise_exclude"
 
     PATH_KEY = "saved_processos_vinculados"
 
-    def _filter_queryset(self, queryset, slug: str):
+    def __init__(self, request, params, model, model_admin):
+        # SimpleListFilter, por padrão, só consome `parameter_name`. Precisamos também
+        # consumir `exclude_parameter_name` para que ele não "sobre" e vire lookup
+        # do model (causando IncorrectLookupParameters).
+        #
+        # Observação: fazemos o pop ANTES do super().__init__ para garantir que, mesmo
+        # se `lookups()` (chamado dentro do super) falhar por qualquer motivo, o
+        # parâmetro extra não ficará pendurado e não será interpretado como lookup
+        # do model pelo ChangeList.
+        exclude_value = None
+        if self.exclude_parameter_name in params:
+            try:
+                exclude_value = params.pop(self.exclude_parameter_name)
+            except Exception:
+                exclude_value = None
+
+        super().__init__(request, params, model, model_admin)
+
+        if exclude_value:
+            try:
+                self.used_parameters[self.exclude_parameter_name] = exclude_value[-1]
+            except Exception:
+                self.used_parameters[self.exclude_parameter_name] = str(exclude_value)
+
+    def expected_parameters(self):
+        # Faz o Django Admin entender que este filtro consome também `tipo_analise_exclude`,
+        # evitando que o parâmetro seja interpretado como lookup do model (e estoure FieldError).
+        return [self.parameter_name, self.exclude_parameter_name]
+
+    def _annotate_queryset(self, queryset, slug: str):
         # "Concluída" aqui significa: existe card salvo desse tipo E ele tem
         # algum conteúdo de análise (não conta CNJ/valor causa/parte contrária).
         #
@@ -2099,37 +2166,59 @@ class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
                 ),
             }
         )
+        return queryset, alias_obs, alias_resp
+
+    def _filter_queryset(self, queryset, slug: str):
+        queryset, alias_obs, alias_resp = self._annotate_queryset(queryset, slug)
         return queryset.filter(models.Q(**{alias_obs: True}) | models.Q(**{alias_resp: True}))
+
+    def _exclude_queryset(self, queryset, slug: str):
+        queryset, alias_obs, alias_resp = self._annotate_queryset(queryset, slug)
+        # "Sem conclusão" = nenhum conteúdo de análise encontrado no card salvo.
+        return queryset.filter(models.Q(**{alias_obs: False}) & models.Q(**{alias_resp: False}))
 
     def lookups(self, request, model_admin):
         tipos = list(TipoAnaliseObjetiva.objects.filter(ativo=True).order_by("nome"))
-        if not _show_filter_counts(request):
-            return [(t.slug, t.nome) for t in tipos]
-
-        qs = model_admin.get_queryset(request)
-        items = []
-        for t in tipos:
-            try:
-                count = self._filter_queryset(qs, t.slug).count()
-            except Exception:
-                count = 0
-            label = mark_safe(f"{t.nome} <span class='filter-count'>({count})</span>")
-            items.append((t.slug, label))
-        return items
+        # As contagens (facets) são calculadas em `choices()` usando `changelist.get_queryset(...)`,
+        # para que respeitem os outros filtros ativos (ex.: "Incluir prescritos", "Carteira", "UF", etc).
+        # Aqui retornamos apenas os slugs/nomes.
+        return [(t.slug, t.nome) for t in tipos]
 
     def choices(self, changelist):
-        current = self.value()
+        current = (self.value() or "").strip()
+        # `expected_parameters()` faz o admin "consumir" este parâmetro e movê-lo para `used_parameters`.
+        current_exclude = str(self.used_parameters.get(self.exclude_parameter_name, "") or "").strip()
         all_query = changelist.get_query_string(
             {"_skip_saved_filters": "1"},
-            remove=[self.parameter_name, "o", "_skip_saved_filters"],
+            remove=[self.parameter_name, self.exclude_parameter_name, "o", "_skip_saved_filters"],
         )
         yield {
-            "selected": current in (None, ""),
+            "selected": (not current) and (not current_exclude),
             "query_string": all_query,
             "display": "Todos",
         }
+        add_counts = _show_filter_counts(self.request)
+        # Base para facets: aplica todos os filtros EXCETO este (tipo_analise/tipo_analise_exclude),
+        # garantindo que as contagens do "−" e do "(count)" reflitam a lista atual do usuário.
+        #
+        # Importante: usar `changelist.get_queryset()` aqui pode mutar `changelist.filter_specs`
+        # e causar efeitos colaterais durante o render (e já vimos discrepâncias de contagem).
+        # Por isso, criamos um ChangeList "fresh" apenas para cálculo das contagens.
+        base_qs = None
+        if add_counts:
+            try:
+                fresh_cl = changelist.model_admin.get_changelist_instance(self.request)
+                base_qs = fresh_cl.get_queryset(
+                    self.request,
+                    exclude_parameters=self.expected_parameters(),
+                )
+            except Exception:
+                base_qs = None
+
         for value, label in self.lookup_choices:
-            selected = str(value) == str(current) and current not in (None, "")
+            value_str = str(value)
+            selected = value_str == current and bool(current)
+
             if selected:
                 query_string = changelist.get_query_string(
                     {"_skip_saved_filters": "1"},
@@ -2137,20 +2226,61 @@ class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
                 )
             else:
                 query_string = changelist.get_query_string(
-                    {self.parameter_name: value},
-                    remove=["o", "_skip_saved_filters"],
+                    {self.parameter_name: value_str},
+                    remove=[self.exclude_parameter_name, "o", "_skip_saved_filters"],
                 )
+
+            minus_query = changelist.get_query_string(
+                {self.exclude_parameter_name: value_str},
+                remove=[self.parameter_name, "o", "_skip_saved_filters"],
+            )
+            minus_active = value_str == current_exclude and bool(current_exclude)
+
+            include_count = None
+            minus_count = None
+            if add_counts and base_qs is not None:
+                try:
+                    include_count = self._filter_queryset(base_qs, value_str).count()
+                except Exception:
+                    include_count = 0
+                try:
+                    minus_count = self._exclude_queryset(base_qs, value_str).count()
+                except Exception:
+                    minus_count = 0
+
+            label_html = label
+            if include_count is not None:
+                label_html = mark_safe(f"{label} <span class='filter-count'>({include_count})</span>")
+
+            # Observação: o template do admin envolve `display` num <a>. Para evitar <a> aninhado,
+            # renderizamos o "−" como <span> clicável e tratamos via JS (change_list.html).
+            display = mark_safe(
+                f'{label_html} <span class="analysis-exclude{" active" if minus_active else ""}" '
+                f'title="Mostrar SEM conclusão deste tipo" data-href="{minus_query}">−'
+                + (
+                    f'<span class="analysis-exclude-count">({minus_count})</span>'
+                    if minus_count is not None
+                    else ""
+                )
+                + "</span>"
+            )
             yield {
                 "selected": selected,
                 "query_string": query_string,
-                "display": label,
+                "display": display,
             }
 
     def queryset(self, request, queryset):
         slug = (self.value() or "").strip()
-        if not slug:
-            return queryset
-        return self._filter_queryset(queryset, slug)
+        exclude_slug = (self.used_parameters.get(self.exclude_parameter_name) or "").strip()
+        if slug and exclude_slug:
+            # Evita ambiguidade: se ambos vierem por qualquer motivo, prioriza o "include".
+            exclude_slug = ""
+        if slug:
+            return self._filter_queryset(queryset, slug)
+        if exclude_slug:
+            return self._exclude_queryset(queryset, exclude_slug)
+        return queryset
 
 
 class ProtocoladosFilter(admin.SimpleListFilter):

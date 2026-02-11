@@ -175,6 +175,34 @@
         #result_list td {
             font-size: 1.1rem;
         }
+
+        /* Botão "−" do filtro Por Análise (exclusão) */
+        #changelist-filter .analysis-exclude {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 0px 6px;
+            border-radius: 10px;
+            border: 1px solid rgba(210, 60, 60, 0.55);
+            color: rgba(190, 40, 40, 0.95);
+            font-weight: 600;
+            font-size: 0.85em;
+            line-height: 1.4;
+            cursor: pointer;
+            user-select: none;
+        }
+        #changelist-filter .analysis-exclude .analysis-exclude-count {
+            margin-left: 4px;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+        #changelist-filter .analysis-exclude.active {
+            background: rgba(210, 60, 60, 0.95);
+            color: #fff;
+            border-color: rgba(210, 60, 60, 0.95);
+        }
+        #changelist-filter a:hover .analysis-exclude {
+            filter: brightness(0.95);
+        }
     </style>
 {% endblock %}
 
@@ -429,36 +457,9 @@
             filterDiv.insertBefore(clearAllBtn, filterDiv.firstChild);
         }
 
-        // Multi-seleção de UF: permite marcar/desmarcar múltiplas UFs sem perder as já escolhidas
-        const ufLinks = Array.from(filterDiv.querySelectorAll('a[href*="uf="]'));
-        ufLinks.forEach(link => {
-            link.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                const target = new URL(link.href, window.location.origin);
-                const ufValue = target.searchParams.get('uf');
-                if (!ufValue) return;
-
-                const current = new URLSearchParams(window.location.search);
-                const values = current.getAll('uf').filter(Boolean);
-                const exists = values.includes(ufValue);
-                const next = exists ? values.filter(v => v !== ufValue) : [...values, ufValue];
-                current.delete('uf');
-                next.forEach(v => current.append('uf', v));
-                const newSearch = current.toString();
-                window.location.search = newSearch ? `?${newSearch}` : '';
-            }, { passive: false });
-        });
-
-        // Destaque visual nas UFs selecionadas (lista)
-        const params = new URLSearchParams(window.location.search);
-        const selectedUFs = new Set(params.getAll('uf').map(v => v.toUpperCase()).filter(Boolean));
-        ufLinks.forEach(link => {
-            const ufValue = new URL(link.href, window.location.origin).searchParams.get('uf');
-            if (ufValue && selectedUFs.has(ufValue.toUpperCase())) {
-                link.style.fontWeight = 'bold';
-                link.style.textDecoration = 'underline';
-            }
-        });
+        // UF multi-seleção é suportada no backend (UFCountFilter) via querystring `uf=AC,DF,...`.
+        // Não fazemos highlight/override via JS aqui para evitar interferir em outros filtros
+        // (o Django preserva `uf=...` em todos os links do sidebar quando UF está ativa).
 
         // Preserva filtros ao entrar no detalhe (adiciona _changelist_filters nos links da lista)
         const currentFilters = window.location.search.replace(/^\?/, '');
@@ -469,6 +470,16 @@
                 a.href = url.toString();
             });
         }
+
+        // Filtro Por Análise: trata o clique no "−" (span) para navegar no modo "excluir"
+        document.querySelectorAll('#changelist-filter .analysis-exclude[data-href]').forEach((el) => {
+            el.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const href = el.getAttribute('data-href');
+                if (href) window.location.href = href;
+            }, { passive: false });
+        });
     });
     </script>
 

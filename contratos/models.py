@@ -737,24 +737,21 @@ class Tarefa(models.Model):
 
 @receiver(pre_delete, sender=Tarefa)
 def cleanup_tarefa_related(sender, instance, **kwargs):
+    # Alguns ambientes (especialmente em produção) podem não ter tabelas legadas
+    # (ex.: `contratos_tarefahistorico`). Se tentarmos deletar nelas e a tabela não existir,
+    # o PostgreSQL marca a transação como "aborted" e o admin falha ao salvar o resto do form.
+    #
+    # Portanto, fazemos a limpeza apenas nas tabelas que existem (best-effort).
+    existing = set(connection.introspection.table_names())
+    statements = [
+        ("contratos_tarefahistorico", "DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s"),
+        ("contratos_tarefamensagem", "DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s"),
+    ]
     with connection.cursor() as cursor:
-        # Alguns ambientes não possuem tabelas legadas (ex.: `contratos_tarefahistorico`).
-        # A exclusão deve ser best-effort para não quebrar o fluxo do admin.
-        for sql in (
-            "DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s",
-            "DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s",
-        ):
-            sid = transaction.savepoint()
-            try:
-                cursor.execute(sql, [instance.pk])
-            except ProgrammingError as exc:
-                transaction.savepoint_rollback(sid)
-                msg = str(exc).lower()
-                if "does not exist" in msg or "nao existe" in msg or "não existe" in msg:
-                    continue
-                raise
-            else:
-                transaction.savepoint_commit(sid)
+        for table, sql in statements:
+            if table not in existing:
+                continue
+            cursor.execute(sql, [instance.pk])
 
 class Prazo(models.Model):
     ALERTA_UNIDADE_CHOICES = [
