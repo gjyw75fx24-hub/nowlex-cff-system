@@ -3169,6 +3169,36 @@ function formatCnjDigits(raw) {
                         const $tipoBadge = $(`<small class="analise-type-badge" title="Tipo de Análise">${tipoAnaliseNome}</small>`);
                         $headerVinculado.append($tipoBadge);
                     }
+                    const tipoAnaliseHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
+                        ? String(processo.analysis_type.hashtag).trim()
+                        : '';
+                    if (tipoAnaliseHashtag) {
+                        const $postit = $(
+                            `<button type="button" class="analise-hashtag-postit" title="Mencionar no caderno">${tipoAnaliseHashtag}</button>`
+                        );
+                        $postit.on('click', function (event) {
+                            event.stopPropagation();
+                            const contratosLine = snapshot.contractIds && snapshot.contractIds.length
+                                ? `Contratos: ${snapshot.contractIds.join(', ')}`
+                                : '';
+                            const mention = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
+                                .filter(Boolean)
+                                .join('\n');
+                            if (typeof window.openNotebookWithMention === 'function') {
+                                window.openNotebookWithMention(mention);
+                                return;
+                            }
+                            const finish = () => showCffSystemDialog('Menção copiada para colar no caderno.', 'success');
+                            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(mention).then(finish).catch(() => {
+                                    showCffSystemDialog('Não foi possível copiar automaticamente. Copie manualmente.', 'warning');
+                                });
+                            } else {
+                                finish();
+                            }
+                        });
+                        $headerVinculado.append($postit);
+                    }
                     const latestTipo = processo && processo.analysis_type && processo.analysis_type.id != null
                         ? analysisTypesById[String(processo.analysis_type.id)]
                         : null;
@@ -3206,13 +3236,10 @@ function formatCnjDigits(raw) {
                     $editBtn.attr('data-visual-index', String(cardIndex));
                     $copyBtn.on('click', function (event) {
                         event.stopPropagation();
-                        const tipoHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
-                            ? String(processo.analysis_type.hashtag).trim()
-                            : '';
                         const contratosLine = snapshot.contractIds && snapshot.contractIds.length
                             ? `Contratos: ${snapshot.contractIds.join(', ')}`
                             : '';
-                        const text = [tipoHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
+                        const text = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
                             .filter(Boolean)
                             .join('\n');
                         const finish = () => showCffSystemDialog('Referência copiada para colar no caderno.', 'success');
