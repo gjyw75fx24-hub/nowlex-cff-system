@@ -1,7 +1,7 @@
 import uuid
 
 from django.conf import settings
-from django.db import connection, models
+from django.db import connection, models, transaction
 from django.db.utils import ProgrammingError
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
@@ -744,13 +744,17 @@ def cleanup_tarefa_related(sender, instance, **kwargs):
             "DELETE FROM contratos_tarefahistorico WHERE tarefa_id = %s",
             "DELETE FROM contratos_tarefamensagem WHERE tarefa_id = %s",
         ):
+            sid = transaction.savepoint()
             try:
                 cursor.execute(sql, [instance.pk])
             except ProgrammingError as exc:
+                transaction.savepoint_rollback(sid)
                 msg = str(exc).lower()
                 if "does not exist" in msg or "nao existe" in msg or "não existe" in msg:
                     continue
                 raise
+            else:
+                transaction.savepoint_commit(sid)
 
 class Prazo(models.Model):
     ALERTA_UNIDADE_CHOICES = [
