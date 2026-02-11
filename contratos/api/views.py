@@ -136,6 +136,12 @@ class AgendaGeralAPIView(APIView):
     MAX_PAGE_SIZE = 500
 
     def get(self, request):
+        is_supervisor_user = (
+            request.user.is_superuser
+            or request.user.groups.filter(name__iexact='Supervisor').exists()
+        )
+        show_all_users = (request.query_params.get('all_users') or '').strip() in ('1', 'true', 'True', 'yes', 'sim')
+
         status_param = (request.query_params.get('status') or '').lower()
         show_completed = status_param in ['completed', 'concluidos', 'concluida', 'concluido']
         tarefa_filter = {'concluida': True} if show_completed else {'concluida': False}
@@ -151,6 +157,16 @@ class AgendaGeralAPIView(APIView):
             .select_related('processo', 'responsavel')
             .filter(**prazo_filter)
         )
+
+        # Por padrão, Agenda Geral mostra apenas itens do próprio usuário.
+        # Supervisor pode ver todos com `?all_users=1`.
+        if not (is_supervisor_user and show_all_users):
+            tarefas = tarefas.filter(
+                Q(responsavel=request.user) |
+                (Q(responsavel__isnull=True) & Q(criado_por=request.user))
+            )
+            prazos = prazos.filter(responsavel=request.user)
+
         allowed_carteiras = get_user_allowed_carteira_ids(request.user)
         if allowed_carteiras not in (None, []) and allowed_carteiras:
             tarefas = tarefas.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
@@ -411,6 +427,13 @@ class AgendaGeralAPIView(APIView):
         }
 
     def _get_supervision_entries(self, show_completed, request):
+        is_supervisor_user = (
+            request.user.is_superuser
+            or request.user.groups.filter(name__iexact='Supervisor').exists()
+        )
+        if not is_supervisor_user:
+            return []
+
         pending_statuses = {'pendente', 'pre_aprovado'}
         completed_statuses = {'aprovado', 'reprovado'}
         target_statuses = completed_statuses if show_completed else pending_statuses
