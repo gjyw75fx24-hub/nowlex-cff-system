@@ -585,7 +585,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 3. Lógica do Botão "Preencher UF" ---
-    if (ufInput && !document.getElementById("btn_preencher_uf")) {
+    // Só faz sentido no formulário de Processo Judicial (com CNJ).
+    if (form && cnjInput && ufInput && !document.getElementById("btn_preencher_uf")) {
         const botao = document.createElement("button");
         botao.id = "btn_preencher_uf";
         botao.type = "button";
@@ -3601,6 +3602,20 @@ document.addEventListener('DOMContentLoaded', function() {
         return ids;
     };
 
+    const getSelectedPlanilhaCpfs = () => {
+        const cpfs = [];
+        const boxes = document.querySelectorAll('input[name="selected_cpfs"]:checked');
+        boxes.forEach((box) => {
+            const v = (box.value || '').trim();
+            if (v) cpfs.push(v);
+        });
+        const uploadToken = (document.querySelector('input[name="upload_token"]')?.value || '').trim();
+        return {
+            cpfs: Array.from(new Set(cpfs)),
+            uploadToken,
+        };
+    };
+
     const openEtiquetasBulkModal = () => {
         const ids = getSelectedProcessIds();
         if (!ids.length) {
@@ -3995,15 +4010,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    const updateAgendaBulkInfo = (modal, processIds) => {
+    const updateAgendaBulkInfo = (modal, processIds, planilhaCpfs) => {
         const countEl = modal.querySelector('[data-bulk-count]');
         const noteEl = modal.querySelector('[data-bulk-note]');
-        const count = processIds.length;
+        const labelEl = modal.querySelector('.agenda-bulk-info__label');
+        const isPlanilha = modal?.dataset?.bulkMode === 'planilha';
+        const count = isPlanilha ? (planilhaCpfs?.length || 0) : (processIds?.length || 0);
         if (countEl) countEl.textContent = `${count}`;
         if (noteEl) {
-            noteEl.textContent = count > 0
-                ? `${count === 1 ? 'processo selecionado' : 'processos selecionados'}`
-                : 'tarefa/prazo geral (sem processo)';
+            if (isPlanilha) {
+                if (labelEl) labelEl.textContent = 'CPFs selecionados:';
+                noteEl.textContent = count > 0
+                    ? `${count === 1 ? 'CPF selecionado' : 'CPFs selecionados'} (tarefa será aplicada após importar)`
+                    : 'Selecione ao menos um CPF.';
+            } else {
+                if (labelEl) labelEl.textContent = 'Processos selecionados:';
+                noteEl.textContent = count > 0
+                    ? `${count === 1 ? 'processo selecionado' : 'processos selecionados'}`
+                    : 'tarefa/prazo geral (sem processo)';
+            }
         }
     };
 
@@ -4200,6 +4225,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const observacoes = getFieldValue('observacoes').trim();
             const concluida = getFieldChecked('concluida');
             const commentPayload = collectBulkCommentPayload(modal);
+            const isPlanilha = modal?.dataset?.bulkMode === 'planilha';
+            const planilhaCpfs = Array.isArray(modal?._planilhaCpfs) ? modal._planilhaCpfs : [];
+            const uploadToken = (modal?._planilhaUploadToken || '').trim();
 
             if (!descricao) {
                 createSystemAlert('Agenda Geral', 'Informe a descrição da tarefa.');
@@ -4209,12 +4237,63 @@ document.addEventListener('DOMContentLoaded', function() {
                 createSystemAlert('Agenda Geral', 'Informe a data da tarefa.');
                 return;
             }
-            if (!processIds.length && !responsavel) {
+            if (!processIds.length && !responsavel && !isPlanilha) {
                 createSystemAlert('Agenda Geral', 'Selecione um responsável para criar tarefa geral.');
                 return;
             }
-            if (commentPayload.file && !processIds.length) {
+            if (commentPayload.file && (!processIds.length || isPlanilha)) {
                 createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
+                return;
+            }
+
+            if (isPlanilha) {
+                if (!uploadToken) {
+                    createSystemAlert('Agenda Geral', 'Anexo não encontrado. Faça a pré-visualização novamente.');
+                    return;
+                }
+                if (!planilhaCpfs.length) {
+                    createSystemAlert('Agenda Geral', 'Selecione ao menos um CPF na lista para guardar a tarefa.');
+                    return;
+                }
+                const pendingPayload = {
+                    upload_token: uploadToken,
+                    cpfs: planilhaCpfs,
+                    payload: {
+                        descricao,
+                        data,
+                        responsavel_id: responsavel || null,
+                        lista_id: lista || null,
+                        prioridade,
+                        observacoes,
+                        concluida,
+                        comentario_texto: commentPayload.text || '',
+                    },
+                };
+                const submitBtn = modal.querySelector('.agenda-form-modal__submit');
+                if (submitBtn) submitBtn.disabled = true;
+                try {
+                    const response = await fetch('/admin/contratos/demandas-analise/planilha/pending/tarefas/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrftoken || '',
+                        },
+                        body: JSON.stringify(pendingPayload),
+                    });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw new Error(data.detail || 'Falha ao guardar tarefa para importação.');
+                    }
+                    createSystemAlert(
+                        'Agenda Geral',
+                        `Tarefa guardada para ${planilhaCpfs.length} CPF(s). Ela será aplicada automaticamente após importar.`,
+                    );
+                    modal.remove();
+                } catch (err) {
+                    createSystemAlert('Agenda Geral', err.message || 'Falha ao guardar tarefa para importação.');
+                } finally {
+                    if (submitBtn) submitBtn.disabled = false;
+                }
                 return;
             }
 
@@ -4378,7 +4457,7 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.addEventListener('remove', () => {
             document.removeEventListener('keydown', handleEscClose);
         });
-        updateAgendaBulkInfo(modal, modal._processIds);
+        updateAgendaBulkInfo(modal, modal._processIds, modal._planilhaCpfs || []);
         setupBulkCommentControls(modal);
         fillAgendaBulkSelects(modal, type);
         if (type === 'tarefas') {
@@ -4404,6 +4483,7 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.querySelector('.agenda-form-modal__submit').addEventListener('click', () => {
             submitAgendaBulkForm(modal, type, modal._processIds || []);
         });
+        return modal;
     };
 
     const openAgendaPanel = () => {
@@ -4412,7 +4492,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const openAgendaForm = (type) => {
         const processIds = getSelectedProcessIds();
-        createAgendaFormModal(type, processIds);
+        const planilha = getSelectedPlanilhaCpfs();
+        const modal = createAgendaFormModal(type, processIds);
+        if (modal && (!processIds.length) && planilha.cpfs.length && planilha.uploadToken) {
+            modal.dataset.bulkMode = 'planilha';
+            modal._planilhaCpfs = planilha.cpfs;
+            modal._planilhaUploadToken = planilha.uploadToken;
+            updateAgendaBulkInfo(modal, modal._processIds || [], modal._planilhaCpfs);
+        }
     };
 
     window.nowlexAgenda = window.nowlexAgenda || {};

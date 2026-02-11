@@ -32,6 +32,13 @@ window.__cnj_active_display = "{{ cnj_active_display|default:''|escapejs }}";
     <span class="button disabled" style="font-size: 1.2em; padding: 5px 10px; background: none; border: none; box-shadow: none; color: #ccc; cursor: default;"> > </span>
   {% endif %}
 </div>
+{% if nav_end_message %}
+  <div class="messagelist">
+    <ul class="messagelist">
+      <li class="warning">{{ nav_end_message }}</li>
+    </ul>
+  </div>
+{% endif %}
 {{ block.super }} {# Render the content from the parent template #}
 
 <script>

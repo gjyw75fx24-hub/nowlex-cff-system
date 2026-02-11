@@ -20,6 +20,9 @@ media/
 # Dumps de carteira consignado
 carteira_consignado_dump_*.dump
 
+# Planilhas locais (importação)
+E - PASSIVAS - Modelo.xlsx
+
 # Arquivos de ambiente (NUNCA commitar!)
 .env
 .env.*

@@ -1,0 +1,166 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+  <script src="{% static 'admin/js/processo_judicial_enhancer.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="demandas-page">
+  <div class="demandas-panel">
+    <div class="demandas-header">
+      <div>
+        <h1 style="margin: 0 0 6px 0;">{{ title }}</h1>
+        <div style="opacity: .8;">
+          Importa planilha Passivas (.xlsx) criando cadastros/CNJs e salvando cards no caderno.
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <a class="button" href="{{ back_url }}">Voltar</a>
+      </div>
+    </div>
+
+	    <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
+	      {% csrf_token %}
+	      {{ form.upload_token }}
+	      <script>
+	        (function () {
+	          const el = document.getElementsByName('upload_token')[0];
+	          if (el && "{{ upload_token_value|escapejs }}") el.value = "{{ upload_token_value|escapejs }}";
+	        })();
+	      </script>
+
+      <div class="demandas-form__row demandas-form__row--stacked">
+        <div class="demandas-form__group demandas-form__group--wide">
+          <label class="demandas-form__label">{{ form.arquivo.label }}</label>
+          {{ form.arquivo }}
+          {% if kept_upload_name %}
+            <div class="help" style="margin-top: 6px;">
+              Arquivo mantido para importação: <strong>{{ kept_upload_name }}</strong>
+              <span style="opacity: .8;">(não precisa anexar novamente)</span>
+            </div>
+          {% endif %}
+          {% if form.arquivo.errors %}<div class="errornote">{{ form.arquivo.errors }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="demandas-form__row">
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.carteira.label }}</label>
+          {{ form.carteira }}
+          {% if form.carteira.errors %}<div class="errornote">{{ form.carteira.errors }}</div>{% endif %}
+        </div>
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.tipo_analise.label }}</label>
+          {{ form.tipo_analise }}
+          {% if form.tipo_analise.errors %}<div class="errornote">{{ form.tipo_analise.errors }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="demandas-form__row">
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.uf.label }}</label>
+          {{ form.uf }}
+          {% if form.uf.help_text %}<div class="help">{{ form.uf.help_text }}</div>{% endif %}
+          {% if form.uf.errors %}<div class="errornote">{{ form.uf.errors }}</div>{% endif %}
+        </div>
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.sheet_prefix.label }}</label>
+          {{ form.sheet_prefix }}
+          {% if form.sheet_prefix.help_text %}<div class="help">{{ form.sheet_prefix.help_text }}</div>{% endif %}
+          {% if form.sheet_prefix.errors %}<div class="errornote">{{ form.sheet_prefix.errors }}</div>{% endif %}
+        </div>
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.limit.label }}</label>
+          {{ form.limit }}
+          {% if form.limit.help_text %}<div class="help">{{ form.limit.help_text }}</div>{% endif %}
+          {% if form.limit.errors %}<div class="errornote">{{ form.limit.errors }}</div>{% endif %}
+        </div>
+      </div>
+
+	      <div class="demandas-form__footer">
+	        <div class="demandas-form__actions">
+	          <button class="button" type="submit" name="action" value="preview">Pré-visualizar</button>
+	          <button class="button default" type="submit" name="action" value="import">Importar</button>
+	          <button class="button" type="submit" name="action" value="cancel" formnovalidate>Cancelar importação</button>
+	        </div>
+	      </div>
+	
+	    {% if preview %}
+	      <hr style="margin: 18px 0;">
+	      <h2>Prévia</h2>
+	      <ul style="margin-top: 6px;">
+	        <li><strong>Linhas:</strong> {{ preview.rows }}</li>
+	        <li><strong>Analisados:</strong> {{ preview.analysed_cpfs }} CPF(s)</li>
+	        <li><strong>CPFs:</strong> {{ preview.cpfs }}</li>
+	        <li><strong>CNJs:</strong> {{ preview.cnjs }}</li>
+	        <li><strong>UFs:</strong> {{ preview.ufs }}</li>
+	      </ul>
+	
+	      {% if preview.cpf_rows %}
+	        <h3 style="margin-top: 14px;">Selecionar CPFs para importar</h3>
+	        <div style="display:flex; gap:10px; margin: 8px 0 10px 0; flex-wrap:wrap;">
+	          <button type="button" class="button" id="sel-all">Selecionar todos</button>
+	          <button type="button" class="button" id="sel-none">Limpar seleção</button>
+	          <button type="button" class="button" id="sel-analysed">Selecionar “já analisados”</button>
+	          <span style="opacity:.75; align-self:center;">(pré-marcados quando há respostas de análise preenchidas)</span>
+	        </div>
+	        <table class="adminlist" style="width: 100%; border-collapse: collapse;">
+	          <thead>
+	            <tr>
+	              <th style="text-align:left; width: 44px;"></th>
+	              <th style="text-align:left;">UF</th>
+	              <th style="text-align:left;">CPF</th>
+	              <th style="text-align:left;">Parte contrária</th>
+	              <th style="text-align:left;">CNJs</th>
+	              <th style="text-align:left;">Status</th>
+	            </tr>
+	          </thead>
+	          <tbody>
+	            {% for row in preview.cpf_rows %}
+	              <tr>
+	                <td>
+	                  <input
+	                    type="checkbox"
+	                    name="selected_cpfs"
+	                    value="{{ row.cpf }}"
+	                    data-prechecked="{{ row.prechecked|yesno:'1,0' }}"
+	                    {% if row.checked %}checked{% endif %}
+	                  >
+	                </td>
+	                <td>{{ row.uf }}</td>
+	                <td>{{ row.cpf }}</td>
+	                <td>{{ row.parte_contraria }}</td>
+	                <td>{{ row.cnj_count }}</td>
+	                <td>
+	                  {% if row.prechecked %}
+	                    <span class="mini-postit">Já analisado</span>
+	                  {% else %}
+	                    <span style="opacity:.65;">Sem respostas</span>
+	                  {% endif %}
+	                </td>
+	              </tr>
+	            {% endfor %}
+	          </tbody>
+	        </table>
+	        <script>
+	          (function () {
+	            const boxes = () => Array.from(document.querySelectorAll('input[name="selected_cpfs"]'));
+	            const setAll = (checked) => boxes().forEach(b => b.checked = checked);
+	            const setAnalysed = () => boxes().forEach(b => b.checked = (b.dataset.prechecked === '1'));
+	            const allBtn = document.getElementById('sel-all');
+	            const noneBtn = document.getElementById('sel-none');
+	            const analysedBtn = document.getElementById('sel-analysed');
+	            if (allBtn) allBtn.addEventListener('click', () => setAll(true));
+	            if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
+	            if (analysedBtn) analysedBtn.addEventListener('click', () => setAnalysed());
+	          })();
+	        </script>
+	      {% endif %}
+	    {% endif %}
+	    </form>
+	  </div>
+	</div>
+	{% endblock %}

@@ -4,6 +4,7 @@
 {% block extrahead %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+    <script src="{% static 'admin/js/processo_judicial_enhancer.js' %}"></script>
     <style>
         .demandas-page {
             padding: 2rem 1.25rem;
@@ -197,9 +198,12 @@
                         Selecione o período para buscar demandas para análise considerando a data de prescrição dos contratos.
                     </p>
                 </div>
-                <div class="demandas-etiqueta-group">
+                <div style="display:flex; gap:10px; align-items:flex-start;">
+                    <a class="button" href="{% url 'admin:contratos_demandas_analise_planilha' %}">Modo Planilha</a>
+                    <div class="demandas-etiqueta-group">
                     <span class="etiqueta-badge demandas-etiqueta-preview">{{ period_label_sample }}</span>
                     <span class="demandas-etiqueta-caption">Etiqueta</span>
+                    </div>
                 </div>
             </div>
 

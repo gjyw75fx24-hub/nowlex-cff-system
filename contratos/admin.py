@@ -3,6 +3,8 @@ import logging
 import json
 import os
 import re
+import uuid
+from urllib.parse import quote
 from typing import Optional
 
 from django import forms
@@ -15,9 +17,10 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch
-from django.db.models.functions import Abs, Cast, Coalesce, Now
+from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
+from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
 from django.db.utils import OperationalError, ProgrammingError
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
@@ -35,14 +38,20 @@ from .models import (
     AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, CarteiraUsuarioAcesso, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     Parte, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
-    QuestaoAnalise, StatusProcessual, Tarefa, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
+    QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
 )
 from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .widgets import EnderecoWidget
-from .forms import DemandasAnaliseForm
+from .forms import DemandasAnaliseForm, DemandasAnalisePlanilhaForm
 from .services.demandas import DemandasImportError, DemandasImportService, _format_currency, _format_cpf
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
+from .services.passivas_planilha import (
+    PassivasPlanilhaError,
+    build_passivas_rows_from_xlsx_bytes,
+    import_passivas_rows,
+    validate_xlsx_upload,
+)
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
 
@@ -1012,6 +1021,446 @@ def demandas_analise_view(request):
     })
     return render(request, "admin/contratos/demandas_analise.html", context)
 
+
+def demandas_analise_planilha_view(request):
+    if not is_user_supervisor(request.user):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    form = DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
+    preview = None
+    import_result = None
+
+    action = request.POST.get("action") if request.method == "POST" else None
+
+    def _uploads_session_key() -> str:
+        return "passivas_planilha_uploads"
+
+    def _pending_actions_session_key() -> str:
+        return "passivas_planilha_pending_actions"
+
+    def _cleanup_old_uploads(session_dict: dict) -> dict:
+        # Remove itens antigos e arquivos inexistentes (best-effort).
+        now = timezone.now()
+        cleaned = {}
+        for token, meta in (session_dict or {}).items():
+            try:
+                ts = meta.get("ts")
+                path = meta.get("path") or ""
+                if not ts or not path:
+                    continue
+                age = now - timezone.datetime.fromisoformat(ts)
+                if age.days >= 2:
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
+                    continue
+                if not os.path.exists(path):
+                    continue
+                cleaned[token] = meta
+            except Exception:
+                continue
+        return cleaned
+
+    def _cleanup_old_pending(session_dict: dict) -> dict:
+        # Remove pendências antigas (best-effort).
+        now = timezone.now()
+        cleaned = {}
+        for token, meta in (session_dict or {}).items():
+            try:
+                ts = meta.get("ts")
+                if not ts:
+                    continue
+                age = now - timezone.datetime.fromisoformat(ts)
+                if age.days >= 2:
+                    continue
+                cleaned[token] = meta
+            except Exception:
+                continue
+        return cleaned
+
+    # Cancelar importação: remove anexo mantido e limpa pendências, sem precisar sair da tela.
+    if request.method == "POST" and action == "cancel":
+        token = (request.POST.get("upload_token") or "").strip()
+        uploads = _cleanup_old_uploads(request.session.get(_uploads_session_key(), {}))
+        pending_actions = _cleanup_old_pending(request.session.get(_pending_actions_session_key(), {}))
+        removed = False
+        try:
+            if token and token in uploads:
+                try:
+                    path = uploads[token].get("path")
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+                uploads.pop(token, None)
+                removed = True
+            if token and token in pending_actions:
+                pending_actions.pop(token, None)
+        finally:
+            request.session[_uploads_session_key()] = uploads
+            request.session[_pending_actions_session_key()] = pending_actions
+
+        if removed:
+            messages.success(request, "Importação cancelada: anexo descartado e tela limpa.")
+        else:
+            messages.info(request, "Nada para cancelar (nenhum anexo mantido).")
+        return HttpResponseRedirect(reverse("admin:contratos_demandas_analise_planilha"))
+
+    if request.method == "POST" and form.is_valid():
+        selected_cpfs = request.POST.getlist("selected_cpfs")
+        upload = form.cleaned_data.get("arquivo")
+        token = (form.cleaned_data.get("upload_token") or "").strip()
+        file_bytes = b""
+        upload_name = ""
+
+        uploads = _cleanup_old_uploads(request.session.get(_uploads_session_key(), {}))
+        request.session[_uploads_session_key()] = uploads
+        pending_actions = _cleanup_old_pending(request.session.get(_pending_actions_session_key(), {}))
+        request.session[_pending_actions_session_key()] = pending_actions
+
+        if upload:
+            upload_name = getattr(upload, "name", "") or ""
+            file_bytes = upload.read() or b""
+        elif token and token in uploads:
+            upload_name = uploads[token].get("name") or ""
+            try:
+                with open(uploads[token]["path"], "rb") as fp:
+                    file_bytes = fp.read()
+            except Exception:
+                file_bytes = b""
+        else:
+            messages.error(request, "Envie a planilha novamente (anexo não encontrado na sessão).")
+            file_bytes = b""
+
+        try:
+            validate_xlsx_upload(upload_name, file_bytes)
+            parsed = build_passivas_rows_from_xlsx_bytes(
+                file_bytes,
+                sheet_prefix=(form.cleaned_data.get("sheet_prefix") or "E - PASSIVAS"),
+                uf_filter=(form.cleaned_data.get("uf") or ""),
+                limit=int(form.cleaned_data.get("limit") or 0),
+            )
+        except (ValidationError, PassivasPlanilhaError) as exc:
+            messages.error(request, str(exc))
+            parsed = []
+
+        if parsed:
+            def _has_analysis_fields(row):
+                def _is_filled(v):
+                    if v is None:
+                        return False
+                    s = str(v).strip()
+                    if not s:
+                        return False
+                    if s in {"---", "-", "—"}:
+                        return False
+                    return True
+
+                return any(
+                    [
+                        _is_filled(row.consignado),
+                        _is_filled(row.status_processo_passivo),
+                        _is_filled(row.procedencia),
+                        _is_filled(row.julgamento),
+                        _is_filled(row.sucumbencias),
+                        _is_filled(row.transitado),
+                        row.data_transito is not None,
+                        _is_filled(row.tipo_acao),
+                        _is_filled(row.observacoes),
+                        _is_filled(row.fase_recursal),
+                        _is_filled(row.cumprimento_sentenca),
+                        _is_filled(row.habilitacao),
+                    ]
+                )
+
+            # Persistir o upload para permitir Importar depois da Prévia.
+            if action == "preview":
+                token = uuid.uuid4().hex
+                tmp_dir = "/tmp/nowlex_passivas_planilha"
+                try:
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    tmp_path = os.path.join(tmp_dir, f"{token}.xlsx")
+                    with open(tmp_path, "wb") as fp:
+                        fp.write(file_bytes)
+                    uploads[token] = {
+                        "path": tmp_path,
+                        "name": upload_name or "planilha.xlsx",
+                        "ts": timezone.now().isoformat(),
+                        "user_id": getattr(request.user, "id", None),
+                    }
+                    request.session[_uploads_session_key()] = uploads
+                    form.initial["upload_token"] = token
+                except Exception:
+                    messages.warning(request, "Não foi possível manter o anexo na sessão. Reenvie ao importar.")
+
+            cpfs = {r.cpf for r in parsed if r.cpf}
+            cnjs = {r.cnj_digits for r in parsed if r.cnj_digits}
+            ufs = {r.uf for r in parsed if r.uf}
+            cpf_map = {}
+            for r in parsed:
+                if not r.cpf:
+                    continue
+                entry = cpf_map.setdefault(
+                    r.cpf,
+                    {
+                        "cpf": r.cpf,
+                        "uf": r.uf or "",
+                        "parte_contraria": r.parte_contraria or "",
+                        "cnjs": set(),
+                        "prechecked": False,
+                    },
+                )
+                if r.uf and not entry["uf"]:
+                    entry["uf"] = r.uf
+                if r.parte_contraria and not entry["parte_contraria"]:
+                    entry["parte_contraria"] = r.parte_contraria
+                if r.cnj_digits:
+                    entry["cnjs"].add(r.cnj_digits)
+                if _has_analysis_fields(r):
+                    entry["prechecked"] = True
+
+            cpf_rows = []
+            analysed_cpfs = 0
+            for cpf_key, entry in cpf_map.items():
+                if bool(entry["prechecked"]):
+                    analysed_cpfs += 1
+                cpf_rows.append(
+                    {
+                        "cpf": entry["cpf"],
+                        "uf": entry["uf"] or "-",
+                        "parte_contraria": entry["parte_contraria"] or "-",
+                        "cnj_count": len(entry["cnjs"]),
+                        "prechecked": bool(entry["prechecked"]),
+                        "checked": (cpf_key in selected_cpfs) if selected_cpfs else bool(entry["prechecked"]),
+                    }
+                )
+            cpf_rows.sort(key=lambda x: (0 if x["checked"] else 1, str(x["cpf"])))
+            preview = {
+                "rows": len(parsed),
+                "cpfs": len(cpfs),
+                "cnjs": len(cnjs),
+                "ufs": ", ".join(sorted([u for u in ufs if u])) or "-",
+                "upload_token": token or "",
+                "cpf_rows": cpf_rows,
+                "analysed_cpfs": analysed_cpfs,
+            }
+
+            if action == "import":
+                if selected_cpfs:
+                    parsed = [r for r in parsed if r.cpf in set(selected_cpfs)]
+                try:
+                    import_result = import_passivas_rows(
+                        parsed,
+                        carteira=form.cleaned_data["carteira"],
+                        tipo_analise=form.cleaned_data["tipo_analise"],
+                        dry_run=False,
+                        user=request.user,
+                    )
+
+                    # Aplica pendências de Agenda Geral (ex.: tarefas) criadas antes de importar.
+                    applied_tasks = 0
+                    applied_tasks_targets = 0
+                    try:
+                        pending_actions = request.session.get(_pending_actions_session_key(), {}) or {}
+                        token_pending = (token or "").strip()
+                        pending_for_token = pending_actions.get(token_pending) if token_pending else None
+                        pending_tarefas = []
+                        if isinstance(pending_for_token, dict):
+                            pending_tarefas = pending_for_token.get("tarefas") or []
+
+                        imported_cpfs = {r.cpf for r in parsed if getattr(r, "cpf", "")}
+                        if imported_cpfs and isinstance(pending_tarefas, list) and pending_tarefas:
+                            carteira = form.cleaned_data["carteira"]
+                            processos = (
+                                ProcessoJudicial.objects.filter(
+                                    carteira=carteira,
+                                    partes_processuais__documento__in=imported_cpfs,
+                                )
+                                .distinct()
+                                .order_by("id")
+                                .prefetch_related("partes_processuais")
+                            )
+                            cpf_to_processo = {}
+                            for proc in processos:
+                                for parte in getattr(proc, "partes_processuais", []).all():
+                                    doc = (parte.documento or "").strip()
+                                    if not doc or doc not in imported_cpfs:
+                                        continue
+                                    cpf_to_processo.setdefault(doc, proc)
+
+                            for item in pending_tarefas:
+                                if not isinstance(item, dict):
+                                    continue
+                                cpfs_item = [c for c in (item.get("cpfs") or []) if c]
+                                payload = item.get("payload") or {}
+                                if not isinstance(payload, dict):
+                                    continue
+                                target_cpfs = [c for c in cpfs_item if c in imported_cpfs]
+                                if not target_cpfs:
+                                    continue
+
+                                descricao = (payload.get("descricao") or "").strip()
+                                data_raw = (payload.get("data") or "").strip()
+                                if not (descricao and data_raw):
+                                    continue
+                                try:
+                                    data_dt = datetime.date.fromisoformat(data_raw)
+                                except Exception:
+                                    continue
+
+                                lista_id = payload.get("lista_id") or None
+                                responsavel_id = payload.get("responsavel_id") or None
+                                prioridade = (payload.get("prioridade") or "M").strip().upper()[:1] or "M"
+                                observacoes = (payload.get("observacoes") or "").strip()
+                                concluida = bool(payload.get("concluida"))
+                                comentario_texto = (payload.get("comentario_texto") or "").strip()
+                                if comentario_texto:
+                                    observacoes = (observacoes + "\n\n" if observacoes else "") + f"Comentário: {comentario_texto}"
+
+                                lista = ListaDeTarefas.objects.filter(id=lista_id).first() if lista_id else None
+                                responsavel = User.objects.filter(id=responsavel_id).first() if responsavel_id else None
+
+                                lote = TarefaLote.objects.create(
+                                    descricao=f"Planilha (pendente): {descricao}",
+                                    criado_por=request.user,
+                                )
+
+                                targets = []
+                                for cpf in target_cpfs:
+                                    proc = cpf_to_processo.get(cpf)
+                                    if proc:
+                                        targets.append(proc)
+                                if not targets:
+                                    continue
+
+                                applied_tasks_targets += len(targets)
+                                for proc in targets:
+                                    Tarefa.objects.create(
+                                        processo=proc,
+                                        lote=lote,
+                                        descricao=descricao,
+                                        lista=lista,
+                                        data=data_dt,
+                                        responsavel=responsavel,
+                                        prioridade=prioridade,
+                                        concluida=concluida,
+                                        observacoes=observacoes,
+                                        criado_por=request.user,
+                                    )
+                                    applied_tasks += 1
+
+                            # Limpa pendências consumidas deste token.
+                            if token_pending and token_pending in pending_actions:
+                                pending_actions.pop(token_pending, None)
+                                request.session[_pending_actions_session_key()] = pending_actions
+                    except Exception:
+                        applied_tasks = 0
+                        applied_tasks_targets = 0
+
+                    messages.success(
+                        request,
+                        "Importação concluída. "
+                        f"Cadastros: {import_result.created_cadastros} novos, {import_result.updated_cadastros} atualizados. "
+                        f"CNJs: {import_result.created_cnjs} novos, {import_result.updated_cnjs} atualizados. "
+                        f"Cards: {import_result.created_cards} novos, {import_result.updated_cards} atualizados.",
+                    )
+                    if applied_tasks:
+                        messages.success(
+                            request,
+                            f"Agenda Geral: {applied_tasks} tarefa(s) aplicada(s) automaticamente em {applied_tasks_targets} processo(s) após a importação.",
+                        )
+                    # Limpa token usado
+                    if token and token in uploads:
+                        try:
+                            path = uploads[token].get("path")
+                            if path and os.path.exists(path):
+                                os.remove(path)
+                        except Exception:
+                            pass
+                        uploads.pop(token, None)
+                        request.session[_uploads_session_key()] = uploads
+                except Exception as exc:
+                    messages.error(request, f"Falha ao importar: {exc}")
+
+    # Nome do arquivo mantido (quando já houve prévia)
+    kept_name = ""
+    try:
+        token_for_name = (preview or {}).get("upload_token") or (request.POST.get("upload_token") or "")
+        uploads = request.session.get(_uploads_session_key(), {}) or {}
+        if token_for_name and token_for_name in uploads:
+            kept_name = uploads[token_for_name].get("name") or ""
+    except Exception:
+        kept_name = ""
+
+    context = admin.site.each_context(request)
+    context.update(
+        {
+            "title": "Demandas P/ Análise (Modo Planilha)",
+            "form": form,
+            "preview": preview,
+            "import_result": import_result,
+            "back_url": reverse("admin:contratos_demandas_analise"),
+            "upload_token_value": (preview or {}).get("upload_token") or (request.POST.get("upload_token") or ""),
+            "kept_upload_name": kept_name,
+        }
+    )
+    return render(request, "admin/contratos/demandas_analise_planilha.html", context)
+
+
+def demandas_analise_planilha_pending_tarefas_view(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if not is_user_supervisor(request.user):
+        return JsonResponse({"detail": "Acesso restrito a supervisores."}, status=403)
+
+    try:
+        payload = json.loads((request.body or b"").decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+
+    upload_token = (payload.get("upload_token") or "").strip()
+    cpfs = payload.get("cpfs") or []
+    tarefa_payload = payload.get("payload") or {}
+
+    if not upload_token:
+        return JsonResponse({"detail": "upload_token é obrigatório."}, status=400)
+    if not isinstance(cpfs, list) or not [c for c in cpfs if c]:
+        return JsonResponse({"detail": "Selecione ao menos um CPF."}, status=400)
+    if not isinstance(tarefa_payload, dict):
+        return JsonResponse({"detail": "payload inválido."}, status=400)
+
+    uploads = request.session.get("passivas_planilha_uploads", {}) or {}
+    if upload_token not in uploads:
+        return JsonResponse({"detail": "Anexo não encontrado na sessão. Faça a prévia novamente."}, status=400)
+
+    session_key = "passivas_planilha_pending_actions"
+    pending = request.session.get(session_key, {}) or {}
+    bucket = pending.get(upload_token)
+    if not isinstance(bucket, dict):
+        bucket = {"tarefas": [], "ts": timezone.now().isoformat()}
+    bucket["ts"] = timezone.now().isoformat()
+
+    tasks_list = bucket.get("tarefas")
+    if not isinstance(tasks_list, list):
+        tasks_list = []
+
+    tasks_list.append(
+        {
+            "cpfs": [str(c).strip() for c in cpfs if str(c).strip()],
+            "payload": tarefa_payload,
+            "created_by": getattr(request.user, "id", None),
+            "created_at": timezone.now().isoformat(),
+        }
+    )
+    bucket["tarefas"] = tasks_list
+    pending[upload_token] = bucket
+    request.session[session_key] = pending
+
+    return JsonResponse({"stored": True, "cpfs": len(set([c for c in cpfs if c]))})
+
 _original_get_admin_urls = admin.site.get_urls
 
 def _get_admin_urls():
@@ -1056,6 +1505,16 @@ def _get_admin_urls():
             "contratos/demandas-analise/",
             admin.site.admin_view(demandas_analise_view),
             name="contratos_demandas_analise",
+        ),
+        path(
+            "contratos/demandas-analise/planilha/",
+            admin.site.admin_view(demandas_analise_planilha_view),
+            name="contratos_demandas_analise_planilha",
+        ),
+        path(
+            "contratos/demandas-analise/planilha/pending/tarefas/",
+            admin.site.admin_view(demandas_analise_planilha_pending_tarefas_view),
+            name="contratos_demandas_analise_planilha_pending_tarefas",
         ),
     ]
     return custom_urls + urls
@@ -1600,6 +2059,98 @@ class AprovacaoFilter(admin.SimpleListFilter):
                 '-pk'
             )
         return queryset
+
+
+class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
+    title = "Por Análise"
+    parameter_name = "tipo_analise"
+
+    PATH_KEY = "saved_processos_vinculados"
+
+    def _filter_queryset(self, queryset, slug: str):
+        # "Concluída" aqui significa: existe card salvo desse tipo E ele tem
+        # algum conteúdo de análise (não conta CNJ/valor causa/parte contrária).
+        #
+        # Regra: considera analisado se tiver alguma resposta preenchida em
+        # `tipo_de_acao_respostas` (qualquer chave) OU `observacoes` não vazias.
+        alias_obs = "_tipo_analise_obs_match"
+        alias_resp = "_tipo_analise_resp_match"
+
+        path_obs = f'$.{self.PATH_KEY}[*] ? (@.analysis_type.slug == "{slug}" && @.observacoes != null && @.observacoes != "")'
+        # Seleciona qualquer valor não-vazio dentro do objeto tipo_de_acao_respostas.
+        path_resp = (
+            f'$.{self.PATH_KEY}[*] ? (@.analysis_type.slug == "{slug}").'
+            'tipo_de_acao_respostas.* ? (@ != null && @ != "" && @ != "---")'
+        )
+
+        queryset = queryset.annotate(
+            **{
+                alias_obs: models.Func(
+                    models.F("analise_processo__respostas"),
+                    models.Value(path_obs),
+                    function="jsonb_path_exists",
+                    output_field=models.BooleanField(),
+                ),
+                alias_resp: models.Func(
+                    models.F("analise_processo__respostas"),
+                    models.Value(path_resp),
+                    function="jsonb_path_exists",
+                    output_field=models.BooleanField(),
+                ),
+            }
+        )
+        return queryset.filter(models.Q(**{alias_obs: True}) | models.Q(**{alias_resp: True}))
+
+    def lookups(self, request, model_admin):
+        tipos = list(TipoAnaliseObjetiva.objects.filter(ativo=True).order_by("nome"))
+        if not _show_filter_counts(request):
+            return [(t.slug, t.nome) for t in tipos]
+
+        qs = model_admin.get_queryset(request)
+        items = []
+        for t in tipos:
+            try:
+                count = self._filter_queryset(qs, t.slug).count()
+            except Exception:
+                count = 0
+            label = mark_safe(f"{t.nome} <span class='filter-count'>({count})</span>")
+            items.append((t.slug, label))
+        return items
+
+    def choices(self, changelist):
+        current = self.value()
+        all_query = changelist.get_query_string(
+            {"_skip_saved_filters": "1"},
+            remove=[self.parameter_name, "o", "_skip_saved_filters"],
+        )
+        yield {
+            "selected": current in (None, ""),
+            "query_string": all_query,
+            "display": "Todos",
+        }
+        for value, label in self.lookup_choices:
+            selected = str(value) == str(current) and current not in (None, "")
+            if selected:
+                query_string = changelist.get_query_string(
+                    {"_skip_saved_filters": "1"},
+                    remove=[self.parameter_name, "o"],
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=["o", "_skip_saved_filters"],
+                )
+            yield {
+                "selected": selected,
+                "query_string": query_string,
+                "display": label,
+            }
+
+    def queryset(self, request, queryset):
+        slug = (self.value() or "").strip()
+        if not slug:
+            return queryset
+        return self._filter_queryset(queryset, slug)
 
 
 class ProtocoladosFilter(admin.SimpleListFilter):
@@ -2489,6 +3040,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         LastEditOrderFilter,
         EquipeDelegadoFilter,
         AprovacaoFilter,
+        TipoAnaliseConcluidaFilter,
         ProtocoladosFilter,
         PrescricaoOrderFilter,
         ViabilidadeFinanceiraFilter,
@@ -2504,7 +3056,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         EtiquetaFilter,
     ]
     list_filter = BASE_LIST_FILTERS[:]
-    search_fields = ("cnj", "partes_processuais__nome", "partes_processuais__documento", "contratos__numero_contrato")
+    search_fields = (
+        "cnj",
+        "numeros_cnj__cnj",
+        "partes_processuais__nome",
+        "partes_processuais__documento",
+        "contratos__numero_contrato",
+    )
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
     def get_search_results(self, request, queryset, search_term):
         qs, use_distinct = super().get_search_results(request, queryset, search_term)
@@ -2518,6 +3076,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 Q(partes_processuais__documento__icontains=sanitized_digits)
                 | Q(partes_processuais__documento__iregex=rf'.*{digit_pattern}')
                 | Q(cnj__iregex=rf'.*{digit_pattern}')
+                | Q(numeros_cnj__cnj__iregex=rf'.*{digit_pattern}')
             )
             extra = queryset.filter(filters)
             qs = (qs | extra).distinct()
@@ -2854,8 +3413,17 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cnj_active_index'] = 0
             extra_context['cnj_active_display'] = ''
         
-        # Preserva os filtros da changelist para a navegação
+        # Preserva os filtros da changelist para a navegação.
+        # Preferimos o parâmetro especial do Django admin "_changelist_filters",
+        # mas aceitamos também querystring "direta" (quando alguém acessa o detalhe manualmente).
         changelist_filters = request.GET.get('_changelist_filters')
+        if not changelist_filters and request.GET:
+            # Evita que o Django tente aplicar parâmetros que não são filtros reais.
+            direct = QueryDict(request.GET.urlencode(), mutable=True)
+            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+                direct.pop(key, None)
+            if direct.urlencode():
+                changelist_filters = direct.urlencode()
 
         # Clona os filtros para o queryset da changelist, evitando que o Django
         # tente filtrar pelo parâmetro especial "_changelist_filters"
@@ -2872,28 +3440,75 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         # Restaura o GET original para não afetar o restante do fluxo
         request.GET = original_get
         
-        # Garante uma ordenação consistente com baixo custo
-        ordering = self.get_ordering(request) or ('-pk',)
+        # Calcula anterior/próximo respeitando os filtros e a ordenação da changelist.
         prev_obj_id = None
         next_obj_id = None
-        ordering_fields = list(ordering) if isinstance(ordering, (list, tuple)) else [ordering]
-        if ordering_fields and all(field in ('pk', '-pk') for field in ordering_fields) and obj:
-            primary_order = ordering_fields[0]
-            if primary_order == '-pk':
-                prev_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
-                next_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
-            else:
-                prev_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
-                next_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
-            prev_obj_id = prev_obj.pk if prev_obj else None
-            next_obj_id = next_obj.pk if next_obj else None
+        if obj:
+            try:
+                ordering = changelist.get_ordering(request, queryset)
+            except Exception:
+                ordering = None
 
-        # Monta as URLs preservando os filtros
+            if isinstance(ordering, (list, tuple)):
+                ordering_fields = list(ordering)
+            elif isinstance(ordering, str):
+                ordering_fields = [ordering]
+            else:
+                ordering_fields = []
+            if not ordering_fields:
+                ordering_fields = ['-pk']
+
+            # Otimização para ordenação simples por pk
+            if ordering_fields and all(field in ('pk', '-pk') for field in ordering_fields):
+                primary_order = ordering_fields[0]
+                if primary_order == '-pk':
+                    prev_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
+                    next_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
+                else:
+                    prev_obj = queryset.filter(pk__lt=obj.pk).order_by('-pk').first()
+                    next_obj = queryset.filter(pk__gt=obj.pk).order_by('pk').first()
+                prev_obj_id = prev_obj.pk if prev_obj else None
+                next_obj_id = next_obj.pk if next_obj else None
+            else:
+                # Ordem arbitrária: usa RowNumber() window para localizar a posição do objeto no "lote".
+                order_by_exprs = []
+                for field in ordering_fields:
+                    if not field:
+                        continue
+                    if isinstance(field, str):
+                        if field.startswith('-'):
+                            order_by_exprs.append(models.F(field[1:]).desc())
+                        else:
+                            order_by_exprs.append(models.F(field).asc())
+                # Tiebreaker estável
+                if not any(isinstance(f, str) and f.lstrip('-') == 'pk' for f in ordering_fields):
+                    order_by_exprs.append(models.F('pk').asc())
+
+                qs_ranked = queryset.annotate(
+                    _nav_rn=Window(
+                        expression=RowNumber(),
+                        order_by=order_by_exprs,
+                    )
+                )
+                current_rn = qs_ranked.filter(pk=obj.pk).values_list('_nav_rn', flat=True).first()
+                if current_rn:
+                    prev_obj_id = qs_ranked.filter(_nav_rn=current_rn - 1).values_list('pk', flat=True).first()
+                    next_obj_id = qs_ranked.filter(_nav_rn=current_rn + 1).values_list('pk', flat=True).first()
+
+        # Monta as URLs preservando os filtros (via _changelist_filters, do jeito padrão do admin).
         base_url = reverse('admin:contratos_processojudicial_changelist') + "{}"
-        filter_params = f'?{changelist_filters}' if changelist_filters else ''
+        if changelist_filters:
+            filter_params = f"?_changelist_filters={quote(changelist_filters, safe='')}"
+        else:
+            filter_params = ""
 
         extra_context['prev_obj_url'] = base_url.format(f'{prev_obj_id}/change/{filter_params}') if prev_obj_id else None
         extra_context['next_obj_url'] = base_url.format(f'{next_obj_id}/change/{filter_params}') if next_obj_id else None
+        if changelist_filters and not next_obj_id:
+            extra_context['nav_end_message'] = (
+                "Fim da demanda filtrada: não há próximo cadastro neste lote. "
+                "Volte à lista e aplique um novo filtro."
+            )
         extra_context['delegar_users'] = User.objects.order_by('username')
         extra_context['is_supervisor'] = is_user_supervisor(request.user)
         extra_context['tipos_peticao_api_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao')

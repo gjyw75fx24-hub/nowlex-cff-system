@@ -2803,13 +2803,20 @@ function formatCnjDigits(raw) {
                 contractsReferenced,
                 { mentionType }
             );
+            const fallbackText = processo && typeof processo.observacoes === 'string'
+                ? processo.observacoes.trim()
+                : '';
+            const effectiveObservationEntries =
+                (observationEntries && observationEntries.length)
+                    ? observationEntries
+                    : (fallbackText ? [{ raw: fallbackText, mentionLines: [], contentLines: [fallbackText], summary: fallbackText }] : []);
 
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
                 contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
-                observationEntries,
+                observationEntries: effectiveObservationEntries,
                 observationTarget
             };
         }
