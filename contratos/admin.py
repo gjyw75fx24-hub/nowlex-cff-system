@@ -1109,7 +1109,7 @@ def _get_app_list(request, app_label=None):
 admin.site.get_app_list = _get_app_list
 
 def _show_filter_counts(request):
-    return request.GET.get('show_counts') == '1'
+    return request.GET.get('show_counts') == '1' or request.GET.get('_facets') == '1'
 
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"

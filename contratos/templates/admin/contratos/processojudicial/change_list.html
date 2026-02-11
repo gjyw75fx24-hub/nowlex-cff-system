@@ -368,33 +368,48 @@
             });
         }
 
-        // Toggle mostrar/ocultar contagem (usa spans .filter-count)
-        const countToggle = Array.from(filterDiv.querySelectorAll('a, button, span')).find(el => {
+        // Toggle mostrar/ocultar contagem (filtros facetados do Django Admin).
+        // Observação: a contagem é calculada server-side; por isso, o toggle precisa navegar.
+        const facetToggle = Array.from(filterDiv.querySelectorAll('h3 a.hidelink')).find((el) => {
             return /contagem/i.test((el.textContent || '').trim());
         });
-        const countNodes = filterDiv.querySelectorAll('.filter-count');
-        if (countToggle && countNodes.length) {
-            countToggle.style.cursor = 'pointer';
-            const countLinks = Array.from(filterDiv.querySelectorAll('li a'));
-            countLinks.forEach(a => {
-                if (!a.dataset.fullText) a.dataset.fullText = (a.textContent || '').trim();
-            });
-            const stripParens = (text) => text.replace(/\s*\([^)]*\)\s*$/, '').trim();
-
-            let showCounts = true;
-            const applyCount = () => {
-                countNodes.forEach(n => { n.style.display = showCounts ? '' : 'none'; });
-                countLinks.forEach(a => {
-                    const full = a.dataset.fullText || a.textContent || '';
-                    a.textContent = showCounts ? full : stripParens(full);
-                });
-                countToggle.textContent = showCounts ? 'Ocultar contagem' : 'Mostrar contagem';
-            };
-            applyCount();
-            countToggle.addEventListener('click', (ev) => {
+        if (facetToggle) {
+            facetToggle.style.cursor = 'pointer';
+            facetToggle.addEventListener('click', (ev) => {
                 ev.preventDefault();
-                showCounts = !showCounts;
-                applyCount();
+
+                // Se já existem contagens renderizadas na página, apenas esconde/mostra via JS.
+                // Caso contrário, recarrega com `_facets=1` para o Django calcular as contagens.
+                const filterLinks = Array.from(filterDiv.querySelectorAll('li a'));
+                const countSpans = Array.from(filterDiv.querySelectorAll('.filter-count'));
+                const hasParenCounts = filterLinks.some(a => /\(\s*\d+\s*\)\s*$/.test((a.textContent || '').trim()));
+                const hasRenderedCounts = countSpans.length > 0 || hasParenCounts;
+
+                const stripParens = (text) => String(text || '').replace(/\s*\(\s*\d+\s*\)\s*$/, '').trim();
+                const areCountsHidden = () => {
+                    const anySpanVisible = countSpans.some(s => s.style.display !== 'none');
+                    if (countSpans.length) return !anySpanVisible;
+                    // Sem spans: considera oculto se nenhum link termina com (N)
+                    return !filterLinks.some(a => /\(\s*\d+\s*\)\s*$/.test((a.textContent || '').trim()));
+                };
+
+                if (!hasRenderedCounts) {
+                    const url = new URL(window.location.href);
+                    const enabled = url.searchParams.get('_facets') === '1';
+                    if (enabled) url.searchParams.delete('_facets');
+                    else url.searchParams.set('_facets', '1');
+                    window.location.href = url.pathname + url.search;
+                    return;
+                }
+
+                const hide = !areCountsHidden(); // se está visível, vamos esconder
+                countSpans.forEach(s => { s.style.display = hide ? 'none' : ''; });
+                filterLinks.forEach(a => {
+                    if (!a.dataset.fullText) a.dataset.fullText = (a.textContent || '').trim();
+                    const full = a.dataset.fullText || (a.textContent || '').trim();
+                    a.textContent = hide ? stripParens(full) : full;
+                });
+                facetToggle.textContent = hide ? 'Mostrar contagem' : 'Esconder contagem';
             });
         }
 
@@ -408,8 +423,8 @@
             url.search = '';
             window.location.href = url.pathname;
         });
-        if (countToggle && countToggle.parentNode) {
-            countToggle.parentNode.insertBefore(clearAllBtn, countToggle);
+        if (facetToggle && facetToggle.parentNode) {
+            facetToggle.parentNode.insertBefore(clearAllBtn, facetToggle);
         } else {
             filterDiv.insertBefore(clearAllBtn, filterDiv.firstChild);
         }

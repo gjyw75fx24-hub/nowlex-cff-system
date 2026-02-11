@@ -141,11 +141,25 @@ class AgendaGeralAPIView(APIView):
             or request.user.groups.filter(name__iexact='Supervisor').exists()
         )
         show_all_users = (request.query_params.get('all_users') or '').strip() in ('1', 'true', 'True', 'yes', 'sim')
+        target_user_id_raw = (request.query_params.get('user_id') or '').strip()
+        target_user = None
+        if target_user_id_raw:
+            try:
+                target_user_id = int(target_user_id_raw)
+            except (TypeError, ValueError):
+                return Response({'detail': 'user_id inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            target_user = User.objects.filter(id=target_user_id).first()
+            if not target_user:
+                return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            if not is_supervisor_user and target_user.id != request.user.id:
+                return Response({'detail': 'Sem permissão para visualizar agenda de outro usuário.'}, status=status.HTTP_403_FORBIDDEN)
 
         status_param = (request.query_params.get('status') or '').lower()
         show_completed = status_param in ['completed', 'concluidos', 'concluida', 'concluido']
         tarefa_filter = {'concluida': True} if show_completed else {'concluida': False}
         prazo_filter = {'concluido': True} if show_completed else {'concluido': False}
+
+        agenda_user = target_user or request.user
 
         tarefas = (
             Tarefa.objects
@@ -162,12 +176,12 @@ class AgendaGeralAPIView(APIView):
         # Supervisor pode ver todos com `?all_users=1`.
         if not (is_supervisor_user and show_all_users):
             tarefas = tarefas.filter(
-                Q(responsavel=request.user) |
-                (Q(responsavel__isnull=True) & Q(criado_por=request.user))
+                Q(responsavel=agenda_user) |
+                (Q(responsavel__isnull=True) & Q(criado_por=agenda_user))
             )
-            prazos = prazos.filter(responsavel=request.user)
+            prazos = prazos.filter(responsavel=agenda_user)
 
-        allowed_carteiras = get_user_allowed_carteira_ids(request.user)
+        allowed_carteiras = get_user_allowed_carteira_ids(agenda_user)
         if allowed_carteiras not in (None, []) and allowed_carteiras:
             tarefas = tarefas.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
             prazos = prazos.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
@@ -179,7 +193,7 @@ class AgendaGeralAPIView(APIView):
         processo_meta = {}
         if processo_ids:
             processos = (
-                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user)
+                filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), agenda_user)
                 .filter(id__in=processo_ids)
                 .prefetch_related('partes_processuais')
             )
@@ -248,7 +262,7 @@ class AgendaGeralAPIView(APIView):
                 item['parte_cpf'] = meta.get('cpf', '')
                 item['documento'] = meta.get('cpf', '')
 
-        supervision_entries = self._get_supervision_entries(show_completed, request)
+        supervision_entries = self._get_supervision_entries(show_completed, request, target_user=agenda_user)
         agenda_items = sorted(
             tarefas_data + prazos_data + supervision_entries,
             key=lambda x: x.get('date') or ''
@@ -426,13 +440,15 @@ class AgendaGeralAPIView(APIView):
             'completed_prazos': 0,
         }
 
-    def _get_supervision_entries(self, show_completed, request):
+    def _get_supervision_entries(self, show_completed, request, target_user=None):
         is_supervisor_user = (
             request.user.is_superuser
             or request.user.groups.filter(name__iexact='Supervisor').exists()
         )
         if not is_supervisor_user:
             return []
+        if target_user and not isinstance(target_user, User):
+            target_user = None
 
         pending_statuses = {'pendente', 'pre_aprovado'}
         completed_statuses = {'aprovado', 'reprovado'}
@@ -542,6 +558,8 @@ class AgendaGeralAPIView(APIView):
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = float(valor_total_causa)
             responsavel_user = analise.updated_by if analise.updated_by else request.user
+            if target_user and responsavel_user and responsavel_user.id != target_user.id:
+                continue
             responsavel = self._serialize_user(responsavel_user)
             active = prescricao_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
@@ -1134,6 +1152,40 @@ class AgendaUsersAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        is_supervisor_user = (
+            request.user.is_superuser
+            or request.user.groups.filter(name__iexact='Supervisor').exists()
+        )
+        if not is_supervisor_user:
+            # Usuário comum não deve navegar agendas de terceiros.
+            users = (
+                User.objects.filter(id=request.user.id, is_active=True)
+                .annotate(
+                    pending_tasks=Count(
+                        'tarefas_responsaveis',
+                        filter=Q(tarefas_responsaveis__concluida=False),
+                        distinct=True,
+                    ),
+                    pending_prazos=Count(
+                        'prazos_responsaveis',
+                        filter=Q(prazos_responsaveis__concluido=False),
+                        distinct=True,
+                    ),
+                    completed_tasks=Count(
+                        'tarefas_responsaveis',
+                        filter=Q(tarefas_responsaveis__concluida=True),
+                        distinct=True,
+                    ),
+                    completed_prazos=Count(
+                        'prazos_responsaveis',
+                        filter=Q(prazos_responsaveis__concluido=True),
+                        distinct=True,
+                    ),
+                )
+            )
+            serializer = UserSerializer(users, many=True)
+            return Response(serializer.data)
+
         users = (
             User.objects.filter(is_active=True)
             .annotate(

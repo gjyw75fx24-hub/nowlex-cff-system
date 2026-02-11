@@ -1431,9 +1431,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!activeUserId) {
             return true;
         }
-        if (entry?.type === 'S') {
-            return true;
-        }
         const responsavelId = entry?.responsavel_id || resolveResponsavelId(entry?.responsavel);
         return `${responsavelId || ''}` === `${activeUserId}`;
     };
@@ -1838,7 +1835,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const apiPage = calendarStateRef?.agendaPage || 1;
         const apiPageSize = calendarStateRef?.agendaPageSize || AGENDA_PAGE_SIZE;
-        const url = `/api/agenda/geral/?format=json&status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}`;
+        const activeUserId = calendarStateRef?.activeUser?.id;
+        const userParam = activeUserId ? `&user_id=${encodeURIComponent(activeUserId)}` : '';
+        const url = `/api/agenda/geral/?format=json&status=${statusParam}&page=${apiPage}&page_size=${apiPageSize}${userParam}`;
         fetch(url, {
             credentials: 'same-origin',
             cache: 'no-store',
@@ -1873,7 +1872,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     restoreActiveEntryReference(combined);
                     let filtered = combined;
-                    const activeUserId = calendarStateRef?.activeUser?.id;
                     if (activeUserId) {
                         filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
                     }
@@ -3366,7 +3364,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     calendarState.view = 'calendar';
                     calendarState.weekOffset = 0;
                     usersToggle?.classList.remove('agenda-panel__users-toggle--active');
-                    renderCalendar();
+                    // Troca de usuário precisa recarregar a agenda via API (senão só filtra o cache atual).
+                    refreshAgendaData(true);
                 });
                 calendarGridEl.appendChild(card);
             });
