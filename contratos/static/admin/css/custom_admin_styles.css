@@ -4585,9 +4585,16 @@ body.agenda-panel-open {
 }
 
 #tarefas-group tr.dynamic-tarefas {
-    grid-template-columns: max-content max-content !important;
-    column-gap: 6px !important;
-    justify-content: start !important;
+    /*
+     * O card de tarefas tem um painel de comentários (position:absolute) à direita.
+     * Precisamos manter o grid com colunas flexíveis e reservar espaço à direita,
+     * senão campos como Lista/Prioridade/Observações acabam “passando por baixo”
+     * do painel.
+     */
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    column-gap: 18px !important;
+    justify-content: initial !important;
+    padding-right: 420px !important;
 }
 
 
