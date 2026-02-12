@@ -4335,8 +4335,9 @@ a.historylink {
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-lista .select2-container,
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-responsavel .select2-container,
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-prioridade .select2-container {
-    width: 160% !important;
-    max-width: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
 }
 
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-observacoes textarea {

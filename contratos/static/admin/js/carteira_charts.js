@@ -9,15 +9,21 @@ window.addEventListener('DOMContentLoaded', () => {
     const processCounts = chartData.map(c => c.total_processos);
     const valuations = chartData.map(c => c.valor_total);
 
-    // Insere os containers para os gráficos no topo da página
+    // Insere os containers para os gráficos abaixo da tabela (evita layout lado-a-lado)
     const changelist = document.getElementById('changelist');
     if (changelist) {
         const chartContainer = document.createElement('div');
         chartContainer.className = 'charts-container';
         chartContainer.style.display = 'flex';
         chartContainer.style.justifyContent = 'space-around';
+        chartContainer.style.flexWrap = 'wrap';
+        chartContainer.style.gap = '16px';
         chartContainer.style.padding = '20px';
         chartContainer.style.backgroundColor = '#f8f8f8';
+        chartContainer.style.width = '100%';
+        chartContainer.style.boxSizing = 'border-box';
+        chartContainer.style.clear = 'both';
+        chartContainer.style.marginTop = '16px';
         chartContainer.innerHTML = `
             <div class="chart-wrapper" style="width: 45%;">
                 <h3>Distribuição de Processos por Carteira</h3>
@@ -28,7 +34,12 @@ window.addEventListener('DOMContentLoaded', () => {
                 <canvas id="valuationChart"></canvas>
             </div>
         `;
-        changelist.insertBefore(chartContainer, changelist.firstChild);
+        const changelistForm = document.getElementById('changelist-form');
+        if (changelistForm && changelistForm.parentNode) {
+            changelistForm.parentNode.insertBefore(chartContainer, changelistForm.nextSibling);
+        } else {
+            changelist.appendChild(chartContainer);
+        }
     }
 
     // Gráfico de Pizza: Distribuição de Processos
