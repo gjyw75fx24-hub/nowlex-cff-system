@@ -94,6 +94,94 @@ window.addEventListener('load', function() {
         let notebookOverlay = null;
         let notebookTextarea = null;
         let notebookMentionSaver = null;
+        const normalizeNotebookText = (value) => String(value || '')
+            .replace(/\r\n?/g, '\n')
+            .trim();
+
+        const parseAnaliseResponses = () => {
+            const responseFields = Array.from(
+                document.querySelectorAll('.analise-procedural-group textarea[name$="-respostas"]')
+            );
+            for (const field of responseFields) {
+                const raw = (field && typeof field.value === 'string') ? field.value.trim() : '';
+                if (!raw) {
+                    continue;
+                }
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                        return parsed;
+                    }
+                } catch (error) {
+                    // Keep trying other fields if any.
+                }
+            }
+            return null;
+        };
+
+        const collectCardObservationBlocks = () => {
+            const responses = parseAnaliseResponses();
+            if (!responses || typeof responses !== 'object') {
+                return [];
+            }
+            const seen = new Set();
+            const blocks = [];
+            const appendBlock = (value) => {
+                const normalized = normalizeNotebookText(value);
+                if (!normalized) {
+                    return;
+                }
+                const signature = normalized.toLowerCase();
+                if (seen.has(signature)) {
+                    return;
+                }
+                seen.add(signature);
+                blocks.push(normalized);
+            };
+
+            ['saved_processos_vinculados', 'processos_vinculados'].forEach((sourceKey) => {
+                const cards = Array.isArray(responses[sourceKey]) ? responses[sourceKey] : [];
+                cards.forEach((card) => {
+                    if (!card || typeof card !== 'object') {
+                        return;
+                    }
+                    appendBlock(card.observacoes);
+                    appendBlock(card.supervisor_observacoes);
+                });
+            });
+
+            return blocks;
+        };
+
+        const mergeNotebookWithCardObservations = (baseText) => {
+            const observationBlocks = collectCardObservationBlocks();
+            if (!observationBlocks.length) {
+                return normalizeNotebookText(baseText);
+            }
+            let merged = normalizeNotebookText(baseText);
+            let mergedSignature = `\n${merged.toLowerCase()}\n`;
+            observationBlocks.forEach((block) => {
+                const blockSignature = `\n${block.toLowerCase()}\n`;
+                if (mergedSignature.includes(blockSignature)) {
+                    return;
+                }
+                merged = merged ? `${merged}\n\n${block}` : block;
+                mergedSignature = `\n${merged.toLowerCase()}\n`;
+            });
+            return merged;
+        };
+
+        const hydrateNotebookText = (baseText = null) => {
+            const current = (typeof baseText === 'string')
+                ? baseText
+                : (notebookTextarea ? notebookTextarea.value : (localStorage.getItem(noteKey) || ''));
+            const merged = mergeNotebookWithCardObservations(current);
+            if (notebookTextarea && notebookTextarea.value !== merged) {
+                notebookTextarea.value = merged;
+            }
+            localStorage.setItem(noteKey, merged);
+            return merged;
+        };
 
         const ensureNotebook = () => {
             if (notebookOverlay) return;
@@ -119,6 +207,7 @@ window.addEventListener('load', function() {
 
             const saved = localStorage.getItem(noteKey) || '';
             notebookTextarea.value = saved;
+            hydrateNotebookText(saved);
             const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
             notebookTextarea.addEventListener('input', save);
             const ensureBlankLineBeforeMention = (text, cursorPos) => {
@@ -286,6 +375,7 @@ window.addEventListener('load', function() {
 
         window.openNotebookWithMention = function(text = '') {
             ensureNotebook();
+            hydrateNotebookText();
             if (text && notebookMentionSaver) {
                 notebookMentionSaver(text);
             }
@@ -296,9 +386,17 @@ window.addEventListener('load', function() {
 
         notebookBtn.addEventListener('click', () => {
             ensureNotebook();
+            hydrateNotebookText();
             if (!notebookOverlay) return;
             notebookOverlay.classList.add('open');
             notebookTextarea?.focus();
+        });
+
+        window.addEventListener('analiseObservacoesSalvas', (event) => {
+            const incoming = (event && typeof event.detail === 'string')
+                ? event.detail
+                : (localStorage.getItem(noteKey) || '');
+            hydrateNotebookText(incoming);
         });
     })();
 
