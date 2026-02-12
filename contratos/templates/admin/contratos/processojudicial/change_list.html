@@ -1,4 +1,5 @@
 {% extends "admin/change_list.html" %}
+{% load static %}
 
 {% block extrastyle %}
     {{ block.super }}
@@ -560,6 +561,7 @@
 
 {% block extrahead %}
     {{ block.super }}
+    <script defer src="{% static 'admin/js/changelist_row_open_prompt.js' %}?v=20260212b"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         const etiquetasData = JSON.parse('{{ etiquetas_data_json|escapejs }}' || '{}');
@@ -627,31 +629,47 @@
     document.addEventListener('DOMContentLoaded', function() {
         const table = document.getElementById('result_list');
         if (!table) return;
+        const interactiveSelector = 'button, input, select, textarea, label, .cnj-nav-control, .cnj-nav-wrapper';
+        const navigateRow = (url) => {
+            if (!url) return;
+            if (typeof window.__adminNavigateWithRowChoice === 'function') {
+                window.__adminNavigateWithRowChoice(url);
+                return;
+            }
+            window.location.href = url;
+        };
         const rows = Array.from(table.querySelectorAll('tbody tr'));
         rows.forEach(row => {
             const changeLink = row.querySelector('th a[href*="/change/"]');
             if (!changeLink) return;
             row.classList.add('clickable-row');
+            row.setAttribute('tabindex', '0');
             row.querySelectorAll('.cnj-nav-control').forEach(ctrl => {
                 ctrl.addEventListener('click', (event) => {
                     event.stopPropagation();
                 });
             });
             row.addEventListener('click', function(event) {
-                if (event.target.closest('a, button, input, select, textarea, label, .cnj-nav-control, .cnj-nav-wrapper')) {
+                const clickedAnchor = event.target.closest('a[href]');
+                if (clickedAnchor && clickedAnchor !== changeLink) {
                     return;
                 }
-                changeLink.click();
+                if (event.target.closest(interactiveSelector) && !clickedAnchor) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                navigateRow(changeLink.href);
             });
             row.addEventListener('keydown', function(event) {
                 if (event.key !== 'Enter' && event.key !== ' ') {
                     return;
                 }
-                if (event.target.closest('a, button, input, select, textarea, label, .cnj-nav-control, .cnj-nav-wrapper')) {
+                if (event.target.closest(interactiveSelector)) {
                     return;
                 }
                 event.preventDefault();
-                changeLink.click();
+                navigateRow(changeLink.href);
             });
         });
     });
