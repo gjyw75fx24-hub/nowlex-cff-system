@@ -2526,24 +2526,154 @@ function formatCnjDigits(raw) {
             return `${match[3]}/${match[2]}/${match[1]}`;
         }
 
-        function getTreeDataForSnapshotAnalysisType(analysisType) {
-            const tipo = analysisType && typeof analysisType === 'object' ? analysisType : null;
-            const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
-            const tipoVersao = tipo && tipo.versao != null ? String(tipo.versao) : '';
-            if (!tipoId) return null;
-            const cacheKeyBase = `${DECISION_TREE_CACHE_KEY}:${tipoId}`;
-            const cacheKey = tipoVersao ? `${cacheKeyBase}:v${tipoVersao}` : cacheKeyBase;
-            const cached = readSessionCache(cacheKey, DECISION_TREE_CACHE_TTL_MS);
-            if (cached && cached.tree_data) {
-                return cached.tree_data || null;
-            }
-            return null;
-        }
+		        function getSnapshotDecisionTreeCacheKey(analysisType) {
+		            const tipo = analysisType && typeof analysisType === 'object' ? analysisType : null;
+		            const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
+		            const tipoVersao = tipo && tipo.versao != null ? String(tipo.versao) : '';
+		            if (!tipoId) return null;
+		            const cacheKeyBase = `${DECISION_TREE_CACHE_KEY}:${tipoId}`;
+		            return tipoVersao ? `${cacheKeyBase}:v${tipoVersao}` : cacheKeyBase;
+		        }
 
-        function getAnsweredFieldEntriesFromTree(processo, options = {}) {
-            if (!processo || typeof processo !== 'object') {
-                return [];
-            }
+		        function getTreeDataForSnapshotAnalysisType(analysisType) {
+		            const cacheKey = getSnapshotDecisionTreeCacheKey(analysisType);
+		            if (!cacheKey) return null;
+		            const cached = readSessionCache(cacheKey, DECISION_TREE_CACHE_TTL_MS);
+		            if (cached && cached.tree_data) {
+		                return cached.tree_data || null;
+		            }
+		            return null;
+		        }
+
+		        const snapshotTreeFetchPromises = {};
+		        const snapshotTreeFetchFailed = {};
+		        const snapshotTreeFetchAttemptCounts = {};
+		        function hasSnapshotTreeFetchFailed(analysisType) {
+		            const cacheKey = getSnapshotDecisionTreeCacheKey(analysisType);
+		            if (!cacheKey) return false;
+		            return Boolean(snapshotTreeFetchFailed[cacheKey]);
+		        }
+
+		        function fetchDecisionTreeConfigForSnapshot(analysisType) {
+		            const tipo = analysisType && typeof analysisType === 'object' ? analysisType : null;
+		            const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
+		            if (!tipoId) {
+		                return $.Deferred().reject().promise();
+		            }
+
+		            const cacheKey = getSnapshotDecisionTreeCacheKey(tipo);
+		            const cached = readSessionCache(cacheKey, DECISION_TREE_CACHE_TTL_MS);
+		            if (cached && cached.tree_data) {
+		                return $.Deferred().resolve(cached.tree_data).promise();
+		            }
+
+		            if (snapshotTreeFetchPromises[cacheKey]) {
+		                return snapshotTreeFetchPromises[cacheKey];
+		            }
+
+		            snapshotTreeFetchAttemptCounts[cacheKey] = (snapshotTreeFetchAttemptCounts[cacheKey] || 0) + 1;
+		            const deferred = $.Deferred();
+		            snapshotTreeFetchPromises[cacheKey] = deferred.promise();
+
+		            const markFailed = (reason) => {
+		                snapshotTreeFetchFailed[cacheKey] = true;
+		                deferred.reject(reason);
+		            };
+
+		            $.ajax({
+		                url: decisionTreeApiUrl,
+		                method: 'GET',
+		                data: { tipo_id: tipoId },
+		                dataType: 'json',
+		                success: function (data) {
+		                    if (data && data.status === 'success' && data.tree_data) {
+		                        snapshotTreeFetchFailed[cacheKey] = false;
+		                        writeSessionCache(cacheKey, {
+		                            tree_data: data.tree_data || {},
+		                            primeira_questao_chave: data.primeira_questao_chave || null,
+		                            analysis_type: data.analysis_type || tipo || null
+		                        });
+		                        deferred.resolve(data.tree_data || {});
+		                    } else {
+		                        markFailed(data && data.message ? data.message : 'Erro ao carregar árvore.');
+		                    }
+		                },
+		                error: function (xhr, status, error) {
+		                    markFailed(error || status || 'Erro AJAX ao carregar árvore.');
+		                },
+		                complete: function () {
+		                    delete snapshotTreeFetchPromises[cacheKey];
+		                }
+		            });
+
+		            return deferred.promise();
+		        }
+
+	        function prefetchSnapshotTreesForCards(cards) {
+	            const list = Array.isArray(cards) ? cards : [];
+	            const byKey = {};
+	            list.forEach(card => {
+	                if (!card || typeof card !== 'object') return;
+	                const tipo = card.analysis_type && typeof card.analysis_type === 'object'
+	                    ? card.analysis_type
+	                    : null;
+	                const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
+	                if (!tipoId) return;
+	                byKey[tipoId] = tipo;
+	            });
+
+	            const tipos = Object.values(byKey);
+	            const fetches = tipos
+	                .filter(t => !getTreeDataForSnapshotAnalysisType(t))
+	                .map(t => fetchDecisionTreeConfigForSnapshot(t));
+	            if (!fetches.length) {
+	                return $.Deferred().resolve().promise();
+	            }
+	            return $.when.apply($, fetches);
+	        }
+
+		        let snapshotTreesPrefetchScheduled = false;
+		        function scheduleSnapshotTreePrefetch(cards) {
+		            if (snapshotTreesPrefetchScheduled) {
+		                return;
+		            }
+		            const list = Array.isArray(cards) ? cards : [];
+		            const tipos = {};
+		            list.forEach(card => {
+		                const tipo = card && card.analysis_type && typeof card.analysis_type === 'object'
+		                    ? card.analysis_type
+		                    : null;
+		                const tipoId = tipo && tipo.id != null ? String(tipo.id) : '';
+		                if (!tipoId) return;
+		                if (getTreeDataForSnapshotAnalysisType(tipo)) return;
+		                const cacheKey = getSnapshotDecisionTreeCacheKey(tipo);
+		                if (cacheKey && snapshotTreeFetchFailed[cacheKey]) return;
+		                if (cacheKey && (snapshotTreeFetchAttemptCounts[cacheKey] || 0) >= 2) return;
+		                tipos[tipoId] = tipo;
+		            });
+		            const missing = Object.values(tipos);
+		            if (!missing.length) {
+		                return;
+		            }
+	            snapshotTreesPrefetchScheduled = true;
+	            prefetchSnapshotTreesForCards(list)
+	                .always(() => {
+	                    snapshotTreesPrefetchScheduled = false;
+	                    // re-render para preencher rótulos/ordem do resumo
+	                    setTimeout(() => {
+	                        try {
+	                            displayFormattedResponses();
+	                        } catch (e) {
+	                            // ignore
+	                        }
+	                    }, 0);
+	                });
+	        }
+
+	        function getAnsweredFieldEntriesFromTree(processo, options = {}) {
+	            if (!processo || typeof processo !== 'object') {
+	                return [];
+	            }
             const excludeFields = Array.isArray(options.excludeFields)
                 ? options.excludeFields
                 : [];
@@ -2644,7 +2774,7 @@ function formatCnjDigits(raw) {
             return entries;
         }
 
-        function buildProcessoDetailsSnapshot(processo, options = {}) {
+		        function buildProcessoDetailsSnapshot(processo, options = {}) {
             const cnjVinculado = processo.cnj || 'Não informado';
             const isNonJudicial = isCardNonJudicialized(processo);
             const mentionType = isNonJudicial ? 'nj' : 'cnj';
@@ -2764,9 +2894,9 @@ function formatCnjDigits(raw) {
             $custasLine.append($custasInput);
             $ulDetalhes.append($custasLine);
 
-            const snapshotTreeData = isPassivasSnapshot
-                ? (getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || treeConfig || {})
-                : null;
+	            const snapshotTreeData = isPassivasSnapshot
+	                ? (getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || {})
+	                : null;
 
             const fieldEntries = isPassivasSnapshot
                 ? getAnsweredFieldEntriesFromTree(processo, {
@@ -2778,18 +2908,32 @@ function formatCnjDigits(raw) {
                     excludeFields: options.excludeFields || [],
                     contractInfos: monitoriaInfos
                 });
-            if (fieldEntries.length) {
-                const $liAcao = $(
-                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`
-                );
+	            if (fieldEntries.length) {
+	                const $liAcao = $(
+	                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`
+	                );
                 const $ulAcao = $liAcao.find('ul');
                 fieldEntries.forEach(entry => {
                     $ulAcao.append(
                         `<li>${entry.label}: ${entry.value}</li>`
                     );
                 });
-                $ulDetalhes.append($liAcao);
-            }
+	                $ulDetalhes.append($liAcao);
+		            } else if (isPassivasSnapshot) {
+		                const responses = processo && processo.tipo_de_acao_respostas ? processo.tipo_de_acao_respostas : {};
+		                const hasAnyAnswer = Object.keys(responses || {}).some(k => {
+		                    const v = responses[k];
+		                    return v !== undefined && v !== null && v !== '';
+		                });
+		                if (hasAnyAnswer && (!snapshotTreeData || !Object.keys(snapshotTreeData || {}).length)) {
+		                    const failed = hasSnapshotTreeFetchFailed(processo?.analysis_type);
+		                    $ulDetalhes.append(
+		                        failed
+		                            ? '<li><strong>Respostas da Análise:</strong> <em>não foi possível carregar a árvore deste tipo.</em></li>'
+		                            : '<li><strong>Respostas da Análise:</strong> <em>carregando...</em></li>'
+		                    );
+		                }
+		            }
 
             const contractsReferenced = Array.from(
                 new Set(contratoInfos.map(c => c.id))
@@ -2806,8 +2950,9 @@ function formatCnjDigits(raw) {
             const fallbackText = processo && typeof processo.observacoes === 'string'
                 ? processo.observacoes.trim()
                 : '';
+            const hasRenderableNotebookContent = getRenderableObservationLines(observationEntries).length > 0;
             const effectiveObservationEntries =
-                (observationEntries && observationEntries.length)
+                hasRenderableNotebookContent
                     ? observationEntries
                     : (fallbackText ? [{ raw: fallbackText, mentionLines: [], contentLines: [fallbackText], summary: fallbackText }] : []);
 
@@ -2817,7 +2962,8 @@ function formatCnjDigits(raw) {
                 contractIds: contractsReferenced,
                 $detailsList: $ulDetalhes,
                 observationEntries: effectiveObservationEntries,
-                observationTarget
+                observationTarget,
+                observationFallbackText: fallbackText
             };
         }
 
@@ -2828,6 +2974,34 @@ function formatCnjDigits(raw) {
             $textarea.css('height', 'auto');
             const scrollHeight = $textarea.prop('scrollHeight');
             $textarea.css('height', `${scrollHeight}px`);
+        }
+
+        function getRenderableObservationLines(observationEntries) {
+            if (!Array.isArray(observationEntries) || !observationEntries.length) {
+                return [];
+            }
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
+            const lines = [];
+            observationEntries.forEach(entry => {
+                const rawLines = String(entry && entry.raw ? entry.raw : '')
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean);
+                if (rawLines.length) {
+                    rawLines.forEach(line => {
+                        if (!mentionLineRegex.test(line)) {
+                            lines.push(line);
+                        }
+                    });
+                    return;
+                }
+                const contentLines = Array.isArray(entry && entry.contentLines) ? entry.contentLines : [];
+                contentLines
+                    .map(line => String(line || '').trim())
+                    .filter(Boolean)
+                    .forEach(line => lines.push(line));
+            });
+            return lines;
         }
 
         function createObservationNoteElement(observationEntries) {
@@ -2846,20 +3020,10 @@ function formatCnjDigits(raw) {
             const $noteContent = $('<div class="analise-observation-content"></div>');
             $noteContent.append('<strong>Observações</strong>');
             const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
-            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
-            const allLines = [];
-            populatedEntries.forEach(entry => {
-                const entryLines = String(entry.raw || '')
-                    .split('\n')
-                    .map(line => line.trim())
-                    .filter(Boolean);
-                entryLines.forEach(line => {
-                    if (mentionLineRegex.test(line)) {
-                        return;
-                    }
-                    allLines.push(line);
-                });
-            });
+            const allLines = getRenderableObservationLines(populatedEntries);
+            if (!allLines.length) {
+                return null;
+            }
             $noteTextarea.val(allLines.join('\n'));
             $noteContent.append($noteTextarea);
             adjustObservationTextareaHeight($noteTextarea);
@@ -2896,6 +3060,9 @@ function formatCnjDigits(raw) {
                 options.mentionLabel || (options.mentionType === 'nj' ? observationTarget : '');
             if (mentionLabel) {
                 $notesColumn.attr('data-analise-mention-label', mentionLabel);
+            }
+            if (typeof options.observationFallbackText === 'string' && options.observationFallbackText.trim()) {
+                $notesColumn.data('analiseObservationFallback', options.observationFallbackText.trim());
             }
             $detailsRow.append($notesColumn);
         }
@@ -3195,12 +3362,13 @@ function formatCnjDigits(raw) {
 
             const tipoAcaoPrincipal = userResponses.tipo_de_acao || 'Não informado';
 
-            /* ---------- Cards de Processos CNJ vinculados ---------- */
+	            /* ---------- Cards de Processos CNJ vinculados ---------- */
 
-            const combinedCards = getCombinedProcessCardsForSummary();
-            const pendingCount = Array.isArray(combinedCards)
-                ? combinedCards.filter(isCardPendingCompletion).length
-                : 0;
+	            const combinedCards = getCombinedProcessCardsForSummary();
+	            scheduleSnapshotTreePrefetch(combinedCards);
+	            const pendingCount = Array.isArray(combinedCards)
+	                ? combinedCards.filter(isCardPendingCompletion).length
+	                : 0;
             if (pendingCount > 0) {
                 const $filterBtn = $(
                     `<button type="button" class="button button-secondary analise-filter-completar">${showOnlyPendingCompletion ? 'Mostrar Todas' : 'Completar Análise'} (${pendingCount})</button>`
@@ -3468,7 +3636,8 @@ function formatCnjDigits(raw) {
                             observationTarget: snapshot.observationTarget,
                             contracts: snapshot.contractIds,
                             mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
-                            mentionLabel: snapshot.observationTarget
+                            mentionLabel: snapshot.observationTarget,
+                            observationFallbackText: snapshot.observationFallbackText
                         }
                     );
                     $bodyVinculado.append($detailsRow);
@@ -3718,7 +3887,8 @@ function formatCnjDigits(raw) {
                 observationTarget: snapshot.observationTarget,
                 contracts: snapshot.contractIds,
                 mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
-                mentionLabel: snapshot.observationTarget
+                mentionLabel: snapshot.observationTarget,
+                observationFallbackText: snapshot.observationFallbackText
             });
             $body.append($detailsRow);
 
@@ -3771,10 +3941,15 @@ function formatCnjDigits(raw) {
                     .filter(Boolean);
                 const mentionType = $column.attr('data-analise-mention-type') || 'cnj';
                 const mentionLabel = $column.attr('data-analise-mention-label') || '';
-                const entries = getObservationEntriesForCnj(cnj, contracts, {
+                const notebookEntries = getObservationEntriesForCnj(cnj, contracts, {
                     mentionType,
                     mentionLabel
                 });
+                const fallbackText = String($column.data('analiseObservationFallback') || '').trim();
+                const entries =
+                    getRenderableObservationLines(notebookEntries).length > 0
+                        ? notebookEntries
+                        : (fallbackText ? [{ raw: fallbackText, mentionLines: [], contentLines: [fallbackText], summary: fallbackText }] : []);
                 const $newObservation = createObservationNoteElement(entries);
                 $column.find('.analise-observation-note').remove();
                 if ($newObservation) {

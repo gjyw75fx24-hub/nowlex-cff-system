@@ -349,7 +349,8 @@
     padding: 8px;
     border: none;
     background: transparent;
-    color: inherit;
+    color: #533809;
+    -webkit-text-fill-color: #533809;
     font-size: 0.9rem;
     line-height: 1.5;
     resize: vertical;
