@@ -1119,24 +1119,32 @@ def demandas_analise_planilha_view(request):
 
         processes = (
             ProcessoJudicial.objects.filter(
-                Q(carteira=carteira_obj) | Q(carteiras_vinculadas=carteira_obj),
                 partes_processuais__documento__in=cpfs,
             )
             .distinct()
             .order_by("id")
-            .prefetch_related("partes_processuais")
-            .select_related("analise_processo")
+            .prefetch_related("partes_processuais", "carteiras_vinculadas")
+            .select_related("analise_processo", "carteira")
         )
 
-        cpf_to_imported_cnjs = {}
-        cpf_has_process = set()
+        cpf_status_map = {}
         target_tipo_id = str(getattr(tipo_analise_obj, "id", ""))
+        target_carteira_id = int(getattr(carteira_obj, "id", 0) or 0)
 
         for proc in processes:
             respostas = {}
             analise_obj = getattr(proc, "analise_processo", None)
             if analise_obj and isinstance(analise_obj.respostas, dict):
                 respostas = analise_obj.respostas
+
+            proc_carteiras = {}
+            if proc.carteira_id:
+                proc_carteiras[int(proc.carteira_id)] = (
+                    getattr(getattr(proc, "carteira", None), "nome", None) or f"Carteira {proc.carteira_id}"
+                )
+            for carteira_vinculada in getattr(proc, "carteiras_vinculadas", []).all():
+                if carteira_vinculada and getattr(carteira_vinculada, "id", None):
+                    proc_carteiras[int(carteira_vinculada.id)] = carteira_vinculada.nome
 
             imported_cnjs = set()
             for source_key in ("saved_processos_vinculados", "processos_vinculados"):
@@ -1153,14 +1161,11 @@ def demandas_analise_planilha_view(request):
                     if card_tipo_id and target_tipo_id and card_tipo_id != target_tipo_id:
                         continue
                     card_carteira_id = card.get("carteira_id")
-                    if card_carteira_id not in (None, "") and str(card_carteira_id) != str(carteira_obj.id):
+                    if card_carteira_id not in (None, "") and str(card_carteira_id) != str(target_carteira_id):
                         continue
                     cnj_digits = normalize_cnj_digits(card.get("cnj"))
                     if cnj_digits:
                         imported_cnjs.add(cnj_digits)
-
-            if not imported_cnjs and not proc.pk:
-                continue
 
             partes_manager = getattr(proc, "partes_processuais", None)
             if not partes_manager:
@@ -1169,16 +1174,56 @@ def demandas_analise_planilha_view(request):
                 cpf_parte = normalize_cpf(getattr(parte, "documento", ""))
                 if not cpf_parte or cpf_parte not in cpfs:
                     continue
-                cpf_has_process.add(cpf_parte)
-                bucket = cpf_to_imported_cnjs.setdefault(cpf_parte, set())
-                bucket.update(imported_cnjs)
+                bucket = cpf_status_map.setdefault(
+                    cpf_parte,
+                    {
+                        "imported_cnjs": set(),
+                        "has_process": False,
+                        "carteiras": {},
+                        "has_selected_carteira": False,
+                    },
+                )
+                bucket["has_process"] = True
+                bucket["imported_cnjs"].update(imported_cnjs)
+                if proc_carteiras:
+                    bucket["carteiras"].update(proc_carteiras)
+                if target_carteira_id and target_carteira_id in proc_carteiras:
+                    bucket["has_selected_carteira"] = True
 
         status_map = {}
         for cpf in cpfs:
-            imported = cpf_to_imported_cnjs.get(cpf, set())
+            data = cpf_status_map.get(cpf, {})
+            imported = set(data.get("imported_cnjs") or set())
+            has_process = bool(data.get("has_process"))
+            carteiras_map = data.get("carteiras") or {}
+            carteiras_sorted = [
+                nome
+                for _, nome in sorted(
+                    carteiras_map.items(),
+                    key=lambda item: str(item[1]).upper(),
+                )
+                if str(nome or "").strip()
+            ]
+            other_carteiras_sorted = [
+                nome
+                for carteira_id, nome in sorted(
+                    carteiras_map.items(),
+                    key=lambda item: str(item[1]).upper(),
+                )
+                if int(carteira_id) != target_carteira_id and str(nome or "").strip()
+            ]
+            if has_process and not carteiras_sorted:
+                carteiras_display = "Sem carteira vinculada"
+            else:
+                carteiras_display = ", ".join(carteiras_sorted) if carteiras_sorted else "-"
             status_map[cpf] = {
                 "imported_cnjs": imported,
-                "has_process": cpf in cpf_has_process,
+                "has_process": has_process,
+                "has_selected_carteira": bool(data.get("has_selected_carteira")),
+                "existing_carteiras": carteiras_sorted,
+                "existing_carteiras_display": carteiras_display,
+                "other_carteiras": other_carteiras_sorted,
+                "other_carteiras_display": ", ".join(other_carteiras_sorted) if other_carteiras_sorted else "",
             }
         return status_map
 
@@ -1381,6 +1426,10 @@ def demandas_analise_planilha_view(request):
                 total_cnjs = len(entry["cnjs"])
                 imported_full = bool(total_cnjs and imported_count >= total_cnjs)
                 imported_partial = bool(imported_count and not imported_full)
+                has_process = bool(imported_entry.get("has_process"))
+                has_selected_carteira = bool(imported_entry.get("has_selected_carteira"))
+                other_carteiras_display = imported_entry.get("other_carteiras_display") or ""
+                exists_only_other_carteira = bool(has_process and not has_selected_carteira and other_carteiras_display)
                 if imported_full:
                     imported_cpfs += 1
 
@@ -1407,6 +1456,11 @@ def demandas_analise_planilha_view(request):
                         "imported_total": total_cnjs,
                         "imported_full": imported_full,
                         "imported_partial": imported_partial,
+                        "has_process": has_process,
+                        "has_selected_carteira": has_selected_carteira,
+                        "exists_only_other_carteira": exists_only_other_carteira,
+                        "other_carteiras_display": other_carteiras_display,
+                        "existing_carteiras_display": imported_entry.get("existing_carteiras_display") or "-",
                         "checked": (
                             cpf_key in selected_cpfs
                         ) if selected_cpfs else (not imported_full),

@@ -159,10 +159,13 @@
 	      {% if preview.cpf_rows %}
 	        <h3 style="margin-top: 14px;">Selecionar CPFs para importar</h3>
 	        <div style="display:flex; gap:10px; margin: 8px 0 10px 0; flex-wrap:wrap;">
+	          <button type="button" class="button" id="filter-only-other-carteira">Mostrar só já em outras carteiras</button>
+	          <button type="button" class="button" id="filter-show-all">Mostrar todos</button>
 	          <button type="button" class="button" id="sel-all">Selecionar todos</button>
 	          <button type="button" class="button" id="sel-not-imported">Selecionar não importados</button>
 	          <button type="button" class="button" id="sel-none">Limpar seleção</button>
 	          <button type="button" class="button" id="sel-analysed">Selecionar “já analisados”</button>
+	          <span id="preview-filter-info" style="opacity:.75; align-self:center;"></span>
 	          <span style="opacity:.75; align-self:center;">(arquivo permanece salvo após importar; use “Cancelar importação” para descartar)</span>
 	        </div>
 	        <table class="adminlist" style="width: 100%; border-collapse: collapse;">
@@ -179,7 +182,7 @@
 	          </thead>
 	          <tbody>
 	            {% for row in preview.cpf_rows %}
-	              <tr>
+	              <tr data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}">
 	                <td>
 	                  <input
 	                    type="checkbox"
@@ -187,6 +190,7 @@
 	                    data-cpf="{{ row.cpf }}"
 	                    data-prechecked="{{ row.prechecked|yesno:'1,0' }}"
 	                    data-imported-full="{{ row.imported_full|yesno:'1,0' }}"
+	                    data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}"
 	                    {% if row.checked %}checked{% endif %}
 	                  >
 	                </td>
@@ -209,6 +213,14 @@
 	                  {% else %}
 	                    <span style="opacity:.65;">Sem respostas</span>
 	                  {% endif %}
+	                  {% if row.has_process %}
+	                    <br>
+	                    {% if row.exists_only_other_carteira %}
+	                      <span style="opacity:.8;">Já existe em outra carteira: {{ row.other_carteiras_display }}</span>
+	                    {% else %}
+	                      <span style="opacity:.8;">Carteira(s): {{ row.existing_carteiras_display }}</span>
+	                    {% endif %}
+	                  {% endif %}
 	                </td>
 	              </tr>
 	            {% endfor %}
@@ -218,7 +230,13 @@
 	          (function () {
 	            const formEl = document.querySelector('.demandas-panel form');
 	            const payloadEl = document.getElementById('id_selected_cpfs_payload');
+	            const tableRows = () => Array.from(document.querySelectorAll('tr[data-exists-other-carteira]'));
+	            const visibleRows = () => tableRows().filter((row) => row.style.display !== 'none');
 	            const boxes = () => Array.from(document.querySelectorAll('.js-planilha-cpf-box'));
+	            const visibleBoxes = () => visibleRows()
+	              .map((row) => row.querySelector('.js-planilha-cpf-box'))
+	              .filter(Boolean);
+	            const filterInfo = document.getElementById('preview-filter-info');
 	            const syncSelectedCpfsPayload = () => {
 	              if (!payloadEl) return;
 	              const cpfs = boxes()
@@ -227,20 +245,33 @@
 	                .filter(Boolean);
 	              payloadEl.value = Array.from(new Set(cpfs)).join(',');
 	            };
+	            const updateFilterInfo = () => {
+	              if (!filterInfo) return;
+	              const total = tableRows().length;
+	              const visible = visibleRows().length;
+	              filterInfo.textContent = `Mostrando ${visible} de ${total} CPF(s) na prévia`;
+	            };
+	            const applyOnlyOtherCarteiraFilter = (onlyOther) => {
+	              tableRows().forEach((row) => {
+	                const isOther = row.dataset.existsOtherCarteira === '1';
+	                row.style.display = (!onlyOther || isOther) ? '' : 'none';
+	              });
+	              updateFilterInfo();
+	            };
 	            const setAll = (checked) => {
-	              boxes().forEach((b) => {
+	              visibleBoxes().forEach((b) => {
 	                b.checked = checked;
 	              });
 	              syncSelectedCpfsPayload();
 	            };
 	            const setAnalysed = () => {
-	              boxes().forEach((b) => {
+	              visibleBoxes().forEach((b) => {
 	                b.checked = (b.dataset.prechecked === '1');
 	              });
 	              syncSelectedCpfsPayload();
 	            };
 	            const setNotImported = () => {
-	              boxes().forEach((b) => {
+	              visibleBoxes().forEach((b) => {
 	                b.checked = (b.dataset.importedFull !== '1');
 	              });
 	              syncSelectedCpfsPayload();
@@ -249,12 +280,21 @@
 	            const notImportedBtn = document.getElementById('sel-not-imported');
 	            const noneBtn = document.getElementById('sel-none');
 	            const analysedBtn = document.getElementById('sel-analysed');
+	            const filterOnlyOtherBtn = document.getElementById('filter-only-other-carteira');
+	            const filterShowAllBtn = document.getElementById('filter-show-all');
 	            boxes().forEach((b) => b.addEventListener('change', syncSelectedCpfsPayload));
 	            if (formEl) formEl.addEventListener('submit', syncSelectedCpfsPayload);
 	            if (allBtn) allBtn.addEventListener('click', () => setAll(true));
 	            if (notImportedBtn) notImportedBtn.addEventListener('click', () => setNotImported());
 	            if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
 	            if (analysedBtn) analysedBtn.addEventListener('click', () => setAnalysed());
+	            if (filterOnlyOtherBtn) {
+	              filterOnlyOtherBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(true));
+	            }
+	            if (filterShowAllBtn) {
+	              filterShowAllBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(false));
+	            }
+	            applyOnlyOtherCarteiraFilter(false);
 	            syncSelectedCpfsPayload();
 	          })();
 	        </script>
