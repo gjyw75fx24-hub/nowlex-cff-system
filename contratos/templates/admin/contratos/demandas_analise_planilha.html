@@ -131,12 +131,45 @@
           priorityToggle.addEventListener('change', syncPriorityVisibility);
           syncPriorityVisibility();
         })();
+
+        (function () {
+          const bindImportSubmitState = () => {
+            const formEl = document.querySelector('.demandas-panel form');
+            const importBtn = document.getElementById('planilha-import-btn');
+            if (!formEl || !importBtn) return;
+
+            formEl.addEventListener('submit', (event) => {
+              const submitter = event.submitter || document.activeElement;
+              const isImportAction = Boolean(
+                submitter
+                && submitter.name === 'action'
+                && submitter.value === 'import'
+              );
+              if (!isImportAction) return;
+
+              if (importBtn.dataset.importing === '1') {
+                event.preventDefault();
+                return;
+              }
+
+              importBtn.dataset.importing = '1';
+              importBtn.disabled = true;
+              importBtn.textContent = 'Importando...';
+            });
+          };
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bindImportSubmitState);
+            return;
+          }
+          bindImportSubmitState();
+        })();
       </script>
 
 	      <div class="demandas-form__footer">
 	        <div class="demandas-form__actions">
 	          <button class="button" type="submit" name="action" value="preview">Pré-visualizar</button>
-	          <button class="button default" type="submit" name="action" value="import">Importar</button>
+	          <button class="button default" type="submit" name="action" value="import" id="planilha-import-btn">Importar</button>
 	          <button class="button" type="submit" name="action" value="cancel" formnovalidate>Cancelar importação</button>
 	        </div>
 	      </div>

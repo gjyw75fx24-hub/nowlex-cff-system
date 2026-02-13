@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from contratos.models import (
@@ -472,6 +472,8 @@ class PassivasImportResult:
     updated_cnjs: int = 0
     created_cards: int = 0
     updated_cards: int = 0
+    reused_priority_tags: int = 0
+    standardized_priority_tags: int = 0
     skipped_rows: int = 0
     errors: List[str] = None
 
@@ -506,9 +508,13 @@ def import_passivas_rows(
 
     by_cpf: Dict[str, List[PassivasRow]] = {}
     priority_tags_cache: Dict[str, Etiqueta] = {}
+    reused_priority_tag_ids: set[int] = set()
+    standardized_priority_tag_ids: set[int] = set()
+    priority_default_bg = "#f5c242"
+    priority_default_fg = "#3e2a00"
 
     def _get_priority_tag(priority_value: str) -> Optional[Etiqueta]:
-        label = str(priority_value or "").strip()
+        label = re.sub(r"\s+", " ", str(priority_value or "").strip()).upper()
         if not label:
             return None
         key = normalize_header(label)
@@ -517,13 +523,58 @@ def import_passivas_rows(
         if key in priority_tags_cache:
             return priority_tags_cache[key]
 
-        tag = Etiqueta.objects.filter(nome__iexact=label).first()
+        tag = Etiqueta.objects.filter(nome=label).first()
+        created = False
         if not tag:
-            tag = Etiqueta.objects.create(
-                nome=label,
-                cor_fundo="#f5c242",
-                cor_fonte="#3e2a00",
-            )
+            tag = Etiqueta.objects.filter(nome__iexact=label).order_by("id").first()
+        if not tag:
+            try:
+                tag = Etiqueta.objects.create(
+                    nome=label,
+                    cor_fundo=priority_default_bg,
+                    cor_fonte=priority_default_fg,
+                )
+                created = True
+            except IntegrityError:
+                # Outro request pode ter criado ao mesmo tempo; reaproveita a existente.
+                tag = Etiqueta.objects.filter(nome__iexact=label).order_by("id").first()
+                if not tag:
+                    raise
+
+        if not created and tag and tag.id:
+            reused_priority_tag_ids.add(tag.id)
+
+        changed_fields: List[str] = []
+        if tag.nome != label:
+            tag.nome = label
+            changed_fields.append("nome")
+        if tag.cor_fundo != priority_default_bg:
+            tag.cor_fundo = priority_default_bg
+            changed_fields.append("cor_fundo")
+        if tag.cor_fonte != priority_default_fg:
+            tag.cor_fonte = priority_default_fg
+            changed_fields.append("cor_fonte")
+        if changed_fields:
+            try:
+                tag.save(update_fields=changed_fields)
+            except IntegrityError:
+                canonical = Etiqueta.objects.filter(nome=label).exclude(id=tag.id).first()
+                if canonical:
+                    tag = canonical
+                else:
+                    raise
+                canonical_changes: List[str] = []
+                if tag.cor_fundo != priority_default_bg:
+                    tag.cor_fundo = priority_default_bg
+                    canonical_changes.append("cor_fundo")
+                if tag.cor_fonte != priority_default_fg:
+                    tag.cor_fonte = priority_default_fg
+                    canonical_changes.append("cor_fonte")
+                if canonical_changes:
+                    tag.save(update_fields=canonical_changes)
+            if tag and tag.id:
+                standardized_priority_tag_ids.add(tag.id)
+
         priority_tags_cache[key] = tag
         return tag
 
@@ -756,6 +807,9 @@ def import_passivas_rows(
 
     if dry_run:
         transaction.set_rollback(True)
+
+    result.reused_priority_tags = len(reused_priority_tag_ids)
+    result.standardized_priority_tags = len(standardized_priority_tag_ids)
 
     return result
 

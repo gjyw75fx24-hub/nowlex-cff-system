@@ -1609,6 +1609,13 @@ def demandas_analise_planilha_view(request):
                         f"CNJs: {import_result.created_cnjs} novos, {import_result.updated_cnjs} atualizados. "
                         f"Cards: {import_result.created_cards} novos, {import_result.updated_cards} atualizados.",
                     )
+                    if import_result.reused_priority_tags or import_result.standardized_priority_tags:
+                        messages.info(
+                            request,
+                            "Etiquetas de prioridade existentes foram reaproveitadas automaticamente. "
+                            f"Reaproveitadas: {import_result.reused_priority_tags}. "
+                            f"Padronizadas (nome/cor): {import_result.standardized_priority_tags}.",
+                        )
                     if applied_tasks:
                         messages.success(
                             request,
@@ -3543,7 +3550,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
     list_display = ("uf", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
-                    "cnj_with_navigation", "classe_processual", "carteira", "nao_judicializado", "busca_ativa")
+                    "cnj_with_navigation", "classe_processual", "carteira_com_indicador", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
@@ -3719,6 +3726,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = super().get_queryset(request)
         qs = filter_processos_queryset_for_user(qs, request.user)
         qs = self._apply_intersection_pair_filter(qs, request)
+        qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
         last_logs = LogEntry.objects.filter(
             content_type=ct,
@@ -3728,6 +3736,34 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return qs.annotate(
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
+        )
+
+    @admin.display(description="Carteira", ordering="carteira__nome")
+    def carteira_com_indicador(self, obj):
+        carteira_names = {}
+        primary_name = getattr(getattr(obj, 'carteira', None), 'nome', None)
+        if obj.carteira_id:
+            carteira_names[int(obj.carteira_id)] = primary_name or f"Carteira {obj.carteira_id}"
+
+        linked_manager = getattr(obj, 'carteiras_vinculadas', None)
+        if linked_manager is not None:
+            for carteira in linked_manager.all():
+                if carteira and getattr(carteira, 'id', None):
+                    carteira_names[int(carteira.id)] = carteira.nome
+
+        if not carteira_names:
+            return "-"
+
+        display_name = primary_name
+        if not display_name:
+            display_name = sorted(carteira_names.values(), key=lambda value: str(value).upper())[0]
+
+        if len(carteira_names) <= 1:
+            return display_name
+
+        return format_html(
+            '{} <span title="Cadastro vinculado a mais de uma carteira">+</span>',
+            display_name,
         )
 
     def _parse_intersection_pair_ids(self, request):
