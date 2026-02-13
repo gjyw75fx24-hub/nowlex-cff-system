@@ -1032,13 +1032,16 @@ def demandas_analise_planilha_view(request):
         messages.error(request, "Acesso restrito a supervisores.")
         return HttpResponseRedirect(reverse('admin:index'))
 
+    import_modal_session_key = "passivas_planilha_last_import_modal"
     form = DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
     preview = None
     import_result = None
+    import_modal_data = request.session.pop(import_modal_session_key, None)
     selected_cpfs = []
     selected_cpfs_payload = ""
 
-    action = request.POST.get("action") if request.method == "POST" else None
+    action = (request.POST.get("action") or request.POST.get("action_override")) if request.method == "POST" else None
+    import_action_requested = request.method == "POST" and action == "import"
     consider_priority = request.method == "POST" and (
         request.POST.get("considerar_prioridade") in {"1", "true", "True", "on", "yes"}
     )
@@ -1227,6 +1230,106 @@ def demandas_analise_planilha_view(request):
                 "other_carteiras_display": ", ".join(other_carteiras_sorted) if other_carteiras_sorted else "",
             }
         return status_map
+
+    def _remove_selected_cpfs(*, selected_cpfs_list, carteira_obj):
+        normalized_cpfs = {
+            normalize_cpf(value)
+            for value in (selected_cpfs_list or [])
+            if normalize_cpf(value)
+        }
+        target_carteira_id = int(getattr(carteira_obj, "id", 0) or 0)
+        summary = {
+            "selected_cpfs": len(normalized_cpfs),
+            "affected_cpfs": 0,
+            "matched_processes": 0,
+            "deleted_processes": 0,
+            "unlinked_processes": 0,
+            "removed_cnjs": 0,
+            "removed_cards": 0,
+        }
+        if not normalized_cpfs or not target_carteira_id:
+            return summary
+
+        normalized_documento_expr = models.Func(
+            models.F("documento"),
+            models.Value(r"\D"),
+            models.Value(""),
+            models.Value("g"),
+            function="regexp_replace",
+        )
+        processo_ids = set(
+            Parte.objects.annotate(_doc_digits=normalized_documento_expr)
+            .filter(_doc_digits__in=normalized_cpfs)
+            .values_list("processo_id", flat=True)
+        )
+        if not processo_ids:
+            return summary
+
+        processos = (
+            ProcessoJudicial.objects.filter(id__in=processo_ids)
+            .distinct()
+            .order_by("id")
+            .prefetch_related("partes_processuais", "carteiras_vinculadas", "numeros_cnj")
+            .select_related("analise_processo")
+        )
+
+        matched = []
+        for processo in processos:
+            processo_cpfs = {
+                normalize_cpf(getattr(parte, "documento", ""))
+                for parte in processo.partes_processuais.all()
+                if normalize_cpf(getattr(parte, "documento", ""))
+            }
+            if not processo_cpfs.intersection(normalized_cpfs):
+                continue
+
+            linked_ids = set(processo.carteiras_vinculadas.values_list("id", flat=True))
+            has_target_vinculo = False
+            if processo.carteira_id == target_carteira_id:
+                has_target_vinculo = True
+            elif target_carteira_id in linked_ids:
+                has_target_vinculo = True
+            elif processo.numeros_cnj.filter(carteira_id=target_carteira_id).exists():
+                has_target_vinculo = True
+            else:
+                analise_obj = getattr(processo, "analise_processo", None)
+                respostas = analise_obj.respostas if analise_obj and isinstance(analise_obj.respostas, dict) else {}
+                for source_key in ("saved_processos_vinculados", "processos_vinculados"):
+                    cards = respostas.get(source_key)
+                    if not isinstance(cards, list):
+                        continue
+                    if any(
+                        isinstance(card, dict)
+                        and str(card.get("carteira_id") or "") == str(target_carteira_id)
+                        for card in cards
+                    ):
+                        has_target_vinculo = True
+                        break
+
+            if has_target_vinculo:
+                matched.append((processo, processo_cpfs))
+
+        summary["matched_processes"] = len(matched)
+        affected_cpfs = set()
+
+        with transaction.atomic():
+            for processo, processo_cpfs in matched:
+                affected_cpfs.update(processo_cpfs.intersection(normalized_cpfs))
+                summary["removed_cnjs"] += processo.numeros_cnj.count()
+
+                analise_obj = getattr(processo, "analise_processo", None)
+                if analise_obj and isinstance(analise_obj.respostas, dict):
+                    respostas = dict(analise_obj.respostas or {})
+                    for source_key in ("saved_processos_vinculados", "processos_vinculados"):
+                        cards = respostas.get(source_key)
+                        if isinstance(cards, list):
+                            summary["removed_cards"] += len(cards)
+
+                processo.delete()
+                summary["deleted_processes"] += 1
+
+        summary["affected_cpfs"] = len(affected_cpfs)
+        return summary
 
     # Cancelar importação: remove anexo mantido e limpa pendências, sem precisar sair da tela.
     if request.method == "POST" and action == "cancel":
@@ -1610,6 +1713,19 @@ def demandas_analise_planilha_view(request):
                         f"CNJs: {import_result.created_cnjs} novos, {import_result.updated_cnjs} atualizados. "
                         f"Cards: {import_result.created_cards} novos, {import_result.updated_cards} atualizados.",
                     )
+                    import_modal_data = {
+                        "created_cadastros": import_result.created_cadastros,
+                        "updated_cadastros": import_result.updated_cadastros,
+                        "created_cnjs": import_result.created_cnjs,
+                        "updated_cnjs": import_result.updated_cnjs,
+                        "created_cards": import_result.created_cards,
+                        "updated_cards": import_result.updated_cards,
+                        "reused_priority_tags": import_result.reused_priority_tags,
+                        "standardized_priority_tags": import_result.standardized_priority_tags,
+                        "applied_tasks": applied_tasks,
+                        "applied_tasks_targets": applied_tasks_targets,
+                    }
+                    request.session[import_modal_session_key] = import_modal_data
                     if import_result.reused_priority_tags or import_result.standardized_priority_tags:
                         messages.info(
                             request,
@@ -1624,6 +1740,72 @@ def demandas_analise_planilha_view(request):
                         )
                 except Exception as exc:
                     messages.error(request, f"Falha ao importar: {exc}")
+                    import_modal_data = {
+                        "title": "Falha ao importar",
+                        "error": str(exc),
+                    }
+            elif action == "remove":
+                supervisor_password = (request.POST.get("supervisor_password") or "").strip()
+                if not selected_cpfs:
+                    messages.warning(request, "Selecione ao menos um CPF para remover.")
+                    import_modal_data = {
+                        "title": "Remoção não concluída",
+                        "note": "Nenhum CPF selecionado para remoção.",
+                    }
+                elif not supervisor_password:
+                    messages.error(request, "Informe a senha de Supervisor para concluir a remoção.")
+                    import_modal_data = {
+                        "title": "Remoção não concluída",
+                        "error": "Senha de Supervisor não informada.",
+                    }
+                elif not request.user.check_password(supervisor_password):
+                    messages.error(request, "Senha de Supervisor inválida.")
+                    import_modal_data = {
+                        "title": "Remoção não concluída",
+                        "error": "Senha de Supervisor inválida.",
+                    }
+                else:
+                    try:
+                        remove_summary = _remove_selected_cpfs(
+                            selected_cpfs_list=selected_cpfs,
+                            carteira_obj=form.cleaned_data["carteira"],
+                        )
+                        messages.success(
+                            request,
+                            "Remoção concluída. "
+                            f"Cadastros removidos: {remove_summary['deleted_processes']}. "
+                            f"Cadastros desvinculados da carteira: {remove_summary['unlinked_processes']}.",
+                        )
+                        import_modal_data = {
+                            "title": "Remoção concluída",
+                            "mode": "remove",
+                            "carteira_nome": getattr(form.cleaned_data["carteira"], "nome", ""),
+                            **remove_summary,
+                        }
+                    except Exception as exc:
+                        messages.error(request, f"Falha ao remover: {exc}")
+                        import_modal_data = {
+                            "title": "Falha ao remover",
+                            "error": str(exc),
+                        }
+
+    if import_action_requested and import_modal_data is None:
+        if import_result is not None:
+            import_modal_data = {
+                "created_cadastros": import_result.created_cadastros,
+                "updated_cadastros": import_result.updated_cadastros,
+                "created_cnjs": import_result.created_cnjs,
+                "updated_cnjs": import_result.updated_cnjs,
+                "created_cards": import_result.created_cards,
+                "updated_cards": import_result.updated_cards,
+                "reused_priority_tags": getattr(import_result, "reused_priority_tags", 0),
+                "standardized_priority_tags": getattr(import_result, "standardized_priority_tags", 0),
+            }
+        else:
+            import_modal_data = {
+                "title": "Importação finalizada",
+                "note": "Nenhuma alteração foi aplicada nesta execução.",
+            }
 
     # Nome do arquivo mantido (quando já houve prévia)
     kept_name = ""
@@ -1642,6 +1824,7 @@ def demandas_analise_planilha_view(request):
             "form": form,
             "preview": preview,
             "import_result": import_result,
+            "import_modal_data": import_modal_data,
             "back_url": reverse("admin:contratos_demandas_analise"),
             "upload_token_value": (preview or {}).get("upload_token") or (request.POST.get("upload_token") or ""),
             "kept_upload_name": kept_name,
@@ -3296,6 +3479,20 @@ class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
     change_list_template = "admin/contratos/carteira/change_list.html"
     fields = ('nome', 'fonte_alias', 'cor_grafico')
+
+    def _can_edit_carteira(self, request):
+        user = getattr(request, "user", None)
+        return bool(user and getattr(user, "is_authenticated", False) and (user.is_superuser or is_user_supervisor(user)))
+
+    def get_list_display_links(self, request, list_display):
+        if not self._can_edit_carteira(request):
+            return None
+        return super().get_list_display_links(request, list_display)
+
+    def has_change_permission(self, request, obj=None):
+        if not self._can_edit_carteira(request):
+            return False
+        return super().has_change_permission(request, obj=obj)
     
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
