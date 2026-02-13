@@ -19,10 +19,11 @@ from django.contrib.auth.models import User, Group  # Importar os modelos User e
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.core.management.color import no_style
+from django.db import connection, models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
 from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
-from django.db.utils import OperationalError, ProgrammingError
+from django.db.utils import IntegrityError, OperationalError, ProgrammingError
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, render
@@ -5245,7 +5246,21 @@ class QuestaoAnaliseAdmin(admin.ModelAdmin):
                 pass
 
     def save_formset(self, request, form, formset, change):
-        super().save_formset(request, form, formset, change)
+        sequence_repaired = False
+        try:
+            with transaction.atomic():
+                super().save_formset(request, form, formset, change)
+        except IntegrityError as exc:
+            if not self._is_opcaoresposta_pk_sequence_conflict(formset, exc):
+                raise
+            sequence_repaired = self._repair_model_pk_sequence(OpcaoResposta)
+            with transaction.atomic():
+                super().save_formset(request, form, formset, change)
+            if sequence_repaired:
+                messages.warning(
+                    request,
+                    "Sequência de IDs de Opções de Resposta estava desajustada e foi corrigida automaticamente.",
+                )
         try:
             instance = form.instance
             tipo = getattr(instance, 'tipo_analise', None)
@@ -5260,6 +5275,25 @@ class QuestaoAnaliseAdmin(admin.ModelAdmin):
                 tipo.bump_version(user=request.user)
         except Exception:
             return
+
+    def _is_opcaoresposta_pk_sequence_conflict(self, formset, exc):
+        if getattr(formset, 'model', None) is not OpcaoResposta:
+            return False
+        message = str(exc or "")
+        message_lower = message.lower()
+        return (
+            "contratos_opcaoresposta_pkey" in message_lower
+            and "duplicate key value violates unique constraint" in message_lower
+        )
+
+    def _repair_model_pk_sequence(self, model_cls):
+        sql_statements = connection.ops.sequence_reset_sql(no_style(), [model_cls]) or []
+        if not sql_statements:
+            return False
+        with connection.cursor() as cursor:
+            for sql in sql_statements:
+                cursor.execute(sql)
+        return True
 
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
