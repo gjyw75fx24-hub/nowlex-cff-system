@@ -3233,6 +3233,7 @@ class ProcessoJudicialChangeList(ChangeList):
 class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
     change_list_template = "admin/contratos/carteira/change_list.html"
+    fields = ('nome', 'fonte_alias', 'cor_grafico')
     
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
@@ -3262,7 +3263,7 @@ class CarteiraAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">Ver Processos</a>', url)
 
     def _build_carteira_intersections(self):
-        carteiras = list(Carteira.objects.order_by('nome').values('id', 'nome'))
+        carteiras = list(Carteira.objects.order_by('nome').values('id', 'nome', 'cor_grafico'))
         process_changelist_url = reverse("admin:contratos_processojudicial_changelist")
         if not carteiras:
             return {
@@ -3317,6 +3318,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             carteira_items.append({
                 "id": carteira['id'],
                 "nome": carteira['nome'],
+                "cor_grafico": carteira.get('cor_grafico') or '#417690',
                 "cpf_total": len(cpfs),
                 "percent_global": round((len(cpfs) * 100.0 / total_unique_cpfs), 2) if total_unique_cpfs else 0.0,
             })
@@ -3353,7 +3355,7 @@ class CarteiraAdmin(admin.ModelAdmin):
         }
 
     def changelist_view(self, request, extra_context=None):
-        chart_data = list(self.get_queryset(request).values('nome', 'total_processos', 'valor_total'))
+        chart_data = list(self.get_queryset(request).values('nome', 'cor_grafico', 'total_processos', 'valor_total'))
         intersection_data = self._build_carteira_intersections()
         extra_context = extra_context or {}
         extra_context['chart_data'] = json.dumps(chart_data, default=str)
@@ -3361,7 +3363,17 @@ class CarteiraAdmin(admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
-        js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js?v=20260213e')
+        css = {
+            'all': (
+                'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css',
+            )
+        }
+        js = (
+            'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
+            'admin/js/carteira_color_picker.js',
+            'https://cdn.jsdelivr.net/npm/chart.js',
+            'admin/js/carteira_charts.js?v=20260213f',
+        )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
     title = 'Valor da Causa'
@@ -3585,6 +3597,35 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             request.session[self.FILTER_SKIP_KEY] = True
         return None
 
+    def _get_filtered_carteira_id(self, request):
+        raw_carteira_id = request.GET.get('carteira') or request.GET.get('carteira__id__exact')
+        try:
+            carteira_id = int(raw_carteira_id)
+        except (TypeError, ValueError):
+            return None
+        return carteira_id if carteira_id > 0 else None
+
+    def _ensure_passivas_include_prescritos(self, request):
+        if request.method != 'GET':
+            return None
+        carteira_id = self._get_filtered_carteira_id(request)
+        if not carteira_id:
+            return None
+        if request.GET.get('ord_prescricao'):
+            return None
+        is_passivas = Carteira.objects.filter(
+            pk=carteira_id,
+            nome__iexact='Passivas',
+        ).exists()
+        if not is_passivas:
+            return None
+        params = request.GET.copy()
+        params['ord_prescricao'] = 'incluir'
+        target_url = f"{request.path}?{params.urlencode()}"
+        if target_url != request.get_full_path():
+            return HttpResponseRedirect(target_url)
+        return None
+
     def save_model(self, request, obj, form, change):
         selected_carteira_ids = self._extract_selected_carteira_ids(form, request=request)
         # Snapshot para uso no save_related; evita perda de seleção em cenários
@@ -3729,11 +3770,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'subtitle': 'Lista filtrada por CPFs em comum.',
             }
 
-        raw_carteira_id = request.GET.get('carteira') or request.GET.get('carteira__id__exact')
-        try:
-            carteira_id = int(raw_carteira_id)
-        except (TypeError, ValueError):
-            carteira_id = None
+        carteira_id = self._get_filtered_carteira_id(request)
         if not carteira_id:
             return None
 
@@ -4413,6 +4450,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         redirect = self._handle_saved_filters(request)
         if redirect:
             return redirect
+        passivas_redirect = self._ensure_passivas_include_prescritos(request)
+        if passivas_redirect:
+            return passivas_redirect
         extra_context = extra_context or {}
         changelist = self.get_changelist_instance(request)
         result_list = changelist.result_list

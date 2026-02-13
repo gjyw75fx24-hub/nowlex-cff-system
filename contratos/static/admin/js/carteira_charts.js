@@ -3,9 +3,37 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!chartDataElement) return;
 
     const chartData = JSON.parse(chartDataElement.textContent || '[]');
+    const fallbackHexPalette = [
+        '#FFC107', '#2196F3', '#673AB7', '#4CAF50', '#F44336', '#00BCD4',
+        '#FF9800', '#8BC34A', '#795548', '#9C27B0',
+    ];
+    const normalizeHex = (value, fallback = '#417690') => {
+        const raw = String(value || '').trim();
+        if (!raw) return fallback;
+        const candidate = raw.startsWith('#') ? raw : `#${raw}`;
+        return /^#[0-9A-Fa-f]{6}$/.test(candidate) ? candidate.toUpperCase() : fallback;
+    };
+    const hexToRgb = (hex) => {
+        const normalized = normalizeHex(hex, '#417690');
+        return {
+            r: parseInt(normalized.slice(1, 3), 16),
+            g: parseInt(normalized.slice(3, 5), 16),
+            b: parseInt(normalized.slice(5, 7), 16),
+        };
+    };
+    const hexToRgba = (hex, alpha) => {
+        const { r, g, b } = hexToRgb(hex);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+    const resolveCarteiraColor = (item, index) => {
+        const fallback = fallbackHexPalette[index % fallbackHexPalette.length];
+        return normalizeHex(item?.cor_grafico, fallback);
+    };
+
     const labels = chartData.map((c) => c.nome);
-    const processCounts = chartData.map((c) => c.total_processos);
-    const valuations = chartData.map((c) => c.valor_total);
+    const processCounts = chartData.map((c) => Number(c.total_processos || 0));
+    const valuations = chartData.map((c) => Number(c.valor_total || 0));
+    const carteiraBaseColors = chartData.map((item, index) => resolveCarteiraColor(item, index));
 
     const changelist = document.getElementById('changelist');
     if (!changelist) return;
@@ -48,12 +76,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 datasets: [{
                     label: 'Nº de Processos',
                     data: processCounts,
-                    backgroundColor: [
-                        'rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)',
-                        'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)',
-                        'rgba(153, 102, 255, 0.7)', 'rgba(255, 159, 64, 0.7)',
-                    ],
-                    borderColor: '#fff',
+                    backgroundColor: carteiraBaseColors.map((hex) => hexToRgba(hex, 0.72)),
+                    borderColor: carteiraBaseColors.map((hex) => hexToRgba(hex, 0.98)),
                     borderWidth: 2,
                 }],
             },
@@ -75,8 +99,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 datasets: [{
                     label: 'Valor Total da Carteira (R$)',
                     data: valuations,
-                    backgroundColor: 'rgba(75, 192, 192, 0.7)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: carteiraBaseColors.map((hex) => hexToRgba(hex, 0.58)),
+                    borderColor: carteiraBaseColors.map((hex) => hexToRgba(hex, 0.92)),
                     borderWidth: 1,
                 }],
             },
@@ -139,14 +163,14 @@ window.addEventListener('DOMContentLoaded', () => {
         return `${processChangelistUrl}?${params.toString()}`;
     };
 
-    const colorPalette = [
-        { fill: 'rgba(255, 193, 7, 0.35)', stroke: 'rgba(191, 137, 0, 0.75)' },
-        { fill: 'rgba(0, 123, 255, 0.30)', stroke: 'rgba(0, 86, 179, 0.75)' },
-        { fill: 'rgba(111, 66, 193, 0.24)', stroke: 'rgba(91, 44, 140, 0.70)' },
-        { fill: 'rgba(40, 167, 69, 0.25)', stroke: 'rgba(30, 126, 52, 0.75)' },
-        { fill: 'rgba(220, 53, 69, 0.20)', stroke: 'rgba(178, 34, 34, 0.70)' },
-        { fill: 'rgba(23, 162, 184, 0.22)', stroke: 'rgba(17, 120, 137, 0.70)' },
-    ];
+    const buildCircleColor = (carteira, index) => {
+        const base = resolveCarteiraColor(carteira, index);
+        return {
+            base,
+            fill: hexToRgba(base, 0.30),
+            stroke: hexToRgba(base, 0.76),
+        };
+    };
 
     const section = document.createElement('section');
     section.style.marginTop = '22px';
@@ -182,7 +206,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const layoutRadiusX = Math.max(120, Math.min(width * 0.30, (width / 2) - 180));
     const layoutRadiusY = Math.max(95, Math.min(height * 0.25, (height / 2) - 140));
     const nodes = carteiras.map((carteira, index) => {
-        const color = colorPalette[index % colorPalette.length];
+        const color = buildCircleColor(carteira, index);
         const angle = (Math.PI * 2 * index) / Math.max(carteiras.length, 1);
         return {
             id: Number(carteira.id),

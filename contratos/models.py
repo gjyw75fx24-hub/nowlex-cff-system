@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import connection, models, transaction
 from django.db.utils import ProgrammingError
 from django.db.models.signals import pre_delete
@@ -31,6 +32,11 @@ class Etiqueta(models.Model):
         return self.nome
 
 class Carteira(models.Model):
+    hex_color_validator = RegexValidator(
+        regex=r'^#[0-9A-Fa-f]{6}$',
+        message='Informe uma cor HEX válida no formato #RRGGBB.',
+    )
+
     nome = models.CharField(max_length=100, unique=True, verbose_name="Nome da Carteira")
     fonte_alias = models.CharField(
         max_length=64,
@@ -40,6 +46,13 @@ class Carteira(models.Model):
             "Alias da conexão do banco que será utilizada para importar cadastros (ex.: "
             "carteira, carteira_bcs, carteira_teste). Deixe em branco para usar a conexão padrão 'carteira'."
         ),
+    )
+    cor_grafico = models.CharField(
+        max_length=7,
+        default='#417690',
+        verbose_name='Cor nos gráficos',
+        help_text='Cor usada nos gráficos e no diagrama de interseções desta carteira.',
+        validators=[hex_color_validator],
     )
 
     class Meta:
