@@ -96,6 +96,135 @@
     object-fit: contain;
 }
 
+/* Carteiras vinculadas: substitui o widget dual por lista horizontal com toggle circular. */
+.carteiras-vinculadas-toggle-ready .field-carteira {
+    display: none !important;
+}
+
+.field-carteiras_vinculadas .help {
+    margin-top: 6px;
+    color: #5d6b80;
+}
+
+.field-carteiras_vinculadas .carteiras-vinculadas-toggle-list,
+.field-carteiras_vinculadas .carteiras-vinculadas-toggle-list ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin: 0;
+    padding: 0;
+}
+
+.field-carteiras_vinculadas .carteiras-vinculadas-toggle-list > div,
+.field-carteiras_vinculadas .carteiras-vinculadas-toggle-list li {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Fallback para markup padrão do Django (sem classes injetadas por JS). */
+.field-carteiras_vinculadas #id_carteiras_vinculadas,
+.field-carteiras_vinculadas .carteiras-vinculadas-toggle-runtime {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin: 0;
+    padding: 0;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas > div {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    font-size: calc(1em - 2px);
+    border-radius: 999px;
+    border: 1px solid rgba(15, 58, 118, 0.12);
+    background: #f8fbff;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas label:hover {
+    border-color: rgba(15, 120, 247, 0.45);
+    background: #edf5ff;
+}
+
+.field-carteiras_vinculadas .carteira-vinculo-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    font-size: calc(1em - 2px);
+    border-radius: 999px;
+    border: 1px solid rgba(15, 58, 118, 0.12);
+    background: #f8fbff;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.field-carteiras_vinculadas .carteira-vinculo-option:hover {
+    border-color: rgba(15, 120, 247, 0.45);
+    background: #edf5ff;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas input[type="checkbox"],
+.field-carteiras_vinculadas .carteira-vinculo-option input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 58, 118, 0.25);
+    background: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas input[type="checkbox"]::after,
+.field-carteiras_vinculadas .carteira-vinculo-option input[type="checkbox"]::after {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: transparent;
+    transition: background 0.2s ease;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas input[type="checkbox"]:checked,
+.field-carteiras_vinculadas .carteira-vinculo-option input[type="checkbox"]:checked {
+    border-color: #0f78f7;
+    background: rgba(15, 120, 247, 0.12);
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas input[type="checkbox"]:checked::after,
+.field-carteiras_vinculadas .carteira-vinculo-option input[type="checkbox"]:checked::after {
+    background: #0f78f7;
+}
+
+.field-carteiras_vinculadas #id_carteiras_vinculadas input[type="checkbox"]:focus-visible,
+.field-carteiras_vinculadas .carteira-vinculo-option input[type="checkbox"]:focus-visible {
+    outline: 2px solid rgba(15, 120, 247, 0.35);
+    outline-offset: 2px;
+}
+
+.field-carteiras_vinculadas .carteira-vinculo-text {
+    font-weight: 600;
+    color: #254363;
+}
+
 .checagem-modal-overlay {
     position: fixed;
     inset: 0;

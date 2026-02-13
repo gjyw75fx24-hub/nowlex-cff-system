@@ -137,6 +137,12 @@ class ProcessoJudicial(models.Model):
         verbose_name="Carteira",
         related_name='processos'
     )
+    carteiras_vinculadas = models.ManyToManyField(
+        Carteira,
+        blank=True,
+        verbose_name="Carteiras vinculadas",
+        related_name='processos_multicarteira',
+    )
 
     heranca_valor = models.DecimalField(
         max_digits=16,
@@ -185,6 +191,16 @@ class ProcessoJudicial(models.Model):
         else:
             self.nao_judicializado = True
         super().save(*args, **kwargs)
+
+    def vincular_carteira(self, carteira_obj):
+        if not carteira_obj or not getattr(carteira_obj, 'pk', None):
+            return
+        if not self.pk:
+            self.save()
+        self.carteiras_vinculadas.add(carteira_obj)
+        if not self.carteira_id:
+            self.carteira = carteira_obj
+            self.save(update_fields=['carteira'])
 
     def clean(self):
         super().clean()
@@ -257,6 +273,14 @@ class ProcessoJudicialNumeroCnj(models.Model):
 # 🔽 NOVO MODELO PARA ARMAZENAR ANDAMENTOS
 class AndamentoProcessual(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='andamentos')
+    numero_cnj = models.ForeignKey(
+        ProcessoJudicialNumeroCnj,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='andamentos_processuais',
+        verbose_name="Número CNJ",
+    )
     data = models.DateTimeField(verbose_name="Data do Andamento")
     descricao = models.TextField(verbose_name="Descrição")
     detalhes = models.TextField(blank=True, null=True, verbose_name="Observações")
@@ -265,7 +289,7 @@ class AndamentoProcessual(models.Model):
         verbose_name = "Andamento Processual"
         verbose_name_plural = "Andamentos Processuais"
         ordering = ['-data'] # Mostra os mais recentes primeiro
-        unique_together = ('processo', 'data', 'descricao')
+        unique_together = ('processo', 'numero_cnj', 'data', 'descricao')
 
     def __str__(self):
         return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
@@ -311,6 +335,14 @@ class Parte(models.Model):
     TIPO_PESSOA_CHOICES = [('PF', 'Pessoa Física'), ('PJ', 'Pessoa Jurídica')]
 
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='partes_processuais')
+    numero_cnj = models.ForeignKey(
+        ProcessoJudicialNumeroCnj,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='partes_processuais',
+        verbose_name="Número CNJ",
+    )
     tipo_polo = models.CharField(max_length=7, choices=TIPO_POLO_CHOICES, verbose_name="Tipo de Polo")
     nome = models.CharField(max_length=255, verbose_name="Nome / Razão Social")
     tipo_pessoa = models.CharField(max_length=2, choices=TIPO_PESSOA_CHOICES, verbose_name="Tipo de Pessoa")

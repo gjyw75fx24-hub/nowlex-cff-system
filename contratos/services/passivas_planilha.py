@@ -1,4 +1,5 @@
 import datetime
+import csv
 import io
 import re
 import unicodedata
@@ -10,11 +11,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from contratos.models import (
     AnaliseProcesso,
     Carteira,
     Contrato,
+    Etiqueta,
     Parte,
     ProcessoJudicial,
     ProcessoJudicialNumeroCnj,
@@ -163,6 +166,7 @@ class PassivasRow:
     fase_recursal: str
     cumprimento_sentenca: str
     habilitacao: str
+    prioridade: str
     valor_causa: Optional[Decimal]
     responsavel: str
     raw: Dict[str, Any]
@@ -247,6 +251,56 @@ def load_xlsx_sheet_rows_from_bytes(file_bytes: bytes, sheet_name_prefix: str) -
         return cols, rows
 
 
+def _decode_csv_bytes(file_bytes: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return file_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise PassivasPlanilhaError("Não foi possível decodificar o CSV. Use UTF-8 ou Latin-1.")
+
+
+def load_csv_records_from_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
+    text = _decode_csv_bytes(file_bytes)
+    sample = text[:4096]
+    delimiter = ";"
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,|\t,")
+        delimiter = dialect.delimiter or ";"
+    except Exception:
+        delimiter = ";" if sample.count(";") >= sample.count(",") else ","
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows = [list(r) for r in reader if any(str(cell or "").strip() for cell in r)]
+    if not rows:
+        return []
+
+    header_idx = None
+    for idx, row in enumerate(rows[:30]):
+        values = " | ".join(str(v or "").strip() for v in row)
+        if "PROCESSO CNJ" in normalize_header(values):
+            header_idx = idx
+            break
+    if header_idx is None:
+        header_idx = 0
+
+    headers = [str(h or "").strip() for h in rows[header_idx]]
+    if not any(normalize_header(h) == "PROCESSO CNJ" for h in headers):
+        raise PassivasPlanilhaError("Não encontrei o cabeçalho 'PROCESSO CNJ' no CSV.")
+
+    records: List[Dict[str, Any]] = []
+    for row in rows[header_idx + 1 :]:
+        if not any(str(v or "").strip() for v in row):
+            continue
+        rec: Dict[str, Any] = {}
+        for idx, header in enumerate(headers):
+            if not header:
+                continue
+            rec[header] = row[idx] if idx < len(row) else ""
+        records.append(rec)
+    return records
+
+
 def extract_table(rows: List[Dict[str, Any]], cols: List[str]) -> Tuple[List[str], List[Dict[str, Any]]]:
     header_row_idx = None
     for idx, row in enumerate(rows[:30]):
@@ -307,6 +361,7 @@ def parse_passivas_row(rec: Dict[str, Any]) -> Optional[PassivasRow]:
     fase_recursal = str(rec.get("FASE RECURSAL", "")).strip()
     cumprimento = str(rec.get("CUMPRIMENTO DE SENTENÇA", "")).strip()
     habilitacao = str(rec.get("HABILITAÇÃO", "")).strip()
+    prioridade = str(rec.get("PRIORIDADE", "")).strip()
     valor_causa = parse_decimal(rec.get("VALOR DA CAUSA", ""))
     responsavel = str(rec.get("RESPONSÁVEL", "")).strip()
 
@@ -328,21 +383,19 @@ def parse_passivas_row(rec: Dict[str, Any]) -> Optional[PassivasRow]:
         fase_recursal=fase_recursal,
         cumprimento_sentenca=cumprimento,
         habilitacao=habilitacao,
+        prioridade=prioridade,
         valor_causa=valor_causa,
         responsavel=responsavel,
         raw=rec,
     )
 
 
-def build_passivas_rows_from_xlsx_bytes(
-    file_bytes: bytes,
+def _build_rows_from_records(
+    records: List[Dict[str, Any]],
     *,
-    sheet_prefix: str = "E - PASSIVAS",
     uf_filter: str = "",
     limit: int = 0,
 ) -> List[PassivasRow]:
-    cols, raw_rows = load_xlsx_sheet_rows_from_bytes(file_bytes, sheet_prefix)
-    _, records = extract_table(raw_rows, cols)
     parsed: List[PassivasRow] = []
     for rec in records:
         row = parse_passivas_row(rec)
@@ -354,6 +407,38 @@ def build_passivas_rows_from_xlsx_bytes(
     if limit:
         parsed = parsed[: int(limit)]
     return parsed
+
+
+def build_passivas_rows_from_xlsx_bytes(
+    file_bytes: bytes,
+    *,
+    sheet_prefix: str = "E - PASSIVAS",
+    uf_filter: str = "",
+    limit: int = 0,
+) -> List[PassivasRow]:
+    cols, raw_rows = load_xlsx_sheet_rows_from_bytes(file_bytes, sheet_prefix)
+    _, records = extract_table(raw_rows, cols)
+    return _build_rows_from_records(records, uf_filter=uf_filter, limit=limit)
+
+
+def build_passivas_rows_from_file_bytes(
+    file_bytes: bytes,
+    *,
+    upload_name: str,
+    sheet_prefix: str = "E - PASSIVAS",
+    uf_filter: str = "",
+    limit: int = 0,
+) -> List[PassivasRow]:
+    lower_name = (upload_name or "").lower().strip()
+    if lower_name.endswith(".csv"):
+        records = load_csv_records_from_bytes(file_bytes)
+        return _build_rows_from_records(records, uf_filter=uf_filter, limit=limit)
+    return build_passivas_rows_from_xlsx_bytes(
+        file_bytes,
+        sheet_prefix=sheet_prefix,
+        uf_filter=uf_filter,
+        limit=limit,
+    )
 
 
 def _question_key_map(tipo_analise: TipoAnaliseObjetiva) -> Dict[str, Optional[str]]:
@@ -420,6 +505,28 @@ def import_passivas_rows(
     }
 
     by_cpf: Dict[str, List[PassivasRow]] = {}
+    priority_tags_cache: Dict[str, Etiqueta] = {}
+
+    def _get_priority_tag(priority_value: str) -> Optional[Etiqueta]:
+        label = str(priority_value or "").strip()
+        if not label:
+            return None
+        key = normalize_header(label)
+        if not key:
+            return None
+        if key in priority_tags_cache:
+            return priority_tags_cache[key]
+
+        tag = Etiqueta.objects.filter(nome__iexact=label).first()
+        if not tag:
+            tag = Etiqueta.objects.create(
+                nome=label,
+                cor_fundo="#f5c242",
+                cor_fonte="#3e2a00",
+            )
+        priority_tags_cache[key] = tag
+        return tag
+
     for row in rows_list:
         if not row.cpf:
             result.skipped_rows += 1
@@ -427,15 +534,20 @@ def import_passivas_rows(
         by_cpf.setdefault(row.cpf, []).append(row)
 
     for cpf, rows_for_cpf in by_cpf.items():
-        processo = (
+        cpf_regex = ''.join(f'{re.escape(char)}\\D*' for char in cpf)
+        base_qs = (
             ProcessoJudicial.objects.filter(
-                carteira=carteira,
-                partes_processuais__documento=cpf,
+                Q(partes_processuais__documento=cpf)
+                | Q(partes_processuais__documento__iregex=rf'^{cpf_regex}$')
             )
             .distinct()
             .order_by("id")
-            .first()
         )
+        processo = base_qs.filter(
+            Q(carteira_id=carteira.id) | Q(carteiras_vinculadas__id=carteira.id)
+        ).first()
+        if not processo:
+            processo = base_qs.first()
         created = False
         if not processo:
             processo = ProcessoJudicial.objects.create(
@@ -447,6 +559,12 @@ def import_passivas_rows(
             result.created_cadastros += 1
         else:
             result.updated_cadastros += 1
+            if not processo.carteira_id:
+                processo.carteira = carteira
+                processo.save(update_fields=["carteira"])
+
+        if carteira and carteira.id:
+            processo.carteiras_vinculadas.add(carteira)
 
         nome = rows_for_cpf[0].parte_contraria or ""
         if nome:
@@ -510,21 +628,51 @@ def import_passivas_rows(
                 if row.valor_causa is not None and numero_obj.valor_causa != row.valor_causa:
                     numero_obj.valor_causa = row.valor_causa
                     changed_fields.append("valor_causa")
-                if numero_obj.carteira_id != carteira.id:
+                if not numero_obj.carteira_id and carteira and carteira.id:
                     numero_obj.carteira = carteira
                     changed_fields.append("carteira")
                 if changed_fields:
                     numero_obj.save(update_fields=changed_fields)
                     result.updated_cnjs += 1
 
-            existing_idx = next(
-                (
-                    idx
-                    for idx, card in enumerate(saved_cards)
-                    if isinstance(card, dict) and normalize_cnj_digits(card.get("cnj")) == row.cnj_digits
-                ),
-                None,
-            )
+            target_carteira_id = carteira.id if carteira and carteira.id else None
+            existing_idx = None
+            if target_carteira_id is not None:
+                existing_idx = next(
+                    (
+                        idx
+                        for idx, card in enumerate(saved_cards)
+                        if isinstance(card, dict)
+                        and normalize_cnj_digits(card.get("cnj")) == row.cnj_digits
+                        and str(card.get("carteira_id") or "") == str(target_carteira_id)
+                    ),
+                    None,
+                )
+                if existing_idx is None:
+                    existing_idx = next(
+                        (
+                            idx
+                            for idx, card in enumerate(saved_cards)
+                            if isinstance(card, dict)
+                            and normalize_cnj_digits(card.get("cnj")) == row.cnj_digits
+                            and not card.get("carteira_id")
+                        ),
+                        None,
+                    )
+            if existing_idx is None:
+                existing_idx = next(
+                    (
+                        idx
+                        for idx, card in enumerate(saved_cards)
+                        if isinstance(card, dict)
+                        and normalize_cnj_digits(card.get("cnj")) == row.cnj_digits
+                        and (
+                            target_carteira_id is None
+                            or not card.get("carteira_id")
+                        )
+                    ),
+                    None,
+                )
 
             tipo_respostas: Dict[str, Any] = {}
             if mapped_keys["CONSIGNADO"] and row.consignado:
@@ -556,6 +704,8 @@ def import_passivas_rows(
                 "contratos": [],
                 "tipo_de_acao_respostas": tipo_respostas,
                 "analysis_type": tipo_snapshot,
+                "carteira_id": target_carteira_id,
+                "carteira_nome": carteira.nome if carteira and carteira.nome else "",
                 "supervisionado": False,
                 "supervisor_status": "pendente",
                 "awaiting_supervision_confirm": False,
@@ -579,6 +729,10 @@ def import_passivas_rows(
                     else:
                         existing["tipo_de_acao_respostas"] = tipo_respostas
                     result.updated_cards += 1
+
+            priority_tag = _get_priority_tag(row.prioridade)
+            if priority_tag:
+                processo.etiquetas.add(priority_tag)
 
         respostas["saved_processos_vinculados"] = saved_cards
         respostas.setdefault("processos_vinculados", [])
@@ -607,10 +761,14 @@ def import_passivas_rows(
 
 
 def validate_xlsx_upload(upload_name: str, file_bytes: bytes) -> None:
-    if not (upload_name or "").lower().endswith(".xlsx"):
-        raise ValidationError("Envie um arquivo .xlsx")
+    lower_name = (upload_name or "").lower().strip()
+    if not (lower_name.endswith(".xlsx") or lower_name.endswith(".csv")):
+        raise ValidationError("Envie um arquivo .xlsx ou .csv")
     if not file_bytes:
         raise ValidationError("Arquivo vazio.")
     if len(file_bytes) > 15 * 1024 * 1024:
         raise ValidationError("Arquivo muito grande (limite: 15MB).")
 
+
+def validate_planilha_upload(upload_name: str, file_bytes: bytes) -> None:
+    validate_xlsx_upload(upload_name, file_bytes)

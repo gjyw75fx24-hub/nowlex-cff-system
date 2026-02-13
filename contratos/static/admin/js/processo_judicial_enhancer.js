@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let nextButton = null;
     let addButton = null;
     let deleteButton = null;
+    let inlineCnjObserver = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -377,16 +378,570 @@ document.addEventListener('DOMContentLoaded', function() {
             watchPartesGroup();
         }
 
+    const setupCarteirasVinculadasToggle = () => {
+        const field = document.querySelector('.field-carteiras_vinculadas');
+        if (!field || field.dataset.toggleReady === '1') {
+            return;
+        }
+        field.dataset.toggleReady = '1';
+
+        const sourceSelect = field.querySelector('select#id_carteiras_vinculadas');
+        const sourceCheckboxes = Array.from(
+            field.querySelectorAll('input[type="checkbox"][name="carteiras_vinculadas"]')
+        );
+        const serverLinkedCarteiraIds = Array.isArray(window.__carteiras_vinculadas_ids)
+            ? window.__carteiras_vinculadas_ids
+                  .map((value) => String(value || '').trim())
+                  .filter(Boolean)
+            : [];
+
+        const optionMap = new Map();
+        const selectedValues = new Set();
+        const addOption = (value, label, selected = false) => {
+            const normalizedValue = String(value || '').trim();
+            if (!normalizedValue) {
+                return;
+            }
+            if (!optionMap.has(normalizedValue)) {
+                optionMap.set(normalizedValue, {
+                    value: normalizedValue,
+                    label: String(label || normalizedValue).trim() || normalizedValue,
+                });
+            }
+            if (selected) {
+                selectedValues.add(normalizedValue);
+            }
+        };
+
+        sourceCheckboxes.forEach((input) => {
+            const labelEl = input.closest('label');
+            addOption(input.value, labelEl ? labelEl.textContent : input.value, input.checked);
+        });
+        if (sourceSelect) {
+            Array.from(sourceSelect.options || []).forEach((option) => {
+                if (option.disabled) {
+                    return;
+                }
+                addOption(option.value, option.textContent || option.label || option.value, option.selected);
+            });
+        }
+        if (carteiraSelect) {
+            Array.from(carteiraSelect.options || []).forEach((option) => {
+                if (option.disabled) {
+                    return;
+                }
+                addOption(option.value, option.textContent || option.label || option.value, option.selected);
+            });
+            const currentPrimary = String(carteiraSelect.value || '').trim();
+            if (currentPrimary) {
+                selectedValues.add(currentPrimary);
+            }
+        }
+        serverLinkedCarteiraIds.forEach((value) => selectedValues.add(value));
+
+        let container = field.querySelector('#id_carteiras_vinculadas');
+        const canReuseExistingCheckboxContainer = !!container && container.tagName !== 'SELECT' && sourceCheckboxes.length > 0;
+
+        if (!canReuseExistingCheckboxContainer) {
+            let runtimeContainer = field.querySelector('.carteiras-vinculadas-toggle-runtime');
+            if (!runtimeContainer) {
+                runtimeContainer = document.createElement('div');
+                runtimeContainer.className = 'carteiras-vinculadas-toggle-runtime';
+                const anchor = sourceSelect || field.querySelector('.readonly, .related-widget-wrapper') || field;
+                anchor.insertAdjacentElement('afterend', runtimeContainer);
+            }
+            runtimeContainer.innerHTML = '';
+            container = runtimeContainer;
+
+            optionMap.forEach((item) => {
+                const row = document.createElement('div');
+                const label = document.createElement('label');
+                label.className = 'carteira-vinculo-option';
+
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.name = 'carteiras_vinculadas';
+                input.value = item.value;
+                input.checked = selectedValues.has(item.value);
+
+                const text = document.createElement('span');
+                text.className = 'carteira-vinculo-text';
+                text.textContent = item.label;
+
+                label.appendChild(input);
+                label.appendChild(text);
+                row.appendChild(label);
+                container.appendChild(row);
+            });
+
+            if (sourceSelect) {
+                sourceSelect.disabled = true;
+                sourceSelect.style.display = 'none';
+            }
+            sourceCheckboxes.forEach((input) => {
+                input.disabled = true;
+                input.dataset.sourceDisabled = '1';
+                const sourceLabel = input.closest('label');
+                if (sourceLabel) {
+                    sourceLabel.style.display = 'none';
+                }
+            });
+        }
+
+        container.classList.add('carteiras-vinculadas-toggle-list');
+        container.style.display = 'flex';
+        container.style.flexWrap = 'wrap';
+        container.style.gap = '8px 12px';
+        container.style.marginTop = '6px';
+
+        const getCheckboxes = () => Array.from(
+            container.querySelectorAll('input[type="checkbox"][name="carteiras_vinculadas"]:not([data-source-disabled="1"])')
+        );
+        const ensureSelectionPayloadInput = () => {
+            if (!form) {
+                return null;
+            }
+            let input = form.querySelector('input[name="carteiras_vinculadas_payload"]');
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'carteiras_vinculadas_payload';
+                input.id = 'id_carteiras_vinculadas_payload';
+                form.appendChild(input);
+            }
+            return input;
+        };
+        const syncSelectionPayload = () => {
+            const payloadInput = ensureSelectionPayloadInput();
+            if (!payloadInput) {
+                return;
+            }
+            const selectedValues = getCheckboxes()
+                .filter((input) => input.checked)
+                .map((input) => String(input.value || '').trim())
+                .filter(Boolean);
+            payloadInput.value = selectedValues.join(',');
+        };
+
+        const decorateCheckboxLabels = () => {
+            getCheckboxes().forEach((input) => {
+                const optionLabel = input.closest('label');
+                if (!optionLabel) {
+                    return;
+                }
+                optionLabel.classList.add('carteira-vinculo-option');
+                optionLabel.style.display = 'inline-flex';
+                optionLabel.style.alignItems = 'center';
+                optionLabel.style.gap = '7px';
+                optionLabel.style.padding = '4px 7px';
+                optionLabel.style.borderRadius = '999px';
+                optionLabel.style.border = '1px solid rgba(15, 58, 118, 0.12)';
+                optionLabel.style.background = '#f8fbff';
+                optionLabel.style.cursor = 'pointer';
+                optionLabel.style.userSelect = 'none';
+                optionLabel.style.position = 'relative';
+                optionLabel.style.width = 'auto';
+                optionLabel.style.minWidth = '0';
+                optionLabel.style.maxWidth = 'max-content';
+                optionLabel.style.flex = '0 0 auto';
+
+                input.style.position = 'absolute';
+                input.style.opacity = '0';
+                input.style.pointerEvents = 'none';
+                input.style.width = '1px';
+                input.style.height = '1px';
+                input.style.margin = '0';
+
+                let textNode = optionLabel.querySelector('.carteira-vinculo-text');
+                if (!textNode) {
+                    const existingSpan = optionLabel.querySelector('span');
+                    if (existingSpan) {
+                        existingSpan.classList.add('carteira-vinculo-text');
+                        textNode = existingSpan;
+                    }
+                }
+                if (!textNode) {
+                    const rawText = Array.from(optionLabel.childNodes)
+                        .filter((node) => node.nodeType === Node.TEXT_NODE)
+                        .map((node) => node.textContent || '')
+                        .join(' ')
+                        .trim();
+                    if (rawText) {
+                        textNode = document.createElement('span');
+                        textNode.className = 'carteira-vinculo-text';
+                        textNode.textContent = rawText;
+                        Array.from(optionLabel.childNodes)
+                            .filter((node) => node.nodeType === Node.TEXT_NODE)
+                            .forEach((node) => node.remove());
+                        optionLabel.appendChild(textNode);
+                    }
+                }
+                if (textNode) {
+                    textNode.style.fontSize = '0.92rem';
+                    textNode.style.fontWeight = '500';
+                }
+
+                let knob = optionLabel.querySelector('.carteira-vinculo-knob');
+                if (!knob) {
+                    knob = document.createElement('span');
+                    knob.className = 'carteira-vinculo-knob';
+                    knob.style.display = 'inline-flex';
+                    knob.style.alignItems = 'center';
+                    knob.style.justifyContent = 'center';
+                    knob.style.width = '22px';
+                    knob.style.height = '22px';
+                    knob.style.borderRadius = '999px';
+                    knob.style.border = '1px solid rgba(15, 58, 118, 0.25)';
+                    knob.style.background = '#fff';
+                    knob.style.flexShrink = '0';
+
+                    const dot = document.createElement('span');
+                    dot.className = 'carteira-vinculo-knob-dot';
+                    dot.style.width = '7px';
+                    dot.style.height = '7px';
+                    dot.style.borderRadius = '50%';
+                    dot.style.background = 'transparent';
+                    dot.style.display = 'inline-block';
+                    knob.appendChild(dot);
+
+                    optionLabel.insertBefore(knob, textNode || null);
+                }
+
+                const parentRow = optionLabel.parentElement;
+                if (parentRow) {
+                    parentRow.style.margin = '0';
+                    parentRow.style.padding = '0';
+                    parentRow.style.listStyle = 'none';
+                }
+            });
+        };
+
+        const syncCheckboxVisualState = () => {
+            getCheckboxes().forEach((input) => {
+                const optionLabel = input.closest('label');
+                if (!optionLabel) {
+                    return;
+                }
+                optionLabel.classList.toggle('carteira-vinculo-checked', !!input.checked);
+                optionLabel.style.borderColor = input.checked ? '#0f78f7' : 'rgba(15, 58, 118, 0.12)';
+                optionLabel.style.background = input.checked ? '#edf5ff' : '#f8fbff';
+
+                const knob = optionLabel.querySelector('.carteira-vinculo-knob');
+                const dot = optionLabel.querySelector('.carteira-vinculo-knob-dot');
+                if (knob) {
+                    knob.style.borderColor = input.checked ? '#0f78f7' : 'rgba(15, 58, 118, 0.25)';
+                    knob.style.background = input.checked ? 'rgba(15, 120, 247, 0.12)' : '#fff';
+                }
+                if (dot) {
+                    dot.style.background = input.checked ? '#0f78f7' : 'transparent';
+                }
+            });
+        };
+
+        const updateToggleReadyState = () => {
+            if (getCheckboxes().length > 0) {
+                document.body.classList.add('carteiras-vinculadas-toggle-ready');
+            } else {
+                document.body.classList.remove('carteiras-vinculadas-toggle-ready');
+            }
+        };
+
+        const syncPrimaryFromLinked = () => {
+            if (!carteiraSelect) {
+                return;
+            }
+            const checked = getCheckboxes().filter((input) => input.checked);
+            if (!checked.length) {
+                carteiraSelect.value = '';
+                return;
+            }
+            const currentValue = String(carteiraSelect.value || '').trim();
+            const hasCurrent = checked.some((input) => String(input.value || '').trim() === currentValue);
+            if (!hasCurrent) {
+                carteiraSelect.value = checked[0].value;
+            }
+        };
+
+        decorateCheckboxLabels();
+        syncCheckboxVisualState();
+        updateToggleReadyState();
+        syncSelectionPayload();
+
+        container.addEventListener('change', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') {
+                return;
+            }
+            syncPrimaryFromLinked();
+            syncCheckboxVisualState();
+            updateToggleReadyState();
+            syncSelectionPayload();
+        });
+
+        if (carteiraSelect) {
+            carteiraSelect.addEventListener('change', () => {
+                const currentValue = String(carteiraSelect.value || '').trim();
+                if (!currentValue) {
+                    return;
+                }
+                const checkbox = getCheckboxes().find(
+                    (input) => String(input.value || '').trim() === currentValue
+                );
+                if (checkbox && !checkbox.checked) {
+                    checkbox.checked = true;
+                }
+                syncCheckboxVisualState();
+                updateToggleReadyState();
+                syncSelectionPayload();
+            });
+        }
+
+        if (form && !form.dataset.carteirasPayloadBound) {
+            form.addEventListener('submit', () => {
+                syncSelectionPayload();
+            });
+            form.dataset.carteirasPayloadBound = '1';
+        }
+
+        syncPrimaryFromLinked();
+        syncCheckboxVisualState();
+        updateToggleReadyState();
+        syncSelectionPayload();
+    };
+    setupCarteirasVinculadasToggle();
+
+    const getActiveEntryState = () => {
+        if (currentEntryIndex < 0 || currentEntryIndex >= entryStates.length) {
+            return null;
+        }
+        return entryStates[currentEntryIndex] || null;
+    };
+
+    const normalizeEntryRef = (entry) => {
+        if (!entry || typeof entry !== 'object') {
+            return '';
+        }
+        if (entry.id !== null && entry.id !== undefined && entry.id !== '') {
+            return `id:${entry.id}`;
+        }
+        const digits = String(entry.cnj || '').replace(/\D/g, '');
+        if (digits) {
+            return `cnj:${digits}`;
+        }
+        return '';
+    };
+
+    const getInlinePrefix = (row) => {
+        if (!row) {
+            return '';
+        }
+        const rowId = String(row.id || '').trim();
+        if (rowId && /-\d+$/.test(rowId)) {
+            return rowId;
+        }
+        const seedInput = row.querySelector('input[name$="-id"], input[name$="-DELETE"], textarea[name]');
+        if (!seedInput || !seedInput.name) {
+            return '';
+        }
+        const match = seedInput.name.match(/^(.+?-\d+)-/);
+        return match ? match[1] : '';
+    };
+
+    const ensureNumeroCnjRefInput = (row, numeroCnjInput) => {
+        if (!row) {
+            return null;
+        }
+        let refName = '';
+        if (numeroCnjInput && numeroCnjInput.name) {
+            refName = numeroCnjInput.name.replace(/-numero_cnj$/, '-numero_cnj_ref');
+        } else {
+            const prefix = getInlinePrefix(row);
+            if (!prefix) {
+                return null;
+            }
+            refName = `${prefix}-numero_cnj_ref`;
+        }
+        if (!refName) {
+            return null;
+        }
+        let input = row.querySelector(`input[name="${refName}"]`);
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = refName;
+            input.id = `id_${refName}`;
+            const appendHost = row.querySelector('td, .form-row, .inline_label') || row;
+            appendHost.appendChild(input);
+        }
+        return input;
+    };
+
+    const getInlineRowsByGroup = (groupId) => {
+        const group = document.getElementById(groupId);
+        if (!group) {
+            return [];
+        }
+        return Array.from(group.querySelectorAll('.inline-related, tr.form-row, tr.dynamic-andamentos, .dynamic-partes, .dynamic-andamento'))
+            .filter((row) => row && !row.classList?.contains('empty-form'))
+            .filter((row) => !!row.querySelector('input[name$="-numero_cnj"]'));
+    };
+
+    const getCnjScopedRows = () => {
+        const seen = new Set();
+        const rows = [];
+        [...getInlineRowsByGroup('partes_processuais-group'), ...getInlineRowsByGroup('andamentos-group')].forEach((row) => {
+            if (seen.has(row)) {
+                return;
+            }
+            seen.add(row);
+            rows.push(row);
+        });
+        return rows;
+    };
+
+    const getRowCurrentRef = (row) => {
+        if (!row) {
+            return '';
+        }
+        const numeroCnjInput = row.querySelector('input[name$="-numero_cnj"]');
+        const refInput = ensureNumeroCnjRefInput(row, numeroCnjInput);
+        const numeroCnjId = String(numeroCnjInput?.value || '').trim();
+        if (numeroCnjId) {
+            const ref = `id:${numeroCnjId}`;
+            if (refInput && refInput.value !== ref) {
+                refInput.value = ref;
+            }
+            row.dataset.numeroCnjRef = ref;
+            return ref;
+        }
+        const ref = String(refInput?.value || '').trim();
+        row.dataset.numeroCnjRef = ref;
+        return ref;
+    };
+
+    const bindRowToEntry = (row, entry, force = false) => {
+        if (!row || !entry) {
+            return;
+        }
+        const ref = normalizeEntryRef(entry);
+        if (!ref) {
+            return;
+        }
+        const numeroCnjInput = row.querySelector('input[name$="-numero_cnj"]');
+        const refInput = ensureNumeroCnjRefInput(row, numeroCnjInput);
+        if (numeroCnjInput) {
+            if (entry.id !== null && entry.id !== undefined && entry.id !== '') {
+                numeroCnjInput.value = String(entry.id);
+            } else if (force) {
+                numeroCnjInput.value = '';
+            }
+        }
+        if (refInput && (force || !String(refInput.value || '').trim())) {
+            refInput.value = ref;
+        }
+        row.dataset.numeroCnjRef = ref;
+    };
+
+    const isRowMarkedForDelete = (row) => {
+        const deleteField = row?.querySelector('input[name$="-DELETE"]');
+        return Boolean(deleteField && deleteField.checked);
+    };
+
+    const persistVisibleInlineBindings = () => {
+        const activeEntry = getActiveEntryState();
+        if (!activeEntry) {
+            return;
+        }
+        const activeRef = normalizeEntryRef(activeEntry);
+        if (!activeRef) {
+            return;
+        }
+        getCnjScopedRows().forEach((row) => {
+            if (isRowMarkedForDelete(row)) {
+                return;
+            }
+            const visible = row.offsetParent !== null && row.style.display !== 'none';
+            if (!visible) {
+                return;
+            }
+            const currentRef = getRowCurrentRef(row);
+            if (!currentRef || currentRef === activeRef) {
+                bindRowToEntry(row, activeEntry);
+            }
+        });
+    };
+
+    const refreshCnjScopedInlines = () => {
+        ensureEntriesHydrated();
+        const multiCnj = entryStates.length > 1;
+        const activeEntry = getActiveEntryState();
+        const activeRef = normalizeEntryRef(activeEntry);
+        const firstEntryRef = normalizeEntryRef(entryStates[0]);
+
+        getCnjScopedRows().forEach((row) => {
+            if (isRowMarkedForDelete(row)) {
+                row.style.display = 'none';
+                return;
+            }
+            let rowRef = getRowCurrentRef(row);
+            if (!rowRef && activeEntry) {
+                bindRowToEntry(row, activeEntry, true);
+                rowRef = getRowCurrentRef(row);
+            }
+            const shouldShow = !multiCnj || !activeRef || !rowRef || rowRef === activeRef;
+            row.style.display = shouldShow ? '' : 'none';
+        });
+
+        document.querySelectorAll('.info-card').forEach((card) => {
+            if (!multiCnj || !activeRef) {
+                card.style.display = '';
+                return;
+            }
+            const cardNumeroCnjId = String(card.dataset?.numeroCnjId || '').trim();
+            if (!cardNumeroCnjId) {
+                card.style.display = activeRef === firstEntryRef ? '' : 'none';
+                return;
+            }
+            card.style.display = activeRef === `id:${cardNumeroCnjId}` ? '' : 'none';
+        });
+    };
+
+    const observeInlineCnjRows = () => {
+        if (inlineCnjObserver) {
+            return;
+        }
+        const groups = [
+            document.getElementById('partes_processuais-group'),
+            document.getElementById('andamentos-group'),
+        ].filter(Boolean);
+        if (!groups.length) {
+            return;
+        }
+        inlineCnjObserver = new MutationObserver((mutations) => {
+            if (!mutations.some((mutation) => mutation.addedNodes && mutation.addedNodes.length)) {
+                return;
+            }
+            window.requestAnimationFrame(refreshCnjScopedInlines);
+        });
+        groups.forEach((group) => {
+            inlineCnjObserver.observe(group, { childList: true, subtree: true });
+        });
+    };
+
     const applyEntryState = (entry) => {
         cnjInput.value = entry.cnj;
         if (ufInput) ufInput.value = entry.uf;
         if (valorCausaInput) valorCausaInput.value = entry.valor_causa;
         if (statusSelect) statusSelect.value = entry.status;
-        if (carteiraSelect) carteiraSelect.value = entry.carteira;
+        if (carteiraSelect) {
+            carteiraSelect.value = entry.carteira;
+            carteiraSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         if (varaInput) varaInput.value = entry.vara;
         if (tribunalInput) tribunalInput.value = entry.tribunal;
         cnjInput.focus();
         setActiveCnjText();
+        refreshCnjScopedInlines();
     };
 
     const updateNavButtons = () => {
@@ -403,6 +958,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const storeCurrentEntry = () => {
+        persistVisibleInlineBindings();
         const currentState = buildEntryState();
         if (currentEntryIndex >= 0) {
             entryStates[currentEntryIndex] = currentState;
@@ -500,7 +1056,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (statusSelect) statusSelect.selectedIndex = 0;
             if (varaInput) varaInput.value = '';
             if (tribunalInput) tribunalInput.value = '';
-        if (carteiraSelect) carteiraSelect.selectedIndex = 0;
+        if (carteiraSelect) {
+            carteiraSelect.selectedIndex = 0;
+            carteiraSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         cnjInput.focus();
         setActiveCnjText();
         };
@@ -509,6 +1068,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentEntryIndex < 0 || entryStates.length === 0) {
                 return;
             }
+            persistVisibleInlineBindings();
             entryStates.splice(currentEntryIndex, 1);
             if (entryStates.length === 0) {
                 currentEntryIndex = -1;
@@ -520,6 +1080,7 @@ document.addEventListener('DOMContentLoaded', function() {
             dedupeEntryStates();
             syncHiddenEntries();
             updateNavButtons();
+            refreshCnjScopedInlines();
         });
 
         addButton.addEventListener('click', () => {
@@ -528,6 +1089,7 @@ document.addEventListener('DOMContentLoaded', function() {
             currentEntryIndex = -1;
             syncHiddenEntries();
             updateNavButtons();
+            refreshCnjScopedInlines();
         });
 
         prevButton.addEventListener('click', () => {
@@ -553,6 +1115,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         hydrateInitialEntries();
+        observeInlineCnjRows();
+        refreshCnjScopedInlines();
 
         const feedbackDiv = document.createElement('div');
         feedbackDiv.id = 'cnj_feedback';
@@ -561,11 +1125,15 @@ document.addEventListener('DOMContentLoaded', function() {
         inlineGroup.parentNode.parentNode.appendChild(feedbackDiv);
 
         hydrateInitialEntries();
+        observeInlineCnjRows();
+        refreshCnjScopedInlines();
     }
 
     if (cnjInput) {
         setActiveCnjText();
     }
+    observeInlineCnjRows();
+    refreshCnjScopedInlines();
 
     const searchButton = document.getElementById('btn_buscar_cnj');
     const cnjFeedback = document.getElementById('cnj_feedback');
@@ -688,7 +1256,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     function clearInlineDuplicateValidationErrors() {
-        document.querySelectorAll('.dynamic-andamento').forEach(row => {
+        getInlineRowsByGroup('andamentos-group').forEach(row => {
             const errorList = row.querySelector('.errorlist');
             if (errorList && /Andamento Processual com este Processo/.test(errorList.textContent)) {
                 errorList.remove();
@@ -703,11 +1271,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function deduplicateInlineAndamentos() {
         const seen = new Set();
         let removedCount = 0;
-        document.querySelectorAll('.dynamic-andamento').forEach(row => {
+        getInlineRowsByGroup('andamentos-group').forEach(row => {
             const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
             const dataInput = row.querySelector('input[id$="-data_0"]');
             const timeInput = row.querySelector('input[id$="-data_1"]');
             const descricaoInput = row.querySelector('textarea[id$="-descricao"]');
+            const numeroCnjRef = getRowCurrentRef(row) || '';
 
             const dataValue = (dataInput?.value || '').trim();
             const timeValue = (timeInput?.value || '').trim();
@@ -717,7 +1286,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const key = `${dataValue}||${timeValue}||${descricaoValue}`;
+            const key = `${numeroCnjRef}||${dataValue}||${timeValue}||${descricaoValue}`;
             if (seen.has(key)) {
                 if (deleteCheckbox && !deleteCheckbox.checked) {
                     deleteCheckbox.checked = true;
@@ -3604,9 +4173,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const getSelectedPlanilhaCpfs = () => {
         const cpfs = [];
-        const boxes = document.querySelectorAll('input[name="selected_cpfs"]:checked');
+        const boxes = document.querySelectorAll('.js-planilha-cpf-box:checked, input[name="selected_cpfs"]:checked');
         boxes.forEach((box) => {
-            const v = (box.value || '').trim();
+            const v = ((box.dataset && box.dataset.cpf) ? box.dataset.cpf : box.value || '').trim();
             if (v) cpfs.push(v);
         });
         const uploadToken = (document.querySelector('input[name="upload_token"]')?.value || '').trim();
@@ -8681,6 +9250,13 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 if ($row && $row.length) {
                     setupParteInline($row[0]);
                 }
+            }
+            if ($row && $row.length && (formsetName === 'partes_processuais' || formsetName === 'andamentos')) {
+                const activeEntry = getActiveEntryState();
+                if (activeEntry) {
+                    bindRowToEntry($row[0], activeEntry, true);
+                }
+                refreshCnjScopedInlines();
             }
         });
     }

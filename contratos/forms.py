@@ -56,7 +56,7 @@ class DemandasAnaliseForm(forms.Form):
 
 class DemandasAnalisePlanilhaForm(forms.Form):
     arquivo = forms.FileField(
-        label="Planilha (.xlsx)",
+        label="Planilha (.xlsx ou .csv)",
         required=False,
     )
 
@@ -117,5 +117,5 @@ class DemandasAnalisePlanilhaForm(forms.Form):
         arquivo = cleaned.get("arquivo")
         token = (cleaned.get("upload_token") or "").strip()
         if not arquivo and not token:
-            raise forms.ValidationError("Envie a planilha .xlsx (ou gere a prévia para habilitar o import).")
+            raise forms.ValidationError("Envie a planilha .xlsx/.csv (ou gere a prévia para habilitar o import).")
         return cleaned

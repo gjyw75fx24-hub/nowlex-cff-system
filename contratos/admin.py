@@ -12,6 +12,7 @@ from django.contrib import admin, messages
 from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, CHANGE
+from django.contrib.admin.views.main import ChangeList
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
@@ -48,9 +49,12 @@ from .services.demandas import DemandasImportError, DemandasImportService, _form
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
 from .services.passivas_planilha import (
     PassivasPlanilhaError,
-    build_passivas_rows_from_xlsx_bytes,
+    build_passivas_rows_from_file_bytes,
     import_passivas_rows,
-    validate_xlsx_upload,
+    normalize_cnj_digits,
+    normalize_cpf,
+    normalize_header,
+    validate_planilha_upload,
 )
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
@@ -1030,8 +1034,20 @@ def demandas_analise_planilha_view(request):
     form = DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
     preview = None
     import_result = None
+    selected_cpfs = []
+    selected_cpfs_payload = ""
 
     action = request.POST.get("action") if request.method == "POST" else None
+    consider_priority = request.method == "POST" and (
+        request.POST.get("considerar_prioridade") in {"1", "true", "True", "on", "yes"}
+    )
+    selected_priority_keys = [
+        normalize_header(v)
+        for v in (request.POST.getlist("selected_prioridades") if request.method == "POST" else [])
+        if normalize_header(v)
+    ]
+    selected_priority_keys = list(dict.fromkeys(selected_priority_keys))
+    priority_options = []
 
     def _uploads_session_key() -> str:
         return "passivas_planilha_uploads"
@@ -1081,6 +1097,91 @@ def demandas_analise_planilha_view(request):
                 continue
         return cleaned
 
+    def _extract_priority_options(rows):
+        labels_by_key = {}
+        for row in rows:
+            key = normalize_header(getattr(row, "prioridade", ""))
+            label = str(getattr(row, "prioridade", "") or "").strip()
+            if not key or not label:
+                continue
+            if key not in labels_by_key:
+                labels_by_key[key] = label
+        return [
+            {"value": key, "label": labels_by_key[key]}
+            for key in sorted(labels_by_key.keys(), key=lambda item: labels_by_key[item].upper())
+        ]
+
+    def _build_imported_status_map(rows, carteira_obj, tipo_analise_obj):
+        cpfs = {normalize_cpf(getattr(r, "cpf", "")) for r in rows if getattr(r, "cpf", "")}
+        cpfs.discard("")
+        if not cpfs:
+            return {}
+
+        processes = (
+            ProcessoJudicial.objects.filter(
+                Q(carteira=carteira_obj) | Q(carteiras_vinculadas=carteira_obj),
+                partes_processuais__documento__in=cpfs,
+            )
+            .distinct()
+            .order_by("id")
+            .prefetch_related("partes_processuais")
+            .select_related("analise_processo")
+        )
+
+        cpf_to_imported_cnjs = {}
+        cpf_has_process = set()
+        target_tipo_id = str(getattr(tipo_analise_obj, "id", ""))
+
+        for proc in processes:
+            respostas = {}
+            analise_obj = getattr(proc, "analise_processo", None)
+            if analise_obj and isinstance(analise_obj.respostas, dict):
+                respostas = analise_obj.respostas
+
+            imported_cnjs = set()
+            for source_key in ("saved_processos_vinculados", "processos_vinculados"):
+                cards = respostas.get(source_key) if isinstance(respostas, dict) else []
+                if not isinstance(cards, list):
+                    continue
+                for card in cards:
+                    if not isinstance(card, dict):
+                        continue
+                    analysis_type = card.get("analysis_type")
+                    card_tipo_id = ""
+                    if isinstance(analysis_type, dict) and analysis_type.get("id") is not None:
+                        card_tipo_id = str(analysis_type.get("id"))
+                    if card_tipo_id and target_tipo_id and card_tipo_id != target_tipo_id:
+                        continue
+                    card_carteira_id = card.get("carteira_id")
+                    if card_carteira_id not in (None, "") and str(card_carteira_id) != str(carteira_obj.id):
+                        continue
+                    cnj_digits = normalize_cnj_digits(card.get("cnj"))
+                    if cnj_digits:
+                        imported_cnjs.add(cnj_digits)
+
+            if not imported_cnjs and not proc.pk:
+                continue
+
+            partes_manager = getattr(proc, "partes_processuais", None)
+            if not partes_manager:
+                continue
+            for parte in partes_manager.all():
+                cpf_parte = normalize_cpf(getattr(parte, "documento", ""))
+                if not cpf_parte or cpf_parte not in cpfs:
+                    continue
+                cpf_has_process.add(cpf_parte)
+                bucket = cpf_to_imported_cnjs.setdefault(cpf_parte, set())
+                bucket.update(imported_cnjs)
+
+        status_map = {}
+        for cpf in cpfs:
+            imported = cpf_to_imported_cnjs.get(cpf, set())
+            status_map[cpf] = {
+                "imported_cnjs": imported,
+                "has_process": cpf in cpf_has_process,
+            }
+        return status_map
+
     # Cancelar importação: remove anexo mantido e limpa pendências, sem precisar sair da tela.
     if request.method == "POST" and action == "cancel":
         token = (request.POST.get("upload_token") or "").strip()
@@ -1110,7 +1211,22 @@ def demandas_analise_planilha_view(request):
         return HttpResponseRedirect(reverse("admin:contratos_demandas_analise_planilha"))
 
     if request.method == "POST" and form.is_valid():
-        selected_cpfs = request.POST.getlist("selected_cpfs")
+        raw_selected_cpfs = (request.POST.get("selected_cpfs_payload") or "").strip()
+        if raw_selected_cpfs:
+            selected_cpfs = [
+                normalize_cpf(v)
+                for v in raw_selected_cpfs.split(",")
+                if normalize_cpf(v)
+            ]
+            selected_cpfs = list(dict.fromkeys(selected_cpfs))
+        else:
+            selected_cpfs = [
+                normalize_cpf(v)
+                for v in request.POST.getlist("selected_cpfs")
+                if normalize_cpf(v)
+            ]
+            selected_cpfs = list(dict.fromkeys(selected_cpfs))
+        selected_cpfs_payload = ",".join(selected_cpfs)
         upload = form.cleaned_data.get("arquivo")
         token = (form.cleaned_data.get("upload_token") or "").strip()
         file_bytes = b""
@@ -1136,16 +1252,29 @@ def demandas_analise_planilha_view(request):
             file_bytes = b""
 
         try:
-            validate_xlsx_upload(upload_name, file_bytes)
-            parsed = build_passivas_rows_from_xlsx_bytes(
+            validate_planilha_upload(upload_name, file_bytes)
+            parsed_all = build_passivas_rows_from_file_bytes(
                 file_bytes,
+                upload_name=upload_name,
                 sheet_prefix=(form.cleaned_data.get("sheet_prefix") or "E - PASSIVAS"),
                 uf_filter=(form.cleaned_data.get("uf") or ""),
                 limit=int(form.cleaned_data.get("limit") or 0),
             )
+            priority_options = _extract_priority_options(parsed_all)
+            if consider_priority and selected_priority_keys:
+                selected_keys = set(selected_priority_keys)
+                parsed = [
+                    row
+                    for row in parsed_all
+                    if normalize_header(getattr(row, "prioridade", "")) in selected_keys
+                ]
+            else:
+                parsed = parsed_all
         except (ValidationError, PassivasPlanilhaError) as exc:
             messages.error(request, str(exc))
             parsed = []
+            parsed_all = []
+            priority_options = []
 
         if parsed:
             def _has_analysis_fields(row):
@@ -1176,18 +1305,22 @@ def demandas_analise_planilha_view(request):
                     ]
                 )
 
-            # Persistir o upload para permitir Importar depois da Prévia.
-            if action == "preview":
+            # Persistir upload novo para permitir prévias/importações graduais sem reenviar o arquivo.
+            should_persist_upload = bool(upload)
+            if should_persist_upload:
                 token = uuid.uuid4().hex
                 tmp_dir = "/tmp/nowlex_passivas_planilha"
                 try:
                     os.makedirs(tmp_dir, exist_ok=True)
-                    tmp_path = os.path.join(tmp_dir, f"{token}.xlsx")
+                    ext = os.path.splitext(upload_name or "")[1].lower()
+                    if ext not in {".xlsx", ".csv"}:
+                        ext = ".xlsx"
+                    tmp_path = os.path.join(tmp_dir, f"{token}{ext}")
                     with open(tmp_path, "wb") as fp:
                         fp.write(file_bytes)
                     uploads[token] = {
                         "path": tmp_path,
-                        "name": upload_name or "planilha.xlsx",
+                        "name": upload_name or f"planilha{ext}",
                         "ts": timezone.now().isoformat(),
                         "user_id": getattr(request.user, "id", None),
                     }
@@ -1199,10 +1332,18 @@ def demandas_analise_planilha_view(request):
             cpfs = {r.cpf for r in parsed if r.cpf}
             cnjs = {r.cnj_digits for r in parsed if r.cnj_digits}
             ufs = {r.uf for r in parsed if r.uf}
+            imported_status = _build_imported_status_map(
+                parsed,
+                carteira_obj=form.cleaned_data["carteira"],
+                tipo_analise_obj=form.cleaned_data["tipo_analise"],
+            )
+            selected_priority_order = {key: idx for idx, key in enumerate(selected_priority_keys)}
             cpf_map = {}
             for r in parsed:
                 if not r.cpf:
                     continue
+                priority_label = str(r.prioridade or "").strip()
+                priority_key = normalize_header(priority_label)
                 entry = cpf_map.setdefault(
                     r.cpf,
                     {
@@ -1211,6 +1352,8 @@ def demandas_analise_planilha_view(request):
                         "parte_contraria": r.parte_contraria or "",
                         "cnjs": set(),
                         "prechecked": False,
+                        "prioridade_keys": set(),
+                        "prioridade_labels": {},
                     },
                 )
                 if r.uf and not entry["uf"]:
@@ -1221,12 +1364,37 @@ def demandas_analise_planilha_view(request):
                     entry["cnjs"].add(r.cnj_digits)
                 if _has_analysis_fields(r):
                     entry["prechecked"] = True
+                if priority_key and priority_label:
+                    entry["prioridade_keys"].add(priority_key)
+                    if priority_key not in entry["prioridade_labels"]:
+                        entry["prioridade_labels"][priority_key] = priority_label
 
             cpf_rows = []
             analysed_cpfs = 0
+            imported_cpfs = 0
             for cpf_key, entry in cpf_map.items():
                 if bool(entry["prechecked"]):
                     analysed_cpfs += 1
+                imported_entry = imported_status.get(normalize_cpf(cpf_key), {})
+                imported_cnjs = set(imported_entry.get("imported_cnjs") or set())
+                imported_count = len(entry["cnjs"].intersection(imported_cnjs))
+                total_cnjs = len(entry["cnjs"])
+                imported_full = bool(total_cnjs and imported_count >= total_cnjs)
+                imported_partial = bool(imported_count and not imported_full)
+                if imported_full:
+                    imported_cpfs += 1
+
+                priority_labels = [
+                    entry["prioridade_labels"][key]
+                    for key in sorted(entry["prioridade_keys"], key=lambda item: entry["prioridade_labels"][item].upper())
+                ]
+                priority_display = ", ".join(priority_labels) if priority_labels else "-"
+                if selected_priority_order:
+                    candidate_ranks = [selected_priority_order[k] for k in entry["prioridade_keys"] if k in selected_priority_order]
+                    priority_rank = min(candidate_ranks) if candidate_ranks else 999
+                else:
+                    priority_rank = 999
+
                 cpf_rows.append(
                     {
                         "cpf": entry["cpf"],
@@ -1234,10 +1402,25 @@ def demandas_analise_planilha_view(request):
                         "parte_contraria": entry["parte_contraria"] or "-",
                         "cnj_count": len(entry["cnjs"]),
                         "prechecked": bool(entry["prechecked"]),
-                        "checked": (cpf_key in selected_cpfs) if selected_cpfs else bool(entry["prechecked"]),
+                        "prioridade": priority_display,
+                        "imported_count": imported_count,
+                        "imported_total": total_cnjs,
+                        "imported_full": imported_full,
+                        "imported_partial": imported_partial,
+                        "checked": (
+                            cpf_key in selected_cpfs
+                        ) if selected_cpfs else (not imported_full),
+                        "priority_rank": priority_rank,
                     }
                 )
-            cpf_rows.sort(key=lambda x: (0 if x["checked"] else 1, str(x["cpf"])))
+            cpf_rows.sort(
+                key=lambda x: (
+                    str(x["uf"] or "ZZ"),
+                    x["priority_rank"],
+                    0 if x["checked"] else 1,
+                    str(x["cpf"]),
+                )
+            )
             preview = {
                 "rows": len(parsed),
                 "cpfs": len(cpfs),
@@ -1246,6 +1429,8 @@ def demandas_analise_planilha_view(request):
                 "upload_token": token or "",
                 "cpf_rows": cpf_rows,
                 "analysed_cpfs": analysed_cpfs,
+                "imported_cpfs": imported_cpfs,
+                "priority_options_count": len(priority_options),
             }
 
             if action == "import":
@@ -1276,7 +1461,7 @@ def demandas_analise_planilha_view(request):
                             carteira = form.cleaned_data["carteira"]
                             processos = (
                                 ProcessoJudicial.objects.filter(
-                                    carteira=carteira,
+                                    Q(carteira=carteira) | Q(carteiras_vinculadas=carteira),
                                     partes_processuais__documento__in=imported_cpfs,
                                 )
                                 .distinct()
@@ -1285,7 +1470,10 @@ def demandas_analise_planilha_view(request):
                             )
                             cpf_to_processo = {}
                             for proc in processos:
-                                for parte in getattr(proc, "partes_processuais", []).all():
+                                partes_manager = getattr(proc, "partes_processuais", None)
+                                if not partes_manager:
+                                    continue
+                                for parte in partes_manager.all():
                                     doc = (parte.documento or "").strip()
                                     if not doc or doc not in imported_cpfs:
                                         continue
@@ -1372,16 +1560,6 @@ def demandas_analise_planilha_view(request):
                             request,
                             f"Agenda Geral: {applied_tasks} tarefa(s) aplicada(s) automaticamente em {applied_tasks_targets} processo(s) após a importação.",
                         )
-                    # Limpa token usado
-                    if token and token in uploads:
-                        try:
-                            path = uploads[token].get("path")
-                            if path and os.path.exists(path):
-                                os.remove(path)
-                        except Exception:
-                            pass
-                        uploads.pop(token, None)
-                        request.session[_uploads_session_key()] = uploads
                 except Exception as exc:
                     messages.error(request, f"Falha ao importar: {exc}")
 
@@ -1405,6 +1583,10 @@ def demandas_analise_planilha_view(request):
             "back_url": reverse("admin:contratos_demandas_analise"),
             "upload_token_value": (preview or {}).get("upload_token") or (request.POST.get("upload_token") or ""),
             "kept_upload_name": kept_name,
+            "consider_priority": consider_priority,
+            "priority_options": priority_options,
+            "selected_priority_keys": selected_priority_keys,
+            "selected_cpfs_payload": selected_cpfs_payload,
         }
     )
     return render(request, "admin/contratos/demandas_analise_planilha.html", context)
@@ -1831,10 +2013,11 @@ class CarteiraCountFilter(admin.SimpleListFilter):
         if not _show_filter_counts(request):
             return [(cart.id, cart.nome) for cart in Carteira.objects.order_by('nome')]
         qs = model_admin.get_queryset(request)
-        counts = {row['carteira__id']: row['total'] for row in qs.values('carteira__id').annotate(total=models.Count('id')) if row['carteira__id']}
         items = []
         for cart in Carteira.objects.order_by('nome'):
-            total = counts.get(cart.id, 0)
+            total = qs.filter(
+                Q(carteira_id=cart.id) | Q(carteiras_vinculadas__id=cart.id)
+            ).distinct().count()
             items.append((cart.id, mark_safe(f"{cart.nome} <span class='filter-count'>({total})</span>")))
         return items
 
@@ -1859,8 +2042,11 @@ class CarteiraCountFilter(admin.SimpleListFilter):
             }
 
     def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(carteira_id=self.value())
+        selected_value = self.value() or request.GET.get('carteira__id__exact')
+        if selected_value:
+            return queryset.filter(
+                Q(carteira_id=selected_value) | Q(carteiras_vinculadas__id=selected_value)
+            ).distinct()
         return queryset
 
 
@@ -2597,6 +2783,7 @@ class AndamentoProcessualForm(forms.ModelForm):
         widgets = {
             'descricao': forms.Textarea(attrs={'rows': 2, 'cols': 600}), # 6x a largura original
             'detalhes': forms.Textarea(attrs={'rows': 2, 'cols': 50}), # Proporcionalmente menor
+            'numero_cnj': forms.HiddenInput(),
         }
 
 class AndamentoInline(NoRelatedLinksMixin, admin.TabularInline):
@@ -2614,6 +2801,7 @@ class ParteForm(forms.ModelForm):
         widgets = {
             'endereco': EnderecoWidget(),
             'obito': forms.HiddenInput(),
+            'numero_cnj': forms.HiddenInput(),
         }
 
     def __init__(self, *args, **kwargs):
@@ -2822,6 +3010,15 @@ class ProcessoJudicialForm(forms.ModelForm):
         if value not in (None, ''):
             formatted = format_decimal_brl(value)
             self.initial['valor_causa'] = formatted
+        carteiras_field = self.fields.get('carteiras_vinculadas')
+        if carteiras_field:
+            carteiras_field.queryset = Carteira.objects.order_by('nome')
+            carteiras_field.widget = forms.CheckboxSelectMultiple(
+                attrs={'class': 'carteiras-vinculadas-toggle'}
+            )
+            carteiras_field.help_text = (
+                "Ative as carteiras vinculadas. A carteira principal será definida automaticamente."
+            )
 
 
 class ContratoInline(NoRelatedLinksMixin, admin.StackedInline):
@@ -3011,6 +3208,27 @@ class AnaliseProcessoInline(NoRelatedLinksMixin, admin.StackedInline): # Usando 
         css = {'all': ()}
         js = ()
 
+
+class ProcessoJudicialChangeList(ChangeList):
+    """
+    Remove lookup params customizados de interseção do fluxo padrão do Django admin.
+    Esses params são consumidos no get_queryset customizado do ModelAdmin.
+    """
+    CUSTOM_INTERSECTION_PARAMS = ('intersection_carteira_a', 'intersection_carteira_b')
+
+    def get_filters_params(self, params=None):
+        lookup_params = super().get_filters_params(params=params)
+        for key in self.CUSTOM_INTERSECTION_PARAMS:
+            lookup_params.pop(key, None)
+        return lookup_params
+
+    def get_queryset(self, request, exclude_parameters=None):
+        excluded = list(exclude_parameters or [])
+        for key in self.CUSTOM_INTERSECTION_PARAMS:
+            if key not in excluded:
+                excluded.append(key)
+        return super().get_queryset(request, exclude_parameters=excluded)
+
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):
     list_display = ('nome', 'get_total_processos', 'get_valor_total_carteira', 'get_valor_medio_processo', 'ver_processos_link')
@@ -3018,8 +3236,8 @@ class CarteiraAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
-            total_processos=models.Count('processos', distinct=True),
-            valor_total=models.Sum('processos__valor_causa')
+            total_processos=models.Count('processos_multicarteira', distinct=True),
+            valor_total=models.Sum('processos_multicarteira__valor_causa')
         )
 
     @admin.display(description='📊 Nº de Processos', ordering='total_processos')
@@ -3040,17 +3258,110 @@ class CarteiraAdmin(admin.ModelAdmin):
 
     @admin.display(description='Ações')
     def ver_processos_link(self, obj):
-        url = reverse("admin:contratos_processojudicial_changelist") + f"?carteira__id__exact={obj.id}"
+        url = reverse("admin:contratos_processojudicial_changelist") + f"?carteira={obj.id}"
         return format_html('<a href="{}">Ver Processos</a>', url)
+
+    def _build_carteira_intersections(self):
+        carteiras = list(Carteira.objects.order_by('nome').values('id', 'nome'))
+        process_changelist_url = reverse("admin:contratos_processojudicial_changelist")
+        if not carteiras:
+            return {
+                "carteiras": [],
+                "pairs": [],
+                "total_unique_cpfs": 0,
+                "process_changelist_url": process_changelist_url,
+            }
+
+        valid_ids = {c['id'] for c in carteiras}
+        carteira_cpfs = {c['id']: set() for c in carteiras}
+        cpf_membership = {}
+        processo_carteiras = {}
+
+        processos = (
+            ProcessoJudicial.objects.filter(
+                Q(carteira_id__in=valid_ids) | Q(carteiras_vinculadas__id__in=valid_ids)
+            )
+            .values_list('id', 'carteira_id', 'carteiras_vinculadas__id')
+            .distinct()
+        )
+        for processo_id, carteira_principal_id, carteira_vinculada_id in processos:
+            bucket = processo_carteiras.setdefault(processo_id, set())
+            if carteira_principal_id in valid_ids:
+                bucket.add(carteira_principal_id)
+            if carteira_vinculada_id in valid_ids:
+                bucket.add(carteira_vinculada_id)
+
+        if processo_carteiras:
+            partes = (
+                Parte.objects.filter(tipo_polo='PASSIVO', processo_id__in=processo_carteiras.keys())
+                .exclude(documento__isnull=True)
+                .exclude(documento__exact='')
+                .values_list('processo_id', 'documento')
+                .distinct()
+            )
+        else:
+            partes = []
+
+        for processo_id, documento in partes:
+            cpf_digits = re.sub(r'\D', '', str(documento or ''))
+            if not cpf_digits:
+                continue
+            for carteira_id in processo_carteiras.get(processo_id, set()):
+                carteira_cpfs[carteira_id].add(cpf_digits)
+                cpf_membership.setdefault(cpf_digits, set()).add(carteira_id)
+
+        total_unique_cpfs = len(cpf_membership)
+        carteira_items = []
+        for carteira in carteiras:
+            cpfs = carteira_cpfs.get(carteira['id'], set())
+            carteira_items.append({
+                "id": carteira['id'],
+                "nome": carteira['nome'],
+                "cpf_total": len(cpfs),
+                "percent_global": round((len(cpfs) * 100.0 / total_unique_cpfs), 2) if total_unique_cpfs else 0.0,
+            })
+
+        pair_items = []
+        for i, carteira_a in enumerate(carteiras):
+            cpfs_a = carteira_cpfs.get(carteira_a['id'], set())
+            for carteira_b in carteiras[i + 1:]:
+                cpfs_b = carteira_cpfs.get(carteira_b['id'], set())
+                if not cpfs_a and not cpfs_b:
+                    continue
+                intersection = cpfs_a.intersection(cpfs_b)
+                if not intersection:
+                    continue
+                union = cpfs_a.union(cpfs_b)
+                count_inter = len(intersection)
+                pair_items.append({
+                    "a_id": carteira_a['id'],
+                    "a_nome": carteira_a['nome'],
+                    "b_id": carteira_b['id'],
+                    "b_nome": carteira_b['nome'],
+                    "key": f"{min(carteira_a['id'], carteira_b['id'])}-{max(carteira_a['id'], carteira_b['id'])}",
+                    "count": count_inter,
+                    "pct_a": round((count_inter * 100.0 / len(cpfs_a)), 2) if cpfs_a else 0.0,
+                    "pct_b": round((count_inter * 100.0 / len(cpfs_b)), 2) if cpfs_b else 0.0,
+                    "pct_union": round((count_inter * 100.0 / len(union)), 2) if union else 0.0,
+                })
+        pair_items.sort(key=lambda item: (-item['count'], item['a_nome'], item['b_nome']))
+        return {
+            "carteiras": carteira_items,
+            "pairs": pair_items,
+            "total_unique_cpfs": total_unique_cpfs,
+            "process_changelist_url": process_changelist_url,
+        }
 
     def changelist_view(self, request, extra_context=None):
         chart_data = list(self.get_queryset(request).values('nome', 'total_processos', 'valor_total'))
+        intersection_data = self._build_carteira_intersections()
         extra_context = extra_context or {}
         extra_context['chart_data'] = json.dumps(chart_data, default=str)
+        extra_context['intersection_data'] = json.dumps(intersection_data, default=str)
         return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
-        js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js')
+        js = ('https://cdn.jsdelivr.net/npm/chart.js', 'admin/js/carteira_charts.js?v=20260213e')
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
     title = 'Valor da Causa'
@@ -3161,6 +3472,8 @@ class ObitoFilter(admin.SimpleListFilter):
 class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     form = ProcessoJudicialForm
     readonly_fields = ()
+    def get_changelist(self, request, **kwargs):
+        return ProcessoJudicialChangeList
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
     list_display = ("uf", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
@@ -3213,7 +3526,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             use_distinct = True
         return qs, use_distinct
     fieldsets = (
-        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "vara", "tribunal", "busca_ativa")}),
+        ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "carteiras_vinculadas", "vara", "tribunal", "busca_ativa")}),
     )
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
@@ -3231,7 +3544,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def _sanitize_filter_qs(self, qs):
         params = QueryDict(qs, mutable=True)
-        for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+        for key in (
+            'o',
+            'p',
+            '_changelist_filters',
+            '_skip_saved_filters',
+            'intersection_carteira_a',
+            'intersection_carteira_b',
+        ):
             params.pop(key, None)
         params.pop('aprovacao', None)
         return params.urlencode()
@@ -3266,11 +3586,17 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return None
 
     def save_model(self, request, obj, form, change):
+        selected_carteira_ids = self._extract_selected_carteira_ids(form, request=request)
+        # Snapshot para uso no save_related; evita perda de seleção em cenários
+        # onde o POST/M2M chega parcialmente no fluxo do admin.
+        obj._selected_carteira_ids_snapshot = set(selected_carteira_ids)
         entries_payload = form.cleaned_data.get('cnj_entries_data')
         # Se o payload não veio no POST (ex.: usuário apenas clicou em "Salvar" sem tocar na UI dos CNJs),
         # não devemos apagar os campos atuais nem os números CNJ existentes.
         if entries_payload in (None, ''):
-            return super().save_model(request, obj, form, change)
+            self._apply_primary_carteira(obj, selected_carteira_ids)
+            super().save_model(request, obj, form, change)
+            return
         entries = self._parse_cnj_entries(entries_payload)
         active_entry = self._get_active_entry(entries, form.cleaned_data.get('cnj_active_index'))
         if not entries:
@@ -3290,12 +3616,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             obj.carteira_id = int(carteira_id) if carteira_id else None
             obj.vara = active_entry.get('vara') or obj.vara
             obj.tribunal = active_entry.get('tribunal') or obj.tribunal
+        self._apply_primary_carteira(obj, selected_carteira_ids)
         super().save_model(request, obj, form, change)
         self._sync_cnj_entries(obj, entries)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         qs = filter_processos_queryset_for_user(qs, request.user)
+        qs = self._apply_intersection_pair_filter(qs, request)
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
         last_logs = LogEntry.objects.filter(
             content_type=ct,
@@ -3306,6 +3634,124 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
         )
+
+    def _parse_intersection_pair_ids(self, request):
+        raw_a = request.GET.get('intersection_carteira_a')
+        raw_b = request.GET.get('intersection_carteira_b')
+        try:
+            carteira_a_id = int(raw_a)
+            carteira_b_id = int(raw_b)
+        except (TypeError, ValueError):
+            return None
+        if carteira_a_id <= 0 or carteira_b_id <= 0:
+            return None
+        if carteira_a_id == carteira_b_id:
+            return None
+        return tuple(sorted((carteira_a_id, carteira_b_id)))
+
+    def _build_intersection_process_ids(self, carteira_a_id, carteira_b_id):
+        pair_ids = {carteira_a_id, carteira_b_id}
+        processo_carteiras = {}
+
+        processo_rows = (
+            ProcessoJudicial.objects.filter(
+                Q(carteira_id__in=pair_ids) | Q(carteiras_vinculadas__id__in=pair_ids)
+            )
+            .values_list('id', 'carteira_id', 'carteiras_vinculadas__id')
+            .distinct()
+        )
+
+        for processo_id, carteira_principal_id, carteira_vinculada_id in processo_rows:
+            bucket = processo_carteiras.setdefault(processo_id, set())
+            if carteira_principal_id in pair_ids:
+                bucket.add(carteira_principal_id)
+            if carteira_vinculada_id in pair_ids:
+                bucket.add(carteira_vinculada_id)
+
+        if not processo_carteiras:
+            return set()
+
+        carteira_cpfs = {carteira_a_id: set(), carteira_b_id: set()}
+        processo_cpfs = {}
+
+        partes_rows = (
+            Parte.objects.filter(tipo_polo='PASSIVO', processo_id__in=processo_carteiras.keys())
+            .exclude(documento__isnull=True)
+            .exclude(documento__exact='')
+            .values_list('processo_id', 'documento')
+            .distinct()
+        )
+
+        for processo_id, documento in partes_rows:
+            cpf_digits = re.sub(r'\D', '', str(documento or ''))
+            if not cpf_digits:
+                continue
+            processo_cpfs.setdefault(processo_id, set()).add(cpf_digits)
+            for carteira_id in processo_carteiras.get(processo_id, set()):
+                if carteira_id in pair_ids:
+                    carteira_cpfs[carteira_id].add(cpf_digits)
+
+        intersection_cpfs = carteira_cpfs.get(carteira_a_id, set()).intersection(
+            carteira_cpfs.get(carteira_b_id, set())
+        )
+        if not intersection_cpfs:
+            return set()
+
+        process_ids = {
+            processo_id
+            for processo_id, cpfs in processo_cpfs.items()
+            if cpfs.intersection(intersection_cpfs)
+        }
+        return process_ids
+
+    def _apply_intersection_pair_filter(self, queryset, request):
+        pair_ids = self._parse_intersection_pair_ids(request)
+        if not pair_ids:
+            return queryset
+        process_ids = self._build_intersection_process_ids(*pair_ids)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
+    def _build_changelist_context_badge(self, request):
+        pair_ids = self._parse_intersection_pair_ids(request)
+        if pair_ids:
+            carteiras = {
+                item['id']: item['nome']
+                for item in Carteira.objects.filter(pk__in=pair_ids).values('id', 'nome')
+            }
+            nome_a = carteiras.get(pair_ids[0], f"Carteira {pair_ids[0]}")
+            nome_b = carteiras.get(pair_ids[1], f"Carteira {pair_ids[1]}")
+            return {
+                'kind': 'intersection',
+                'title': 'Interseção',
+                'value': f'{nome_a} + {nome_b}',
+                'subtitle': 'Lista filtrada por CPFs em comum.',
+            }
+
+        raw_carteira_id = request.GET.get('carteira') or request.GET.get('carteira__id__exact')
+        try:
+            carteira_id = int(raw_carteira_id)
+        except (TypeError, ValueError):
+            carteira_id = None
+        if not carteira_id:
+            return None
+
+        carteira_nome = (
+            Carteira.objects.filter(pk=carteira_id)
+            .values_list('nome', flat=True)
+            .first()
+        )
+        if not carteira_nome:
+            return None
+
+        return {
+            'kind': 'carteira',
+            'title': 'Carteira',
+            'value': carteira_nome,
+            'subtitle': 'Lista filtrada por carteira.',
+            'carteira_id': carteira_id,
+        }
 
     def get_actions(self, request):
         actions = super().get_actions(request)
@@ -3446,25 +3892,133 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (InvalidOperation, TypeError):
             return None
 
-    def _sync_cnj_entries(self, processo, entries):
-        processo.numeros_cnj.all().delete()
-        if not entries:
+    def _extract_selected_carteira_ids(self, form, request=None):
+        carteira_ids = set()
+        selected = form.cleaned_data.get('carteiras_vinculadas')
+        if selected is not None:
+            if hasattr(selected, 'values_list'):
+                carteira_ids.update({int(pk) for pk in selected.values_list('id', flat=True) if pk})
+            else:
+                for item in selected:
+                    pk = getattr(item, 'id', item)
+                    try:
+                        carteira_ids.add(int(pk))
+                    except (TypeError, ValueError):
+                        continue
+
+        # Fallback robusto: captura seleção enviada pelo POST (inclui widget customizado em JS).
+        if request is not None and hasattr(request, 'POST'):
+            for raw in request.POST.getlist('carteiras_vinculadas'):
+                try:
+                    carteira_ids.add(int(raw))
+                except (TypeError, ValueError):
+                    continue
+            payload = (request.POST.get('carteiras_vinculadas_payload') or '').strip()
+            if payload:
+                for raw in payload.split(','):
+                    try:
+                        carteira_ids.add(int(raw))
+                    except (TypeError, ValueError):
+                        continue
+
+        if hasattr(form, 'data') and hasattr(form.data, 'getlist'):
+            for raw in form.data.getlist('carteiras_vinculadas'):
+                try:
+                    carteira_ids.add(int(raw))
+                except (TypeError, ValueError):
+                    continue
+            payload = (form.data.get('carteiras_vinculadas_payload') or '').strip()
+            if payload:
+                for raw in payload.split(','):
+                    try:
+                        carteira_ids.add(int(raw))
+                    except (TypeError, ValueError):
+                        continue
+
+        return carteira_ids
+
+    def _apply_primary_carteira(self, obj, selected_carteira_ids):
+        if not selected_carteira_ids:
             return
-        for entry_data in entries:
+        if obj.carteira_id and obj.carteira_id in selected_carteira_ids:
+            return
+        obj.carteira_id = min(selected_carteira_ids)
+
+    def _cnj_entry_key(self, cnj_value):
+        normalized_digits = normalize_cnj_digits(cnj_value)
+        if normalized_digits:
+            return normalized_digits
+        return str(cnj_value or '').strip().upper()
+
+    def _sync_cnj_entries(self, processo, entries):
+        existing_entries = list(processo.numeros_cnj.all())
+        by_id = {item.pk: item for item in existing_entries}
+        by_key = {}
+        for item in existing_entries:
+            key = self._cnj_entry_key(item.cnj)
+            if key and key not in by_key:
+                by_key[key] = item
+
+        kept_ids = set()
+        used_ids = set()
+
+        for entry_data in entries or []:
             cnj_value = (entry_data.get('cnj') or '').strip()
             if not cnj_value:
                 continue
-            entry_obj = ProcessoJudicialNumeroCnj(
-                processo=processo,
-                cnj=cnj_value,
-                uf=(entry_data.get('uf') or '').strip(),
-                valor_causa=self._decimal_from_string(entry_data.get('valor_causa')),
-                status_id=entry_data.get('status'),
-                carteira_id=entry_data.get('carteira'),
-                vara=(entry_data.get('vara') or '').strip(),
-                tribunal=(entry_data.get('tribunal') or '').strip(),
-            )
-            entry_obj.save()
+
+            target = None
+            entry_id = entry_data.get('id')
+            try:
+                entry_id = int(entry_id) if entry_id not in (None, '') else None
+            except (TypeError, ValueError):
+                entry_id = None
+
+            if entry_id and entry_id in by_id and entry_id not in used_ids:
+                target = by_id[entry_id]
+
+            if not target:
+                key = self._cnj_entry_key(cnj_value)
+                candidate = by_key.get(key)
+                if candidate and candidate.pk not in used_ids:
+                    target = candidate
+
+            if not target:
+                target = ProcessoJudicialNumeroCnj(processo=processo)
+
+            target.cnj = cnj_value
+            target.uf = (entry_data.get('uf') or '').strip()
+            target.valor_causa = self._decimal_from_string(entry_data.get('valor_causa'))
+            target.status_id = entry_data.get('status')
+            target.carteira_id = entry_data.get('carteira')
+            target.vara = (entry_data.get('vara') or '').strip()
+            target.tribunal = (entry_data.get('tribunal') or '').strip()
+            target.save()
+
+            kept_ids.add(target.pk)
+            used_ids.add(target.pk)
+            entry_data['id'] = target.pk
+
+        stale_ids = [item.pk for item in existing_entries if item.pk not in kept_ids]
+        if stale_ids:
+            processo.numeros_cnj.filter(pk__in=stale_ids).delete()
+
+        self._sync_processo_carteiras(processo, entries)
+
+    def _sync_processo_carteiras(self, processo, entries):
+        carteira_ids = set()
+        if processo.carteira_id:
+            carteira_ids.add(processo.carteira_id)
+        for entry_data in entries or []:
+            carteira_id = entry_data.get('carteira')
+            if not carteira_id:
+                continue
+            try:
+                carteira_ids.add(int(carteira_id))
+            except (TypeError, ValueError):
+                continue
+        if carteira_ids:
+            processo.carteiras_vinculadas.add(*carteira_ids)
 
     @admin.display(description="Número CNJ", ordering="cnj")
     def cnj_with_navigation(self, obj):
@@ -3538,10 +4092,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cnj_active_index'] = self._determine_active_index(cnj_entries, obj)
             active_idx = extra_context['cnj_active_index']
             extra_context['cnj_active_display'] = cnj_entries[active_idx]['cnj'] if cnj_entries and 0 <= active_idx < len(cnj_entries) else (obj.cnj or '')
+            if request.method == 'GET':
+                linked_ids = list(obj.carteiras_vinculadas.values_list('id', flat=True))
+            else:
+                linked_ids = []
+            extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps(linked_ids))
         else:
             extra_context['cnj_entries_json'] = mark_safe(json.dumps([]))
             extra_context['cnj_active_index'] = 0
             extra_context['cnj_active_display'] = ''
+            extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps([]))
         
         # Preserva os filtros da changelist para a navegação.
         # Preferimos o parâmetro especial do Django admin "_changelist_filters",
@@ -3648,6 +4208,97 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
+    def _resolve_cnj_entry_from_ref(self, ref_value, by_id, by_key):
+        raw = str(ref_value or '').strip()
+        if not raw:
+            return None
+        if raw.startswith('id:'):
+            try:
+                return by_id.get(int(raw.split(':', 1)[1]))
+            except (TypeError, ValueError):
+                return None
+        if raw.startswith('cnj:'):
+            return by_key.get(self._cnj_entry_key(raw.split(':', 1)[1]))
+        try:
+            return by_id.get(int(raw))
+        except (TypeError, ValueError):
+            return by_key.get(self._cnj_entry_key(raw))
+
+    def _build_cnj_resolution_context(self, request, processo):
+        if not processo or not processo.pk:
+            return None
+
+        by_id = {}
+        by_key = {}
+        for entry in processo.numeros_cnj.all():
+            by_id[entry.pk] = entry
+            key = self._cnj_entry_key(entry.cnj)
+            if key and key not in by_key:
+                by_key[key] = entry
+
+        if not by_id:
+            return None
+
+        active_entry_obj = None
+        entries_payload = request.POST.get('cnj_entries_data')
+        if entries_payload:
+            parsed_entries = self._parse_cnj_entries(entries_payload)
+            try:
+                active_index = int(request.POST.get('cnj_active_index'))
+            except (TypeError, ValueError):
+                active_index = None
+            active_entry_payload = self._get_active_entry(parsed_entries, active_index)
+            if active_entry_payload:
+                active_entry_obj = self._resolve_cnj_entry_from_ref(
+                    f"id:{active_entry_payload.get('id')}" if active_entry_payload.get('id') else '',
+                    by_id,
+                    by_key,
+                )
+                if not active_entry_obj:
+                    active_entry_obj = self._resolve_cnj_entry_from_ref(
+                        f"cnj:{active_entry_payload.get('cnj')}",
+                        by_id,
+                        by_key,
+                    )
+
+        if not active_entry_obj and processo.cnj:
+            active_entry_obj = by_key.get(self._cnj_entry_key(processo.cnj))
+        if not active_entry_obj:
+            active_entry_obj = processo.numeros_cnj.order_by('-criado_em', '-id').first() or next(iter(by_id.values()))
+
+        return {"by_id": by_id, "by_key": by_key, "active": active_entry_obj}
+
+    def _assign_inline_numero_cnj(self, request, formset, processo):
+        context = self._build_cnj_resolution_context(request, processo)
+        if not context:
+            return
+
+        by_id = context["by_id"]
+        by_key = context["by_key"]
+        active_entry = context["active"]
+
+        for inline_form in formset.forms:
+            cleaned = getattr(inline_form, 'cleaned_data', None)
+            if not cleaned or cleaned.get('DELETE'):
+                continue
+
+            current_entry = cleaned.get('numero_cnj')
+            if current_entry and getattr(current_entry, 'id', None) in by_id:
+                continue
+
+            ref_field_name = f'{inline_form.prefix}-numero_cnj_ref'
+            ref_value = request.POST.get(ref_field_name)
+            resolved = self._resolve_cnj_entry_from_ref(ref_value, by_id, by_key)
+            if not resolved and current_entry:
+                resolved = by_key.get(self._cnj_entry_key(getattr(current_entry, 'cnj', '')))
+            if not resolved:
+                resolved = active_entry
+            if not resolved:
+                continue
+
+            cleaned['numero_cnj'] = resolved
+            inline_form.instance.numero_cnj = resolved
+
 
     def save_formset(self, request, form, formset, change):
         if formset.model == AnaliseProcesso:
@@ -3689,9 +4340,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             formset.new_objects = new_objects
             formset.changed_objects = changed_objects
             formset.deleted_objects = deleted_objects
+        elif formset.model == Parte:
+            self._assign_inline_numero_cnj(request, formset, form.instance)
+            return super().save_formset(request, form, formset, change)
         elif formset.model == AndamentoProcessual:
             from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
 
+            self._assign_inline_numero_cnj(request, formset, form.instance)
             processo = form.instance
             remover_andamentos_duplicados(processo)
             seen_keys = set()
@@ -3704,7 +4359,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 descricao = (cleaned.get('descricao') or '').strip()
                 if not data or not descricao:
                     continue
-                chave = (data, descricao)
+                numero_cnj_obj = cleaned.get('numero_cnj')
+                numero_cnj_id = getattr(numero_cnj_obj, 'id', None)
+                chave = (numero_cnj_id, data, descricao)
                 if chave in seen_keys:
                     cleaned['DELETE'] = True
                 else:
@@ -3713,6 +4370,36 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return super().save_formset(request, form, formset, change)
         else:
             super().save_formset(request, form, formset, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        obj = form.instance
+        # Baseia-se no estado já persistido pelo próprio form do Django (M2M)
+        # e apenas complementa com payloads/fallbacks do widget customizado.
+        persisted_after_super = set(obj.carteiras_vinculadas.values_list('id', flat=True))
+        carteira_ids = set(persisted_after_super)
+        snapshot_ids = getattr(obj, '_selected_carteira_ids_snapshot', None)
+        if snapshot_ids:
+            carteira_ids.update(snapshot_ids)
+        extracted_ids = self._extract_selected_carteira_ids(form, request=request)
+        carteira_ids.update(
+            extracted_ids
+        )
+        numero_carteiras = set(
+            obj.numeros_cnj.exclude(carteira_id__isnull=True).values_list('carteira_id', flat=True)
+        )
+        if obj.carteira_id:
+            carteira_ids.add(obj.carteira_id)
+        carteira_ids.update(numero_carteiras)
+        if carteira_ids:
+            obj.carteiras_vinculadas.set(sorted(carteira_ids))
+            if not obj.carteira_id:
+                obj.carteira_id = min(carteira_ids)
+                obj.save(update_fields=['carteira'])
+        else:
+            obj.carteiras_vinculadas.clear()
+        if hasattr(obj, '_selected_carteira_ids_snapshot'):
+            delattr(obj, '_selected_carteira_ids_snapshot')
 
 
     def changelist_view(self, request, extra_context=None):
@@ -3741,17 +4428,25 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 for etiqueta in processo.etiquetas.all()
             ]
             etiquetas_data[processo.pk] = etiquetas
-        
+
         extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
         extra_context['delegar_users'] = User.objects.order_by('username')
-        
+        badge = self._build_changelist_context_badge(request)
+        extra_context['changelist_context_badge'] = badge
+        if badge and badge.get('kind') == 'carteira':
+            extra_context['changelist_carteira_options'] = list(
+                Carteira.objects.order_by('nome').values('id', 'nome')
+            )
+        else:
+            extra_context['changelist_carteira_options'] = []
+
         return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
         css = {
             'all': (
                 'admin/css/admin_tabs.css',
-                'admin/css/custom_admin_styles.css?v=20260210m',
+                'admin/css/custom_admin_styles.css?v=20260213c',
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css',  # <--- Adicionado
             )
@@ -3759,7 +4454,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         js = (
             'admin/js/vendor/jquery/jquery.min.js',
             'admin/js/jquery.init.js',
-            'admin/js/processo_judicial_enhancer.js?v=20260210c',
+            'admin/js/processo_judicial_enhancer.js?v=20260213j',
             'admin/js/admin_tabs.js',
             'admin/js/processo_judicial_lazy_loader.js?v=20260210m',
             'admin/js/etiqueta_interface.js',
@@ -4061,6 +4756,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if form.is_valid():
                 carteira = form.cleaned_data.get('carteira')
                 updated = queryset.update(carteira=carteira)
+                if carteira:
+                    for processo in queryset.only('id'):
+                        processo.carteiras_vinculadas.add(carteira)
                 carteira_label = carteira.nome if carteira else "Sem carteira"
                 self.message_user(
                     request,
@@ -4091,6 +4789,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if allowed:
                 kwargs['queryset'] = Carteira.objects.filter(id__in=allowed).order_by('nome')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == 'carteiras_vinculadas' and request and request.user and not request.user.is_superuser:
+            allowed = get_user_allowed_carteira_ids(request.user)
+            if allowed:
+                kwargs['queryset'] = Carteira.objects.filter(id__in=allowed).order_by('nome')
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
     @admin.display(description="X")
     def get_x_separator(self, obj):

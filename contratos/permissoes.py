@@ -37,7 +37,10 @@ def filter_processos_queryset_for_user(queryset, user):
         return queryset
     if not allowed:
         return queryset
-    return queryset.filter(carteira_id__in=allowed)
+    return queryset.filter(
+        models.Q(carteira_id__in=allowed)
+        | models.Q(carteiras_vinculadas__id__in=allowed)
+    ).distinct()
 
 
 def filter_tarefas_queryset_for_user(queryset, user):
@@ -46,4 +49,8 @@ def filter_tarefas_queryset_for_user(queryset, user):
         return queryset
     if not allowed:
         return queryset
-    return queryset.filter(models.Q(processo__isnull=True) | models.Q(processo__carteira_id__in=allowed))
+    return queryset.filter(
+        models.Q(processo__isnull=True)
+        | models.Q(processo__carteira_id__in=allowed)
+        | models.Q(processo__carteiras_vinculadas__id__in=allowed)
+    ).distinct()

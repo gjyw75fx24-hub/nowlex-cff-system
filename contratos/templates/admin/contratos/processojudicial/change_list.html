@@ -31,6 +31,8 @@
             margin: 0;
             float: none;
             clear: none;
+            position: relative;
+            z-index: 8;
         }
         body.change-list #changelist-filter {
             max-height: calc(100vh - 120px);
@@ -42,6 +44,11 @@
             transform: scale(0.7);
             transform-origin: top left;
             width: calc(100% / 0.7);
+        }
+        body.change-list #changelist .changelist-form-container {
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
         }
         /* Rolagem com cabeçalho fixo */
         body.change-list #changelist-form .results {
@@ -204,7 +211,150 @@
         #changelist-filter a:hover .analysis-exclude {
             filter: brightness(0.95);
         }
+        .processo-search-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            box-sizing: border-box;
+            padding-right: 10px;
+        }
+        .processo-search-main {
+            flex: 1;
+            min-width: 0;
+        }
+        .processo-search-main #toolbar {
+            margin-bottom: 0;
+        }
+        .processo-context-badge {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 2px;
+            margin-top: 0;
+            padding: 6px 10px;
+            border: 1px solid #d8e1ea;
+            border-radius: 9px;
+            background: #f8fbff;
+            color: #2f435b;
+            text-align: right;
+            min-width: 160px;
+            max-width: 300px;
+            line-height: 1.2;
+            align-self: center;
+        }
+        .processo-context-badge--clickable {
+            cursor: pointer;
+            user-select: none;
+        }
+        .processo-context-badge.is-open {
+            box-shadow: 0 0 0 2px rgba(63, 112, 138, 0.14);
+        }
+        .processo-context-badge--intersection {
+            background: #fff8ec;
+            border-color: #ecd8b6;
+        }
+        .processo-context-badge__title {
+            font-size: 8px;
+            line-height: 1.15;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            opacity: 0.85;
+            font-weight: 600;
+        }
+        .processo-context-badge__value {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1f2f40;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .processo-context-badge__subtitle {
+            font-size: 10px;
+            opacity: 0.82;
+        }
+        .processo-context-badge__switch {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+            padding-top: 4px;
+            border-top: 1px solid rgba(73, 98, 126, 0.22);
+        }
+        .processo-context-badge__switch[hidden] {
+            display: none !important;
+        }
+        .processo-context-badge__switch-select {
+            flex: 1;
+            min-width: 0;
+            font-size: 11px;
+            line-height: 1.2;
+            padding: 2px 6px;
+            border-radius: 5px;
+            border: 1px solid #c6d3e0;
+            background: #fff;
+            color: #2f435b;
+            cursor: pointer;
+        }
+        .processo-context-badge__switch-apply {
+            font-size: 11px;
+            line-height: 1.2;
+            padding: 2px 7px;
+            border: 1px solid #c6d3e0;
+            border-radius: 5px;
+            background: #fff;
+            color: #2f435b;
+            cursor: pointer;
+        }
+        .processo-context-badge__switch-apply:hover {
+            background: #f1f5f9;
+        }
+        @media (max-width: 1200px) {
+            .processo-search-row {
+                flex-direction: column;
+            }
+            .processo-context-badge {
+                text-align: left;
+                max-width: 100%;
+                width: fit-content;
+            }
+        }
     </style>
+{% endblock %}
+
+{% block search %}
+    <div class="processo-search-row">
+        <div class="processo-search-main">
+            {{ block.super }}
+        </div>
+        {% if changelist_context_badge %}
+            <div
+                class="processo-context-badge processo-context-badge--{{ changelist_context_badge.kind }}{% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %} processo-context-badge--clickable{% endif %}"
+                {% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %}
+                    data-carteira-switch="1"
+                    role="button"
+                    tabindex="0"
+                    aria-expanded="false"
+                {% endif %}
+            >
+                <span class="processo-context-badge__title">{{ changelist_context_badge.title }}</span>
+                <strong class="processo-context-badge__value">{{ changelist_context_badge.value }}</strong>
+                <span class="processo-context-badge__subtitle">{{ changelist_context_badge.subtitle }}</span>
+                {% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %}
+                    <div class="processo-context-badge__switch" hidden>
+                        <select class="processo-context-badge__switch-select" aria-label="Selecionar carteira">
+                            {% for carteira_opt in changelist_carteira_options %}
+                                <option value="{{ carteira_opt.id }}"{% if carteira_opt.id == changelist_context_badge.carteira_id %} selected{% endif %}>
+                                    {{ carteira_opt.nome }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" class="processo-context-badge__switch-apply">Ir</button>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
 {% endblock %}
 
 {% block content %}
@@ -219,6 +369,90 @@
                     toggleButton.id = 'filter-toggle';
                     toggleButton.textContent = ' [–]';
                     filterTitle.appendChild(toggleButton);
+                }
+            }
+
+            const carteiraBadge = document.querySelector('.processo-context-badge[data-carteira-switch="1"]');
+            if (carteiraBadge) {
+                const switchWrap = carteiraBadge.querySelector('.processo-context-badge__switch');
+                const selectEl = carteiraBadge.querySelector('.processo-context-badge__switch-select');
+                const applyBtn = carteiraBadge.querySelector('.processo-context-badge__switch-apply');
+
+                const closeSwitch = () => {
+                    if (!switchWrap) return;
+                    switchWrap.hidden = true;
+                    carteiraBadge.classList.remove('is-open');
+                    carteiraBadge.setAttribute('aria-expanded', 'false');
+                };
+
+                const openSwitch = () => {
+                    if (!switchWrap) return;
+                    switchWrap.hidden = false;
+                    carteiraBadge.classList.add('is-open');
+                    carteiraBadge.setAttribute('aria-expanded', 'true');
+                    if (selectEl) {
+                        window.setTimeout(() => selectEl.focus(), 0);
+                    }
+                };
+
+                const toggleSwitch = () => {
+                    if (!switchWrap) return;
+                    if (switchWrap.hidden) {
+                        openSwitch();
+                    } else {
+                        closeSwitch();
+                    }
+                };
+
+                carteiraBadge.addEventListener('click', (event) => {
+                    if (event.target.closest('.processo-context-badge__switch')) {
+                        return;
+                    }
+                    toggleSwitch();
+                });
+
+                carteiraBadge.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        toggleSwitch();
+                    } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeSwitch();
+                    }
+                });
+
+                document.addEventListener('click', (event) => {
+                    if (!carteiraBadge.contains(event.target)) {
+                        closeSwitch();
+                    }
+                });
+
+                const applySelection = () => {
+                    if (!selectEl || !selectEl.value) return;
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('carteira', String(selectEl.value));
+                    params.delete('carteira__id__exact');
+                    params.delete('intersection_carteira_a');
+                    params.delete('intersection_carteira_b');
+                    params.delete('p');
+                    const nextQuery = params.toString();
+                    window.location.href = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
+                };
+
+                if (applyBtn) {
+                    applyBtn.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        applySelection();
+                    });
+                }
+                if (selectEl) {
+                    selectEl.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            applySelection();
+                        }
+                    });
                 }
             }
         });

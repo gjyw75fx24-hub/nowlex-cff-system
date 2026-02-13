@@ -90,40 +90,92 @@ window.addEventListener('load', function() {
             tabsContainer.appendChild(notebookBtn);
         }
 
-        const noteKey = `observacoes_livres_${window.location.pathname}`;
-        let notebookOverlay = null;
-        let notebookTextarea = null;
-        let notebookMentionSaver = null;
-        const normalizeNotebookText = (value) => String(value || '')
-            .replace(/\r\n?/g, '\n')
-            .trim();
+	        const noteKey = `observacoes_livres_${window.location.pathname}`;
+	        let notebookOverlay = null;
+	        let notebookTextarea = null;
+	        let notebookMentionSaver = null;
+	        const normalizeNotebookText = (value) => String(value || '')
+	            .replace(/\r\n?/g, '\n')
+	            .trim();
 
-        const parseAnaliseResponses = () => {
-            const responseFields = Array.from(
-                document.querySelectorAll('.analise-procedural-group textarea[name$="-respostas"]')
-            );
-            for (const field of responseFields) {
-                const raw = (field && typeof field.value === 'string') ? field.value.trim() : '';
-                if (!raw) {
-                    continue;
-                }
-                try {
-                    const parsed = JSON.parse(raw);
-                    if (parsed && typeof parsed === 'object') {
-                        return parsed;
-                    }
-                } catch (error) {
-                    // Keep trying other fields if any.
-                }
-            }
-            return null;
-        };
+	        const safeJsonParse = (raw) => {
+	            if (!raw || typeof raw !== 'string') return null;
+	            try {
+	                return JSON.parse(raw);
+	            } catch (error) {
+	                return null;
+	            }
+	        };
 
-        const collectCardObservationBlocks = () => {
-            const responses = parseAnaliseResponses();
-            if (!responses || typeof responses !== 'object') {
-                return [];
-            }
+	        const getCnjActiveIndex = () => {
+	            const field = document.querySelector('input[name="cnj_active_index"], #id_cnj_active_index');
+	            if (!field) return -1;
+	            const value = parseInt(field.value, 10);
+	            return Number.isFinite(value) ? value : -1;
+	        };
+
+	        const findAnaliseResponsesField = () => {
+	            const selectors = [
+	                '#analise_processo-group textarea[name$="-respostas"]',
+	                '.inline-group[id*="analise_processo"] textarea[name$="-respostas"]',
+	                'textarea[name^="analise_processo-"][name$="-respostas"]',
+	                'textarea[name$="-respostas"]',
+	            ];
+	            for (const selector of selectors) {
+	                const fields = Array.from(document.querySelectorAll(selector));
+	                for (const field of fields) {
+	                    const raw = (field && typeof field.value === 'string') ? field.value.trim() : '';
+	                    const parsed = safeJsonParse(raw);
+	                    if (parsed && typeof parsed === 'object') {
+	                        return field;
+	                    }
+	                }
+	            }
+	            return null;
+	        };
+
+	        const parseAnaliseResponses = () => {
+	            const field = findAnaliseResponsesField();
+	            if (!field) return null;
+	            const raw = (typeof field.value === 'string') ? field.value.trim() : '';
+	            const parsed = safeJsonParse(raw);
+	            return (parsed && typeof parsed === 'object') ? parsed : null;
+	        };
+
+	        const persistNotebookToAnaliseResponses = (text) => {
+	            const field = findAnaliseResponsesField();
+	            if (!field) return false;
+	            const raw = (typeof field.value === 'string') ? field.value.trim() : '';
+	            const parsed = safeJsonParse(raw);
+	            const responses = (parsed && typeof parsed === 'object') ? parsed : {};
+	            const normalized = normalizeNotebookText(text);
+
+	            responses.observacoes_livres = normalized;
+
+	            const activeIndex = getCnjActiveIndex();
+	            const cards = Array.isArray(responses.saved_processos_vinculados)
+	                ? responses.saved_processos_vinculados
+	                : [];
+	            const targetIndex = (activeIndex >= 0 && activeIndex < cards.length)
+	                ? activeIndex
+	                : (cards.length === 1 ? 0 : -1);
+
+	            if (targetIndex !== -1) {
+	                const card = cards[targetIndex];
+	                if (card && typeof card === 'object') {
+	                    card.observacoes = normalized;
+	                }
+	            }
+
+	            field.value = JSON.stringify(responses);
+	            return true;
+	        };
+
+	        const collectCardObservationBlocks = () => {
+	            const responses = parseAnaliseResponses();
+	            if (!responses || typeof responses !== 'object') {
+	                return [];
+	            }
             const seen = new Set();
             const blocks = [];
             const appendBlock = (value) => {
@@ -139,19 +191,21 @@ window.addEventListener('load', function() {
                 blocks.push(normalized);
             };
 
-            ['saved_processos_vinculados', 'processos_vinculados'].forEach((sourceKey) => {
-                const cards = Array.isArray(responses[sourceKey]) ? responses[sourceKey] : [];
-                cards.forEach((card) => {
-                    if (!card || typeof card !== 'object') {
-                        return;
-                    }
-                    appendBlock(card.observacoes);
-                    appendBlock(card.supervisor_observacoes);
-                });
-            });
+	            ['saved_processos_vinculados', 'processos_vinculados'].forEach((sourceKey) => {
+	                const cards = Array.isArray(responses[sourceKey]) ? responses[sourceKey] : [];
+	                cards.forEach((card) => {
+	                    if (!card || typeof card !== 'object') {
+	                        return;
+	                    }
+	                    appendBlock(card.observacoes);
+	                    appendBlock(card.supervisor_observacoes);
+	                });
+	            });
 
-            return blocks;
-        };
+	            appendBlock(responses.observacoes_livres);
+
+	            return blocks;
+	        };
 
         const mergeNotebookWithCardObservations = (baseText) => {
             const observationBlocks = collectCardObservationBlocks();
@@ -298,17 +352,20 @@ window.addEventListener('load', function() {
             // Drag manual do caderno
             const notebook = notebookOverlay.querySelector('.notebook');
             const dragHandle = notebookOverlay.querySelector('[data-drag-handle]');
-            const saveButton = notebookOverlay.querySelector('.notebook-save-btn');
-            let isSaving = false;
-            saveButton.addEventListener('click', async () => {
-                if (isSaving) return;
-                const targetForm = document.querySelector('#processojudicial_form') || document.querySelector('form');
-                if (!targetForm) return;
-                const formData = new FormData(targetForm);
-                formData.set('_continue', '1');
-                const actionUrl = targetForm.action || window.location.href;
-                isSaving = true;
-                const originalLabel = saveButton.textContent;
+	            const saveButton = notebookOverlay.querySelector('.notebook-save-btn');
+	            let isSaving = false;
+	            saveButton.addEventListener('click', async () => {
+	                if (isSaving) return;
+	                const targetForm = document.querySelector('#processojudicial_form') || document.querySelector('form');
+	                if (!targetForm) return;
+	                const savedTextForDb = notebookTextarea ? notebookTextarea.value : '';
+	                localStorage.setItem(noteKey, savedTextForDb);
+	                persistNotebookToAnaliseResponses(savedTextForDb);
+	                const formData = new FormData(targetForm);
+	                formData.set('_continue', '1');
+	                const actionUrl = targetForm.action || window.location.href;
+	                isSaving = true;
+	                const originalLabel = saveButton.textContent;
                 saveButton.textContent = 'Salvando...';
                 saveButton.disabled = true;
                 try {
@@ -320,15 +377,15 @@ window.addEventListener('load', function() {
                             'X-Requested-With': 'XMLHttpRequest'
                         }
                     });
-                    if (!response.ok) {
-                        throw new Error(`status ${response.status}`);
-                    }
-                    showNotebookMessage('Salvo com sucesso', 'success');
-                    const savedText = notebookTextarea ? notebookTextarea.value : '';
-                    window.dispatchEvent(new CustomEvent('analiseObservacoesSalvas', {
-                        detail: savedText
-                    }));
-                } catch (error) {
+	                    if (!response.ok) {
+	                        throw new Error(`status ${response.status}`);
+	                    }
+	                    showNotebookMessage('Salvo com sucesso', 'success');
+	                    const savedText = notebookTextarea ? notebookTextarea.value : '';
+	                    window.dispatchEvent(new CustomEvent('analiseObservacoesSalvas', {
+	                        detail: savedText
+	                    }));
+	                } catch (error) {
                     showNotebookMessage(`Falha ao salvar: ${error.message}`, 'error');
                 } finally {
                     isSaving = false;

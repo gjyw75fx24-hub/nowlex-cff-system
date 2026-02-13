@@ -6,9 +6,10 @@ from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from django.conf import settings
 from django.db import connections, transaction
+from django.db.models import Q
 from django.db.utils import OperationalError
 
-from contratos.models import Carteira, Contrato, Etiqueta, Parte, ProcessoJudicial
+from contratos.models import Carteira, Contrato, Etiqueta, Parte, ProcessoJudicial, ProcessoJudicialNumeroCnj
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,17 @@ def _build_telefone(row: Mapping[str, Optional[str]]) -> str:
     if ddd and numero:
         return f"({ddd.strip()}) {numero.strip()}"
     return numero or ddd
+
+
+def _normalize_cnj_digits(value: Optional[str]) -> str:
+    return re.sub(r'\D', '', str(value or ''))[:20]
+
+
+def _format_cnj(value: Optional[str]) -> str:
+    digits = _normalize_cnj_digits(value)
+    if len(digits) != 20:
+        return str(value or '').strip()
+    return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13:14]}.{digits[14:16]}.{digits[16:20]}"
 
 
 
@@ -172,18 +184,251 @@ class DemandasImportService:
         imported = 0
         skipped = 0
         for cpf, contracts in grouped.items():
-            documento_clean = _normalize_digits(cpf)
-            documento_variants = {cpf}
-            if documento_clean:
-                documento_variants.add(documento_clean)
-            if Parte.objects.filter(documento__in=documento_variants).exists():
-                skipped += 1
-                continue
             with transaction.atomic():
-                processo = self._build_processo(cpf, contracts, carteira)
+                processo = self._find_existing_processo(cpf, carteira)
+                changed = False
+                if processo:
+                    changed = self._upsert_existing_processo(processo, cpf, contracts, carteira)
+                else:
+                    processo = self._build_processo(cpf, contracts, carteira)
+                    changed = True
                 processo.etiquetas.add(etiqueta)
-                imported += 1
+                if changed:
+                    imported += 1
+                else:
+                    skipped += 1
         return {"imported": imported, "skipped": skipped}
+
+    def _find_existing_processo(self, cpf: str, carteira: Optional[Carteira]) -> Optional[ProcessoJudicial]:
+        cpf_digits = _normalize_digits(cpf)
+        if not cpf_digits:
+            return None
+
+        cpf_regex = ''.join(f'{re.escape(char)}\\D*' for char in cpf_digits)
+        base_qs = (
+            ProcessoJudicial.objects.filter(
+                Q(partes_processuais__documento=cpf_digits)
+                | Q(partes_processuais__documento__iregex=rf'^{cpf_regex}$')
+            )
+            .distinct()
+            .order_by('id')
+        )
+        if carteira and carteira.id:
+            preferred = base_qs.filter(
+                Q(carteira_id=carteira.id) | Q(carteiras_vinculadas__id=carteira.id)
+            ).first()
+            if preferred:
+                return preferred
+        return base_qs.first()
+
+    def _ensure_carteira_link(self, processo: ProcessoJudicial, carteira: Optional[Carteira]) -> bool:
+        if not carteira or not carteira.id:
+            return False
+        changed = False
+        if not processo.carteira_id:
+            processo.carteira = carteira
+            processo.save(update_fields=['carteira'])
+            changed = True
+        already_linked = processo.carteiras_vinculadas.filter(id=carteira.id).exists()
+        if not already_linked:
+            processo.carteiras_vinculadas.add(carteira)
+            changed = True
+        return changed
+
+    def _upsert_passivo_parte(self, processo: ProcessoJudicial, cpf: str, contracts: List[Dict]) -> bool:
+        cpf_digits = _normalize_digits(cpf)
+        if not cpf_digits:
+            return False
+        changed = False
+        nome = contracts[0].get('cliente_nome') or 'Cliente sem nome'
+        tipo_pessoa = contracts[0].get('contato_tipo_pessoa', 'PF')
+        endereco = contracts[0].get('endereco', '')
+        cpf_regex = ''.join(f'{re.escape(char)}\\D*' for char in cpf_digits)
+        parte = (
+            processo.partes_processuais.filter(tipo_polo='PASSIVO')
+            .filter(Q(documento=cpf_digits) | Q(documento__iregex=rf'^{cpf_regex}$'))
+            .order_by('id')
+            .first()
+        )
+        if not parte:
+            Parte.objects.create(
+                processo=processo,
+                tipo_polo='PASSIVO',
+                nome=nome,
+                tipo_pessoa=tipo_pessoa,
+                documento=cpf_digits,
+                endereco=endereco,
+            )
+            changed = True
+        else:
+            update_fields = []
+            if parte.documento != cpf_digits:
+                parte.documento = cpf_digits
+                update_fields.append('documento')
+            if nome and parte.nome != nome:
+                parte.nome = nome
+                update_fields.append('nome')
+            if tipo_pessoa and parte.tipo_pessoa != tipo_pessoa:
+                parte.tipo_pessoa = tipo_pessoa
+                update_fields.append('tipo_pessoa')
+            if endereco and parte.endereco != endereco:
+                parte.endereco = endereco
+                update_fields.append('endereco')
+            if update_fields:
+                parte.save(update_fields=update_fields)
+                changed = True
+
+        if not processo.partes_processuais.filter(tipo_polo='ATIVO').exists():
+            Parte.objects.create(
+                processo=processo,
+                tipo_polo='ATIVO',
+                nome='',
+                tipo_pessoa='PJ',
+                documento='',
+            )
+            changed = True
+        return changed
+
+    def _upsert_contratos(self, processo: ProcessoJudicial, contracts: List[Dict]) -> bool:
+        changed = False
+        existing = {
+            (str(c.numero_contrato or '').strip()): c
+            for c in processo.contratos.all()
+            if str(c.numero_contrato or '').strip()
+        }
+        for contract in contracts:
+            numero_contrato = str(contract.get('contrato') or '').strip()
+            source_id = contract.get('id')
+            contract_key = numero_contrato or (f"source:{source_id}" if source_id else None)
+            valor = contract.get('valor_aberto')
+            parcelas = contract.get('parcelas_aberto')
+            prescricao = contract.get('data_prescricao')
+            if contract_key and contract_key in existing:
+                contrato_obj = existing[contract_key]
+                update_fields = []
+                if contrato_obj.valor_total_devido != valor:
+                    contrato_obj.valor_total_devido = valor
+                    update_fields.append('valor_total_devido')
+                if contrato_obj.valor_causa != valor:
+                    contrato_obj.valor_causa = valor
+                    update_fields.append('valor_causa')
+                if contrato_obj.parcelas_em_aberto != parcelas:
+                    contrato_obj.parcelas_em_aberto = parcelas
+                    update_fields.append('parcelas_em_aberto')
+                if contrato_obj.data_prescricao != prescricao:
+                    contrato_obj.data_prescricao = prescricao
+                    update_fields.append('data_prescricao')
+                if update_fields:
+                    contrato_obj.save(update_fields=update_fields)
+                    changed = True
+                continue
+
+            created_contrato = Contrato.objects.create(
+                processo=processo,
+                numero_contrato=numero_contrato or None,
+                valor_total_devido=valor,
+                valor_causa=valor,
+                parcelas_em_aberto=parcelas,
+                data_prescricao=prescricao,
+            )
+            if contract_key:
+                existing[contract_key] = created_contrato
+            changed = True
+        return changed
+
+    def _upsert_numeros_cnj(
+        self,
+        processo: ProcessoJudicial,
+        contracts: List[Dict],
+        carteira: Optional[Carteira],
+    ) -> bool:
+        changed = False
+        if not contracts:
+            return changed
+        existing = {
+            _normalize_cnj_digits(item.cnj) or (item.cnj or '').strip().upper(): item
+            for item in processo.numeros_cnj.all()
+        }
+        for contract in contracts:
+            raw_cnj = (contract.get('num_processo_jud') or '').strip()
+            if not raw_cnj:
+                continue
+            cnj_for_store = _format_cnj(raw_cnj)
+            key = _normalize_cnj_digits(cnj_for_store) or cnj_for_store.upper()
+            if not key:
+                continue
+            numero_obj = existing.get(key)
+            if not numero_obj:
+                numero_obj = ProcessoJudicialNumeroCnj.objects.create(
+                    processo=processo,
+                    cnj=cnj_for_store,
+                    uf=(contract.get('uf') or contract.get('endereco_uf') or '').strip().upper(),
+                    valor_causa=contract.get('valor_aberto') or None,
+                    carteira=carteira if carteira and carteira.id else None,
+                    vara=contract.get('loja_nome') or '',
+                    tribunal='',
+                )
+                existing[key] = numero_obj
+                changed = True
+                continue
+
+            update_fields = []
+            if carteira and carteira.id and not numero_obj.carteira_id:
+                numero_obj.carteira = carteira
+                update_fields.append('carteira')
+            uf = (contract.get('uf') or contract.get('endereco_uf') or '').strip().upper()
+            if uf and numero_obj.uf != uf:
+                numero_obj.uf = uf
+                update_fields.append('uf')
+            valor = contract.get('valor_aberto') or None
+            if valor is not None and numero_obj.valor_causa != valor:
+                numero_obj.valor_causa = valor
+                update_fields.append('valor_causa')
+            loja_nome = contract.get('loja_nome') or ''
+            if loja_nome and numero_obj.vara != loja_nome:
+                numero_obj.vara = loja_nome
+                update_fields.append('vara')
+            if update_fields:
+                numero_obj.save(update_fields=update_fields)
+                changed = True
+        return changed
+
+    def _sync_soma_contratos(self, processo: ProcessoJudicial) -> bool:
+        total = sum(
+            (c.valor_total_devido or c.valor_causa or Decimal('0'))
+            for c in processo.contratos.all()
+        )
+        update_fields = []
+        if processo.soma_contratos != total:
+            processo.soma_contratos = total
+            update_fields.append('soma_contratos')
+        if total and processo.valor_causa != total:
+            processo.valor_causa = total
+            update_fields.append('valor_causa')
+        if update_fields:
+            processo.save(update_fields=update_fields)
+            return True
+        return False
+
+    def _upsert_existing_processo(
+        self,
+        processo: ProcessoJudicial,
+        cpf: str,
+        contracts: List[Dict],
+        carteira: Optional[Carteira],
+    ) -> bool:
+        changed = False
+        if self._ensure_carteira_link(processo, carteira):
+            changed = True
+        if self._upsert_passivo_parte(processo, cpf, contracts):
+            changed = True
+        if self._upsert_contratos(processo, contracts):
+            changed = True
+        if self._upsert_numeros_cnj(processo, contracts, carteira):
+            changed = True
+        if self._sync_soma_contratos(processo):
+            changed = True
+        return changed
 
     def _load_contracts_grouped_by_cpf(
         self,
@@ -514,8 +759,9 @@ class DemandasImportService:
                 break
         if not uf_value:
             uf_value = (contracts[0].get('uf') or '').strip().upper()
+        principal_cnj = next((c.get('num_processo_jud') for c in contracts if c.get('num_processo_jud')), None)
         processo = ProcessoJudicial.objects.create(
-            cnj=next((c.get('num_processo_jud') for c in contracts if c.get('num_processo_jud')), None),
+            cnj=_format_cnj(principal_cnj) if principal_cnj else None,
             uf=uf_value,
             vara=contracts[0].get('loja_nome') or '',
             tribunal='',
@@ -523,6 +769,7 @@ class DemandasImportService:
             soma_contratos=total_aberto,
             carteira=carteira,
         )
+        self._ensure_carteira_link(processo, carteira)
         cpf_para_gravar = _normalize_digits(cpf) or cpf
         Parte.objects.bulk_create([
             Parte(
@@ -553,5 +800,6 @@ class DemandasImportService:
             )
             for contract in contracts
         ])
+        self._upsert_numeros_cnj(processo, contracts, carteira)
 
         return processo

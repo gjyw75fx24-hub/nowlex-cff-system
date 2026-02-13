@@ -516,7 +516,7 @@
 {% if original %}
     {% for parte in original.partes_processuais.all %}
         {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}" data-obito-idade="{{ parte.obito_idade|default_if_none:'' }}">
+            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-numero-cnj-id="{{ parte.numero_cnj_id|default_if_none:'' }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}" data-obito-idade="{{ parte.obito_idade|default_if_none:'' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">

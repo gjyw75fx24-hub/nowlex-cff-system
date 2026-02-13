@@ -183,8 +183,16 @@ class AgendaGeralAPIView(APIView):
 
         allowed_carteiras = get_user_allowed_carteira_ids(agenda_user)
         if allowed_carteiras not in (None, []) and allowed_carteiras:
-            tarefas = tarefas.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
-            prazos = prazos.filter(Q(processo__isnull=True) | Q(processo__carteira_id__in=allowed_carteiras))
+            tarefas = tarefas.filter(
+                Q(processo__isnull=True)
+                | Q(processo__carteira_id__in=allowed_carteiras)
+                | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
+            ).distinct()
+            prazos = prazos.filter(
+                Q(processo__isnull=True)
+                | Q(processo__carteira_id__in=allowed_carteiras)
+                | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
+            ).distinct()
 
         processo_ids = set(
             list(tarefas.values_list('processo_id', flat=True))

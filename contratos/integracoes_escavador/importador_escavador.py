@@ -1,4 +1,11 @@
-from contratos.models import ProcessoJudicial, Parte, Advogado, StatusProcessual, AndamentoProcessual
+from contratos.models import (
+    ProcessoJudicial,
+    ProcessoJudicialNumeroCnj,
+    Parte,
+    Advogado,
+    StatusProcessual,
+    AndamentoProcessual,
+)
 from decimal import Decimal
 from datetime import datetime
 
@@ -26,6 +33,21 @@ def importar_dados_escavador(json_data):
         processo.partes_processuais.all().delete()
         processo.andamentos.all().delete()
 
+    cnj_atual = (json_data.get("numero_cnj") or "").strip()
+    numero_cnj_obj = None
+    if cnj_atual:
+        numero_cnj_obj, _ = ProcessoJudicialNumeroCnj.objects.get_or_create(
+            processo=processo,
+            cnj=cnj_atual,
+            defaults={
+                "uf": processo.uf or "",
+                "status": status,
+                "vara": processo.vara or "",
+                "tribunal": processo.tribunal or "",
+                "valor_causa": processo.valor_causa,
+            },
+        )
+
     # Mapeamento de tipo_pessoa
     def map_tipo_pessoa(tipo):
         if tipo == "FISICA":
@@ -39,6 +61,7 @@ def importar_dados_escavador(json_data):
         if envolvido.get("polo") in ["ATIVO", "PASSIVO"]:
             parte = Parte.objects.create(
                 processo=processo,
+                numero_cnj=numero_cnj_obj,
                 nome=envolvido.get("nome"),
                 tipo_pessoa=map_tipo_pessoa(envolvido.get("tipo_pessoa")),
                 documento=envolvido.get("cpf") or envolvido.get("cnpj"),
@@ -65,6 +88,7 @@ def importar_dados_escavador(json_data):
     for mov in fonte.get("movimentacoes", []):
         AndamentoProcessual.objects.create(
             processo=processo,
+            numero_cnj=numero_cnj_obj,
             data=datetime.strptime(mov["data"], "%Y-%m-%d"),
             descricao=mov.get("conteudo"),
             detalhes=mov.get("fonte", {}).get("nome")

@@ -38,6 +38,7 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
     """
     processo.partes_processuais.all().delete()  # Usa o related_name correto
 
+    numero_cnj_obj = _resolve_numero_cnj_for_processo(processo)
     partes_envolvidas = dados_api.get('partes_envolvidas', [])
     for parte_api in partes_envolvidas:
         # Mapeia o tipo de polo
@@ -55,6 +56,7 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
 
         Parte.objects.create(
             processo=processo,
+            numero_cnj=numero_cnj_obj,
             tipo_polo=tipo_polo,
             nome=parte_api.get('nome', 'Nome não informado'),
             tipo_pessoa=tipo_pessoa,
@@ -67,6 +69,21 @@ def _normalize_descricao(descricao: str | None) -> str:
     return " ".join(descricao.split())
 
 
+def _normalize_cnj_digits(value: str | None) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _resolve_numero_cnj_for_processo(processo: ProcessoJudicial):
+    if not processo:
+        return None
+    current_digits = _normalize_cnj_digits(processo.cnj)
+    if current_digits:
+        for item in processo.numeros_cnj.all().only("id", "cnj"):
+            if _normalize_cnj_digits(item.cnj) == current_digits:
+                return item
+    return processo.numeros_cnj.order_by("-criado_em", "-id").only("id").first()
+
+
 def remover_andamentos_duplicados(processo: ProcessoJudicial):
     seen = set()
     duplicate_ids = []
@@ -77,7 +94,7 @@ def remover_andamentos_duplicados(processo: ProcessoJudicial):
         .order_by('data', 'pk')
     ):
         normalized_descricao = _normalize_descricao(andamento.descricao)
-        key = (andamento.data, normalized_descricao)
+        key = (andamento.numero_cnj_id, andamento.data, normalized_descricao)
         if key in seen:
             duplicate_ids.append(andamento.pk)
         else:
@@ -97,8 +114,10 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     movimentacoes = dados_api.get('movimentacoes', [])
     novos_andamentos = 0
     remover_andamentos_duplicados(processo)
+    numero_cnj_obj = _resolve_numero_cnj_for_processo(processo)
+    numero_cnj_id = numero_cnj_obj.id if numero_cnj_obj else None
     existentes = {
-        (andamento.data.isoformat(), _normalize_descricao(andamento.descricao))
+        (andamento.numero_cnj_id, andamento.data.isoformat(), _normalize_descricao(andamento.descricao))
         for andamento in processo.andamentos.all()
     }
     for andamento_api in movimentacoes:
@@ -110,12 +129,13 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
 
         try:
             data_andamento = make_aware(datetime.fromisoformat(data_str))
-            chave = (data_andamento.isoformat(), _normalize_descricao(descricao))
+            chave = (numero_cnj_id, data_andamento.isoformat(), _normalize_descricao(descricao))
             if chave in existentes:
                 continue
 
             _, criado = AndamentoProcessual.objects.get_or_create(
                 processo=processo,
+                numero_cnj=numero_cnj_obj,
                 data=data_andamento,
                 descricao=descricao
             )
@@ -130,7 +150,7 @@ def _remover_andamentos_duplicados(processo: ProcessoJudicial):
     duplicados = (
         AndamentoProcessual.objects
         .filter(processo=processo)
-        .values('data', 'descricao')
+        .values('numero_cnj_id', 'data', 'descricao')
         .annotate(qtd=Count('id'))
         .filter(qtd__gt=1)
     )
@@ -139,6 +159,7 @@ def _remover_andamentos_duplicados(processo: ProcessoJudicial):
             AndamentoProcessual.objects
             .filter(
                 processo=processo,
+                numero_cnj_id=dup['numero_cnj_id'],
                 data=dup['data'],
                 descricao=dup['descricao']
             )

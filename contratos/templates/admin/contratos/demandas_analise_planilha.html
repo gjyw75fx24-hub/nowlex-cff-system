@@ -14,7 +14,7 @@
       <div>
         <h1 style="margin: 0 0 6px 0;">{{ title }}</h1>
         <div style="opacity: .8;">
-          Importa planilha Passivas (.xlsx) criando cadastros/CNJs e salvando cards no caderno.
+          Importa planilha Passivas (.xlsx/.csv) criando cadastros/CNJs e salvando cards no caderno.
         </div>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
@@ -25,6 +25,7 @@
 	    <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
 	      {% csrf_token %}
 	      {{ form.upload_token }}
+	      <input type="hidden" name="selected_cpfs_payload" id="id_selected_cpfs_payload" value="{{ selected_cpfs_payload|default:'' }}">
 	      <script>
 	        (function () {
 	          const el = document.getElementsByName('upload_token')[0];
@@ -80,6 +81,58 @@
         </div>
       </div>
 
+      <div class="demandas-form__row">
+        <div class="demandas-form__group demandas-form__group--wide">
+          <label class="demandas-form__label" for="id_considerar_prioridade" style="display:flex; gap:8px; align-items:center;">
+            <input
+              type="checkbox"
+              id="id_considerar_prioridade"
+              name="considerar_prioridade"
+              value="1"
+              {% if consider_priority %}checked{% endif %}
+            >
+            Considerar Prioridade
+          </label>
+          <div
+            id="prioridade-select-wrapper"
+            style="{% if not consider_priority %}display:none;{% endif %} margin-top: 8px;"
+          >
+            <label class="demandas-form__label" for="id_selected_prioridades">Prioridades (uma ou várias)</label>
+            <select
+              id="id_selected_prioridades"
+              name="selected_prioridades"
+              multiple
+              size="6"
+              class="form-control"
+              style="min-height: 120px;"
+            >
+              {% for opt in priority_options %}
+                <option value="{{ opt.value }}" {% if opt.value in selected_priority_keys %}selected{% endif %}>
+                  {{ opt.label }}
+                </option>
+              {% endfor %}
+            </select>
+            {% if not priority_options %}
+              <div class="help">Gere a pré-visualização para carregar as prioridades da planilha.</div>
+            {% else %}
+              <div class="help">Quando selecionadas, a prévia/importação foca nessas prioridades.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const priorityToggle = document.getElementById('id_considerar_prioridade');
+          const priorityWrapper = document.getElementById('prioridade-select-wrapper');
+          if (!priorityToggle || !priorityWrapper) return;
+          const syncPriorityVisibility = () => {
+            priorityWrapper.style.display = priorityToggle.checked ? '' : 'none';
+          };
+          priorityToggle.addEventListener('change', syncPriorityVisibility);
+          syncPriorityVisibility();
+        })();
+      </script>
+
 	      <div class="demandas-form__footer">
 	        <div class="demandas-form__actions">
 	          <button class="button" type="submit" name="action" value="preview">Pré-visualizar</button>
@@ -94,24 +147,30 @@
 	      <ul style="margin-top: 6px;">
 	        <li><strong>Linhas:</strong> {{ preview.rows }}</li>
 	        <li><strong>Analisados:</strong> {{ preview.analysed_cpfs }} CPF(s)</li>
+	        <li><strong>Já importados:</strong> {{ preview.imported_cpfs }} CPF(s)</li>
 	        <li><strong>CPFs:</strong> {{ preview.cpfs }}</li>
 	        <li><strong>CNJs:</strong> {{ preview.cnjs }}</li>
 	        <li><strong>UFs:</strong> {{ preview.ufs }}</li>
+	        {% if preview.priority_options_count %}
+	          <li><strong>Prioridades na prévia:</strong> {{ preview.priority_options_count }}</li>
+	        {% endif %}
 	      </ul>
 	
 	      {% if preview.cpf_rows %}
 	        <h3 style="margin-top: 14px;">Selecionar CPFs para importar</h3>
 	        <div style="display:flex; gap:10px; margin: 8px 0 10px 0; flex-wrap:wrap;">
 	          <button type="button" class="button" id="sel-all">Selecionar todos</button>
+	          <button type="button" class="button" id="sel-not-imported">Selecionar não importados</button>
 	          <button type="button" class="button" id="sel-none">Limpar seleção</button>
 	          <button type="button" class="button" id="sel-analysed">Selecionar “já analisados”</button>
-	          <span style="opacity:.75; align-self:center;">(pré-marcados quando há respostas de análise preenchidas)</span>
+	          <span style="opacity:.75; align-self:center;">(arquivo permanece salvo após importar; use “Cancelar importação” para descartar)</span>
 	        </div>
 	        <table class="adminlist" style="width: 100%; border-collapse: collapse;">
 	          <thead>
 	            <tr>
 	              <th style="text-align:left; width: 44px;"></th>
 	              <th style="text-align:left;">UF</th>
+	              <th style="text-align:left;">Prioridade</th>
 	              <th style="text-align:left;">CPF</th>
 	              <th style="text-align:left;">Parte contrária</th>
 	              <th style="text-align:left;">CNJs</th>
@@ -124,19 +183,29 @@
 	                <td>
 	                  <input
 	                    type="checkbox"
-	                    name="selected_cpfs"
-	                    value="{{ row.cpf }}"
+	                    class="js-planilha-cpf-box"
+	                    data-cpf="{{ row.cpf }}"
 	                    data-prechecked="{{ row.prechecked|yesno:'1,0' }}"
+	                    data-imported-full="{{ row.imported_full|yesno:'1,0' }}"
 	                    {% if row.checked %}checked{% endif %}
 	                  >
 	                </td>
 	                <td>{{ row.uf }}</td>
+	                <td>{{ row.prioridade }}</td>
 	                <td>{{ row.cpf }}</td>
 	                <td>{{ row.parte_contraria }}</td>
 	                <td>{{ row.cnj_count }}</td>
 	                <td>
+	                  {% if row.imported_full %}
+	                    <span class="mini-postit">Já importado ({{ row.imported_count }}/{{ row.imported_total }})</span>
+	                  {% elif row.imported_partial %}
+	                    <span class="mini-postit">Importação parcial ({{ row.imported_count }}/{{ row.imported_total }})</span>
+	                  {% else %}
+	                    <span style="opacity:.75;">Não importado</span>
+	                  {% endif %}
+	                  <br>
 	                  {% if row.prechecked %}
-	                    <span class="mini-postit">Já analisado</span>
+	                    <span style="opacity:.75;">Já analisado</span>
 	                  {% else %}
 	                    <span style="opacity:.65;">Sem respostas</span>
 	                  {% endif %}
@@ -147,15 +216,46 @@
 	        </table>
 	        <script>
 	          (function () {
-	            const boxes = () => Array.from(document.querySelectorAll('input[name="selected_cpfs"]'));
-	            const setAll = (checked) => boxes().forEach(b => b.checked = checked);
-	            const setAnalysed = () => boxes().forEach(b => b.checked = (b.dataset.prechecked === '1'));
+	            const formEl = document.querySelector('.demandas-panel form');
+	            const payloadEl = document.getElementById('id_selected_cpfs_payload');
+	            const boxes = () => Array.from(document.querySelectorAll('.js-planilha-cpf-box'));
+	            const syncSelectedCpfsPayload = () => {
+	              if (!payloadEl) return;
+	              const cpfs = boxes()
+	                .filter((b) => b.checked)
+	                .map((b) => (b.dataset.cpf || '').trim())
+	                .filter(Boolean);
+	              payloadEl.value = Array.from(new Set(cpfs)).join(',');
+	            };
+	            const setAll = (checked) => {
+	              boxes().forEach((b) => {
+	                b.checked = checked;
+	              });
+	              syncSelectedCpfsPayload();
+	            };
+	            const setAnalysed = () => {
+	              boxes().forEach((b) => {
+	                b.checked = (b.dataset.prechecked === '1');
+	              });
+	              syncSelectedCpfsPayload();
+	            };
+	            const setNotImported = () => {
+	              boxes().forEach((b) => {
+	                b.checked = (b.dataset.importedFull !== '1');
+	              });
+	              syncSelectedCpfsPayload();
+	            };
 	            const allBtn = document.getElementById('sel-all');
+	            const notImportedBtn = document.getElementById('sel-not-imported');
 	            const noneBtn = document.getElementById('sel-none');
 	            const analysedBtn = document.getElementById('sel-analysed');
+	            boxes().forEach((b) => b.addEventListener('change', syncSelectedCpfsPayload));
+	            if (formEl) formEl.addEventListener('submit', syncSelectedCpfsPayload);
 	            if (allBtn) allBtn.addEventListener('click', () => setAll(true));
+	            if (notImportedBtn) notImportedBtn.addEventListener('click', () => setNotImported());
 	            if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
 	            if (analysedBtn) analysedBtn.addEventListener('click', () => setAnalysed());
+	            syncSelectedCpfsPayload();
 	          })();
 	        </script>
 	      {% endif %}
