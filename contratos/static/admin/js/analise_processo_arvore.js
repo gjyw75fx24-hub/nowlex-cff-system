@@ -1769,32 +1769,431 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             );
         }
 
-	        function restoreTreeFromCard(cardIndex) {
-	            analysisHasStarted = true;
-	            const parsedIndex = Number(cardIndex);
-	            if (!Number.isFinite(parsedIndex)) {
-	                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
-	                return;
-	            }
+        function buildAnalysisTypeSnapshotFromType(typeData) {
+            if (!typeData || typeData.id == null) {
+                return null;
+            }
+            return {
+                id: typeData.id,
+                nome: typeData.nome || '',
+                slug: typeData.slug || '',
+                hashtag: typeData.hashtag || '',
+                versao: typeData.versao != null ? typeData.versao : null
+            };
+        }
+
+        function inferAnalysisTypeForCard(types, cardData) {
+            const list = Array.isArray(types)
+                ? types.filter(tipo => tipo && tipo.id != null)
+                : [];
+            if (!list.length) {
+                return null;
+            }
+            if (list.length === 1) {
+                return list[0];
+            }
+
+            const explicitTypeText = normalizeTextForComparison(
+                `${cardData?.analysis_type?.slug || ''} ${cardData?.analysis_type?.nome || ''}`
+            );
+            if (explicitTypeText) {
+                const directMatches = list.filter(tipo => {
+                    const typeText = normalizeTextForComparison(`${tipo.slug || ''} ${tipo.nome || ''}`);
+                    return typeText && (typeText.includes(explicitTypeText) || explicitTypeText.includes(typeText));
+                });
+                if (directMatches.length === 1) {
+                    return directMatches[0];
+                }
+            }
+
+            const responses =
+                cardData && cardData.tipo_de_acao_respostas && typeof cardData.tipo_de_acao_respostas === 'object'
+                    ? cardData.tipo_de_acao_respostas
+                    : {};
+
+            const hasMonitoriaSignals = [
+                'judicializado_pela_massa',
+                'propor_monitoria',
+                'repropor_monitoria',
+                'contratos_para_monitoria'
+            ].some(key => Object.prototype.hasOwnProperty.call(responses, key));
+            const hasPassivasSignals = [
+                'procedencia',
+                'cumprimento_de_sentenca',
+                'data_de_transito',
+                'transitado',
+                'julgamento'
+            ].some(key => Object.prototype.hasOwnProperty.call(responses, key));
+            const tipoAcaoText = normalizeTextForComparison(
+                (responses && responses.tipo_de_acao) || cardData?.tipo_de_acao || ''
+            );
+
+            const preferMonitoria = hasMonitoriaSignals || tipoAcaoText.includes('monitor');
+            const preferPassivas = hasPassivasSignals || tipoAcaoText.includes('passiv');
+            const keyword = preferMonitoria && !preferPassivas
+                ? 'monitor'
+                : (preferPassivas && !preferMonitoria ? 'passiv' : '');
+
+            if (!keyword) {
+                return null;
+            }
+
+            const keywordMatches = list.filter(tipo => {
+                const typeText = normalizeTextForComparison(`${tipo.slug || ''} ${tipo.nome || ''}`);
+                return typeText.includes(keyword);
+            });
+            if (keywordMatches.length === 1) {
+                return keywordMatches[0];
+            }
+            return null;
+        }
+
+        function ensureDecisionTreeForCardEditing(cardData) {
+            const deferred = $.Deferred();
+            const cardTipoId = cardData && cardData.analysis_type && cardData.analysis_type.id != null
+                ? String(cardData.analysis_type.id)
+                : '';
+            const cardTipoVersao = cardData && cardData.analysis_type ? cardData.analysis_type.versao : null;
+            const currentTipoId = activeAnalysisType && activeAnalysisType.id != null
+                ? String(activeAnalysisType.id)
+                : '';
+            const hasCurrentTreeConfig = Boolean(firstQuestionKey && treeConfig && treeConfig[firstQuestionKey]);
+
+            const finalizeSuccess = (fallbackType = null) => {
+                if (!cardData.analysis_type || cardData.analysis_type.id == null) {
+                    const snapshot = buildActiveAnalysisTypeSnapshot() || buildAnalysisTypeSnapshotFromType(fallbackType);
+                    if (snapshot) {
+                        cardData.analysis_type = snapshot;
+                    }
+                }
+                analysisTypeSelectionInProgress = false;
+                updateActionButtons();
+                deferred.resolve();
+            };
+
+            const finalizeFailure = (reason = null) => {
+                analysisTypeSelectionInProgress = false;
+                updateActionButtons();
+                deferred.reject(reason || {});
+            };
+
+            const promptForTypeSelection = (contextMessage) => {
+                fetchAnalysisTypes()
+                    .done(types => {
+                        const list = Array.isArray(types) ? types.filter(Boolean) : [];
+                        if (!list.length) {
+                            finalizeFailure({
+                                message: 'Não foi possível carregar os tipos de análise disponíveis para este card.'
+                            });
+                            return;
+                        }
+
+                        const inferredType = inferAnalysisTypeForCard(list, cardData);
+                        if (inferredType) {
+                            loadTreeForType(inferredType, {
+                                allowSelectionFallback: false,
+                                failMessage: contextMessage || 'Não foi possível carregar a árvore do tipo inferido para este card.'
+                            });
+                            return;
+                        }
+
+                        promptSelectAnalysisType(list)
+                            .done(selectedType => {
+                                loadTreeForType(selectedType, {
+                                    allowSelectionFallback: false,
+                                    failMessage: contextMessage || 'Não foi possível carregar o tipo escolhido para este card.'
+                                });
+                            })
+                            .fail(reason => {
+                                if (reason && reason.cancelled) {
+                                    finalizeFailure({ cancelled: true });
+                                    return;
+                                }
+                                finalizeFailure({
+                                    message: contextMessage || 'Não foi possível identificar o tipo de análise deste card.'
+                                });
+                            });
+                    })
+                    .fail(() => {
+                        finalizeFailure({
+                            message: contextMessage || 'Não foi possível carregar os tipos de análise.'
+                        });
+                    });
+            };
+
+            const loadTreeForType = (typeInfo, options = {}) => {
+                const tipoId = typeInfo && typeInfo.id != null
+                    ? String(typeInfo.id)
+                    : '';
+                if (!tipoId) {
+                    finalizeFailure({ message: 'Tipo de análise não identificado para este card.' });
+                    return;
+                }
+                const tipoVersao = typeInfo && typeInfo.versao != null ? typeInfo.versao : null;
+                fetchDecisionTreeConfig({ tipoId: tipoId, tipoVersao: tipoVersao, forceReload: false })
+                    .done(() => finalizeSuccess(typeInfo))
+                    .fail(() => {
+                        if (options.allowSelectionFallback) {
+                            promptForTypeSelection(options.failMessage);
+                            return;
+                        }
+                        finalizeFailure({
+                            message: options.failMessage || 'Não foi possível carregar a configuração da árvore para editar este card.'
+                        });
+                    });
+            };
+
+            analysisTypeSelectionInProgress = true;
+            updateActionButtons();
+
+            if (cardTipoId) {
+                if (cardTipoId === currentTipoId && hasCurrentTreeConfig) {
+                    finalizeSuccess(cardData.analysis_type || null);
+                } else {
+                    loadTreeForType(cardData.analysis_type || { id: cardTipoId, versao: cardTipoVersao }, {
+                        allowSelectionFallback: true,
+                        failMessage: 'Não foi possível carregar o tipo salvo neste card. Selecione o tipo de análise para editar.'
+                    });
+                }
+                return deferred.promise();
+            }
+
+            if (currentTipoId) {
+                if (hasCurrentTreeConfig) {
+                    finalizeSuccess(activeAnalysisType || null);
+                } else {
+                    loadTreeForType(activeAnalysisType || { id: currentTipoId }, {
+                        allowSelectionFallback: true,
+                        failMessage: 'Não foi possível restaurar a configuração atual. Selecione o tipo de análise para editar o card.'
+                    });
+                }
+                return deferred.promise();
+            }
+
+            promptForTypeSelection('Este card legado não informa o tipo de análise. Selecione o tipo para editar.');
+            return deferred.promise();
+        }
+
+        function restoreTreeFromCard(cardIndex) {
+            analysisHasStarted = true;
+            const parsedIndex = Number(cardIndex);
+            if (!Number.isFinite(parsedIndex)) {
+                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
+                return;
+            }
             cardIndex = parsedIndex;
-    
+
             console.log('=== INICIANDO EDIÇÃO DO CARD ===', cardIndex);
-    
+
             userResponses._editing_card_index = cardIndex;
             const savedCards = getSavedProcessCards();
             const cardData = savedCards[cardIndex];
-    
+
             if (!cardData) {
                 console.warn('restoreTreeFromCard: card não encontrado no índice:', cardIndex);
                 return;
             }
 
-            const cardTipoId = cardData && cardData.analysis_type && cardData.analysis_type.id != null
-                ? String(cardData.analysis_type.id)
-                : '';
-            const currentTipoId = activeAnalysisType && activeAnalysisType.id != null
-                ? String(activeAnalysisType.id)
-                : '';
+            const startPopulationCascade = () => {
+                setTimeout(() => {
+                    console.log('=== INICIANDO POPULAÇÃO EM CASCATA ===');
+
+                    function populateFieldsCascade(attempt = 1, maxAttempts = 10) {
+                        console.log(`--- Tentativa ${attempt} de ${maxAttempts} ---`);
+
+                        const savedResponses = cardData.tipo_de_acao_respostas || {};
+                        console.log('savedResponses disponível:', savedResponses);
+
+                        const $allFields = $dynamicQuestionsContainer.find('[name]');
+                        const totalFields = $allFields.length;
+
+                        console.log(`Campos no DOM: ${totalFields}`);
+
+                        let fieldsPopulated = 0;
+
+                        $allFields.each(function() {
+                            const $field = $(this);
+                            const fieldName = $field.attr('name');
+                            const currentValue = $field.val();
+
+                            let savedValue = userResponses[fieldName];
+                            if (savedValue === undefined && savedResponses && savedResponses[fieldName]) {
+                                savedValue = savedResponses[fieldName];
+                            }
+
+                            console.log(`  Verificando campo: ${fieldName}, valor atual: "${currentValue}", valor salvo:`, savedValue);
+
+                            if (savedValue !== undefined && savedValue !== null) {
+                                const needsPopulation = !currentValue ||
+                                                      currentValue === '---' ||
+                                                      currentValue === '' ||
+                                                      (Array.isArray(savedValue) && currentValue !== savedValue.join(','));
+
+                                if (needsPopulation) {
+                                    console.log(`  → Populando: ${fieldName} = ${savedValue}`);
+
+                                    if ($field.attr('type') === 'checkbox') {
+                                        const isChecked = String(savedValue).toUpperCase() === 'SIM' ||
+                                                        String(savedValue).toLowerCase() === 'true' ||
+                                                        savedValue === true;
+                                        $field.prop('checked', isChecked);
+                                        console.log(`    ✓ Checkbox setado para: ${isChecked}`);
+
+                                    } else if ($field.is('select')) {
+                                        console.log(`    📋 Select detectado, valor desejado: "${savedValue}"`);
+                                        const options = [];
+                                        $field.find('option').each(function() {
+                                            const optValue = $(this).val();
+                                            const optText = $(this).text().trim();
+                                            options.push({ value: optValue, text: optText });
+                                            console.log(`      - Option: value="${optValue}", text="${optText}"`);
+                                        });
+
+                                        let matchedValue = null;
+                                        if ($field.find(`option[value="${savedValue}"]`).length > 0) {
+                                            matchedValue = savedValue;
+                                            console.log(`    ✓ Match exato encontrado: "${matchedValue}"`);
+                                        } else {
+                                            $field.find('option').each(function() {
+                                                const optValue = $(this).val();
+                                                const optText = $(this).text().trim();
+
+                                                if (optValue && optValue.toUpperCase().includes(String(savedValue).toUpperCase())) {
+                                                    matchedValue = optValue;
+                                                    console.log(`    ✓ Match parcial por value encontrado: "${matchedValue}"`);
+                                                    return false;
+                                                }
+                                                if (optText && optText.toUpperCase().includes(String(savedValue).toUpperCase())) {
+                                                    matchedValue = optValue;
+                                                    console.log(`    ✓ Match parcial por text encontrado: "${matchedValue}"`);
+                                                    return false;
+                                                }
+                                            });
+                                        }
+
+                                        if (!matchedValue && String(savedValue).toUpperCase() === 'SIM') {
+                                            $field.find('option').each(function() {
+                                                const optValue = $(this).val();
+                                                if (optValue && optValue.toUpperCase().startsWith('SIM')) {
+                                                    matchedValue = optValue;
+                                                    console.log(`    ✓ Primeira option "SIM*" encontrada: "${matchedValue}"`);
+                                                    return false;
+                                                }
+                                            });
+                                        }
+                                        if (!matchedValue && String(savedValue).toUpperCase() === 'NÃO') {
+                                            $field.find('option').each(function() {
+                                                const optValue = $(this).val();
+                                                if (optValue && (optValue.toUpperCase().startsWith('NÃO') || optValue.toUpperCase().startsWith('NAO'))) {
+                                                    matchedValue = optValue;
+                                                    console.log(`    ✓ Primeira option "NÃO*" encontrada: "${matchedValue}"`);
+                                                    return false;
+                                                }
+                                            });
+                                        }
+
+                                        if (matchedValue) {
+                                            $field.val(matchedValue);
+                                            console.log(`    ✅ Select populado com: "${matchedValue}"`);
+                                        } else {
+                                            console.warn(`    ⚠️ Nenhuma option correspondente encontrada para: "${savedValue}"`);
+                                            console.warn(`    ⚠️ Options disponíveis:`, options);
+                                            $field.val(savedValue);
+                                        }
+
+                                    } else if ($field.attr('type') === 'date') {
+                                        $field.val(savedValue);
+                                        console.log(`    ✓ Date setado para: ${savedValue}`);
+
+                                    } else if ($field.attr('type') === 'radio') {
+                                        $field.filter(`[value="${savedValue}"]`).prop('checked', true);
+                                        console.log(`    ✓ Radio setado para: ${savedValue}`);
+
+                                    } else {
+                                        $field.val(savedValue);
+                                        console.log(`    ✓ Campo setado para: ${savedValue}`);
+                                    }
+
+                                    console.log(`    🔄 Disparando change event...`);
+                                    $field.trigger('change');
+
+                                    setTimeout(() => {
+                                        const camposAposChange = $dynamicQuestionsContainer.find('[name]').length;
+                                        console.log(`    📊 Campos após change: ${camposAposChange} (antes: ${totalFields})`);
+                                        if (camposAposChange > totalFields) {
+                                            console.log(`    ✅ Novos campos criados! (+${camposAposChange - totalFields})`);
+                                        } else {
+                                            console.log(`    ⚠️ Nenhum campo novo criado`);
+                                        }
+                                    }, 200);
+
+                                    fieldsPopulated++;
+                                } else {
+                                    console.log('  ⏭️ Campo já populado, pulando');
+                                }
+                            } else {
+                                console.log(`  ⚠️ Sem valor salvo para: ${fieldName}`);
+                            }
+                        });
+
+                        console.log(`  Campos populados: ${fieldsPopulated}`);
+
+                        if (fieldsPopulated > 0 && attempt < maxAttempts) {
+                            setTimeout(() => {
+                                const $newFields = $dynamicQuestionsContainer.find('[name]');
+                                const newTotalFields = $newFields.length;
+
+                                console.log(`  Campos após change: ${newTotalFields}`);
+
+                                if (newTotalFields > totalFields) {
+                                    console.log('  ✅ Novos campos criados! Continuando...');
+                                    populateFieldsCascade(attempt + 1, maxAttempts);
+                                } else {
+                                    if (attempt < maxAttempts) {
+                                        console.log('  ⚠️ Nenhum campo novo, mas tentando novamente...');
+                                        populateFieldsCascade(attempt + 1, maxAttempts);
+                                    } else {
+                                        console.log('  ✅ Cascata finalizada');
+                                        finalizarEdicao();
+                                    }
+                                }
+                            }, 800);
+                        } else {
+                            console.log('  ✅ Cascata finalizada (sem mais campos para popular)');
+                            finalizarEdicao();
+                        }
+                    }
+
+                    function finalizarEdicao() {
+                        console.log('=== FINALIZANDO EDIÇÃO ===');
+
+                        if (typeof updateContractStars === 'function') {
+                            updateContractStars();
+                        }
+
+                        if (typeof updateGenerateButtonState === 'function') {
+                            updateGenerateButtonState();
+                        }
+
+                        saveResponses();
+
+                        const $finalFields = $dynamicQuestionsContainer.find('[name]');
+                        console.log(`=== TOTAL FINAL DE CAMPOS: ${$finalFields.length} ===`);
+
+                        $finalFields.each(function() {
+                            const fieldName = $(this).attr('name');
+                            const fieldValue = $(this).val();
+                            console.log(`  ${fieldName}: ${fieldValue}`);
+                        });
+
+                        console.log('=== EDIÇÃO CARREGADA COM SUCESSO ===');
+
+                        showEditModeIndicator(cardData.cnj, cardIndex);
+                    }
+
+                    populateFieldsCascade();
+                }, 500);
+            };
 
             const proceedRestore = () => {
                 console.log('Card encontrado:', cardData);
@@ -1804,7 +2203,18 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 syncProcessoVinculadoResponseKey();
                 ensureUserResponsesShape();
 
-                const savedResponses = cardData.tipo_de_acao_respostas || {};
+                let savedResponses =
+                    cardData && cardData.tipo_de_acao_respostas && typeof cardData.tipo_de_acao_respostas === 'object'
+                        ? deepClone(cardData.tipo_de_acao_respostas)
+                        : {};
+                if (!Object.keys(savedResponses).length) {
+                    GENERAL_CARD_FIELD_KEYS.forEach(key => {
+                        if (hasMeaningfulResponseValue(cardData[key])) {
+                            savedResponses[key] = deepClone(cardData[key]);
+                        }
+                    });
+                    cardData.tipo_de_acao_respostas = deepClone(savedResponses);
+                }
                 const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
 
                 if (isMonitoria) {
@@ -1849,220 +2259,21 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                 console.log('Renderizando árvore...');
                 renderDecisionTree();
+                startPopulationCascade();
             };
 
-	            const cardTipoVersao = cardData && cardData.analysis_type ? cardData.analysis_type.versao : null;
-
-	            if (cardTipoId && cardTipoId !== currentTipoId) {
-	                fetchDecisionTreeConfig({ tipoId: cardTipoId, tipoVersao: cardTipoVersao, forceReload: false })
-	                    .done(proceedRestore)
-	                    .fail(() => {
-	                        console.error('Falha ao carregar Tipo de Análise do card:', cardTipoId);
-	                        proceedRestore();
-	                    });
-            } else {
-                proceedRestore();
-            }
-
-            setTimeout(() => {
-                console.log('=== INICIANDO POPULAÇÃO EM CASCATA ===');
-    
-                function populateFieldsCascade(attempt = 1, maxAttempts = 10) {
-                    console.log(`--- Tentativa ${attempt} de ${maxAttempts} ---`);
-    
-                    const savedResponses = cardData.tipo_de_acao_respostas || {};
-                    console.log('savedResponses disponível:', savedResponses);
-
-                    const $allFields = $dynamicQuestionsContainer.find('[name]');
-                    const totalFields = $allFields.length;
-    
-                    console.log(`Campos no DOM: ${totalFields}`);
-    
-                    let fieldsPopulated = 0;
-    
-                    $allFields.each(function() {
-                        const $field = $(this);
-                        const fieldName = $field.attr('name');
-                        const currentValue = $field.val();
-
-                        let savedValue = userResponses[fieldName];
-                        if (savedValue === undefined && savedResponses && savedResponses[fieldName]) {
-                            savedValue = savedResponses[fieldName];
-                        }
-
-                        console.log(`  Verificando campo: ${fieldName}, valor atual: "${currentValue}", valor salvo:`, savedValue);
-
-                        if (savedValue !== undefined && savedValue !== null) {
-                            const needsPopulation = !currentValue ||
-                                                  currentValue === '---' ||
-                                                  currentValue === '' ||
-                                                  (Array.isArray(savedValue) && currentValue !== savedValue.join(','));
-
-                            if (needsPopulation) {
-                                console.log(`  → Populando: ${fieldName} = ${savedValue}`);
-
-                                if ($field.attr('type') === 'checkbox') {
-                                    const isChecked = String(savedValue).toUpperCase() === 'SIM' ||
-                                                    String(savedValue).toLowerCase() === 'true' ||
-                                                    savedValue === true;
-                                    $field.prop('checked', isChecked);
-                                    console.log(`    ✓ Checkbox setado para: ${isChecked}`);
-
-                                } else if ($field.is('select')) {
-                                    console.log(`    📋 Select detectado, valor desejado: "${savedValue}"`);
-                                    const options = [];
-                                    $field.find('option').each(function() {
-                                        const optValue = $(this).val();
-                                        const optText = $(this).text().trim();
-                                        options.push({ value: optValue, text: optText });
-                                        console.log(`      - Option: value="${optValue}", text="${optText}"`);
-                                    });
-
-                                    let matchedValue = null;
-                                    if ($field.find(`option[value="${savedValue}"]`).length > 0) {
-                                        matchedValue = savedValue;
-                                        console.log(`    ✓ Match exato encontrado: "${matchedValue}"`);
-                                    } else {
-                                        $field.find('option').each(function() {
-                                            const optValue = $(this).val();
-                                            const optText = $(this).text().trim();
-
-                                            if (optValue && optValue.toUpperCase().includes(String(savedValue).toUpperCase())) {
-                                                matchedValue = optValue;
-                                                console.log(`    ✓ Match parcial por value encontrado: "${matchedValue}"`);
-                                                return false;
-                                            }
-                                            if (optText && optText.toUpperCase().includes(String(savedValue).toUpperCase())) {
-                                                matchedValue = optValue;
-                                                console.log(`    ✓ Match parcial por text encontrado: "${matchedValue}"`);
-                                                return false;
-                                            }
-                                        });
-                                    }
-
-                                    if (!matchedValue && String(savedValue).toUpperCase() === 'SIM') {
-                                        $field.find('option').each(function() {
-                                            const optValue = $(this).val();
-                                            if (optValue && optValue.toUpperCase().startsWith('SIM')) {
-                                                matchedValue = optValue;
-                                                console.log(`    ✓ Primeira option "SIM*" encontrada: "${matchedValue}"`);
-                                                return false;
-                                            }
-                                        });
-                                    }
-                                    if (!matchedValue && String(savedValue).toUpperCase() === 'NÃO') {
-                                        $field.find('option').each(function() {
-                                            const optValue = $(this).val();
-                                            if (optValue && (optValue.toUpperCase().startsWith('NÃO') || optValue.toUpperCase().startsWith('NAO'))) {
-                                                matchedValue = optValue;
-                                                console.log(`    ✓ Primeira option "NÃO*" encontrada: "${matchedValue}"`);
-                                                return false;
-                                            }
-                                        });
-                                    }
-
-                                    if (matchedValue) {
-                                        $field.val(matchedValue);
-                                        console.log(`    ✅ Select populado com: "${matchedValue}"`);
-                                    } else {
-                                        console.warn(`    ⚠️ Nenhuma option correspondente encontrada para: "${savedValue}"`);
-                                        console.warn(`    ⚠️ Options disponíveis:`, options);
-                                        $field.val(savedValue);
-                                    }
-
-                                } else if ($field.attr('type') === 'date') {
-                                    $field.val(savedValue);
-                                    console.log(`    ✓ Date setado para: ${savedValue}`);
-
-                                } else if ($field.attr('type') === 'radio') {
-                                    $field.filter(`[value="${savedValue}"]`).prop('checked', true);
-                                    console.log(`    ✓ Radio setado para: ${savedValue}`);
-
-                                } else {
-                                    $field.val(savedValue);
-                                    console.log(`    ✓ Campo setado para: ${savedValue}`);
-                                }
-
-                                console.log(`    🔄 Disparando change event...`);
-                                $field.trigger('change');
-
-                                setTimeout(() => {
-                                    const camposAposChange = $dynamicQuestionsContainer.find('[name]').length;
-                                    console.log(`    📊 Campos após change: ${camposAposChange} (antes: ${totalFields})`);
-                                    if (camposAposChange > totalFields) {
-                                        console.log(`    ✅ Novos campos criados! (+${camposAposChange - totalFields})`);
-                                    } else {
-                                        console.log(`    ⚠️ Nenhum campo novo criado`);
-                                    }
-                                }, 200);
-
-                                fieldsPopulated++;
-                            } else {
-                                console.log(`  ⏭️ Campo já populado, pulando`);
-                            }
-                        } else {
-                            console.log(`  ⚠️ Sem valor salvo para: ${fieldName}`);
-                        }
-                    });
-    
-                    console.log(`  Campos populados: ${fieldsPopulated}`);
-    
-                    if (fieldsPopulated > 0 && attempt < maxAttempts) {
-                        setTimeout(() => {
-                            const $newFields = $dynamicQuestionsContainer.find('[name]');
-                            const newTotalFields = $newFields.length;
-    
-                            console.log(`  Campos após change: ${newTotalFields}`);
-    
-                            if (newTotalFields > totalFields) {
-                                console.log(`  ✅ Novos campos criados! Continuando...`);
-                                populateFieldsCascade(attempt + 1, maxAttempts);
-                            } else {
-                                if (attempt < maxAttempts) {
-                                    console.log(`  ⚠️ Nenhum campo novo, mas tentando novamente...`);
-                                    populateFieldsCascade(attempt + 1, maxAttempts);
-                                } else {
-                                    console.log(`  ✅ Cascata finalizada`);
-                                    finalizarEdicao();
-                                }
-                            }
-                        }, 800);
-                    } else {
-                        console.log(`  ✅ Cascata finalizada (sem mais campos para popular)`);
-                        finalizarEdicao();
+            ensureDecisionTreeForCardEditing(cardData)
+                .done(proceedRestore)
+                .fail(reason => {
+                    delete userResponses._editing_card_index;
+                    if (reason && reason.cancelled) {
+                        return;
                     }
-                }
-    
-                function finalizarEdicao() {
-                    console.log('=== FINALIZANDO EDIÇÃO ===');
-    
-                    if (typeof updateContractStars === 'function') {
-                        updateContractStars();
-                    }
-    
-                    if (typeof updateGenerateButtonState === 'function') {
-                        updateGenerateButtonState();
-                    }
-    
-                    saveResponses();
-    
-                    const $finalFields = $dynamicQuestionsContainer.find('[name]');
-                    console.log(`=== TOTAL FINAL DE CAMPOS: ${$finalFields.length} ===`);
-    
-                    $finalFields.each(function() {
-                        const fieldName = $(this).attr('name');
-                        const fieldValue = $(this).val();
-                        console.log(`  ${fieldName}: ${fieldValue}`);
-                    });
-    
-                    console.log('=== EDIÇÃO CARREGADA COM SUCESSO ===');
-    
-                    showEditModeIndicator(cardData.cnj, cardIndex);
-                }
-    
-                populateFieldsCascade();
-    
-            }, 500);
+                    const message = reason && reason.message
+                        ? reason.message
+                        : 'Não foi possível preparar o card para edição. Tente novamente.';
+                    showCffSystemDialog(message, 'warning');
+                });
         }
         function scrollToProcessCard(cardIndexValue) {
             activateInnerTab('analise');
