@@ -562,6 +562,233 @@
          * Helpers gerais
          * ======================================================= */
 
+        function hasMeaningfulResponseValue(value) {
+            if (value === undefined || value === null) {
+                return false;
+            }
+            if (Array.isArray(value)) {
+                return value.some(item => hasMeaningfulResponseValue(item));
+            }
+            if (typeof value === 'object') {
+                return Object.keys(value).length > 0;
+            }
+            return String(value).trim() !== '';
+        }
+
+        function isLikelyProcessCard(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return false;
+            }
+            const markerKeys = [
+                'cnj',
+                'contratos',
+                'valor_causa',
+                'observacoes',
+                'analysis_type',
+                'analysis_author',
+                'supervisionado',
+                'supervisor_status',
+                'barrado',
+                'tipo_de_acao_respostas'
+            ];
+            if (markerKeys.some(key => Object.prototype.hasOwnProperty.call(value, key))) {
+                return true;
+            }
+            return GENERAL_CARD_FIELD_KEYS.some(key => Object.prototype.hasOwnProperty.call(value, key));
+        }
+
+        function coerceLegacyProcessCardList(rawValue) {
+            if (Array.isArray(rawValue)) {
+                return rawValue.filter(item => isLikelyProcessCard(item));
+            }
+            if (!rawValue || typeof rawValue !== 'object') {
+                return [];
+            }
+            if (isLikelyProcessCard(rawValue)) {
+                return [rawValue];
+            }
+            return Object.values(rawValue).filter(item => isLikelyProcessCard(item));
+        }
+
+        function buildActiveAnalysisTypeSnapshot() {
+            if (!activeAnalysisType || activeAnalysisType.id == null) {
+                return null;
+            }
+            return {
+                id: activeAnalysisType.id,
+                nome: activeAnalysisType.nome,
+                slug: activeAnalysisType.slug,
+                hashtag: activeAnalysisType.hashtag,
+                versao: activeAnalysisType.versao
+            };
+        }
+
+        function getFallbackProcessCnj() {
+            const fromRoot = String(userResponses?.cnj || '').trim();
+            if (fromRoot) {
+                return formatCnjDigits(fromRoot);
+            }
+            const fromWidget = String($responseField?.data('analise-cnj') || '').trim();
+            if (fromWidget) {
+                return formatCnjDigits(fromWidget);
+            }
+            const fromForm = String($('input[name="cnj"]').val() || '').trim();
+            if (fromForm) {
+                return formatCnjDigits(fromForm);
+            }
+            return '';
+        }
+
+        function extractLegacyRootResponses() {
+            const result = {};
+            const ignored = new Set([
+                'processos_vinculados',
+                SAVED_PROCESSOS_KEY,
+                'selected_analysis_cards',
+                'contratos_status',
+                'contratos_para_monitoria',
+                'saved_entries_migrated',
+                'ativar_botao_monitoria',
+                'general_card',
+                '_editing_card_index',
+                'notebook'
+            ]);
+            const preferredKeys = Array.from(
+                new Set([...(GENERAL_CARD_FIELD_KEYS || []), ...(treeResponseKeys || [])])
+            ).filter(key => key && !ignored.has(key));
+            preferredKeys.forEach(key => {
+                const value = userResponses[key];
+                if (hasMeaningfulResponseValue(value)) {
+                    result[key] = deepClone(value);
+                }
+            });
+            if (Object.keys(result).length > 0) {
+                return result;
+            }
+
+            Object.keys(userResponses || {}).forEach(key => {
+                if (ignored.has(key)) {
+                    return;
+                }
+                if (/^_/.test(key)) {
+                    return;
+                }
+                const value = userResponses[key];
+                if (!hasMeaningfulResponseValue(value)) {
+                    return;
+                }
+                const isScalar =
+                    typeof value === 'string' ||
+                    typeof value === 'number' ||
+                    typeof value === 'boolean';
+                const isSimpleArray = Array.isArray(value) && value.every(item => typeof item !== 'object');
+                if (isScalar || isSimpleArray) {
+                    result[key] = deepClone(value);
+                }
+            });
+            return result;
+        }
+
+        function normalizeProcessCardForSummary(rawCard) {
+            if (!isLikelyProcessCard(rawCard)) {
+                return null;
+            }
+            const card = deepClone(rawCard);
+            if (!card.tipo_de_acao_respostas || typeof card.tipo_de_acao_respostas !== 'object' || Array.isArray(card.tipo_de_acao_respostas)) {
+                const mapped = {};
+                GENERAL_CARD_FIELD_KEYS.forEach(key => {
+                    const value = card[key];
+                    if (hasMeaningfulResponseValue(value)) {
+                        mapped[key] = deepClone(value);
+                    }
+                });
+                card.tipo_de_acao_respostas = mapped;
+            }
+
+            if (!hasMeaningfulResponseValue(card.cnj)) {
+                const fallbackCnj = getFallbackProcessCnj();
+                if (fallbackCnj) {
+                    card.cnj = fallbackCnj;
+                }
+            }
+
+            if (!Array.isArray(card.contratos)) {
+                let contracts = parseContractsField(card.contratos);
+                if (!contracts.length && card.tipo_de_acao_respostas) {
+                    contracts = parseContractsField(card.tipo_de_acao_respostas.contratos_para_monitoria);
+                }
+                card.contratos = Array.from(new Set(contracts.map(item => String(item).trim()).filter(Boolean)));
+            }
+
+            if (!card.analysis_type) {
+                const snapshot = buildActiveAnalysisTypeSnapshot();
+                if (snapshot) {
+                    card.analysis_type = snapshot;
+                }
+            }
+            if (!card.analysis_author) {
+                const fallbackAuthor = resolveCardAnalysisAuthor(card, getCurrentAnalysisAuthorName());
+                if (fallbackAuthor) {
+                    card.analysis_author = fallbackAuthor;
+                }
+            }
+            if (!card.updated_at && $responseField?.data('analise-updated-at')) {
+                card.updated_at = $responseField.data('analise-updated-at');
+            }
+            if (typeof card.observacoes !== 'string') {
+                const rootObservation = typeof userResponses.observacoes === 'string'
+                    ? userResponses.observacoes.trim()
+                    : '';
+                if (rootObservation) {
+                    card.observacoes = rootObservation;
+                }
+            }
+            return card;
+        }
+
+        function buildLegacyRootSummaryCard() {
+            const hasSaved = Array.isArray(userResponses[SAVED_PROCESSOS_KEY]) && userResponses[SAVED_PROCESSOS_KEY].length > 0;
+            const hasActive = Array.isArray(userResponses.processos_vinculados) && userResponses.processos_vinculados.length > 0;
+            if (hasSaved || hasActive) {
+                return null;
+            }
+            const rootResponses = extractLegacyRootResponses();
+            if (!Object.keys(rootResponses).length) {
+                return null;
+            }
+            const contracts = parseContractsField(userResponses.contratos_para_monitoria || rootResponses.contratos_para_monitoria);
+            const rawCard = {
+                cnj: getFallbackProcessCnj() || 'Não informado',
+                contratos: contracts,
+                tipo_de_acao_respostas: rootResponses,
+                observacoes: typeof userResponses.observacoes === 'string' ? userResponses.observacoes.trim() : '',
+                analysis_type: buildActiveAnalysisTypeSnapshot(),
+                analysis_author: getCurrentAnalysisAuthorName(),
+                updated_at: $responseField?.data('analise-updated-at') || null
+            };
+            return normalizeProcessCardForSummary(rawCard);
+        }
+
+        function getSummaryCardIdentity(card, fallbackIndex = 0, fallbackSource = 'unknown') {
+            if (!card || typeof card !== 'object') {
+                return `${fallbackSource}:${fallbackIndex}`;
+            }
+            const cnjDigits = String(card.cnj || '').replace(/\D/g, '');
+            if (cnjDigits) {
+                return `cnj:${cnjDigits}`;
+            }
+            const contracts = Array.isArray(card.contratos)
+                ? card.contratos.map(item => String(item).trim()).filter(Boolean).sort().join(',')
+                : '';
+            const payload = card.tipo_de_acao_respostas && typeof card.tipo_de_acao_respostas === 'object'
+                ? JSON.stringify(card.tipo_de_acao_respostas)
+                : '';
+            if (contracts || payload) {
+                return `payload:${contracts}:${payload}`;
+            }
+            return `${fallbackSource}:${fallbackIndex}`;
+        }
+
         function ensureUserResponsesShape() {
             if (!userResponses || typeof userResponses !== 'object') {
                 userResponses = {};
@@ -576,7 +803,7 @@
                 userResponses.contratos_para_monitoria = [];
             }
             if (!Array.isArray(userResponses.processos_vinculados)) {
-                userResponses.processos_vinculados = [];
+                userResponses.processos_vinculados = coerceLegacyProcessCardList(userResponses.processos_vinculados);
             }
             if (!userResponses.hasOwnProperty('saved_entries_migrated')) {
                 userResponses.saved_entries_migrated = false;
@@ -585,7 +812,16 @@
                 userResponses.ativar_botao_monitoria = '';
             }
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
-                userResponses[SAVED_PROCESSOS_KEY] = [];
+                userResponses[SAVED_PROCESSOS_KEY] = coerceLegacyProcessCardList(userResponses[SAVED_PROCESSOS_KEY]);
+            }
+            if (
+                !userResponses.processos_vinculados.length &&
+                !userResponses[SAVED_PROCESSOS_KEY].length
+            ) {
+                const legacyFallbackCard = buildLegacyRootSummaryCard();
+                if (legacyFallbackCard) {
+                    userResponses[SAVED_PROCESSOS_KEY] = [legacyFallbackCard];
+                }
             }
 
             // normaliza contratos_para_monitoria como array de strings únicos
@@ -976,30 +1212,45 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 ? userResponses.processos_vinculados
                 : [];
 
-            const combined = savedCards.map((card, idx) => ({
-                ...card,
-                __savedIndex: idx,
-                __source: 'saved'
-            }));
+            const combined = [];
+            const seen = new Set();
+
+            savedCards.forEach((card, idx) => {
+                const normalizedCard = normalizeProcessCardForSummary(card);
+                if (!normalizedCard) {
+                    return;
+                }
+                const identity = getSummaryCardIdentity(normalizedCard, idx, 'saved');
+                if (seen.has(identity)) {
+                    return;
+                }
+                seen.add(identity);
+                combined.push({
+                    ...normalizedCard,
+                    __savedIndex: idx,
+                    __source: 'saved'
+                });
+            });
 
             if (!activeCards.length) {
                 return combined;
             }
 
-            activeCards.forEach(activeCard => {
-                if (!activeCard || !activeCard.cnj) return;
-
-                const alreadyIncluded = combined.some(card =>
-                    card && card.cnj && activeCard.cnj && String(card.cnj).trim() === String(activeCard.cnj).trim()
-                );
-
-                if (!alreadyIncluded) {
-                    combined.push({
-                        ...activeCard,
-                        __savedIndex: null,
-                        __source: 'active'
-                    });
+            activeCards.forEach((activeCard, idx) => {
+                const normalizedCard = normalizeProcessCardForSummary(activeCard);
+                if (!normalizedCard) {
+                    return;
                 }
+                const identity = getSummaryCardIdentity(normalizedCard, idx, 'active');
+                if (seen.has(identity)) {
+                    return;
+                }
+                seen.add(identity);
+                combined.push({
+                    ...normalizedCard,
+                    __savedIndex: null,
+                    __source: 'active'
+                });
             });
 
             return combined;
@@ -1060,6 +1311,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const fallbackKeys = [
                 'judicializado_pela_massa',
                 'cnj',
+                'propor_monitoria',
                 'tipo_de_acao',
                 'julgamento',
                 'transitado',
@@ -3371,13 +3623,16 @@ function formatCnjDigits(raw) {
 
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
+            ensureUserResponsesShape();
 
             const hasSavedCards = getSavedProcessCards().length > 0;
+            const hasActiveCards = Array.isArray(userResponses.processos_vinculados) && userResponses.processos_vinculados.length > 0;
             const hasGeneralSnapshot = Boolean(getGeneralCardSnapshot());
             if (
                 suppressGeneralSummaryUntilFirstAnswer &&
                 !userResponses.judicializado_pela_massa &&
                 !hasSavedCards &&
+                !hasActiveCards &&
                 !hasGeneralSnapshot
             ) {
                 return;
@@ -3386,9 +3641,6 @@ function formatCnjDigits(raw) {
             const $headerContainer = $('<div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px;"></div>');
             $headerContainer.append('<h3>Respostas da Análise</h3>');
             $formattedResponsesContainer.append($headerContainer);
-
-
-            ensureUserResponsesShape();
 
             const isCardPendingCompletion = (processo) => {
                 const cardType = processo && processo.analysis_type;
@@ -3408,12 +3660,14 @@ function formatCnjDigits(raw) {
                 generalSnapshot.contracts.length > 0 &&
                 !shouldSkipGeneralCard();
             const generalEligible = generalSnapshotReady;
-            const savedProcessCount = getSavedProcessCards().length;
+            const combinedCards = getCombinedProcessCardsForSummary();
+            const hasCombinedCards = Array.isArray(combinedCards) && combinedCards.length > 0;
             const temDadosRelevantes =
                 generalSnapshotReady ||
                 userResponses.judicializado_pela_massa ||
                 Object.keys(userResponses.contratos_status || {}).length > 0 ||
-                savedProcessCount > 0;
+                hasCombinedCards ||
+                hasActiveAnalysisResponses();
 
             if (!temDadosRelevantes) {
                 $formattedResponsesContainer.append(
@@ -3454,7 +3708,6 @@ function formatCnjDigits(raw) {
 
 	            /* ---------- Cards de Processos CNJ vinculados ---------- */
 
-	            const combinedCards = getCombinedProcessCardsForSummary();
 	            scheduleSnapshotTreePrefetch(combinedCards);
 	            const pendingCount = Array.isArray(combinedCards)
 	                ? combinedCards.filter(isCardPendingCompletion).length
