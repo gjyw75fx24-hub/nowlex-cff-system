@@ -2001,16 +2001,18 @@ def _show_filter_counts(request):
     show_counts = request.GET.get('show_counts')
     facets_flag = request.GET.get('_facets')
 
-    if show_counts in {'0', '1'}:
-        enabled = show_counts == '1'
+    if show_counts is not None:
+        normalized_show_counts = str(show_counts).strip().lower()
+        enabled = normalized_show_counts not in {'0', 'false', 'off', 'no'}
         try:
             request.session[FILTER_COUNTS_SESSION_KEY] = enabled
         except Exception:
             pass
         return enabled
 
-    if facets_flag in {'0', '1'}:
-        enabled = facets_flag == '1'
+    if '_facets' in request.GET:
+        normalized_facets = str(facets_flag or '1').strip().lower()
+        enabled = normalized_facets not in {'0', 'false', 'off', 'no'}
         try:
             request.session[FILTER_COUNTS_SESSION_KEY] = enabled
         except Exception:

@@ -639,14 +639,21 @@
         if (facetToggle) {
             facetToggle.style.cursor = 'pointer';
             const initialUrl = new URL(window.location.href);
+            const initialFacetsValue = (initialUrl.searchParams.get('_facets') || '1').toLowerCase();
             const initialEnabled =
-                initialUrl.searchParams.get('_facets') === '1' ||
+                (
+                    initialUrl.searchParams.has('_facets') &&
+                    !['0', 'false', 'off', 'no'].includes(initialFacetsValue)
+                ) ||
                 filterDiv.querySelectorAll('.filter-count').length > 0;
             facetToggle.textContent = initialEnabled ? 'Esconder contagem' : 'Mostrar contagem';
             facetToggle.addEventListener('click', (ev) => {
                 ev.preventDefault();
                 const url = new URL(window.location.href);
-                const enabled = url.searchParams.get('_facets') === '1';
+                const facetsValue = (url.searchParams.get('_facets') || '1').toLowerCase();
+                const enabled =
+                    url.searchParams.has('_facets') &&
+                    !['0', 'false', 'off', 'no'].includes(facetsValue);
                 if (enabled) {
                     url.searchParams.delete('_facets');
                 } else {
