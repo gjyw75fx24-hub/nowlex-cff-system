@@ -625,10 +625,7 @@ _original_app_index = admin.site.app_index
 
 def _app_index_redirect(request, app_label, extra_context=None):
     if app_label == "contratos":
-        redirect_url = (
-            reverse("admin:contratos_processojudicial_changelist")
-            + "?ord_prescricao=incluir&ord_ultima_edicao=recente"
-        )
+        redirect_url = reverse("admin:contratos_processojudicial_changelist")
         return HttpResponseRedirect(redirect_url)
     return _original_app_index(request, app_label, extra_context=extra_context)
 
@@ -2840,12 +2837,16 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
         # Se filtrando explicitamente por não judicializado, não aplicamos ordenação/filtro de prescrição
         if request.GET.get('nao_judicializado') is not None:
             return queryset
+        value = self.value()
+        # Modo "incluir prescritos": não adiciona cálculos extras.
+        if value == "incluir":
+            return queryset
         queryset = queryset.annotate(
             primeira_prescricao=models.Min('contratos__data_prescricao'),
         )
         # Ignora processos com todos os contratos prescritos enquanto o checkbox não está ativo
         today = timezone.now().date()
-        if self.value() != "incluir":
+        if value != "incluir":
             nao_prescrito_q = (
                 models.Q(contratos__data_prescricao__gte=today) |
                 models.Q(contratos__data_prescricao__isnull=True)
@@ -2855,25 +2856,25 @@ class PrescricaoOrderFilter(admin.SimpleListFilter):
             ).filter(
                 contratos_nao_prescritos__gt=0
             )
-        # Converte a diferença para segundos para usar ABS numérico (evita ABS de interval no Postgres)
-        queryset = queryset.annotate(
-            distancia_segundos=Abs(
-                models.Func(
-                    models.F('primeira_prescricao') - Now(),
-                    function="DATE_PART",
-                    template="DATE_PART('epoch', %(expressions)s)",
-                    output_field=FloatField(),
+        if value in {"az", "za"}:
+            # Converte a diferença para segundos para usar ABS numérico (evita ABS de interval no Postgres)
+            queryset = queryset.annotate(
+                distancia_segundos=Abs(
+                    models.Func(
+                        models.F('primeira_prescricao') - Now(),
+                        function="DATE_PART",
+                        template="DATE_PART('epoch', %(expressions)s)",
+                        output_field=FloatField(),
+                    )
                 )
+            ).annotate(
+                distancia_prescricao=models.F('distancia_segundos')
             )
-        )
-        queryset = queryset.annotate(
-            distancia_prescricao=models.F('distancia_segundos')
-        )
-        if self.value() == "az":
+        if value == "az":
             return queryset.order_by(models.F('distancia_prescricao').asc(nulls_last=True), 'pk')
-        if self.value() == "za":
+        if value == "za":
             return queryset.order_by(models.F('distancia_prescricao').desc(nulls_last=True), '-pk')
-        if self.value() == "clear":
+        if value == "clear":
             return queryset
         # Default: sem filtro especial
         return queryset
@@ -3858,6 +3859,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'intersection_carteira_a',
             'intersection_carteira_b',
             'show_counts',
+            'ord_prescricao',
+            'ord_ultima_edicao',
         ):
             params.pop(key, None)
         params.pop('aprovacao', None)
@@ -3988,6 +3991,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = filter_processos_queryset_for_user(qs, request.user)
         qs = self._apply_intersection_pair_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
+        order_filter = request.GET.get('ord_ultima_edicao')
+        if order_filter not in {'recente', 'antigo'}:
+            return qs
         ct = ContentType.objects.get_for_model(ProcessoJudicial)
         last_logs = LogEntry.objects.filter(
             content_type=ct,
