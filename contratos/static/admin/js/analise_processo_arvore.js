@@ -2244,10 +2244,31 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                 console.log('Respostas salvas:', savedResponses);
 
+                const processoListKey = getProcessoVinculadoQuestionKey();
+                const reservedResponseKeys = new Set([
+                    'processos_vinculados',
+                    SAVED_PROCESSOS_KEY,
+                    'selected_analysis_cards',
+                    'contratos_status',
+                    'general_card',
+                    '_editing_card_index',
+                    '__savedIndex',
+                    '__source'
+                ]);
+                if (processoListKey) {
+                    reservedResponseKeys.add(processoListKey);
+                }
+
                 Object.keys(savedResponses).forEach(key => {
+                    if (reservedResponseKeys.has(key)) {
+                        return;
+                    }
                     userResponses[key] = deepClone(savedResponses[key]);
                     console.log(`Carregando: ${key} =`, savedResponses[key]);
                 });
+
+                // Garante que a pergunta PROCESSO_VINCULADO use somente o card em edição.
+                syncProcessoVinculadoResponseKey(processoListKey);
 
                 if (isMonitoria) {
                     const contratoArray = parseContractsField(cardData.contratos);
