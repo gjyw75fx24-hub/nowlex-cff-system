@@ -640,22 +640,16 @@
             facetToggle.style.cursor = 'pointer';
             const initialUrl = new URL(window.location.href);
             const initialEnabled =
-                initialUrl.searchParams.get('show_counts') === '1' ||
                 initialUrl.searchParams.get('_facets') === '1' ||
                 filterDiv.querySelectorAll('.filter-count').length > 0;
             facetToggle.textContent = initialEnabled ? 'Esconder contagem' : 'Mostrar contagem';
             facetToggle.addEventListener('click', (ev) => {
                 ev.preventDefault();
                 const url = new URL(window.location.href);
-                const enabled =
-                    url.searchParams.get('show_counts') === '1' ||
-                    url.searchParams.get('_facets') === '1';
+                const enabled = url.searchParams.get('_facets') === '1';
                 if (enabled) {
-                    url.searchParams.set('show_counts', '0');
                     url.searchParams.delete('_facets');
                 } else {
-                    url.searchParams.set('show_counts', '1');
-                    // Mantém _facets para compatibilidade com o admin nativo.
                     url.searchParams.set('_facets', '1');
                 }
                 window.location.href = url.pathname + url.search;

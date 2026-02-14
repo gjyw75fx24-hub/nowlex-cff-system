@@ -3855,6 +3855,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             '_skip_saved_filters',
             'intersection_carteira_a',
             'intersection_carteira_b',
+            'show_counts',
         ):
             params.pop(key, None)
         params.pop('aprovacao', None)
@@ -3862,6 +3863,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def _handle_saved_filters(self, request):
         stored = request.session.get(self.FILTER_SESSION_KEY)
+        if stored:
+            sanitized_stored = self._sanitize_filter_qs(stored)
+            if sanitized_stored != stored:
+                if sanitized_stored:
+                    request.session[self.FILTER_SESSION_KEY] = sanitized_stored
+                else:
+                    request.session.pop(self.FILTER_SESSION_KEY, None)
+            stored = sanitized_stored or None
         skip = request.session.pop(self.FILTER_SKIP_KEY, False)
         if request.GET.get('nao_judicializado') is not None:
             request.session.pop(self.FILTER_SESSION_KEY, None)
@@ -3887,6 +3896,25 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         elif request.GET and not request.GET.get('_changelist_filters'):
             request.session.pop(self.FILTER_SESSION_KEY, None)
             request.session[self.FILTER_SKIP_KEY] = True
+        return None
+
+    def _normalize_show_counts_param(self, request):
+        """
+        Migra URLs antigas com `show_counts` para o parâmetro nativo `_facets`.
+        Evita que `show_counts` vire lookup inválido em versões antigas do changelist.
+        """
+        if request.method != 'GET' or 'show_counts' not in request.GET:
+            return None
+        params = request.GET.copy()
+        show_counts_value = params.get('show_counts')
+        if show_counts_value in {'0', '1'} and '_facets' not in params:
+            params['_facets'] = show_counts_value
+        params.pop('show_counts', None)
+        target_url = request.path
+        if params:
+            target_url = f"{target_url}?{params.urlencode()}"
+        if target_url != request.get_full_path():
+            return HttpResponseRedirect(target_url)
         return None
 
     def _get_filtered_carteira_id(self, request):
@@ -4768,6 +4796,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if params:
                 clean_url = f"{clean_url}?{params.urlencode()}"
             return HttpResponseRedirect(clean_url)
+        show_counts_redirect = self._normalize_show_counts_param(request)
+        if show_counts_redirect:
+            return show_counts_redirect
         redirect = self._handle_saved_filters(request)
         if redirect:
             return redirect
