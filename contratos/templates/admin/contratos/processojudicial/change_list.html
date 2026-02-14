@@ -638,41 +638,27 @@
         });
         if (facetToggle) {
             facetToggle.style.cursor = 'pointer';
+            const initialUrl = new URL(window.location.href);
+            const initialEnabled =
+                initialUrl.searchParams.get('show_counts') === '1' ||
+                initialUrl.searchParams.get('_facets') === '1' ||
+                filterDiv.querySelectorAll('.filter-count').length > 0;
+            facetToggle.textContent = initialEnabled ? 'Esconder contagem' : 'Mostrar contagem';
             facetToggle.addEventListener('click', (ev) => {
                 ev.preventDefault();
-
-                // Se já existem contagens renderizadas na página, apenas esconde/mostra via JS.
-                // Caso contrário, recarrega com `_facets=1` para o Django calcular as contagens.
-                const filterLinks = Array.from(filterDiv.querySelectorAll('li a'));
-                const countSpans = Array.from(filterDiv.querySelectorAll('.filter-count'));
-                const hasParenCounts = filterLinks.some(a => /\(\s*\d+\s*\)\s*$/.test((a.textContent || '').trim()));
-                const hasRenderedCounts = countSpans.length > 0 || hasParenCounts;
-
-                const stripParens = (text) => String(text || '').replace(/\s*\(\s*\d+\s*\)\s*$/, '').trim();
-                const areCountsHidden = () => {
-                    const anySpanVisible = countSpans.some(s => s.style.display !== 'none');
-                    if (countSpans.length) return !anySpanVisible;
-                    // Sem spans: considera oculto se nenhum link termina com (N)
-                    return !filterLinks.some(a => /\(\s*\d+\s*\)\s*$/.test((a.textContent || '').trim()));
-                };
-
-                if (!hasRenderedCounts) {
-                    const url = new URL(window.location.href);
-                    const enabled = url.searchParams.get('_facets') === '1';
-                    if (enabled) url.searchParams.delete('_facets');
-                    else url.searchParams.set('_facets', '1');
-                    window.location.href = url.pathname + url.search;
-                    return;
+                const url = new URL(window.location.href);
+                const enabled =
+                    url.searchParams.get('show_counts') === '1' ||
+                    url.searchParams.get('_facets') === '1';
+                if (enabled) {
+                    url.searchParams.set('show_counts', '0');
+                    url.searchParams.delete('_facets');
+                } else {
+                    url.searchParams.set('show_counts', '1');
+                    // Mantém _facets para compatibilidade com o admin nativo.
+                    url.searchParams.set('_facets', '1');
                 }
-
-                const hide = !areCountsHidden(); // se está visível, vamos esconder
-                countSpans.forEach(s => { s.style.display = hide ? 'none' : ''; });
-                filterLinks.forEach(a => {
-                    if (!a.dataset.fullText) a.dataset.fullText = (a.textContent || '').trim();
-                    const full = a.dataset.fullText || (a.textContent || '').trim();
-                    a.textContent = hide ? stripParens(full) : full;
-                });
-                facetToggle.textContent = hide ? 'Mostrar contagem' : 'Esconder contagem';
+                window.location.href = url.pathname + url.search;
             });
         }
 

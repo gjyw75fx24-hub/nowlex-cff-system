@@ -1994,8 +1994,36 @@ def _get_app_list(request, app_label=None):
 
 admin.site.get_app_list = _get_app_list
 
+FILTER_COUNTS_SESSION_KEY = "processo_show_filter_counts"
+
+
 def _show_filter_counts(request):
-    return request.GET.get('show_counts') == '1' or request.GET.get('_facets') == '1'
+    show_counts = request.GET.get('show_counts')
+    facets_flag = request.GET.get('_facets')
+
+    if show_counts in {'0', '1'}:
+        enabled = show_counts == '1'
+        try:
+            request.session[FILTER_COUNTS_SESSION_KEY] = enabled
+        except Exception:
+            pass
+        return enabled
+
+    if facets_flag in {'0', '1'}:
+        enabled = facets_flag == '1'
+        try:
+            request.session[FILTER_COUNTS_SESSION_KEY] = enabled
+        except Exception:
+            pass
+        return enabled
+
+    try:
+        if FILTER_COUNTS_SESSION_KEY in request.session:
+            return bool(request.session.get(FILTER_COUNTS_SESSION_KEY))
+    except Exception:
+        pass
+
+    return False
 
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
