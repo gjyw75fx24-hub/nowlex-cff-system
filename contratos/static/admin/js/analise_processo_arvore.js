@@ -1150,6 +1150,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             delete snapshotResponses.awaiting_supervision_confirm;
             delete snapshotResponses.barrado;
             delete snapshotResponses.processos_vinculados;
+            const analysisAuthor = getCurrentAnalysisAuthorName();
             return {
                 cnj: formattedCnj || 'Não informado',
                 contratos: contractIds,
@@ -1157,7 +1158,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 supervisionado,
                 supervisor_status,
                 awaiting_supervision_confirm,
-                barrado
+                barrado,
+                analysis_author: analysisAuthor
             };
         }
 
@@ -1198,6 +1200,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 supervisor_status: processo.supervisor_status || 'pendente',
                 awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
                 barrado,
+                analysis_author: resolveCardAnalysisAuthor(processo),
                 general_card_snapshot: false
             };
         }
@@ -1309,6 +1312,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
 
             const timestamp = new Date().toISOString();
+            const currentAnalysisAuthor = getCurrentAnalysisAuthorName();
             const analysisTypeSnapshot = activeAnalysisType && activeAnalysisType.id != null ? {
                 id: activeAnalysisType.id,
                 nome: activeAnalysisType.nome,
@@ -1330,6 +1334,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if (analysisTypeSnapshot) {
                     snapshotToUpdate.analysis_type = analysisTypeSnapshot;
                 }
+                snapshotToUpdate.analysis_author = resolveCardAnalysisAuthor(
+                    snapshotToUpdate,
+                    currentAnalysisAuthor
+                );
                 snapshotToUpdate.general_card_snapshot =
                     savedCards[editingIndex].general_card_snapshot || false;
                 savedCards[editingIndex] = snapshotToUpdate;
@@ -1341,6 +1349,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if (analysisTypeSnapshot) {
                     snapshot.analysis_type = analysisTypeSnapshot;
                 }
+                snapshot.analysis_author = resolveCardAnalysisAuthor(
+                    snapshot,
+                    currentAnalysisAuthor
+                );
                 appendProcessCardToHistory(snapshot);
             });
 
@@ -2464,6 +2476,84 @@ function formatCnjDigits(raw) {
          * Resumo da análise (cards)
          * ======================================================= */
 
+        function getCurrentAnalysisAuthorName() {
+            const fromSessionUser = String(window.__analise_username || '').trim();
+            if (fromSessionUser) {
+                return fromSessionUser;
+            }
+            const fromWidget = String($responseField.data('analise-updated-by') || '').trim();
+            return fromWidget;
+        }
+
+        function resolveCardAnalysisAuthor(processo, fallbackAuthor = '') {
+            if (processo && typeof processo === 'object') {
+                const candidates = [
+                    processo.analysis_author,
+                    processo.analise_autor,
+                    processo.updated_by,
+                    processo.supervisor_observacoes_autor
+                ];
+                for (const candidate of candidates) {
+                    const normalized = String(candidate || '').trim();
+                    if (normalized) {
+                        return normalized;
+                    }
+                }
+            }
+            const normalizedFallback = String(fallbackAuthor || '').trim();
+            if (normalizedFallback) {
+                return normalizedFallback;
+            }
+            return getCurrentAnalysisAuthorName();
+        }
+
+        function resolveCardAnalysisDateRaw(processo, fallbackDateRaw = '') {
+            if (processo && typeof processo === 'object') {
+                const candidates = [
+                    processo.updated_at,
+                    processo.saved_at,
+                    processo.updatedAt,
+                    processo.savedAt
+                ];
+                for (const candidate of candidates) {
+                    const normalized = String(candidate || '').trim();
+                    if (normalized) {
+                        return normalized;
+                    }
+                }
+            }
+            const normalizedFallback = String(fallbackDateRaw || '').trim();
+            return normalizedFallback;
+        }
+
+        function formatAnalysisDateOnly(rawValue) {
+            const raw = String(rawValue || '').trim();
+            if (!raw) {
+                return '';
+            }
+            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                return formatDateIsoToBr(raw);
+            }
+            const date = new Date(raw);
+            if (Number.isNaN(date.getTime())) {
+                return '';
+            }
+            const pad = (value) => String(value).padStart(2, '0');
+            return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+        }
+
+        function buildAnalysisByline(authorName, rawDate) {
+            const author = String(authorName || '').trim();
+            if (!author) {
+                return '';
+            }
+            const formattedDate = formatAnalysisDateOnly(rawDate);
+            if (formattedDate) {
+                return `Analisado por: ${author} em ${formattedDate}`;
+            }
+            return `Analisado por: ${author}`;
+        }
+
         function buildDateSpan(updatedAtRaw, updatedBy) {
             if (!updatedAtRaw) return null;
             const updatedAt = new Date(updatedAtRaw);
@@ -3401,10 +3491,20 @@ function formatCnjDigits(raw) {
                     const $cardVinculado = $('<div class="analise-summary-card"></div>');
                     const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
                     const $bodyVinculado = $('<div class="analise-summary-card-body"></div>');
-
-                    $headerVinculado.append(
-                        `<span>Processo CNJ: <strong>${snapshot.cnj}</strong></span>`
-                    );
+                    const cardAnalysisAuthor = resolveCardAnalysisAuthor(processo, updatedBy);
+                    const cardAnalysisDateRaw = resolveCardAnalysisDateRaw(processo, updatedAtRaw);
+                    const cardAnalysisByline = buildAnalysisByline(cardAnalysisAuthor, cardAnalysisDateRaw);
+                    const $titleColumnVinculado = $('<div class="analise-summary-card-title-column"></div>');
+                    if (cardAnalysisByline) {
+                        const $analysisAuthorByline = $('<small class="analise-summary-card-analyst"></small>');
+                        $analysisAuthorByline.text(cardAnalysisByline);
+                        $titleColumnVinculado.append($analysisAuthorByline);
+                    }
+                    const $cnjLine = $('<span class="analise-summary-card-cnj-line"></span>');
+                    $cnjLine.append('Processo CNJ: ');
+                    $cnjLine.append($('<strong></strong>').text(snapshot.cnj));
+                    $titleColumnVinculado.append($cnjLine);
+                    $headerVinculado.append($titleColumnVinculado);
                     const tipoAnaliseNome = processo && processo.analysis_type && processo.analysis_type.nome
                         ? String(processo.analysis_type.nome).trim()
                         : '';
@@ -3862,9 +3962,19 @@ function formatCnjDigits(raw) {
             const $card = $('<div class="analise-supervision-card"></div>');
             const $header = $('<div class="analise-supervision-card-header"></div>');
             const headerLabel = getProcessoCnjLabel(processo);
-            const $headerTitle = $(
-                `<span>Processo CNJ: <strong>${headerLabel}</strong></span>`
-            );
+            const $headerTitleColumn = $('<div class="analise-summary-card-title-column"></div>');
+            const cardAnalysisAuthor = resolveCardAnalysisAuthor(processo);
+            const cardAnalysisDateRaw = resolveCardAnalysisDateRaw(processo);
+            const cardAnalysisByline = buildAnalysisByline(cardAnalysisAuthor, cardAnalysisDateRaw);
+            if (cardAnalysisByline) {
+                const $analysisAuthorByline = $('<small class="analise-summary-card-analyst"></small>');
+                $analysisAuthorByline.text(cardAnalysisByline);
+                $headerTitleColumn.append($analysisAuthorByline);
+            }
+            const $headerTitle = $('<span class="analise-summary-card-cnj-line"></span>');
+            $headerTitle.append('Processo CNJ: ');
+            $headerTitle.append($('<strong></strong>').text(headerLabel));
+            $headerTitleColumn.append($headerTitle);
             const $statusBadge = $('<span class="analise-supervision-status-badge"></span>');
 
             const updateStatusBadge = (status) => {
@@ -3874,7 +3984,7 @@ function formatCnjDigits(raw) {
                 $statusBadge.addClass(SUPERVISION_STATUS_CLASSES[status]);
             };
 
-            $header.append($headerTitle);
+            $header.append($headerTitleColumn);
             $header.append($statusBadge);
             $card.append($header);
 
@@ -5063,6 +5173,7 @@ function formatCnjDigits(raw) {
                     tipo_de_acao_respostas: {},
                     supervisionado: false,
                     supervisor_status: 'pendente',
+                    analysis_author: getCurrentAnalysisAuthorName(),
                     barrado: {
                         ativo: false,
                         inicio: null,
@@ -5131,6 +5242,7 @@ function formatCnjDigits(raw) {
                     tipo_de_acao_respostas: {},
                     supervisionado: false,
                     supervisor_status: 'pendente',
+                    analysis_author: getCurrentAnalysisAuthorName(),
                     barrado: {
                         ativo: false,
                         inicio: null,
@@ -5666,6 +5778,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                             },
                             supervisionado: true,
                             supervisor_status: 'pendente',
+                            analysis_author: getCurrentAnalysisAuthorName(),
                             barrado: { ativo: false, inicio: null, retorno_em: null },
                             awaiting_supervision_confirm: false,
                             analysis_type: activeAnalysisType && activeAnalysisType.id != null ? {

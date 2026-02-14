@@ -3484,10 +3484,15 @@ class AnaliseProcessoInline(NoRelatedLinksMixin, admin.StackedInline): # Usando 
 
 class ProcessoJudicialChangeList(ChangeList):
     """
-    Remove lookup params customizados de interseção do fluxo padrão do Django admin.
-    Esses params são consumidos no get_queryset customizado do ModelAdmin.
+    Remove lookup params customizados do fluxo padrão do Django admin.
+    Esses params são consumidos por lógica própria e não correspondem
+    a campos reais de ProcessoJudicial.
     """
-    CUSTOM_INTERSECTION_PARAMS = ('intersection_carteira_a', 'intersection_carteira_b')
+    CUSTOM_INTERSECTION_PARAMS = (
+        'intersection_carteira_a',
+        'intersection_carteira_b',
+        'show_counts',
+    )
 
     def get_filters_params(self, params=None):
         lookup_params = super().get_filters_params(params=params)

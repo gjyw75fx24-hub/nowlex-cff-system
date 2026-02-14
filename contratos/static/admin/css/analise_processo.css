@@ -80,6 +80,28 @@
     color: #333;
 }
 
+.analise-summary-card-title-column {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+
+.analise-summary-card-analyst {
+    display: block;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 500;
+    color: #64748b;
+}
+
+.analise-summary-card-cnj-line {
+    font-size: 14px;
+    color: #555;
+    margin-right: 10px;
+}
+
 .analise-type-badge {
     margin-left: 8px;
     padding: 2px 8px;
