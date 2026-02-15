@@ -1384,6 +1384,64 @@ a.historylink {
     margin-left: auto;
 }
 
+@media (min-width: 1200px) {
+    .analise-summary-card-header {
+        padding: 8px 12px;
+        gap: 6px;
+    }
+    .analise-summary-card-header .analise-summary-card-title-column {
+        gap: 1px;
+        flex: 1 1 auto;
+        min-width: 0;
+        margin-right: 2px;
+    }
+    .analise-summary-card-header .analise-summary-card-analyst {
+        font-size: 0.67rem;
+        line-height: 1.1;
+    }
+    .analise-summary-card-header .analise-summary-card-cnj-line {
+        font-size: 0.79rem;
+        line-height: 1.1;
+        white-space: nowrap;
+        margin-right: 4px;
+    }
+    .analise-summary-card-header .analise-type-badge,
+    .analise-summary-card-header .analise-completar-badge {
+        margin-left: 4px;
+        padding: 1px 7px;
+        font-size: 0.67rem;
+        line-height: 1.25;
+    }
+    .analise-summary-card-header .analise-hashtag-postit {
+        margin-left: 4px;
+        padding: 1px 8px;
+        font-size: 0.69rem;
+        line-height: 1.25;
+    }
+    .analise-summary-card-header button {
+        margin-left: 6px;
+        padding: 4px 8px;
+    }
+    .analise-summary-card-header .analise-toggle-btn {
+        min-width: 34px;
+        line-height: 1;
+        padding: 3px 8px;
+    }
+    .analise-summary-card-header .analise-summary-card-copy {
+        font-size: 0.9rem;
+        line-height: 1.1;
+    }
+    .analise-summary-card-header .analise-summary-card-delete {
+        font-size: 1rem;
+        line-height: 1;
+    }
+    .analise-summary-card-header .analise-summary-card-edit {
+        font-size: 0.9rem;
+        line-height: 1.1;
+        padding: 3px 6px;
+    }
+}
+
 .dynamic-andamento.andamento-duplicate-marked {
     display: none;
 }

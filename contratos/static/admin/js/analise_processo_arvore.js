@@ -2724,40 +2724,103 @@ function formatCnjDigits(raw) {
             return currencyFormatter.format(numeric);
         }
 
-        function updateContractCustas(contractId, numericValue) {
-            if (!contractId) return;
-            const wrapper = document.querySelector(`.contrato-item-wrapper[data-contrato-id="${contractId}"]`);
-            if (wrapper) {
-                wrapper.setAttribute('data-custas', numericValue != null ? numericValue : '');
+        function findContractInlineRow(contractIdOrNumber) {
+            const candidate = String(contractIdOrNumber || '').trim();
+            if (!candidate) {
+                return null;
             }
-            const idInput = document.querySelector(`.dynamic-contratos input[name$="-id"][value="${contractId}"]`);
-            if (!idInput) return;
-            const inlineRow = idInput.closest('.dynamic-contratos');
-            if (!inlineRow) return;
-            const custasInput = inlineRow.querySelector('input[name$="-custas"]');
-            if (!custasInput) return;
-            const formatted = numericValue == null ? '' : formatCurrency(numericValue);
-            custasInput.value = formatted;
-            custasInput.dispatchEvent(new Event('input', { bubbles: true }));
-            custasInput.dispatchEvent(new Event('change', { bubbles: true }));
+            const directIdInput = document.querySelector(`.dynamic-contratos input[name$="-id"][value="${candidate}"]`);
+            if (directIdInput) {
+                return directIdInput.closest('.dynamic-contratos');
+            }
+            const normalized = candidate.replace(/\D/g, '');
+            const rows = Array.from(document.querySelectorAll('.dynamic-contratos'));
+            for (const row of rows) {
+                const rowId = String(row.querySelector('input[name$="-id"]')?.value || '').trim();
+                const rowNumeroContrato = String(
+                    row.querySelector('input[name$="-numero_contrato"]')?.value || ''
+                ).trim();
+                if (rowId && rowId === candidate) {
+                    return row;
+                }
+                if (rowNumeroContrato && (rowNumeroContrato === candidate || rowNumeroContrato.replace(/\D/g, '') === normalized)) {
+                    return row;
+                }
+            }
+            return null;
         }
 
-        function updateContractCustas(contractId, numericValue) {
-            if (!contractId) return;
-            const wrapper = document.querySelector(`.contrato-item-wrapper[data-contrato-id="${contractId}"]`);
+        function getContractSaldoAtualizadoFromRow(row) {
+            if (!row) {
+                return null;
+            }
+            const valorCausaInput = row.querySelector('input[name$="-valor_causa"]');
+            return parseCurrencyValue(valorCausaInput ? valorCausaInput.value : null);
+        }
+
+        function waitForContractSaldoAtualizado(row, previousValue, timeoutMs = 12000) {
+            return new Promise(resolve => {
+                const startedAt = Date.now();
+                const poll = () => {
+                    const currentValue = getContractSaldoAtualizadoFromRow(row);
+                    const nowlexBtn = row ? row.querySelector('.nowlex-valor-btn') : null;
+                    const finished = !nowlexBtn || !nowlexBtn.disabled;
+                    const hasPositiveValue = Number.isFinite(currentValue) && currentValue > 0;
+
+                    if (hasPositiveValue && (previousValue == null || currentValue !== previousValue || previousValue <= 0)) {
+                        resolve(currentValue);
+                        return;
+                    }
+                    if (finished && Date.now() - startedAt > 1200) {
+                        resolve(Number.isFinite(currentValue) ? currentValue : null);
+                        return;
+                    }
+                    if (Date.now() - startedAt >= timeoutMs) {
+                        resolve(Number.isFinite(currentValue) ? currentValue : null);
+                        return;
+                    }
+                    setTimeout(poll, 250);
+                };
+                setTimeout(poll, 250);
+            });
+        }
+
+        async function ensureContractSaldoAtualizado(contractIdOrNumber) {
+            const row = findContractInlineRow(contractIdOrNumber);
+            if (!row) {
+                return null;
+            }
+            const currentValue = getContractSaldoAtualizadoFromRow(row);
+            if (Number.isFinite(currentValue) && currentValue > 0) {
+                return currentValue;
+            }
+            const nowlexBtn = row.querySelector('.nowlex-valor-btn');
+            if (!nowlexBtn || nowlexBtn.disabled) {
+                return currentValue;
+            }
+            nowlexBtn.click();
+            return waitForContractSaldoAtualizado(row, currentValue);
+        }
+
+        function updateContractCustas(contractIdOrNumber, numericValue) {
+            if (!contractIdOrNumber) return false;
+            const inlineRow = findContractInlineRow(contractIdOrNumber);
+            if (!inlineRow) return false;
+            const resolvedId = String(inlineRow.querySelector('input[name$="-id"]')?.value || '').trim();
+            const wrapperKey = resolvedId || String(contractIdOrNumber).trim();
+            const wrapper = wrapperKey
+                ? document.querySelector(`.contrato-item-wrapper[data-contrato-id="${wrapperKey}"]`)
+                : null;
             if (wrapper) {
                 wrapper.setAttribute('data-custas', numericValue != null ? numericValue : '');
             }
-            const idInput = document.querySelector(`.dynamic-contratos input[name$="-id"][value="${contractId}"]`);
-            if (!idInput) return;
-            const inlineRow = idInput.closest('.dynamic-contratos');
-            if (!inlineRow) return;
             const custasInput = inlineRow.querySelector('input[name$="-custas"]');
-            if (!custasInput) return;
+            if (!custasInput) return false;
             const formatted = numericValue == null ? '' : formatCurrency(numericValue);
             custasInput.value = formatted;
             custasInput.dispatchEvent(new Event('input', { bubbles: true }));
             custasInput.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
         }
 
         function parseContractsField(value) {
@@ -3506,11 +3569,20 @@ function formatCnjDigits(raw) {
                 0
             );
             if (!isPassivasSnapshot) {
+                const contratosCount = contratoInfos.length;
+                const isSummed = contratosCount > 1;
+                const contratosCountLabel = `${contratosCount} ${contratosCount === 1 ? 'contrato' : 'contratos'}`;
+                const saldoDevedorLabel = isSummed
+                    ? `Saldo devedor somado (${contratosCountLabel})`
+                    : 'Saldo devedor';
+                const saldoAtualizadoLabel = isSummed
+                    ? `Saldo atualizado somado (${contratosCountLabel})`
+                    : 'Saldo atualizado';
                 $ulDetalhes.append(
-                    `<li><strong>Saldo devedor:</strong> ${formatCurrency(totalDevido)}</li>`
+                    `<li><strong>${saldoDevedorLabel}:</strong> ${formatCurrency(totalDevido)}</li>`
                 );
                 $ulDetalhes.append(
-                    `<li><strong>Saldo atualizado:</strong> ${formatCurrency(totalCausa)}</li>`
+                    `<li><strong>${saldoAtualizadoLabel}:</strong> ${formatCurrency(totalCausa)}</li>`
                 );
             } else {
                 const valorCausaProcesso = parseCurrencyValue(processo?.valor_causa);
@@ -3523,11 +3595,13 @@ function formatCnjDigits(raw) {
                 );
             }
             const firstContractId = contratoInfos.length ? contratoInfos[0].id : null;
+            const shouldSyncCustasToInline = contratoInfos.length === 1;
             const $custasInput = $('<input type="text" class="analise-custas-input">');
             $custasInput.val(formatCurrency(totalCustas));
             $custasInput.on('change', () => {
                 const numeric = parseCurrencyValue($custasInput.val());
                 $custasInput.val(formatCurrency(numeric));
+                if (!shouldSyncCustasToInline) return;
                 if (numeric != null && !firstContractId) return;
                 updateContractCustas(firstContractId, numeric);
             });
@@ -3535,11 +3609,85 @@ function formatCnjDigits(raw) {
             $custasLine.append($custasInput);
             if (!isPassivasSnapshot) {
                 const $calc2Btn = $('<button type="button" class="analise-custas-calc-btn" title="Calcular 2% do saldo atualizado">Calc 2%</button>');
-                $calc2Btn.on('click', () => {
-                    const saldoAtualizado = Number.isFinite(totalCausa) ? totalCausa : 0;
-                    const custasCalculadas = Math.round((saldoAtualizado * 0.02) * 100) / 100;
-                    $custasInput.val(formatCurrency(custasCalculadas));
-                    $custasInput.trigger('change');
+                $calc2Btn.on('click', async () => {
+                    if ($calc2Btn.prop('disabled')) {
+                        return;
+                    }
+                    const originalButtonText = $calc2Btn.text();
+                    $calc2Btn.prop('disabled', true).text('Calc...');
+                    try {
+                        const targetInfosRaw = monitoriaInfos.length ? monitoriaInfos : contratoInfos;
+                        const seenTargets = new Set();
+                        const targetInfos = targetInfosRaw.filter(info => {
+                            const key = String((info && (info.id || info.numero_contrato)) || '').trim();
+                            if (!key || seenTargets.has(key)) {
+                                return false;
+                            }
+                            seenTargets.add(key);
+                            return true;
+                        });
+                        if (!targetInfos.length) {
+                            showCffSystemDialog('Não há contratos selecionados para calcular custas.', 'warning');
+                            return;
+                        }
+                        const contratosSemSaldoAtualizado = [];
+                        let totalCustasCalculadas = 0;
+                        for (const contratoInfo of targetInfos) {
+                            const contractRef = contratoInfo && (contratoInfo.id || contratoInfo.numero_contrato);
+                            const contractLabel = contratoInfo && (contratoInfo.numero_contrato || String(contractRef));
+                            if (!contractRef) {
+                                if (contractLabel) {
+                                    contratosSemSaldoAtualizado.push(contractLabel);
+                                }
+                                continue;
+                            }
+                            let saldoAtualizadoContrato = Number(contratoInfo.valor_causa);
+                            if (!(Number.isFinite(saldoAtualizadoContrato) && saldoAtualizadoContrato > 0)) {
+                                saldoAtualizadoContrato = await ensureContractSaldoAtualizado(contractRef);
+                            }
+                            if (
+                                !(Number.isFinite(saldoAtualizadoContrato) && saldoAtualizadoContrato > 0) &&
+                                contratoInfo.numero_contrato &&
+                                String(contratoInfo.numero_contrato) !== String(contractRef)
+                            ) {
+                                saldoAtualizadoContrato = await ensureContractSaldoAtualizado(contratoInfo.numero_contrato);
+                            }
+                            if (!(Number.isFinite(saldoAtualizadoContrato) && saldoAtualizadoContrato > 0)) {
+                                const refreshedInfo =
+                                    fetchContractInfoFromDOM(contractRef) ||
+                                    fetchContractInfoFromDOM(contratoInfo.numero_contrato);
+                                saldoAtualizadoContrato = Number(refreshedInfo && refreshedInfo.valor_causa);
+                            }
+                            if (!(Number.isFinite(saldoAtualizadoContrato) && saldoAtualizadoContrato > 0)) {
+                                if (contractLabel) {
+                                    contratosSemSaldoAtualizado.push(contractLabel);
+                                }
+                                continue;
+                            }
+                            const custasContrato = Math.round((saldoAtualizadoContrato * 0.02) * 100) / 100;
+                            const updated =
+                                updateContractCustas(contractRef, custasContrato) ||
+                                updateContractCustas(contratoInfo.numero_contrato, custasContrato);
+                            if (!updated) {
+                                if (contractLabel) {
+                                    contratosSemSaldoAtualizado.push(contractLabel);
+                                }
+                                continue;
+                            }
+                            totalCustasCalculadas += custasContrato;
+                        }
+                        $custasInput.val(formatCurrency(totalCustasCalculadas));
+                        $custasInput.trigger('input');
+                        if (contratosSemSaldoAtualizado.length) {
+                            const pendentes = Array.from(new Set(contratosSemSaldoAtualizado)).join(', ');
+                            showCffSystemDialog(
+                                `Não foi possível calcular custas para: ${pendentes}. Verifique o saldo atualizado (use "Só valor" se necessário).`,
+                                'warning'
+                            );
+                        }
+                    } finally {
+                        $calc2Btn.prop('disabled', false).text(originalButtonText);
+                    }
                 });
                 $custasLine.append($calc2Btn);
             }
