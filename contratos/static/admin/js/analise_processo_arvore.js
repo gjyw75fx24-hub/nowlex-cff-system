@@ -2208,6 +2208,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const proceedRestore = () => {
                 console.log('Card encontrado:', cardData);
 
+                loadContratosFromDOM();
                 clearTreeResponsesForNewAnalysis();
                 userResponses.processos_vinculados = [deepClone(cardData)];
                 syncProcessoVinculadoResponseKey();
@@ -2282,7 +2283,18 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                 if (isMonitoria) {
                     const contratoArray = parseContractsField(cardData.contratos);
-                    userResponses.contratos_para_monitoria = contratoArray;
+                    const contratoArrayNormalizado = Array.from(
+                        new Set(
+                            contratoArray
+                                .map(resolveContratoCandidate)
+                                .filter(Boolean)
+                                .map(item => item.id)
+                        )
+                    );
+                    userResponses.contratos_para_monitoria =
+                        contratoArrayNormalizado.length > 0
+                            ? contratoArrayNormalizado
+                            : contratoArray;
                     userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
                 }
 
@@ -2534,6 +2546,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ensureUserResponsesShape();
             restoreLocalResponsesIfNewer();
             migrateProcessCardsIfNeeded();
+            loadContratosFromDOM();
             console.log(
                 "DEBUG A_P_A: loadExistingResponses - userResponses APÓS carregarః",
                 JSON.stringify(userResponses)
@@ -2750,13 +2763,56 @@ function formatCnjDigits(raw) {
 
         function parseContractsField(value) {
             if (!value) return [];
+
+            const normalizeList = (items) => {
+                const seen = new Set();
+                return (items || [])
+                    .map(item => String(item == null ? '' : item).trim())
+                    .filter(Boolean)
+                    .map(item => item.replace(/^['"]+|['"]+$/g, '').trim())
+                    .filter(Boolean)
+                    .filter(item => {
+                        if (seen.has(item)) return false;
+                        seen.add(item);
+                        return true;
+                    });
+            };
+
             if (Array.isArray(value)) {
-                return value.map(item => String(item).trim()).filter(Boolean);
+                return normalizeList(value);
             }
-            return String(value)
-                .split(',')
-                .map(part => part.trim())
-                .filter(Boolean);
+
+            if (typeof value === 'object') {
+                if (Array.isArray(value.contratos)) {
+                    return normalizeList(value.contratos);
+                }
+                if (Array.isArray(value.values)) {
+                    return normalizeList(value.values);
+                }
+                if (Object.prototype.hasOwnProperty.call(value, 'id')) {
+                    return normalizeList([value.id]);
+                }
+                return normalizeList(Object.values(value));
+            }
+
+            const raw = String(value).trim();
+            if (!raw) return [];
+
+            if ((raw.startsWith('[') && raw.endsWith(']')) || (raw.startsWith('{') && raw.endsWith('}'))) {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parseContractsField(parsed);
+                } catch (error) {
+                    // segue para parsing textual
+                }
+            }
+
+            return normalizeList(
+                raw
+                    .split(/[;,]/)
+                    .map(part => part.trim())
+                    .map(part => part.replace(/^\[+|\]+$/g, '').trim())
+            );
         }
 
         function populateTreeFieldsFromResponses(responses) {
@@ -3867,6 +3923,9 @@ function formatCnjDigits(raw) {
         function displayFormattedResponses() {
             $formattedResponsesContainer.empty();
             ensureUserResponsesShape();
+            if (!Array.isArray(allAvailableContratos) || allAvailableContratos.length === 0) {
+                loadContratosFromDOM();
+            }
 
             const hasSavedCards = getSavedProcessCards().length > 0;
             const hasActiveCards = Array.isArray(userResponses.processos_vinculados) && userResponses.processos_vinculados.length > 0;
@@ -4583,72 +4642,149 @@ function formatCnjDigits(raw) {
         }
 
         function fetchContractInfoFromDOM(contractId) {
-            const idStr = String(contractId);
-            const $element = $(`.contrato-item-wrapper[data-contrato-id="${idStr}"]`).first();
-            if (!$element.length) {
+            const candidate = String(contractId || '').trim();
+            if (!candidate) {
                 return null;
             }
-            const numeroContrato = $element
-                .find('.contrato-numero')
-                .first()
-                .text()
-                .trim()
-                .split('\n')[0]
-                .trim();
-            const valorTotalRaw = $element.attr('data-valor-total');
-            const valorCausaRaw = $element.attr('data-valor-causa');
-            const custasRaw = $element.attr('data-custas');
-            return {
-                id: idStr,
-                numero_contrato: numeroContrato || `ID ${idStr}`,
-                is_prescrito: Boolean($element.data('is-prescrito')),
-                is_quitado: Boolean($element.data('is-quitado')),
-                valor_total_devido: parseDecimalValue(valorTotalRaw),
-                valor_causa: parseDecimalValue(valorCausaRaw),
-                custas: parseDecimalValue(custasRaw)
-            };
-        }
 
-        function loadContratosFromDOM() {
-            allAvailableContratos = [];
-            $('.contrato-item-wrapper').each(function () {
-                const $wrapper = $(this);
-                const rawId = $wrapper.data('contrato-id');
-                if (!rawId) return;
+            const normalizedCandidate = candidate.replace(/\D/g, '');
+            let $element = $(`.contrato-item-wrapper[data-contrato-id="${candidate}"]`).first();
+            if (!$element.length && normalizedCandidate) {
+                $element = $('.contrato-item-wrapper').filter(function () {
+                    const $wrapper = $(this);
+                    const rawId = String($wrapper.attr('data-contrato-id') || '').trim();
+                    const numero = String($wrapper.find('.contrato-numero').first().text() || '')
+                        .trim()
+                        .split('\n')[0]
+                        .trim();
+                    return rawId === candidate ||
+                        rawId.replace(/\D/g, '') === normalizedCandidate ||
+                        numero.replace(/\D/g, '') === normalizedCandidate;
+                }).first();
+            }
 
-                const contratoId = String(rawId);
-                const numeroContrato = $wrapper
+            if ($element.length) {
+                const resolvedId = String($element.attr('data-contrato-id') || candidate).trim();
+                const numeroContrato = $element
                     .find('.contrato-numero')
+                    .first()
                     .text()
                     .trim()
                     .split('\n')[0]
                     .trim();
-                const valorTotalRaw = $wrapper.attr('data-valor-total');
-                const valorCausaRaw = $wrapper.attr('data-valor-causa');
-                const custasRaw = $wrapper.attr('data-custas');
+                const valorTotalRaw = $element.attr('data-valor-total');
+                const valorCausaRaw = $element.attr('data-valor-causa');
+                const custasRaw = $element.attr('data-custas');
+                return {
+                    id: resolvedId || candidate,
+                    numero_contrato: numeroContrato || (resolvedId || candidate),
+                    is_prescrito: String($element.attr('data-is-prescrito') || '').toLowerCase() === 'true',
+                    is_quitado: String($element.attr('data-is-quitado') || '').toLowerCase() === 'true',
+                    valor_total_devido: parseDecimalValue(valorTotalRaw),
+                    valor_causa: parseDecimalValue(valorCausaRaw),
+                    custas: parseDecimalValue(custasRaw)
+                };
+            }
 
-                let isPrescrito = !!$wrapper.data('is-prescrito');
-                let isQuitado = !!$wrapper.data('is-quitado');
+            const $idInput = $('.dynamic-contratos input[name$="-id"]').filter(function () {
+                return String($(this).val() || '').trim() === candidate;
+            }).first();
+            if ($idInput.length) {
+                const $row = $idInput.closest('.dynamic-contratos');
+                const numeroContrato = String($row.find('input[name$="-numero_contrato"]').val() || '').trim();
+                return {
+                    id: candidate,
+                    numero_contrato: numeroContrato || candidate,
+                    is_prescrito: false,
+                    is_quitado: false,
+                    valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
+                    valor_causa: parseDecimalValue($row.find('input[name$="-valor_causa"]').val()),
+                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val())
+                };
+            }
 
-                // sobrescreve quitado pelo JSON
-                const statusMap = userResponses.contratos_status || {};
-                const st = statusMap[contratoId];
-                if (st && typeof st.quitado === 'boolean') {
-                    isQuitado = st.quitado;
+            return null;
+        }
+
+        function loadContratosFromDOM() {
+            const statusMap = userResponses.contratos_status || {};
+            const contractsById = new Map();
+
+            const upsertContract = (raw) => {
+                if (!raw || raw.id === undefined || raw.id === null || raw.id === '') {
+                    return;
                 }
-
-                if (contratoId && numeroContrato) {
-                    allAvailableContratos.push({
-                        id: contratoId,
-                        numero_contrato: numeroContrato,
-                        is_prescrito: isPrescrito,
-                        is_quitado: isQuitado,
-                        valor_total_devido: parseDecimalValue(valorTotalRaw),
-                        valor_causa: parseDecimalValue(valorCausaRaw),
-                        custas: parseDecimalValue(custasRaw)
-                    });
+                const contratoId = String(raw.id).trim();
+                if (!contratoId) {
+                    return;
                 }
+                const existing = contractsById.get(contratoId) || {};
+                const status = statusMap[contratoId] || {};
+                const numeroContrato = String(raw.numero_contrato || existing.numero_contrato || contratoId)
+                    .trim();
+
+                contractsById.set(contratoId, {
+                    id: contratoId,
+                    numero_contrato: numeroContrato || contratoId,
+                    is_prescrito: Boolean(
+                        raw.is_prescrito != null ? raw.is_prescrito : existing.is_prescrito
+                    ),
+                    is_quitado: typeof status.quitado === 'boolean'
+                        ? status.quitado
+                        : Boolean(raw.is_quitado != null ? raw.is_quitado : existing.is_quitado),
+                    valor_total_devido: raw.valor_total_devido != null
+                        ? raw.valor_total_devido
+                        : (existing.valor_total_devido != null ? existing.valor_total_devido : null),
+                    valor_causa: raw.valor_causa != null
+                        ? raw.valor_causa
+                        : (existing.valor_causa != null ? existing.valor_causa : null),
+                    custas: raw.custas != null
+                        ? raw.custas
+                        : (existing.custas != null ? existing.custas : null)
+                });
+            };
+
+            $('.contrato-item-wrapper').each(function () {
+                const $wrapper = $(this);
+                const rawId = String($wrapper.attr('data-contrato-id') || '').trim();
+                if (!rawId) {
+                    return;
+                }
+                const numeroContrato = $wrapper
+                    .find('.contrato-numero')
+                    .first()
+                    .text()
+                    .trim()
+                    .split('\n')[0]
+                    .trim();
+                upsertContract({
+                    id: rawId,
+                    numero_contrato: numeroContrato,
+                    is_prescrito: String($wrapper.attr('data-is-prescrito') || '').toLowerCase() === 'true',
+                    is_quitado: String($wrapper.attr('data-is-quitado') || '').toLowerCase() === 'true',
+                    valor_total_devido: parseDecimalValue($wrapper.attr('data-valor-total')),
+                    valor_causa: parseDecimalValue($wrapper.attr('data-valor-causa')),
+                    custas: parseDecimalValue($wrapper.attr('data-custas'))
+                });
             });
+
+            $('.dynamic-contratos').each(function () {
+                const $row = $(this);
+                const rowId = String($row.find('input[name$="-id"]').val() || '').trim();
+                if (!rowId) {
+                    return;
+                }
+                upsertContract({
+                    id: rowId,
+                    numero_contrato: String($row.find('input[name$="-numero_contrato"]').val() || '').trim(),
+                    valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
+                    valor_causa: parseDecimalValue($row.find('input[name$="-valor_causa"]').val()),
+                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val())
+                });
+            });
+
+            allAvailableContratos = Array.from(contractsById.values());
+
             console.log(
                 "DEBUG A_P_A: Contratos carregados do DOM (já considerando JSON.quitado):",
                 JSON.stringify(allAvailableContratos)
@@ -5903,6 +6039,18 @@ function formatCnjDigits(raw) {
             const $detailsBody = $details.find('.processo-contratos-details-body');
 
             const listaParaExibir = Array.isArray(allAvailableContratos) ? allAvailableContratos : [];
+            const contratosCardNormalizados = Array.from(
+                new Set(
+                    parseContractsField(cardData.contratos)
+                        .map(resolveContratoCandidate)
+                        .filter(Boolean)
+                        .map(item => item.id)
+                )
+            );
+            if (contratosCardNormalizados.length > 0) {
+                cardData.contratos = contratosCardNormalizados.slice();
+            }
+            const contratosCardSelecionados = parseContractsField(cardData.contratos);
 
             if (listaParaExibir.length === 0) {
                 $detailsBody.append(
@@ -5911,7 +6059,7 @@ function formatCnjDigits(raw) {
             } else {
                 listaParaExibir.forEach(contrato => {
                     const idStr = String(contrato.id);
-                    const isChecked = (cardData.contratos || [])
+                    const isChecked = contratosCardSelecionados
                         .map(String)
                         .includes(idStr);
 
