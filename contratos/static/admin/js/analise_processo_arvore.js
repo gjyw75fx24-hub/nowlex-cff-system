@@ -6133,11 +6133,52 @@ function formatCnjDigits(raw) {
         }
 
         function buildContractsLabel(ids) {
-            const contractNames = (ids || []).map(id => {
-                const contract = allAvailableContratos.find(c => String(c.id) === String(id));
-                return contract ? contract.numero_contrato : null;
-            }).filter(Boolean);
+            const contractNames = (ids || []).map(id => getContractLabelForId(id)).filter(Boolean);
             return contractNames.length > 0 ? contractNames.join(', ') : 'Nenhum contrato selecionado';
+        }
+
+        function resolveContratoCandidate(rawId) {
+            const candidate = String(rawId || '').trim();
+            if (!candidate) {
+                return null;
+            }
+            const byId = allAvailableContratos.find(c => String(c.id) === candidate);
+            const byNumber = allAvailableContratos.find(
+                c => String(c.numero_contrato || '').trim() === candidate
+            );
+            const contratoInfo = byId || byNumber;
+            if (!contratoInfo) {
+                return null;
+            }
+            return {
+                id: String(contratoInfo.id),
+                numero_contrato: String(contratoInfo.numero_contrato || contratoInfo.id),
+                is_prescrito: Boolean(contratoInfo.is_prescrito),
+                is_quitado: Boolean(contratoInfo.is_quitado)
+            };
+        }
+
+        function getSelectedContractIdsFromInfoCard() {
+            const selected = new Set();
+
+            const statusMap = userResponses.contratos_status || {};
+            Object.keys(statusMap).forEach(key => {
+                const status = statusMap[key];
+                if (status && status.selecionado) {
+                    selected.add(String(key));
+                }
+            });
+
+            document.querySelectorAll('.contrato-item-wrapper').forEach(wrapper => {
+                const contractId = String(wrapper.getAttribute('data-contrato-id') || '').trim();
+                if (!contractId) return;
+                const checkbox = wrapper.querySelector('input[type="checkbox"]');
+                if (checkbox && checkbox.checked) {
+                    selected.add(contractId);
+                }
+            });
+
+            return Array.from(selected);
         }
 
         function refreshMonitoriaHashtag($button, currentResponses) {
@@ -6169,22 +6210,47 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 
             const $selectorDiv = $('<div class="form-row field-contratos-monitoria"></div>');
 
-            const selectedInInfoCard = allAvailableContratos.filter(
-                c => userResponses.contratos_status[c.id] && userResponses.contratos_status[c.id].selecionado
-            );
-            const selection = currentResponses.contratos_para_monitoria || [];
+            const selectedInInfoCard = getSelectedContractIdsFromInfoCard();
+            const rawSelection = Array.isArray(currentResponses.contratos_para_monitoria)
+                ? currentResponses.contratos_para_monitoria
+                : [];
             const processo = (cardIndex !== null && cardIndex >= 0 && Array.isArray(userResponses.processos_vinculados))
                 ? userResponses.processos_vinculados[cardIndex] || null
                 : null;
 
-            // Conjunto final: mantém os já marcados e os selecionados no info-card
-            const contractCandidates = Array.from(new Set([
+            const normalizedSelection = Array.from(
+                new Set(
+                    rawSelection
+                        .map(resolveContratoCandidate)
+                        .filter(Boolean)
+                        .map(c => c.id)
+                )
+            );
+            currentResponses.contratos_para_monitoria = normalizedSelection;
+
+            // Conjunto final: mantém os já marcados e os selecionados no info-card,
+            // mas só renderiza candidatos que existem de fato no cadastro atual.
+            const rawCandidates = Array.from(new Set([
                 ...(processo && Array.isArray(processo.contratos) ? processo.contratos : []),
-                ...selection,
-                ...selectedInInfoCard.map(c => String(c.id)),
+                ...normalizedSelection,
+                ...selectedInInfoCard,
             ].map(id => String(id))));
 
-            if (contractCandidates.length === 0) {
+            const resolvedCandidates = [];
+            const seenCandidateIds = new Set();
+            rawCandidates.forEach(rawId => {
+                const resolved = resolveContratoCandidate(rawId);
+                if (!resolved) {
+                    return;
+                }
+                if (seenCandidateIds.has(resolved.id)) {
+                    return;
+                }
+                seenCandidateIds.add(resolved.id);
+                resolvedCandidates.push(resolved);
+            });
+
+            if (resolvedCandidates.length === 0) {
                 $selectorDiv.append(
                     '<p>Nenhum contrato selecionado para monitória.</p>'
                 );
@@ -6192,15 +6258,15 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 return;
             }
 
-            contractCandidates.forEach(function (idStr) {
-                const contratoInfo = allAvailableContratos.find(c => String(c.id) === idStr);
-                const isChecked = selection.includes(idStr);
-                const isDisabled = contratoInfo ? (contratoInfo.is_prescrito || contratoInfo.is_quitado) : false;
+            resolvedCandidates.forEach(function (contratoInfo) {
+                const idStr = String(contratoInfo.id);
+                const isChecked = normalizedSelection.includes(idStr);
+                const isDisabled = contratoInfo.is_prescrito || contratoInfo.is_quitado;
 
-                let label = contratoInfo ? `${contratoInfo.numero_contrato}` : `Contrato ${idStr}`;
-                if (contratoInfo && contratoInfo.is_prescrito) {
+                let label = `${contratoInfo.numero_contrato}`;
+                if (contratoInfo.is_prescrito) {
                     label += ' <span style="color:#c62828;font-style:italic;">(Prescrito)</span>';
-                } else if (contratoInfo && contratoInfo.is_quitado) {
+                } else if (contratoInfo.is_quitado) {
                     label += ' <span style="color:#007bff;font-style:italic;">(Quitado)</span>';
                 }
 
