@@ -1930,7 +1930,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     return;
                 }
                 const tipoVersao = typeInfo && typeInfo.versao != null ? typeInfo.versao : null;
-                fetchDecisionTreeConfig({ tipoId: tipoId, tipoVersao: tipoVersao, forceReload: false })
+                const forceReload = Boolean(options.forceReload);
+                fetchDecisionTreeConfig({ tipoId: tipoId, tipoVersao: tipoVersao, forceReload: forceReload })
                     .done(() => finalizeSuccess(typeInfo))
                     .fail(() => {
                         if (options.allowSelectionFallback) {
@@ -1947,13 +1948,22 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             updateActionButtons();
 
             if (cardTipoId) {
-                if (cardTipoId === currentTipoId && hasCurrentTreeConfig) {
-                    finalizeSuccess(cardData.analysis_type || null);
-                } else {
-                    loadTreeForType(cardData.analysis_type || { id: cardTipoId, versao: cardTipoVersao }, {
+                const loadLatestSameType = () => {
+                    // Mantém o mesmo tipo do card, mas usa a versão mais recente disponível
+                    // para garantir que novas opções (ex.: novas respostas) apareçam no Editar.
+                    const latestSameType = analysisTypesById[String(cardTipoId)] || null;
+                    const typeToLoad = latestSameType || cardData.analysis_type || { id: cardTipoId, versao: cardTipoVersao };
+                    loadTreeForType(typeToLoad, {
                         allowSelectionFallback: true,
-                        failMessage: 'Não foi possível carregar o tipo salvo neste card. Selecione o tipo de análise para editar.'
+                        failMessage: 'Não foi possível carregar o tipo salvo neste card. Selecione o tipo de análise para editar.',
+                        forceReload: true
                     });
+                };
+
+                if (analysisTypesById[String(cardTipoId)]) {
+                    loadLatestSameType();
+                } else {
+                    fetchAnalysisTypes().always(loadLatestSameType);
                 }
                 return deferred.promise();
             }
