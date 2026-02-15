@@ -3298,18 +3298,19 @@ function formatCnjDigits(raw) {
             if (!processo || typeof processo !== 'object') {
                 return [];
             }
-            const responseOrder = [
-                'judicializado_pela_massa',
-                'tipo_de_acao',
-                'julgamento',
-                'transitado',
-                'procedencia',
-                'data_de_transito',
-                'cumprimento_de_sentenca',
-                'repropor_monitoria',
-                'contratos_para_monitoria',
-                'ativar_botao_monitoria'
-            ];
+	            const responseOrder = [
+	                'judicializado_pela_massa',
+	                'tipo_de_acao',
+	                'julgamento',
+	                'transitado',
+	                'procedencia',
+	                'data_de_transito',
+	                'cumprimento_de_sentenca',
+	                'habilitacao',
+	                'repropor_monitoria',
+	                'contratos_para_monitoria',
+	                'ativar_botao_monitoria'
+	            ];
             const excludeFields = Array.isArray(options.excludeFields) ? options.excludeFields : [];
             const labels = {
                 judicializado_pela_massa: 'Judicializado pela massa',
@@ -3317,12 +3318,13 @@ function formatCnjDigits(raw) {
                 julgamento: 'Julgamento',
                 transitado: 'Transitado',
                 procedencia: 'Procedência',
-                data_de_transito: 'Data de trânsito',
-                cumprimento_de_sentenca: 'Cumprimento de sentença',
-                repropor_monitoria: 'Repropor monitória',
-                contratos_para_monitoria: 'Contratos para monitória',
-                ativar_botao_monitoria: 'Ativar botão monitória'
-            };
+	                data_de_transito: 'Data de trânsito',
+	                cumprimento_de_sentenca: 'Cumprimento de sentença',
+	                habilitacao: 'Habilitação',
+	                repropor_monitoria: 'Repropor monitória',
+	                contratos_para_monitoria: 'Contratos para monitória',
+	                ativar_botao_monitoria: 'Ativar botão monitória'
+	            };
             const entries = [];
             responseOrder.forEach(key => {
                 let value = undefined;
@@ -3468,20 +3470,19 @@ function formatCnjDigits(raw) {
             $custasLine.append($custasInput);
             $ulDetalhes.append($custasLine);
 
-	            const snapshotTreeData = isPassivasSnapshot
-	                ? (getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || {})
-	                : null;
+	            const snapshotTreeData = getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || {};
+	            const hasSnapshotTreeData = Boolean(snapshotTreeData && Object.keys(snapshotTreeData).length);
 
-            const fieldEntries = isPassivasSnapshot
-                ? getAnsweredFieldEntriesFromTree(processo, {
-                    excludeFields: options.excludeFields || [],
-                    contractInfos: monitoriaInfos,
-                    treeData: snapshotTreeData
-                })
-                : getAnsweredFieldEntries(processo, {
-                    excludeFields: options.excludeFields || [],
-                    contractInfos: monitoriaInfos
-                });
+	            const fieldEntries = hasSnapshotTreeData
+	                ? getAnsweredFieldEntriesFromTree(processo, {
+	                    excludeFields: options.excludeFields || [],
+	                    contractInfos: monitoriaInfos,
+	                    treeData: snapshotTreeData
+	                })
+	                : getAnsweredFieldEntries(processo, {
+	                    excludeFields: options.excludeFields || [],
+	                    contractInfos: monitoriaInfos
+	                });
 	            if (fieldEntries.length) {
 	                const $liAcao = $(
 	                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`
@@ -3499,11 +3500,11 @@ function formatCnjDigits(raw) {
 		                    const v = responses[k];
 		                    return v !== undefined && v !== null && v !== '';
 		                });
-		                if (hasAnyAnswer && (!snapshotTreeData || !Object.keys(snapshotTreeData || {}).length)) {
-		                    const failed = hasSnapshotTreeFetchFailed(processo?.analysis_type);
-		                    $ulDetalhes.append(
-		                        failed
-		                            ? '<li><strong>Respostas da Análise:</strong> <em>não foi possível carregar a árvore deste tipo.</em></li>'
+			                if (hasAnyAnswer && !hasSnapshotTreeData) {
+			                    const failed = hasSnapshotTreeFetchFailed(processo?.analysis_type);
+			                    $ulDetalhes.append(
+			                        failed
+			                            ? '<li><strong>Respostas da Análise:</strong> <em>não foi possível carregar a árvore deste tipo.</em></li>'
 		                            : '<li><strong>Respostas da Análise:</strong> <em>carregando...</em></li>'
 		                    );
 		                }
@@ -5259,7 +5260,10 @@ function formatCnjDigits(raw) {
 	                    (activeAnalysisType && (activeAnalysisType.slug || activeAnalysisType.nome)) || ''
 	                );
 	                const isPassivas = tipoText.includes('PASSIV');
-	                if (isPassivas) {
+	                const isEditingSavedCard =
+	                    Number.isFinite(userResponses && userResponses._editing_card_index) &&
+	                    Number(userResponses._editing_card_index) >= 0;
+	                if (isPassivas || isEditingSavedCard) {
 	                    return;
 	                }
 
