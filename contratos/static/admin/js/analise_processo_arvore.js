@@ -135,7 +135,6 @@
         let firstQuestionKey = null;
         let activeAnalysisType = null;
         let analysisTypesById = {};
-        let showOnlyPendingCompletion = false;
         let decisionTreeFetchSeq = 0;
         let decisionTreeLatestSeq = 0;
         const currentProcessoId =
@@ -4011,24 +4010,8 @@ function formatCnjDigits(raw) {
 	            /* ---------- Cards de Processos CNJ vinculados ---------- */
 
 	            scheduleSnapshotTreePrefetch(combinedCards);
-	            const pendingCount = Array.isArray(combinedCards)
-	                ? combinedCards.filter(isCardPendingCompletion).length
-	                : 0;
-            if (pendingCount > 0) {
-                const $filterBtn = $(
-                    `<button type="button" class="button button-secondary analise-filter-completar">${showOnlyPendingCompletion ? 'Mostrar Todas' : 'Completar Análise'} (${pendingCount})</button>`
-                );
-                $filterBtn.on('click', () => {
-                    showOnlyPendingCompletion = !showOnlyPendingCompletion;
-                    displayFormattedResponses();
-                });
-                $headerContainer.append($filterBtn);
-            }
-
-            const processosVinculados = Array.isArray(combinedCards) ? combinedCards : [];
-            const visibleProcessos = showOnlyPendingCompletion
-                ? processosVinculados.filter(isCardPendingCompletion)
-                : processosVinculados;
+	            const processosVinculados = Array.isArray(combinedCards) ? combinedCards : [];
+	            const visibleProcessos = processosVinculados;
             if (Array.isArray(visibleProcessos) && visibleProcessos.length > 0) {
                 visibleProcessos.forEach((processo, idx) => {
                     if (
