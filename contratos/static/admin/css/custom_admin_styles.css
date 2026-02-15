@@ -4633,6 +4633,21 @@ body.agenda-panel-open {
     align-items: center;
     gap: 6px;
 }
+.analise-custas-calc-btn {
+    border: 1px solid #cfd8e3;
+    background: #f4f7fb;
+    color: #4b5f78;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+}
+.analise-custas-calc-btn:hover {
+    background: #e7eef7;
+    border-color: #b7c7da;
+}
 
 
 #tarefas-group tr.dynamic-tarefas td.field-concluida input[type="checkbox"],

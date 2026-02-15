@@ -3533,6 +3533,16 @@ function formatCnjDigits(raw) {
             });
             const $custasLine = $('<li class="analise-custas-line"><strong>Custas:</strong></li>');
             $custasLine.append($custasInput);
+            if (!isPassivasSnapshot) {
+                const $calc2Btn = $('<button type="button" class="analise-custas-calc-btn" title="Calcular 2% do saldo atualizado">Calc 2%</button>');
+                $calc2Btn.on('click', () => {
+                    const saldoAtualizado = Number.isFinite(totalCausa) ? totalCausa : 0;
+                    const custasCalculadas = Math.round((saldoAtualizado * 0.02) * 100) / 100;
+                    $custasInput.val(formatCurrency(custasCalculadas));
+                    $custasInput.trigger('change');
+                });
+                $custasLine.append($calc2Btn);
+            }
             $ulDetalhes.append($custasLine);
 
 	            const snapshotTreeData = getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || {};
