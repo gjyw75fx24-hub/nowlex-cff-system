@@ -4208,21 +4208,37 @@ function formatCnjDigits(raw) {
                         const $tipoBadge = $(`<small class="analise-type-badge" title="Tipo de Análise">${tipoAnaliseNome}</small>`);
                         $headerVinculado.append($tipoBadge);
                     }
-                    const tipoAnaliseHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
-                        ? String(processo.analysis_type.hashtag).trim()
-                        : '';
-                    if (tipoAnaliseHashtag) {
-                        const $postit = $(
-                            `<button type="button" class="analise-hashtag-postit" title="Mencionar no caderno">${tipoAnaliseHashtag}</button>`
-                        );
-                        $postit.on('click', function (event) {
-                            event.stopPropagation();
-                            const contratosLine = snapshot.contractIds && snapshot.contractIds.length
-                                ? `Contratos: ${snapshot.contractIds.join(', ')}`
-                                : '';
-                            const mention = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
-                                .filter(Boolean)
-                                .join('\n');
+	                    const tipoAnaliseHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
+	                        ? String(processo.analysis_type.hashtag).trim()
+	                        : '';
+	                    const mentionContractNumbers = (() => {
+	                        const fromSnapshotInfos = Array.isArray(snapshot.contratoInfos)
+	                            ? snapshot.contratoInfos
+	                                .map(c => String(c && c.numero_contrato ? c.numero_contrato : '').trim())
+	                                .filter(Boolean)
+	                            : [];
+	                        if (fromSnapshotInfos.length) {
+	                            return Array.from(new Set(fromSnapshotInfos));
+	                        }
+	                        const fromContractIds = Array.isArray(snapshot.contractIds)
+	                            ? snapshot.contractIds
+	                                .map(id => String(getContractLabelForId(id) || '').trim())
+	                                .filter(Boolean)
+	                            : [];
+	                        return Array.from(new Set(fromContractIds));
+	                    })();
+	                    if (tipoAnaliseHashtag) {
+	                        const $postit = $(
+	                            `<button type="button" class="analise-hashtag-postit" title="Mencionar no caderno">${tipoAnaliseHashtag}</button>`
+	                        );
+	                        $postit.on('click', function (event) {
+	                            event.stopPropagation();
+	                            const contratosLine = mentionContractNumbers.length
+	                                ? `Contratos: ${mentionContractNumbers.join(', ')}`
+	                                : '';
+	                            const mention = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
+	                                .filter(Boolean)
+	                                .join('\n');
                             if (typeof window.openNotebookWithMention === 'function') {
                                 window.openNotebookWithMention(mention);
                                 return;
@@ -4271,16 +4287,16 @@ function formatCnjDigits(raw) {
                     const savedIndexAttr = Number.isFinite(savedCardIndex) ? String(savedCardIndex) : '';
                     $deleteBtn.attr('data-card-index', savedIndexAttr);
                     $editBtn.attr('data-saved-index', savedIndexAttr);
-                    $editBtn.attr('data-cnj', snapshot.cnj || '');
-                    $editBtn.attr('data-visual-index', String(cardIndex));
-                    $copyBtn.on('click', function (event) {
-                        event.stopPropagation();
-                        const contratosLine = snapshot.contractIds && snapshot.contractIds.length
-                            ? `Contratos: ${snapshot.contractIds.join(', ')}`
-                            : '';
-                        const text = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
-                            .filter(Boolean)
-                            .join('\n');
+	                    $editBtn.attr('data-cnj', snapshot.cnj || '');
+	                    $editBtn.attr('data-visual-index', String(cardIndex));
+	                    $copyBtn.on('click', function (event) {
+	                        event.stopPropagation();
+	                        const contratosLine = mentionContractNumbers.length
+	                            ? `Contratos: ${mentionContractNumbers.join(', ')}`
+	                            : '';
+	                        const text = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
+	                            .filter(Boolean)
+	                            .join('\n');
                         const finish = () => showCffSystemDialog('Referência copiada para colar no caderno.', 'success');
                         if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
                             navigator.clipboard.writeText(text).then(finish).catch(() => {
