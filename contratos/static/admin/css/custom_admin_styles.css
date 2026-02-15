@@ -920,6 +920,9 @@ a.historylink {
 .field-supervision {
     margin-top: 16px;
     display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
     justify-content: flex-start;
     width: 100%;
 }
@@ -1053,6 +1056,33 @@ a.historylink {
 }
 .supervision-label-text {
     font-size: 0.95rem;
+}
+.supervision-date-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.supervision-date-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #4b5563;
+    margin: 0;
+}
+.supervision-date-input {
+    width: 138px;
+    max-width: 100%;
+    padding: 4px 8px;
+    min-height: 30px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.86rem;
+    color: #1f2937;
+}
+.supervision-date-input:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 }
 .add-processo-card {
     display: inline-flex;

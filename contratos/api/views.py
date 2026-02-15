@@ -89,6 +89,23 @@ def _parse_decimal_value(value):
     except (InvalidOperation, TypeError):
         return None
 
+
+def _parse_optional_date(value):
+    if isinstance(value, date_cls):
+        return value
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    raw = raw.split('T', 1)[0]
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except (TypeError, ValueError):
+            continue
+    return None
+
 def get_next_supervision_status(current_status):
     normalized = (current_status or 'pendente').lower()
     if normalized not in SUPERVISION_STATUS_SEQUENCE:
@@ -539,11 +556,20 @@ class AgendaGeralAPIView(APIView):
                 for cid in card_info['contract_ids']
                 if contract_map.get(cid)
             ]
-            valid_contracts = [c for c in valid_contracts if c.data_prescricao]
             if not valid_contracts:
                 continue
-            prescricao_date = min(c.data_prescricao for c in valid_contracts if c.data_prescricao)
-            if not prescricao_date:
+            contracts_with_prescricao = [c for c in valid_contracts if c.data_prescricao]
+            card = card_info.get('card')
+            if not isinstance(card, dict):
+                card = {}
+            custom_supervision_date = _parse_optional_date(card.get('supervision_date'))
+            prescricao_date = (
+                min(c.data_prescricao for c in contracts_with_prescricao)
+                if contracts_with_prescricao
+                else None
+            )
+            agenda_date = custom_supervision_date or prescricao_date
+            if not agenda_date:
                 continue
             analise = card_info['analise']
             processo = analise.processo_judicial
@@ -569,22 +595,19 @@ class AgendaGeralAPIView(APIView):
             if target_user and responsavel_user and responsavel_user.id != target_user.id:
                 continue
             responsavel = self._serialize_user(responsavel_user)
-            active = prescricao_date >= today
+            active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
             viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
-            card = card_info.get('card')
-            if not isinstance(card, dict):
-                card = {}
             entries.append({
                 'type': 'S',
                 'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
                 'label': 'S',
                 'description': detail_text,
                 'detail': detail_text,
-                'date': prescricao_date.isoformat(),
-                'original_date': prescricao_date.isoformat(),
-                'prescricao_date': prescricao_date.isoformat(),
+                'date': agenda_date.isoformat(),
+                'original_date': agenda_date.isoformat(),
+                'prescricao_date': prescricao_date.isoformat() if prescricao_date else None,
                 'contract_numbers': contrato_labels,
                 'valor_causa': valor_total_causa,
                 'status_label': status_label,

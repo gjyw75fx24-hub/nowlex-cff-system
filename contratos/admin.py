@@ -3446,6 +3446,19 @@ def sanitize_supervision_respostas(respostas):
         if not isinstance(card, dict):
             return
         status = card.get('supervisor_status')
+        raw_supervision_date = str(card.get('supervision_date') or '').strip()
+        if raw_supervision_date:
+            parsed_supervision_date = None
+            raw_supervision_date = raw_supervision_date.split('T', 1)[0]
+            for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+                try:
+                    parsed_supervision_date = datetime.datetime.strptime(raw_supervision_date, fmt).date()
+                    break
+                except (TypeError, ValueError):
+                    continue
+            card['supervision_date'] = parsed_supervision_date.isoformat() if parsed_supervision_date else ''
+        else:
+            card['supervision_date'] = ''
         barrado = card.get('barrado')
         if not isinstance(barrado, dict):
             barrado = {}

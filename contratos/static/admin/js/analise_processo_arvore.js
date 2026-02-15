@@ -810,6 +810,9 @@
             if (!userResponses.ativar_botao_monitoria) {
                 userResponses.ativar_botao_monitoria = '';
             }
+            if (typeof userResponses.supervision_date_nao_judicializado !== 'string') {
+                userResponses.supervision_date_nao_judicializado = '';
+            }
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
                 userResponses[SAVED_PROCESSOS_KEY] = coerceLegacyProcessCardList(userResponses[SAVED_PROCESSOS_KEY]);
             }
@@ -830,6 +833,9 @@
                         .filter(v => v != null)
                         .map(v => String(v))
                 )
+            );
+            userResponses.supervision_date_nao_judicializado = normalizeIsoDateValue(
+                userResponses.supervision_date_nao_judicializado
             );
         }
 
@@ -1393,12 +1399,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const awaiting_supervision_confirm = Boolean(
                 snapshotResponses.awaiting_supervision_confirm
             );
+            const supervision_date = normalizeIsoDateValue(snapshotResponses.supervision_date);
             const barrado = snapshotResponses.barrado
                 ? deepClone(snapshotResponses.barrado)
                 : { ativo: false, inicio: null, retorno_em: null };
             delete snapshotResponses.supervisionado;
             delete snapshotResponses.supervisor_status;
             delete snapshotResponses.awaiting_supervision_confirm;
+            delete snapshotResponses.supervision_date;
             delete snapshotResponses.barrado;
             delete snapshotResponses.processos_vinculados;
             const analysisAuthor = getCurrentAnalysisAuthorName();
@@ -1409,6 +1417,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 supervisionado,
                 supervisor_status,
                 awaiting_supervision_confirm,
+                supervision_date,
                 barrado,
                 analysis_author: analysisAuthor
             };
@@ -1440,6 +1449,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const barrado = processo.barrado
                 ? deepClone(processo.barrado)
                 : { ativo: false, inicio: null, retorno_em: null };
+            const supervisionDate = normalizeIsoDateValue(processo.supervision_date);
             delete responses.processos_vinculados;
             return {
                 cnj: cnjFormatted || 'Não informado',
@@ -1450,6 +1460,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 supervisionado: Boolean(processo.supervisionado),
                 supervisor_status: processo.supervisor_status || 'pendente',
                 awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
+                supervision_date: supervisionDate,
                 barrado,
                 analysis_author: resolveCardAnalysisAuthor(processo),
                 general_card_snapshot: false
@@ -1527,6 +1538,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             card.supervisionado = supervisionado;
             card.supervisor_status = status;
             card.awaiting_supervision_confirm = Boolean(userResponses.awaiting_supervision_confirm);
+            card.supervision_date = normalizeIsoDateValue(
+                userResponses.supervision_date_nao_judicializado
+            );
             if (userResponses.barrado_nao_judicializado) {
                 card.barrado = deepClone(userResponses.barrado_nao_judicializado);
             }
@@ -1675,6 +1689,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ['judicializado_pela_massa', 'propor_monitoria', 'tipo_de_acao', 'transitado', 'procedencia', 'data_de_transito', 'cumprimento_de_sentenca'].forEach(key => {
                 delete userResponses[key];
             });
+            delete userResponses.supervision_date_nao_judicializado;
             const preservedSelections = (userResponses.selected_analysis_cards || []).filter(
                 sel => sel === GENERAL_MONITORIA_CARD_KEY
             );
@@ -2918,6 +2933,30 @@ function formatCnjDigits(raw) {
             return `${pad(parsed.getDate())}/${pad(parsed.getMonth() + 1)}/${parsed.getFullYear()}`;
         }
 
+        function normalizeIsoDateValue(value) {
+            if (value === undefined || value === null) {
+                return '';
+            }
+            const raw = String(value).trim();
+            if (!raw) {
+                return '';
+            }
+            const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (isoMatch) {
+                return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+            }
+            const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (brMatch) {
+                return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+            }
+            const parsed = new Date(raw);
+            if (Number.isNaN(parsed.getTime())) {
+                return '';
+            }
+            const pad = n => (`0${n}`).slice(-2);
+            return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+        }
+
 
         function extractCnjDigits(text) {
             if (!text) return null;
@@ -3925,6 +3964,7 @@ function formatCnjDigits(raw) {
             if (typeof processo.supervisionado === 'undefined') {
                 processo.supervisionado = false;
             }
+            processo.supervision_date = normalizeIsoDateValue(processo.supervision_date);
         }
 
         function buildSummaryStatusMetadata(processo, options = {}) {
@@ -5965,6 +6005,7 @@ function formatCnjDigits(raw) {
                     tipo_de_acao_respostas: {},
                     supervisionado: false,
                     supervisor_status: 'pendente',
+                    supervision_date: '',
                     analysis_author: getCurrentAnalysisAuthorName(),
                     barrado: {
                         ativo: false,
@@ -6034,6 +6075,7 @@ function formatCnjDigits(raw) {
                     tipo_de_acao_respostas: {},
                     supervisionado: false,
                     supervisor_status: 'pendente',
+                    supervision_date: '',
                     analysis_author: getCurrentAnalysisAuthorName(),
                     barrado: {
                         ativo: false,
@@ -6072,6 +6114,7 @@ function formatCnjDigits(raw) {
             }
             cardData.supervisionado = Boolean(cardData.supervisionado);
             cardData.supervisor_status = cardData.supervisor_status || 'pendente';
+            cardData.supervision_date = normalizeIsoDateValue(cardData.supervision_date);
             cardData.barrado = cardData.barrado || {};
             cardData.barrado.ativo = Boolean(cardData.barrado.ativo);
             cardData.barrado.inicio = cardData.barrado.inicio || null;
@@ -6275,11 +6318,32 @@ function formatCnjDigits(raw) {
                     <span class="supervision-label-text">Supervisionar</span>
                 </label>
             `);
+            const supervisionDateInputId = `supervision_date_${cardIndex}`;
+            const $supervisionDateWrapper = $('<div class="supervision-date-wrapper"></div>');
+            const $supervisionDateLabel = $(
+                `<label class="supervision-date-label" for="${supervisionDateInputId}">Data S</label>`
+            );
+            const $supervisionDateInput = $(
+                `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
+            );
+            $supervisionDateInput.val(cardData.supervision_date || '');
+            $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
+
             $supervisionWrapper.append($supervisionToggle);
+            $supervisionWrapper.append($supervisionDateWrapper);
             $body.append($supervisionWrapper);
 
             const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
             $supervisionInput.prop('checked', cardData.supervisionado);
+            $supervisionDateInput.on('change', function () {
+                const normalizedDate = normalizeIsoDateValue($(this).val());
+                $(this).val(normalizedDate);
+                cardData.supervision_date = normalizedDate;
+                syncEditingCardWithSaved(cardData);
+                userResponses.processos_vinculados = [cardData];
+                saveResponses();
+                renderSupervisionPanel();
+            });
             $supervisionInput.on('change', function (e) {
                 console.log('═══════════════════════════════════════════════════');
                 console.log('🔄 TOGGLE SUPERVISIONAR MUDOU');
@@ -6623,6 +6687,17 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             if (existing.length) {
                 return;
             }
+            const existingNaoJudCard = Array.isArray(userResponses.processos_vinculados)
+                ? userResponses.processos_vinculados.find(
+                    p => p && typeof p === 'object' && String(p.cnj || '').trim().toLowerCase() === 'não judicializado'
+                )
+                : null;
+            const initialSupervisionDate = normalizeIsoDateValue(
+                userResponses.supervision_date_nao_judicializado ||
+                (existingNaoJudCard && existingNaoJudCard.supervision_date)
+            );
+            userResponses.supervision_date_nao_judicializado = initialSupervisionDate;
+
             const $wrapper = $('<div class="field-supervision nao-judicializado-supervisionize"></div>');
             const $toggle = $(`
                 <label class="supervision-toggle nao-judicializado-supervision-toggle" title="Ao concluir esta análise, encaminhe para supervisão.">
@@ -6631,7 +6706,34 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     <span class="supervision-label-text">Supervisionar</span>
                 </label>
             `);
+            const naoJudDateInputId = `supervision_date_nao_judicializado_${Math.random().toString(36).slice(2, 8)}`;
+            const $dateWrap = $('<div class="supervision-date-wrapper"></div>');
+            const $dateLabel = $(
+                `<label class="supervision-date-label" for="${naoJudDateInputId}">Data S</label>`
+            );
+            const $dateInput = $(
+                `<input type="date" id="${naoJudDateInputId}" class="supervision-date-input supervision-date-input--compact">`
+            );
+            $dateInput.val(initialSupervisionDate);
+            $dateWrap.append($dateLabel).append($dateInput);
             const $input = $toggle.find('.supervision-toggle-input');
+            $input.prop(
+                'checked',
+                Boolean(userResponses.supervisionado_nao_judicializado || (existingNaoJudCard && existingNaoJudCard.supervisionado))
+            );
+            $dateInput.on('change', function () {
+                const normalizedDate = normalizeIsoDateValue($(this).val());
+                $(this).val(normalizedDate);
+                userResponses.supervision_date_nao_judicializado = normalizedDate;
+                if (Array.isArray(userResponses.processos_vinculados)) {
+                    userResponses.processos_vinculados.forEach(card => {
+                        if (card && typeof card === 'object' && String(card.cnj || '').trim().toLowerCase() === 'não judicializado') {
+                            card.supervision_date = normalizedDate;
+                        }
+                    });
+                }
+                saveResponses();
+            });
             $input.on('change', function () {
                 const checked = $(this).is(':checked');
                 if (!Array.isArray(userResponses.processos_vinculados)) {
@@ -6648,6 +6750,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                             },
                             supervisionado: true,
                             supervisor_status: 'pendente',
+                            supervision_date: normalizeIsoDateValue(userResponses.supervision_date_nao_judicializado),
                             analysis_author: getCurrentAnalysisAuthorName(),
                             barrado: { ativo: false, inicio: null, retorno_em: null },
                             awaiting_supervision_confirm: false,
@@ -6678,6 +6781,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 }
             });
             $wrapper.append($toggle);
+            $wrapper.append($dateWrap);
             $container.append($wrapper);
         }
 
