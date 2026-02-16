@@ -1336,6 +1336,17 @@ document.addEventListener('DOMContentLoaded', function() {
         msgEl.textContent = message;
         overlay.appendChild(msgEl);
 
+        const closeAlert = () => {
+            document.removeEventListener('keydown', onEscapeClose, true);
+            overlay.remove();
+        };
+        const onEscapeClose = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeAlert();
+            }
+        };
+
         const button = document.createElement('button');
         button.type = 'button';
         button.textContent = 'OK';
@@ -1347,11 +1358,12 @@ document.addEventListener('DOMContentLoaded', function() {
         button.style.cursor = 'pointer';
         button.addEventListener('click', (event) => {
             event.stopPropagation();
-            overlay.remove();
+            closeAlert();
         });
         overlay.appendChild(button);
 
         document.body.appendChild(overlay);
+        document.addEventListener('keydown', onEscapeClose, true);
         const calendarGridEl = overlay.querySelector('[data-calendar-placeholder]');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
@@ -5659,6 +5671,200 @@ document.addEventListener('DOMContentLoaded', function() {
             .join('');
     };
 
+    const postTaskComment = async (row, texto, arquivo = null) => {
+        const tarefaId = getTarefaIdFromRow(row);
+        if (!tarefaId) {
+            throw new Error('Salve a tarefa antes de concluir e justificar.');
+        }
+
+        const formData = new FormData();
+        formData.append('texto', texto || '');
+        if (arquivo) {
+            formData.append('arquivo', arquivo);
+        }
+
+        const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+            },
+            body: formData,
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+            let detail = 'Erro ao salvar comentário';
+            try {
+                const payload = await response.json();
+                if (payload && payload.detail) {
+                    detail = payload.detail;
+                }
+            } catch (error) {
+                // noop
+            }
+            throw new Error(detail);
+        }
+
+        const comment = await response.json();
+        const comments = getRowComments(row);
+        comments.unshift(comment);
+        setRowComments(row, comments);
+        writeSessionCache(buildCommentsCacheKey(tarefaId), comments);
+        renderCommentsHistory(row);
+        (comment.anexos || []).forEach(appendAttachmentToArquivos);
+        return comment;
+    };
+
+    const postPrazoComment = async (row, texto, arquivo = null) => {
+        const prazoId = ensurePrazoId(row);
+        if (!prazoId) {
+            throw new Error('Salve o prazo antes de concluir e justificar.');
+        }
+
+        const formData = new FormData();
+        formData.append('texto', texto || '');
+        if (arquivo) {
+            formData.append('arquivo', arquivo);
+        }
+
+        const response = await fetch(`/api/prazos/${prazoId}/comentarios/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            let detail = 'Erro ao salvar comentário do prazo';
+            try {
+                const payload = await response.json();
+                if (payload && payload.detail) {
+                    detail = payload.detail;
+                }
+            } catch (error) {
+                // noop
+            }
+            throw new Error(detail);
+        }
+
+        const comment = await response.json();
+        const comments = getPrazoRowComments(row);
+        comments.unshift(comment);
+        setPrazoRowComments(row, comments);
+        writeSessionCache(buildPrazoCommentsCacheKey(prazoId), comments);
+        renderPrazoCommentsHistory(row);
+        (comment.anexos || []).forEach(appendAttachmentToArquivos);
+        return comment;
+    };
+
+    const requestCompletionJustification = ({ modalId, titleText, placeholderText }) => new Promise((resolve) => {
+        const existing = document.getElementById(modalId);
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = modalId;
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0, 0, 0, 0.35)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '3200';
+
+        const card = document.createElement('div');
+        card.style.width = 'min(560px, calc(100vw - 32px))';
+        card.style.background = '#fff';
+        card.style.borderRadius = '10px';
+        card.style.boxShadow = '0 18px 36px rgba(0, 0, 0, 0.22)';
+        card.style.padding = '16px';
+        card.addEventListener('click', (event) => event.stopPropagation());
+
+        const title = document.createElement('h3');
+        title.textContent = titleText;
+        title.style.margin = '0 0 10px 0';
+        title.style.fontSize = '1.05rem';
+
+        const textarea = document.createElement('textarea');
+        textarea.rows = 5;
+        textarea.placeholder = placeholderText;
+        textarea.style.width = '100%';
+        textarea.style.boxSizing = 'border-box';
+        textarea.style.padding = '10px 12px';
+        textarea.style.border = '1px solid #d6d6d6';
+        textarea.style.borderRadius = '8px';
+        textarea.style.resize = 'vertical';
+        textarea.style.minHeight = '110px';
+        textarea.style.fontSize = '0.96rem';
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.justifyContent = 'flex-end';
+        actions.style.gap = '8px';
+        actions.style.marginTop = '12px';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = 'Cancelar';
+        cancelBtn.style.border = '1px solid #c9c9c9';
+        cancelBtn.style.background = '#f8f8f8';
+        cancelBtn.style.borderRadius = '8px';
+        cancelBtn.style.padding = '7px 12px';
+        cancelBtn.style.cursor = 'pointer';
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.textContent = 'Salvar e concluir';
+        confirmBtn.style.border = '1px solid #0d6efd';
+        confirmBtn.style.background = '#0d6efd';
+        confirmBtn.style.color = '#fff';
+        confirmBtn.style.borderRadius = '8px';
+        confirmBtn.style.padding = '7px 12px';
+        confirmBtn.style.cursor = 'pointer';
+
+        const close = (value) => {
+            overlay.remove();
+            resolve(value);
+        };
+
+        cancelBtn.addEventListener('click', () => close(null));
+        confirmBtn.addEventListener('click', () => close(textarea.value || ''));
+        overlay.addEventListener('click', () => close(null));
+        overlay.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                close(null);
+            }
+        });
+        textarea.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'enter') {
+                event.preventDefault();
+                close(textarea.value || '');
+            }
+        });
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        card.appendChild(title);
+        card.appendChild(textarea);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+        textarea.focus();
+    });
+
+    const requestTaskCompletionJustification = () => requestCompletionJustification({
+        modalId: 'tarefa-conclusao-justificativa-modal',
+        titleText: 'Justifique a ação de conclusão da tarefa',
+        placeholderText: 'Descreva o que foi feito para concluir esta tarefa.',
+    });
+
+    const requestPrazoCompletionJustification = () => requestCompletionJustification({
+        modalId: 'prazo-conclusao-justificativa-modal',
+        titleText: 'Justifique a ação de conclusão do prazo',
+        placeholderText: 'Descreva o que foi feito para concluir este prazo.',
+    });
+
     const attachSimpleCommentHandler = (row) => {
         if (!row || row.dataset[COMMENTS_HANDLER_FLAG] === '1') {
             return;
@@ -5673,8 +5879,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
-        const tarefaId = getTarefaIdFromRow(row);
-        const csrfToken = getCsrfToken();
         let pendingSend = false;
         const updateButtonState = () => {
             button.disabled = !(input.value.trim() || (fileInput && fileInput.files.length));
@@ -5695,31 +5899,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const handleSend = async () => {
             const value = input.value.trim();
             if (!value && (!fileInput || !fileInput.files.length)) return;
-            if (!tarefaId || pendingSend) return;
+            if (pendingSend) return;
             pendingSend = true;
             button.disabled = true;
-            console.log('tarefa-comments: sending', { tarefaId, text: value, files: fileInput?.files?.length });
-            const formData = new FormData();
-            formData.append('texto', value);
-            if (fileInput && fileInput.files.length) {
-                formData.append('arquivo', fileInput.files[0]);
-            }
             try {
-                const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': csrfToken,
-                    },
-                    body: formData,
-                    credentials: 'same-origin',
-                });
-                if (!response.ok) throw new Error('Erro ao salvar comentário');
-                const comment = await response.json();
-                const comments = getRowComments(row);
-                comments.unshift(comment);
-                setRowComments(row, comments);
-                writeSessionCache(buildCommentsCacheKey(tarefaId), comments);
-                renderCommentsHistory(row);
+                await postTaskComment(row, value, fileInput?.files?.[0] || null);
                 input.value = '';
                 if (fileInput) {
                     fileInput.value = '';
@@ -5727,16 +5911,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 showAttachmentPreview('');
                 updateButtonState();
                 input.focus();
-                console.log('tarefa-comments: comment added', comment);
-                const anexos = comment.anexos || [];
-                anexos.forEach(appendAttachmentToArquivos);
             } catch (error) {
                 console.error(error);
             } finally {
                 pendingSend = false;
                 updateButtonState();
                 input.focus();
-                console.log('tarefa-comments: request finished', { tarefaId, pendingSend });
             }
         };
         if (fileInput) {
@@ -6044,7 +6224,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
-        const csrfToken = getCsrfToken();
         let pendingSend = false;
         const updateButtonState = () => {
             const prazoId = ensurePrazoId(row);
@@ -6074,30 +6253,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!prazoId || pendingSend) return;
             pendingSend = true;
             button.disabled = true;
-            const formData = new FormData();
-            formData.append('texto', value);
-            if (fileInput && fileInput.files.length) {
-                formData.append('arquivo', fileInput.files[0]);
-            }
             try {
-                const response = await fetch(`/api/prazos/${prazoId}/comentarios/`, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': csrfToken,
-                    },
-                    credentials: 'same-origin',
-                    body: formData,
-                });
-                if (!response.ok) {
-                    console.error('Erro ao salvar comentário do prazo', { status: response.status });
-                    throw new Error('Erro ao salvar comentário do prazo');
-                }
-                const comment = await response.json();
-                const comments = getPrazoRowComments(row);
-                comments.unshift(comment);
-                setPrazoRowComments(row, comments);
-                writeSessionCache(buildPrazoCommentsCacheKey(prazoId), comments);
-                renderPrazoCommentsHistory(row);
+                const comment = await postPrazoComment(row, value, fileInput?.files?.[0] || null);
                 input.value = '';
                 if (fileInput) {
                     fileInput.value = '';
@@ -6105,8 +6262,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 showAttachmentPreview('');
                 updateButtonState();
                 input.focus();
-                const anexos = comment.anexos || [];
-                anexos.forEach(appendAttachmentToArquivos);
             } catch (error) {
                 console.error(error);
             } finally {
@@ -6289,20 +6444,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const stripPrazoDatetimeShortcuts = (root = document) => {
         const group = root.querySelector?.('#prazos-group') || document.getElementById('prazos-group');
         if (!group) return;
-        group.querySelectorAll('.field-data_limite .datetimeshortcuts').forEach((shortcuts) => {
-            shortcuts.querySelectorAll('a').forEach((link) => {
-                const text = (link.textContent || '').trim().toLowerCase();
-                if (text === 'hoje' || text === 'agora') {
-                    link.remove();
-                }
+        group.querySelectorAll('.field-data_limite').forEach((fieldDataLimite) => {
+            const datetime = fieldDataLimite.querySelector('.datetime');
+            if (!datetime) return;
+
+            const allShortcuts = Array.from(fieldDataLimite.querySelectorAll('.datetimeshortcuts'));
+
+            allShortcuts.forEach((shortcuts) => {
+                shortcuts.querySelectorAll('a').forEach((link) => {
+                    const text = (link.textContent || '').trim().toLowerCase();
+                    if (text === 'hoje' || text === 'agora') {
+                        link.remove();
+                    }
+                });
+                Array.from(shortcuts.childNodes).forEach((node) => {
+                    if (node.nodeType === Node.TEXT_NODE && node.textContent.replace(/\s/g, '') === '|') {
+                        node.remove();
+                    }
+                });
             });
-            Array.from(shortcuts.childNodes).forEach((node) => {
-                if (node.nodeType === Node.TEXT_NODE && node.textContent.replace(/\s/g, '') === '|') {
-                    node.remove();
-                }
-            });
-        });
-        group.querySelectorAll('.field-data_limite .datetime').forEach((datetime) => {
+
             Array.from(datetime.childNodes).forEach((node) => {
                 if (node.nodeType !== Node.TEXT_NODE) return;
                 const normalized = (node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -6310,6 +6471,70 @@ document.addEventListener('DOMContentLoaded', function() {
                     node.remove();
                 }
             });
+
+            allShortcuts.forEach((shortcuts) => {
+                if (shortcuts.parentElement !== datetime) {
+                    datetime.appendChild(shortcuts);
+                }
+            });
+
+            const dateInput = fieldDataLimite.querySelector('input.vDateField');
+            const timeInput = fieldDataLimite.querySelector('input.vTimeField');
+            const labels = Array.from(fieldDataLimite.querySelectorAll('label'));
+            const timeLabel = labels.find((label) => /hora/i.test((label.textContent || '').trim()));
+
+            if (dateInput && dateInput.parentElement !== datetime) {
+                datetime.appendChild(dateInput);
+            }
+            if (timeLabel && timeLabel.parentElement !== datetime) {
+                datetime.appendChild(timeLabel);
+            }
+            if (timeInput && timeInput.parentElement !== datetime) {
+                datetime.appendChild(timeInput);
+            }
+
+            const calendarLink = fieldDataLimite.querySelector('.datetimeshortcuts a[href*="openCalendar"], .datetimeshortcuts a[href*="calendar"]');
+            const clockLink = fieldDataLimite.querySelector('.datetimeshortcuts a[href*="openClock"], .datetimeshortcuts a[href*="clock"]');
+            const explicitDateShortcut = calendarLink ? calendarLink.closest('.datetimeshortcuts') : null;
+            const explicitTimeShortcut = clockLink ? clockLink.closest('.datetimeshortcuts') : null;
+
+            const isDateShortcut = (shortcut) => {
+                const content = Array.from(shortcut.querySelectorAll('a'))
+                    .map((anchor) => `${anchor.getAttribute('href') || ''} ${(anchor.textContent || '').trim()}`)
+                    .join(' ')
+                    .toLowerCase();
+                return content.includes('calendar') || content.includes('hoje') || !!shortcut.querySelector('.date-icon');
+            };
+
+            const isTimeShortcut = (shortcut) => {
+                const content = Array.from(shortcut.querySelectorAll('a'))
+                    .map((anchor) => `${anchor.getAttribute('href') || ''} ${(anchor.textContent || '').trim()}`)
+                    .join(' ')
+                    .toLowerCase();
+                return content.includes('clock') || content.includes('agora') || !!shortcut.querySelector('.clock-icon');
+            };
+
+            const dateShortcut = explicitDateShortcut
+                || allShortcuts.find(isDateShortcut)
+                || allShortcuts[0]
+                || null;
+            const timeShortcut = explicitTimeShortcut
+                || allShortcuts.find((shortcut) => shortcut !== dateShortcut && isTimeShortcut(shortcut))
+                || allShortcuts.find((shortcut) => shortcut !== dateShortcut)
+                || null;
+
+            if (dateInput && dateShortcut && dateShortcut.previousElementSibling !== dateInput) {
+                dateInput.insertAdjacentElement('afterend', dateShortcut);
+            }
+            if (timeInput && timeShortcut && timeShortcut.previousElementSibling !== timeInput) {
+                timeInput.insertAdjacentElement('afterend', timeShortcut);
+            }
+
+            if (dateInput) dateInput.style.order = '1';
+            if (dateShortcut) dateShortcut.style.order = '2';
+            if (timeLabel) timeLabel.style.order = '3';
+            if (timeInput) timeInput.style.order = '4';
+            if (timeShortcut) timeShortcut.style.order = '5';
         });
     };
 
@@ -6576,6 +6801,91 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const pendingCompletionChecks = new WeakSet();
+
+        const handleTarefaCompletionToggle = async (checkbox) => {
+            if (!(checkbox instanceof HTMLInputElement)) return;
+            const row = checkbox.closest('tr.dynamic-tarefas');
+            if (!row || row.classList.contains('empty-form')) {
+                return;
+            }
+            if (pendingCompletionChecks.has(checkbox)) {
+                return;
+            }
+            if (!checkbox.checked) {
+                return;
+            }
+
+            pendingCompletionChecks.add(checkbox);
+            checkbox.disabled = true;
+
+            try {
+                ensureTarefaCommentsPanel(row);
+                const justificativa = await requestTaskCompletionJustification();
+                if (justificativa === null) {
+                    checkbox.checked = false;
+                    return;
+                }
+                const texto = (justificativa || '').trim();
+                if (!texto) {
+                    checkbox.checked = false;
+                    createSystemAlert('Tarefas & Prazos', 'A conclusão exige uma justificativa.');
+                    return;
+                }
+                await postTaskComment(row, texto);
+            } catch (error) {
+                checkbox.checked = false;
+                createSystemAlert(
+                    'Tarefas & Prazos',
+                    error?.message || 'Não foi possível salvar a justificativa da conclusão.',
+                );
+            } finally {
+                checkbox.disabled = false;
+                pendingCompletionChecks.delete(checkbox);
+            }
+        };
+
+        const handlePrazoCompletionToggle = async (checkbox) => {
+            if (!(checkbox instanceof HTMLInputElement)) return;
+            const row = checkbox.closest('tr.dynamic-prazos');
+            if (!row || row.classList.contains('empty-form')) {
+                return;
+            }
+            if (pendingCompletionChecks.has(checkbox)) {
+                return;
+            }
+            if (!checkbox.checked) {
+                return;
+            }
+
+            pendingCompletionChecks.add(checkbox);
+            checkbox.disabled = true;
+
+            try {
+                ensurePrazoCommentsPanel(row);
+                const justificativa = await requestPrazoCompletionJustification();
+                if (justificativa === null) {
+                    checkbox.checked = false;
+                    return;
+                }
+                const texto = (justificativa || '').trim();
+                if (!texto) {
+                    checkbox.checked = false;
+                    createSystemAlert('Tarefas & Prazos', 'A conclusão exige uma justificativa.');
+                    return;
+                }
+                await postPrazoComment(row, texto);
+            } catch (error) {
+                checkbox.checked = false;
+                createSystemAlert(
+                    'Tarefas & Prazos',
+                    error?.message || 'Não foi possível salvar a justificativa da conclusão.',
+                );
+            } finally {
+                checkbox.disabled = false;
+                pendingCompletionChecks.delete(checkbox);
+            }
+        };
 
         const getOrCreateHeader = (group) => {
             let header = group.querySelector('.inline-section-header');
@@ -6662,6 +6972,16 @@ document.addEventListener('DOMContentLoaded', function() {
             tbody.addEventListener('change', (event) => {
                 const target = event.target;
                 if (!(target instanceof HTMLElement)) return;
+                if (id === 'tarefas-group' && target.matches(doneSelector)) {
+                    void handleTarefaCompletionToggle(target).finally(() => refreshSections());
+                    refreshSections();
+                    return;
+                }
+                if (id === 'prazos-group' && target.matches(doneSelector)) {
+                    void handlePrazoCompletionToggle(target).finally(() => refreshSections());
+                    refreshSections();
+                    return;
+                }
                 if (target.matches(doneSelector) || target.matches(dateSelector)) {
                     refreshSections();
                 }
