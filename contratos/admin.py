@@ -5740,9 +5740,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         js = (
             'admin/js/vendor/jquery/jquery.min.js',
             'admin/js/jquery.init.js',
-            'admin/js/processo_judicial_enhancer.js?v=20260213j',
+            'admin/js/processo_judicial_enhancer.js?v=20260217a',
             'admin/js/admin_tabs.js',
-            'admin/js/processo_judicial_lazy_loader.js?v=20260210m',
+            'admin/js/processo_judicial_lazy_loader.js?v=20260217a',
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/soma_contratos.js',
