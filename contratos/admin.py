@@ -3699,6 +3699,15 @@ class CarteiraAdmin(admin.ModelAdmin):
             text = text.replace("_", " ").replace("-", " ")
             return re.sub(r"\s+", " ", text).strip()
 
+        def _normalize_type_text(value):
+            text = _clean_text(value).lower()
+            if not text:
+                return ""
+            text = unicodedata.normalize("NFKD", text)
+            text = "".join(ch for ch in text if not unicodedata.combining(ch))
+            text = text.replace("#", " ").replace("_", " ").replace("-", " ")
+            return re.sub(r"\s+", " ", text).strip()
+
         def _classify_peticao_kind(nome, arquivo_nome):
             joined = f"{_normalize_filename_text(nome)} {_normalize_filename_text(arquivo_nome)}".strip()
             if not joined:
@@ -3738,10 +3747,109 @@ class CarteiraAdmin(admin.ModelAdmin):
             carteira["id"]: carteira["nome"]
             for carteira in Carteira.objects.order_by("nome").values("id", "nome")
         }
-        tipo_lookup = {
-            tipo["id"]: {"nome": tipo["nome"], "slug": tipo["slug"]}
-            for tipo in TipoAnaliseObjetiva.objects.values("id", "nome", "slug")
-        }
+        tipos_rows = list(TipoAnaliseObjetiva.objects.values("id", "nome", "slug", "hashtag"))
+        tipo_lookup = {}
+        tipo_by_slug = {}
+        tipo_by_nome = {}
+        tipo_by_hashtag = {}
+        tipo_monitoria_default = None
+        tipo_passivas_default = None
+
+        for tipo in tipos_rows:
+            tipo_id = _safe_int(tipo.get("id"))
+            if not tipo_id:
+                continue
+            nome = _clean_text(tipo.get("nome"))
+            slug = _clean_text(tipo.get("slug"))
+            hashtag = _clean_text(tipo.get("hashtag"))
+            slug_norm = _normalize_type_text(slug)
+            nome_norm = _normalize_type_text(nome)
+            hashtag_norm = _normalize_type_text(hashtag)
+            search_text = " ".join(part for part in (slug_norm, nome_norm, hashtag_norm) if part)
+            meta = {
+                "id": tipo_id,
+                "nome": nome,
+                "slug": slug,
+                "hashtag": hashtag,
+                "slug_norm": slug_norm,
+                "nome_norm": nome_norm,
+                "hashtag_norm": hashtag_norm,
+                "search_text": search_text,
+            }
+            tipo_lookup[tipo_id] = meta
+            if slug_norm and slug_norm not in tipo_by_slug:
+                tipo_by_slug[slug_norm] = meta
+            if nome_norm and nome_norm not in tipo_by_nome:
+                tipo_by_nome[nome_norm] = meta
+            if hashtag_norm and hashtag_norm not in tipo_by_hashtag:
+                tipo_by_hashtag[hashtag_norm] = meta
+
+        def _resolve_tipo_meta(analysis_type, respostas_obj):
+            if not isinstance(analysis_type, dict):
+                analysis_type = {}
+            if not isinstance(respostas_obj, dict):
+                respostas_obj = {}
+
+            # 1) Prioriza id explícito no card
+            tipo_id = _safe_int(analysis_type.get("id"))
+            if tipo_id and tipo_id in tipo_lookup:
+                return tipo_lookup[tipo_id]
+
+            # 2) Fallback por slug/nome/hashtag quando vier sem id
+            slug_norm = _normalize_type_text(analysis_type.get("slug"))
+            if slug_norm and slug_norm in tipo_by_slug:
+                return tipo_by_slug[slug_norm]
+
+            nome_norm = _normalize_type_text(analysis_type.get("nome"))
+            if nome_norm and nome_norm in tipo_by_nome:
+                return tipo_by_nome[nome_norm]
+
+            hashtag_norm = _normalize_type_text(analysis_type.get("hashtag"))
+            if hashtag_norm and hashtag_norm in tipo_by_hashtag:
+                return tipo_by_hashtag[hashtag_norm]
+
+            # 3) Legado: infere por sinais das respostas (mesma lógica do frontend)
+            has_monitoria_signals = any(
+                key in respostas_obj
+                for key in (
+                    "judicializado_pela_massa",
+                    "propor_monitoria",
+                    "repropor_monitoria",
+                    "contratos_para_monitoria",
+                )
+            )
+            has_passivas_signals = any(
+                key in respostas_obj
+                for key in (
+                    "procedencia",
+                    "cumprimento_de_sentenca",
+                    "data_de_transito",
+                    "transitado",
+                    "julgamento",
+                )
+            )
+            tipo_acao_norm = _normalize_type_text(respostas_obj.get("tipo_de_acao"))
+            prefer_monitoria = has_monitoria_signals or ("monitor" in tipo_acao_norm)
+            prefer_passivas = has_passivas_signals or ("passiv" in tipo_acao_norm)
+
+            if prefer_monitoria and not prefer_passivas:
+                return tipo_monitoria_default
+            if prefer_passivas and not prefer_monitoria:
+                return tipo_passivas_default
+
+            return None
+
+        for tipo_meta in tipo_lookup.values():
+            search_text = tipo_meta.get("search_text", "")
+            if tipo_monitoria_default is None and "monitor" in search_text:
+                tipo_monitoria_default = tipo_meta
+            if tipo_passivas_default is None and "passiv" in search_text:
+                tipo_passivas_default = tipo_meta
+
+        # Fallback preferencial por slug conhecido
+        tipo_monitoria_default = tipo_by_slug.get("novas monitorias") or tipo_by_slug.get("monitorias") or tipo_monitoria_default
+        tipo_passivas_default = tipo_by_slug.get("passivas") or tipo_by_slug.get("passiva") or tipo_passivas_default
+
         questao_lookup = {
             questao["chave"]: {
                 "texto_pergunta": questao["texto_pergunta"],
@@ -3916,18 +4024,18 @@ class CarteiraAdmin(admin.ModelAdmin):
                     continue
 
                 analysis_type = card.get("analysis_type") if isinstance(card.get("analysis_type"), dict) else {}
-                tipo_id = _safe_int(analysis_type.get("id"))
-                tipo_meta = tipo_lookup.get(tipo_id, {})
-                tipo_nome = _clean_text(analysis_type.get("nome")) or tipo_meta.get("nome") or "[Sem tipo]"
-                tipo_slug = _clean_text(analysis_type.get("slug")) or tipo_meta.get("slug") or "[sem-slug]"
+                respostas_obj = card.get("tipo_de_acao_respostas")
+                if not isinstance(respostas_obj, dict):
+                    respostas_obj = {}
+
+                tipo_meta = _resolve_tipo_meta(analysis_type, respostas_obj)
+                tipo_id = int(tipo_meta["id"]) if isinstance(tipo_meta, dict) and tipo_meta.get("id") else None
+                tipo_nome = (tipo_meta or {}).get("nome") or _clean_text(analysis_type.get("nome")) or "[Sem tipo]"
+                tipo_slug = (tipo_meta or {}).get("slug") or _clean_text(analysis_type.get("slug")) or "[sem-slug]"
 
                 carteira_card_id = _safe_int(card.get("carteira_id"))
                 carteira_id = carteira_card_id or carteira_default
                 carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
-
-                respostas_obj = card.get("tipo_de_acao_respostas")
-                if not isinstance(respostas_obj, dict):
-                    respostas_obj = {}
 
                 entry = {
                     "processo_id": processo.id,
