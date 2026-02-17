@@ -487,52 +487,626 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (!pairs.length) {
         tableWrap.innerHTML = '<div style="font-size:13px; color:#57697d;">Sem interseções de CPF entre carteiras até o momento.</div>';
+    } else {
+        if (!visibleOverlaps.length) {
+            tableWrap.innerHTML = `
+                <div style="font-size:13px; color:#57697d; margin-bottom:8px;">
+                    Existem interseções reais nos dados. O layout foi ajustado para evitar sobreposição indevida.
+                </div>
+            `;
+        }
+
+        const rows = pairs
+            .slice(0, 120)
+            .map((pair) => {
+                const pairUrl = buildPairUrl(pair);
+                const openLink = pairUrl
+                    ? `<a href="${escapeHtml(pairUrl)}" style="font-weight:600;">Abrir lista</a>`
+                    : '—';
+                return `
+                <tr>
+                    <td>${escapeHtml(pair.a_nome)}</td>
+                    <td>${escapeHtml(pair.b_nome)}</td>
+                    <td style="text-align:right;">${Number(pair.count || 0).toLocaleString('pt-BR')}</td>
+                    <td style="text-align:right;">${Number(pair.pct_a || 0).toLocaleString('pt-BR')}%</td>
+                    <td style="text-align:right;">${Number(pair.pct_b || 0).toLocaleString('pt-BR')}%</td>
+                    <td style="text-align:right;">${Number(pair.pct_union || 0).toLocaleString('pt-BR')}%</td>
+                    <td style="text-align:center;">${openLink}</td>
+                </tr>
+            `;
+            })
+            .join('');
+
+        tableWrap.innerHTML += `
+            <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                    <tr style="background:#eef3f8;">
+                        <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira A</th>
+                        <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira B</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">CPFs em comum</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% de A</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% de B</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% da união</th>
+                        <th style="text-align:center; padding:6px; border:1px solid #d8e1ea;">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    const kpiDataElement = document.getElementById('kpi_data_script');
+    if (!kpiDataElement) return;
+
+    let kpiData = {};
+    try {
+        kpiData = JSON.parse(kpiDataElement.textContent || '{}');
+    } catch (error) {
+        console.error('[carteira-kpi] erro ao parsear dados:', error);
         return;
     }
 
-    if (!visibleOverlaps.length) {
-        tableWrap.innerHTML = `
-            <div style="font-size:13px; color:#57697d; margin-bottom:8px;">
-                Existem interseções reais nos dados. O layout foi ajustado para evitar sobreposição indevida.
+    const kpiBuckets = (kpiData && typeof kpiData === 'object' && kpiData.buckets) ? kpiData.buckets : {};
+    const kpiUfOptions = Array.isArray(kpiData.ufs) ? kpiData.ufs : [];
+    const kpiProcessChangelistUrl = String(kpiData.process_changelist_url || '').trim();
+    const peticaoTypes = Array.isArray(kpiData.peticao_types) ? kpiData.peticao_types : [];
+    const peticaoByCarteira = Array.isArray(kpiData.peticao_by_carteira) ? kpiData.peticao_by_carteira : [];
+    const peticaoTotals = Array.isArray(kpiData.peticao_totals) ? kpiData.peticao_totals : [];
+    if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
+
+    const kpiSection = document.createElement('section');
+    kpiSection.style.marginTop = '22px';
+    kpiSection.style.padding = '16px';
+    kpiSection.style.border = '1px solid #d9e1ea';
+    kpiSection.style.borderRadius = '10px';
+    kpiSection.style.background = '#fff';
+    kpiSection.innerHTML = `
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+            <h3 style="margin:0;">KPIs da Análise por Carteira x Tipo</h3>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                UF:
+                <select class="carteira-kpi-uf" style="padding:4px 8px; min-width:130px;"></select>
+            </label>
+        </div>
+        <div class="carteira-kpi-summary" style="margin-bottom:10px; font-size:12px; color:#46576b;"></div>
+        <div class="carteira-kpi-table-wrap" style="overflow:auto;"></div>
+        <div class="carteira-kpi-questions-wrap" style="margin-top:10px;"></div>
+    `;
+    chartContainer.appendChild(kpiSection);
+
+    const ufSelect = kpiSection.querySelector('.carteira-kpi-uf');
+    const summaryWrap = kpiSection.querySelector('.carteira-kpi-summary');
+    const tableWrapKpi = kpiSection.querySelector('.carteira-kpi-table-wrap');
+    const questionsWrap = kpiSection.querySelector('.carteira-kpi-questions-wrap');
+    if (!ufSelect || !summaryWrap || !tableWrapKpi || !questionsWrap) return;
+
+    const kpiCharts = [];
+    const destroyKpiCharts = () => {
+        while (kpiCharts.length) {
+            const chart = kpiCharts.pop();
+            if (chart && typeof chart.destroy === 'function') {
+                chart.destroy();
+            }
+        }
+    };
+
+    const numberPt = (value) => Number(value || 0).toLocaleString('pt-BR');
+    const pctPt = (value) => `${Number(value || 0).toLocaleString('pt-BR')}%`;
+    const truncateLabel = (value, limit = 30) => {
+        const text = String(value || '');
+        if (text.length <= limit) return text;
+        return `${text.slice(0, limit - 1)}…`;
+    };
+
+    const kpiPalette = [
+        '#3D6D8A', '#2E8BC0', '#4DAA57', '#B48B1E', '#9C4E9A', '#D46A4A', '#5C6BC0', '#6B8E23',
+    ];
+    const paletteColor = (index, alpha = 1) => {
+        const hex = kpiPalette[index % kpiPalette.length];
+        return hexToRgba(hex, alpha);
+    };
+
+    const buildKpiResponseUrl = (combo, question, answer, ufCode) => {
+        if (!kpiProcessChangelistUrl) return '';
+        if (!combo || !question || !answer) return '';
+        const carteiraId = Number(combo.carteira_id || 0);
+        const tipoId = Number(combo.tipo_id || 0);
+        const questionKey = String(question.chave || '').trim();
+        const answerValue = String(answer.valor || '').trim();
+        if (!carteiraId || !tipoId || !questionKey || !answerValue) {
+            return '';
+        }
+        const params = new URLSearchParams();
+        params.set('kpi_carteira_id', String(carteiraId));
+        params.set('kpi_tipo_id', String(tipoId));
+        params.set('kpi_question', questionKey);
+        params.set('kpi_answer', answerValue);
+        if (ufCode && ufCode !== 'ALL') {
+            params.set('kpi_uf', String(ufCode));
+        }
+        return `${kpiProcessChangelistUrl}?${params.toString()}`;
+    };
+
+    const buildPeticaoUrl = (tipoSlug, carteiraId) => {
+        if (!kpiProcessChangelistUrl) return '';
+        const slug = String(tipoSlug || '').trim();
+        if (!slug) return '';
+        const params = new URLSearchParams();
+        params.set('peticao_tipo', slug);
+        const carteiraParsed = Number(carteiraId || 0);
+        if (carteiraParsed > 0) {
+            params.set('peticao_carteira_id', String(carteiraParsed));
+        }
+        return `${kpiProcessChangelistUrl}?${params.toString()}`;
+    };
+
+    const buildUfDatasets = (answers) => {
+        const ufTotals = {};
+        answers.forEach((answer) => {
+            const byUf = Array.isArray(answer.by_uf) ? answer.by_uf : [];
+            byUf.forEach((item) => {
+                const uf = String(item.uf || '').trim();
+                if (!uf) return;
+                ufTotals[uf] = (ufTotals[uf] || 0) + Number(item.count || 0);
+            });
+        });
+
+        const orderedUfs = Object.entries(ufTotals)
+            .sort((a, b) => b[1] - a[1])
+            .map(([uf]) => uf);
+        if (!orderedUfs.length) {
+            return [];
+        }
+
+        const maxSeries = 6;
+        const mainUfs = orderedUfs.slice(0, maxSeries);
+        const mainUfSet = new Set(mainUfs);
+        const includeOthers = orderedUfs.length > maxSeries;
+        const datasets = [];
+
+        mainUfs.forEach((uf, idx) => {
+            datasets.push({
+                label: uf,
+                data: answers.map((answer) => {
+                    const total = Number(answer.count || 0);
+                    if (!total) return 0;
+                    const byUf = Array.isArray(answer.by_uf) ? answer.by_uf : [];
+                    const match = byUf.find((item) => String(item.uf || '') === uf);
+                    const count = Number(match?.count || 0);
+                    return Number(((count * 100) / total).toFixed(2));
+                }),
+                backgroundColor: paletteColor(idx, 0.75),
+                borderColor: paletteColor(idx, 0.92),
+                borderWidth: 1,
+                stack: 'uf',
+            });
+        });
+
+        if (includeOthers) {
+            datasets.push({
+                label: 'Outras UFs',
+                data: answers.map((answer) => {
+                    const total = Number(answer.count || 0);
+                    if (!total) return 0;
+                    const byUf = Array.isArray(answer.by_uf) ? answer.by_uf : [];
+                    const othersCount = byUf.reduce((sum, item) => {
+                        const uf = String(item.uf || '');
+                        if (mainUfSet.has(uf)) return sum;
+                        return sum + Number(item.count || 0);
+                    }, 0);
+                    return Number(((othersCount * 100) / total).toFixed(2));
+                }),
+                backgroundColor: 'rgba(142, 155, 170, 0.70)',
+                borderColor: 'rgba(110, 126, 145, 0.95)',
+                borderWidth: 1,
+                stack: 'uf',
+            });
+        }
+
+        return datasets;
+    };
+
+    const renderQuestionCharts = (question, verticalId, horizontalId) => {
+        const answers = Array.isArray(question.answers) ? question.answers : [];
+        if (!answers.length) {
+            return;
+        }
+        const verticalCanvas = document.getElementById(verticalId);
+        const horizontalCanvas = document.getElementById(horizontalId);
+        if (!verticalCanvas || !horizontalCanvas) {
+            return;
+        }
+
+        const labels = answers.map((answer) => truncateLabel(answer.valor, 28));
+        const values = answers.map((answer) => Number(answer.count || 0));
+        const verticalCtx = verticalCanvas.getContext('2d');
+        if (verticalCtx) {
+            const verticalChart = new Chart(verticalCtx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Cards',
+                        data: values,
+                        backgroundColor: labels.map((_, idx) => paletteColor(idx, 0.66)),
+                        borderColor: labels.map((_, idx) => paletteColor(idx, 0.92)),
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => {
+                                    const item = items?.[0];
+                                    return item ? String(answers[item.dataIndex]?.valor || '') : '';
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: true,
+                                font: { size: 10 },
+                            },
+                            grid: { display: false },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                                font: { size: 10 },
+                            },
+                        },
+                    },
+                },
+            });
+            kpiCharts.push(verticalChart);
+        }
+
+        const ufDatasets = buildUfDatasets(answers);
+        if (!ufDatasets.length) {
+            const fallback = document.createElement('div');
+            fallback.style.fontSize = '10px';
+            fallback.style.color = '#5b6f84';
+            fallback.style.marginTop = '4px';
+            fallback.textContent = 'Sem distribuição por UF nesta amostra.';
+            horizontalCanvas.parentElement?.appendChild(fallback);
+            return;
+        }
+
+        const horizontalCtx = horizontalCanvas.getContext('2d');
+        if (!horizontalCtx) return;
+
+        const horizontalChart = new Chart(horizontalCtx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: ufDatasets,
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 10,
+                            font: { size: 9 },
+                        },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const item = items?.[0];
+                                return item ? String(answers[item.dataIndex]?.valor || '') : '';
+                            },
+                            label: (context) => `${context.dataset.label}: ${Number(context.parsed.x || 0).toLocaleString('pt-BR')}%`,
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: (value) => `${Number(value || 0).toLocaleString('pt-BR')}%`,
+                            font: { size: 9 },
+                        },
+                    },
+                    y: {
+                        stacked: true,
+                        ticks: {
+                            font: { size: 9 },
+                        },
+                    },
+                },
+            },
+        });
+        kpiCharts.push(horizontalChart);
+    };
+
+    kpiUfOptions.forEach((option) => {
+        const opt = document.createElement('option');
+        opt.value = String(option.code || 'ALL');
+        opt.textContent = String(option.label || option.code || 'ALL');
+        ufSelect.appendChild(opt);
+    });
+    ufSelect.value = 'ALL';
+
+    const renderKpiByUf = (ufCode) => {
+        destroyKpiCharts();
+        const bucket = kpiBuckets[ufCode] || kpiBuckets.ALL || {
+            cards_total: 0,
+            processos_total: 0,
+            cpfs_total: 0,
+            combos: [],
+        };
+        const combos = Array.isArray(bucket.combos) ? bucket.combos : [];
+
+        summaryWrap.innerHTML = `
+            <strong>Cards:</strong> ${numberPt(bucket.cards_total)}
+            &nbsp;|&nbsp;
+            <strong>Processos:</strong> ${numberPt(bucket.processos_total)}
+            &nbsp;|&nbsp;
+            <strong>CPFs:</strong> ${numberPt(bucket.cpfs_total)}
+            &nbsp;|&nbsp;
+            <strong>Combinações carteira/tipo:</strong> ${numberPt(combos.length)}
+        `;
+
+        if (!combos.length) {
+            tableWrapKpi.innerHTML = '<div style="font-size:13px; color:#57697d;">Sem dados de KPI para o recorte selecionado.</div>';
+            questionsWrap.innerHTML = '';
+            return;
+        }
+
+        const rows = combos.map((combo) => {
+            const kpis = combo.kpis || {};
+            return `
+                <tr>
+                    <td style="text-align:left;">${escapeHtml(combo.carteira_nome || '[Sem carteira]')}</td>
+                    <td style="text-align:left;">${escapeHtml(combo.tipo_nome || '[Sem tipo]')}</td>
+                    <td style="text-align:right;">${numberPt(combo.cards)}</td>
+                    <td style="text-align:right;">${numberPt(combo.processos)}</td>
+                    <td style="text-align:right;">${numberPt(combo.cpfs)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.propor_monitoria_sim)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.repropor_monitoria_sim)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.cumprimento_sentenca_iniciar_cs)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.habilitar_sim)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.habilitar_nao)}</td>
+                    <td style="text-align:right;">${numberPt(kpis.recomendou_monitoria)} (${pctPt(combo.pct_recomendou_monitoria)})</td>
+                </tr>
+            `;
+        }).join('');
+
+        tableWrapKpi.innerHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                    <tr style="background:#eef3f8;">
+                        <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira</th>
+                        <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Tipo de análise</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Cards</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Processos</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">CPFs</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Nova monitória</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Repropor monitória</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Iniciar CS</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Habilitar</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Não habilitar</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Recomendou monitória</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+
+        const chartJobs = [];
+        const questionCards = combos.slice(0, 14).map((combo, comboIndex) => {
+            const questions = Array.isArray(combo.questions) ? combo.questions : [];
+            if (!questions.length) {
+                return '';
+            }
+            const questionBlocks = questions.slice(0, 7).map((question, questionIndex) => {
+                const answers = Array.isArray(question.answers) ? question.answers : [];
+                if (!answers.length) {
+                    return '';
+                }
+                const verticalId = `kpi-answers-v-${comboIndex}-${questionIndex}-${ufCode}`;
+                const horizontalId = `kpi-answers-h-${comboIndex}-${questionIndex}-${ufCode}`;
+                chartJobs.push({ question, verticalId, horizontalId });
+                const answerRows = answers.map((answer) => {
+                    const url = buildKpiResponseUrl(combo, question, answer, ufCode);
+                    const answerLabel = `${escapeHtml(answer.valor)} (${numberPt(answer.count)})`;
+                    const answerLink = url
+                        ? `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${answerLabel}</a>`
+                        : `<span>${answerLabel}</span>`;
+                    return `
+                        <li style="margin-bottom:2px;">
+                            ${answerLink}
+                            <span style="color:#6a7a8b;">· ${pctPt(answer.pct)}</span>
+                        </li>
+                    `;
+                }).join('');
+                return `
+                    <div style="display:grid; grid-template-columns:minmax(260px, 1fr) minmax(260px, 330px); gap:10px; align-items:start; border:1px dashed #dbe4ee; border-radius:8px; padding:8px; background:#fff;">
+                        <div>
+                            <div style="font-size:12px; font-weight:700; color:#2f3d4a; margin-bottom:4px;">
+                                ${escapeHtml(question.pergunta || question.chave || '')}
+                            </div>
+                            <ul style="margin:0; padding-left:16px; font-size:12px; color:#46576b;">
+                                ${answerRows}
+                            </ul>
+                        </div>
+                        <div style="display:grid; gap:6px;">
+                            <div style="height:110px;">
+                                <canvas id="${verticalId}"></canvas>
+                            </div>
+                            <div style="height:130px;">
+                                <canvas id="${horizontalId}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).filter(Boolean).join('');
+            if (!questionBlocks) {
+                return '';
+            }
+            return `
+                <details style="border:1px solid #e4ebf3; border-radius:8px; padding:8px; background:#fafcff;">
+                    <summary style="cursor:pointer; font-weight:600; color:#2f3d4a;">
+                        ${escapeHtml(combo.carteira_nome || '[Sem carteira]')} · ${escapeHtml(combo.tipo_nome || '[Sem tipo]')}
+                    </summary>
+                    <div style="display:grid; gap:8px; margin-top:8px;">
+                        ${questionBlocks}
+                    </div>
+                </details>
+            `;
+        }).filter(Boolean).join('');
+
+        questionsWrap.innerHTML = questionCards
+            ? `
+                <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:#2f3d4a;">
+                    Respostas contabilizáveis (amostra por carteira/tipo)
+                </div>
+                <div style="display:grid; gap:8px;">
+                    ${questionCards}
+                </div>
+            `
+            : '';
+
+        chartJobs.forEach(({ question, verticalId, horizontalId }) => {
+            renderQuestionCharts(question, verticalId, horizontalId);
+        });
+    };
+
+    ufSelect.addEventListener('change', () => {
+        renderKpiByUf(ufSelect.value || 'ALL');
+    });
+    renderKpiByUf('ALL');
+
+    if (peticaoTypes.length && peticaoByCarteira.length) {
+        const peticaoSection = document.createElement('section');
+        peticaoSection.style.marginTop = '16px';
+        peticaoSection.style.padding = '14px';
+        peticaoSection.style.border = '1px solid #d9e1ea';
+        peticaoSection.style.borderRadius = '10px';
+        peticaoSection.style.background = '#fff';
+        peticaoSection.innerHTML = `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                <h3 style="margin:0;">Peças Geradas por Tipo e Carteira</h3>
+                <div style="font-size:12px; color:#5d6f83;">Clique em uma barra para abrir a lista filtrada.</div>
+            </div>
+            <div class="carteira-kpi-peticao-totals" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+            <div style="height:290px;">
+                <canvas id="kpiPeticaoCarteiraChart"></canvas>
             </div>
         `;
+        chartContainer.appendChild(peticaoSection);
+
+        const totalsWrap = peticaoSection.querySelector('.carteira-kpi-peticao-totals');
+        if (totalsWrap) {
+            totalsWrap.innerHTML = peticaoTypes.map((tipo, idx) => {
+                const slug = String(tipo.slug || '');
+                const totalItem = peticaoTotals.find((item) => String(item.slug || '') === slug) || {};
+                const label = String(tipo.label || slug || 'Tipo');
+                const pieces = Number(totalItem.pieces || 0);
+                const processos = Number(totalItem.processos || 0);
+                const url = buildPeticaoUrl(slug, null);
+                const inner = `
+                    <span style="font-weight:700;">${escapeHtml(label)}</span>
+                    <span>· Peças: <strong>${numberPt(pieces)}</strong></span>
+                    <span>· Processos: <strong>${numberPt(processos)}</strong></span>
+                `;
+                if (url) {
+                    return `
+                        <a href="${escapeHtml(url)}" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#2f435b; text-decoration:none; border:1px solid #e2e9f2; border-radius:999px; padding:5px 10px; background:${paletteColor(idx, 0.14)};">
+                            ${inner}
+                        </a>
+                    `;
+                }
+                return `
+                    <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#2f435b; border:1px solid #e2e9f2; border-radius:999px; padding:5px 10px; background:${paletteColor(idx, 0.14)};">
+                        ${inner}
+                    </span>
+                `;
+            }).join('');
+        }
+
+        const peticaoCanvas = document.getElementById('kpiPeticaoCarteiraChart');
+        const peticaoCtx = peticaoCanvas ? peticaoCanvas.getContext('2d') : null;
+        if (peticaoCtx) {
+            const labels = peticaoByCarteira.map((item) => String(item.carteira_nome || item.carteira_id || 'Carteira'));
+            const datasets = peticaoTypes.map((tipo, idx) => {
+                const slug = String(tipo.slug || '');
+                return {
+                    label: String(tipo.label || slug || 'Tipo'),
+                    data: peticaoByCarteira.map((item) => Number((item.pieces || {})[slug] || 0)),
+                    backgroundColor: paletteColor(idx, 0.68),
+                    borderColor: paletteColor(idx, 0.96),
+                    borderWidth: 1,
+                };
+            });
+
+            new Chart(peticaoCtx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                font: { size: 11 },
+                            },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} peça(s)`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                font: { size: 11 },
+                            },
+                            grid: { display: false },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                                font: { size: 11 },
+                            },
+                        },
+                    },
+                    onClick(event, elements, chart) {
+                        if (!elements || !elements.length) return;
+                        const first = elements[0];
+                        const datasetIndex = Number(first.datasetIndex);
+                        const dataIndex = Number(first.index);
+                        const tipo = peticaoTypes[datasetIndex];
+                        const carteira = peticaoByCarteira[dataIndex];
+                        if (!tipo || !carteira) return;
+                        const url = buildPeticaoUrl(tipo.slug, carteira.carteira_id);
+                        if (url) {
+                            window.location.href = url;
+                        }
+                    },
+                },
+            });
+        }
     }
-
-    const rows = pairs
-        .slice(0, 120)
-        .map((pair) => {
-            const pairUrl = buildPairUrl(pair);
-            const openLink = pairUrl
-                ? `<a href="${escapeHtml(pairUrl)}" style="font-weight:600;">Abrir lista</a>`
-                : '—';
-            return `
-            <tr>
-                <td>${escapeHtml(pair.a_nome)}</td>
-                <td>${escapeHtml(pair.b_nome)}</td>
-                <td style="text-align:right;">${Number(pair.count || 0).toLocaleString('pt-BR')}</td>
-                <td style="text-align:right;">${Number(pair.pct_a || 0).toLocaleString('pt-BR')}%</td>
-                <td style="text-align:right;">${Number(pair.pct_b || 0).toLocaleString('pt-BR')}%</td>
-                <td style="text-align:right;">${Number(pair.pct_union || 0).toLocaleString('pt-BR')}%</td>
-                <td style="text-align:center;">${openLink}</td>
-            </tr>
-        `;
-        })
-        .join('');
-
-    tableWrap.innerHTML = `
-        <table style="width:100%; border-collapse:collapse; font-size:12px;">
-            <thead>
-                <tr style="background:#eef3f8;">
-                    <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira A</th>
-                    <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira B</th>
-                    <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">CPFs em comum</th>
-                    <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% de A</th>
-                    <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% de B</th>
-                    <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">% da união</th>
-                    <th style="text-align:center; padding:6px; border:1px solid #d8e1ea;">Ações</th>
-                </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>
-    `;
 });

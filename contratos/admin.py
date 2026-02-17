@@ -4,6 +4,7 @@ import json
 import os
 import re
 import uuid
+import unicodedata
 from urllib.parse import quote
 from typing import Optional
 
@@ -3508,6 +3509,13 @@ class ProcessoJudicialChangeList(ChangeList):
         'intersection_carteira_a',
         'intersection_carteira_b',
         'show_counts',
+        'kpi_carteira_id',
+        'kpi_tipo_id',
+        'kpi_question',
+        'kpi_answer',
+        'kpi_uf',
+        'peticao_tipo',
+        'peticao_carteira_id',
     )
 
     def get_filters_params(self, params=None):
@@ -3662,12 +3670,483 @@ class CarteiraAdmin(admin.ModelAdmin):
             "process_changelist_url": process_changelist_url,
         }
 
+    def _build_carteira_kpi_data(self):
+        def _safe_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _clean_text(value):
+            if value is None:
+                return ""
+            return str(value).strip()
+
+        def _normalize_answer(value):
+            text = _clean_text(value).lower()
+            if not text:
+                return ""
+            text = unicodedata.normalize("NFKD", text)
+            text = "".join(ch for ch in text if not unicodedata.combining(ch))
+            return re.sub(r"\s+", " ", text).strip()
+
+        def _normalize_filename_text(value):
+            text = _clean_text(value).lower()
+            if not text:
+                return ""
+            text = unicodedata.normalize("NFKD", text)
+            text = "".join(ch for ch in text if not unicodedata.combining(ch))
+            text = text.replace("_", " ").replace("-", " ")
+            return re.sub(r"\s+", " ", text).strip()
+
+        def _classify_peticao_kind(nome, arquivo_nome):
+            joined = f"{_normalize_filename_text(nome)} {_normalize_filename_text(arquivo_nome)}".strip()
+            if not joined:
+                return ""
+            if "monitoria inicial" in joined:
+                return "monitoria_inicial"
+            if "cobranca judicial" in joined:
+                return "cobranca_judicial"
+            if "habilitacao" in joined:
+                return "habilitacao"
+            return ""
+
+        def _is_yes(value):
+            return _normalize_answer(value) in {"sim", "s", "yes", "y"}
+
+        def _is_no(value):
+            return _normalize_answer(value) in {"nao", "n", "no"}
+
+        def _get_cards_from_respostas(respostas):
+            if not isinstance(respostas, dict):
+                return []
+            saved_cards = respostas.get("saved_processos_vinculados")
+            if isinstance(saved_cards, list) and saved_cards:
+                return saved_cards
+            active_cards = respostas.get("processos_vinculados")
+            if isinstance(active_cards, list) and active_cards:
+                return active_cards
+            return []
+
+        technical_response_keys = {
+            "ativar_botao_monitoria",
+            "contratos_para_monitoria",
+        }
+
+        process_changelist_url = reverse("admin:contratos_processojudicial_changelist")
+        carteira_lookup = {
+            carteira["id"]: carteira["nome"]
+            for carteira in Carteira.objects.order_by("nome").values("id", "nome")
+        }
+        tipo_lookup = {
+            tipo["id"]: {"nome": tipo["nome"], "slug": tipo["slug"]}
+            for tipo in TipoAnaliseObjetiva.objects.values("id", "nome", "slug")
+        }
+        questao_lookup = {
+            questao["chave"]: {
+                "texto_pergunta": questao["texto_pergunta"],
+                "tipo_campo": questao["tipo_campo"],
+            }
+            for questao in QuestaoAnalise.objects.exclude(chave__isnull=True)
+            .exclude(chave__exact="")
+            .values("chave", "texto_pergunta", "tipo_campo")
+        }
+
+        processos = (
+            ProcessoJudicial.objects.filter(analise_processo__isnull=False)
+            .select_related("analise_processo")
+            .prefetch_related(Prefetch("carteiras_vinculadas", queryset=Carteira.objects.only("id")))
+            .only("id", "uf", "carteira_id", "analise_processo__respostas")
+        )
+
+        process_ids = [processo.id for processo in processos]
+        cpf_by_processo = {}
+        if process_ids:
+            partes = (
+                Parte.objects.filter(tipo_polo="PASSIVO", processo_id__in=process_ids)
+                .exclude(documento__isnull=True)
+                .exclude(documento__exact="")
+                .values_list("processo_id", "documento")
+                .distinct()
+            )
+            for processo_id, documento in partes:
+                cpf_digits = re.sub(r"\D", "", str(documento or ""))
+                if not cpf_digits:
+                    continue
+                cpf_by_processo.setdefault(processo_id, set()).add(cpf_digits)
+
+        all_ufs = set()
+        buckets = {}
+
+        def _get_bucket(uf_code):
+            bucket = buckets.get(uf_code)
+            if bucket is None:
+                bucket = {
+                    "process_ids": set(),
+                    "cpfs": set(),
+                    "cards_total": 0,
+                    "combos": {},
+                }
+                buckets[uf_code] = bucket
+            return bucket
+
+        def _process_entry_for_bucket(bucket, entry):
+            bucket["cards_total"] += 1
+            bucket["process_ids"].add(entry["processo_id"])
+            bucket["cpfs"].update(entry["cpfs"])
+
+            combo_key = (
+                entry["carteira_id"] or 0,
+                entry["tipo_id"] or 0,
+                entry["tipo_slug"] or "",
+                entry["tipo_nome"] or "",
+            )
+            combo = bucket["combos"].get(combo_key)
+            if combo is None:
+                combo = {
+                    "carteira_id": entry["carteira_id"],
+                    "carteira_nome": entry["carteira_nome"],
+                    "tipo_id": entry["tipo_id"],
+                    "tipo_nome": entry["tipo_nome"],
+                    "tipo_slug": entry["tipo_slug"],
+                    "process_ids": set(),
+                    "cpfs": set(),
+                    "cards": 0,
+                    "kpis": {
+                        "propor_monitoria_sim": 0,
+                        "propor_monitoria_nao": 0,
+                        "repropor_monitoria_sim": 0,
+                        "repropor_monitoria_nao": 0,
+                        "recomendou_monitoria": 0,
+                        "cumprimento_sentenca_sim": 0,
+                        "cumprimento_sentenca_nao": 0,
+                        "cumprimento_sentenca_iniciar_cs": 0,
+                        "habilitar_sim": 0,
+                        "habilitar_nao": 0,
+                    },
+                    "questions": {},
+                }
+                bucket["combos"][combo_key] = combo
+
+            combo["cards"] += 1
+            combo["process_ids"].add(entry["processo_id"])
+            combo["cpfs"].update(entry["cpfs"])
+
+            respostas_obj = entry["respostas_obj"]
+            propor_monitoria = respostas_obj.get("propor_monitoria")
+            repropor_monitoria = respostas_obj.get("repropor_monitoria")
+            cumprimento_sentenca = respostas_obj.get("cumprimento_de_sentenca")
+            habilitacao = respostas_obj.get("habilitacao")
+
+            if _is_yes(propor_monitoria):
+                combo["kpis"]["propor_monitoria_sim"] += 1
+            elif _is_no(propor_monitoria):
+                combo["kpis"]["propor_monitoria_nao"] += 1
+
+            if _is_yes(repropor_monitoria):
+                combo["kpis"]["repropor_monitoria_sim"] += 1
+            elif _is_no(repropor_monitoria):
+                combo["kpis"]["repropor_monitoria_nao"] += 1
+
+            if _is_yes(propor_monitoria) or _is_yes(repropor_monitoria):
+                combo["kpis"]["recomendou_monitoria"] += 1
+
+            cumprimento_norm = _normalize_answer(cumprimento_sentenca)
+            if _is_yes(cumprimento_sentenca):
+                combo["kpis"]["cumprimento_sentenca_sim"] += 1
+            elif _is_no(cumprimento_sentenca):
+                combo["kpis"]["cumprimento_sentenca_nao"] += 1
+
+            if cumprimento_norm in {
+                "iniciar cs",
+                "iniciar c.s.",
+                "iniciar cumprimento de sentenca",
+            }:
+                combo["kpis"]["cumprimento_sentenca_iniciar_cs"] += 1
+
+            habilitacao_norm = _normalize_answer(habilitacao)
+            if habilitacao_norm.startswith("habilitar"):
+                combo["kpis"]["habilitar_sim"] += 1
+            elif habilitacao_norm.startswith("nao habilitar"):
+                combo["kpis"]["habilitar_nao"] += 1
+
+            for chave, valor in respostas_obj.items():
+                if chave in technical_response_keys:
+                    continue
+                resposta_valor = _clean_text(valor)
+                if not resposta_valor or resposta_valor == "---":
+                    continue
+                question_meta = questao_lookup.get(chave, {})
+                question_item = combo["questions"].get(chave)
+                if question_item is None:
+                    question_item = {
+                        "chave": chave,
+                        "pergunta": question_meta.get("texto_pergunta") or chave,
+                        "tipo_campo": question_meta.get("tipo_campo") or "",
+                        "cards_com_resposta": 0,
+                        "answers": {},
+                    }
+                    combo["questions"][chave] = question_item
+                question_item["cards_com_resposta"] += 1
+                answer_item = question_item["answers"].get(resposta_valor)
+                if answer_item is None:
+                    answer_item = {
+                        "count": 0,
+                        "by_uf": {},
+                    }
+                    question_item["answers"][resposta_valor] = answer_item
+                answer_item["count"] += 1
+                uf_code = _clean_text(entry.get("uf")).upper() or "SEM_UF"
+                answer_item["by_uf"][uf_code] = answer_item["by_uf"].get(uf_code, 0) + 1
+
+        for processo in processos:
+            respostas = getattr(getattr(processo, "analise_processo", None), "respostas", None)
+            cards = _get_cards_from_respostas(respostas)
+            if not cards:
+                continue
+
+            vinc_ids = [carteira.id for carteira in processo.carteiras_vinculadas.all()]
+            carteira_default = processo.carteira_id or (vinc_ids[0] if vinc_ids else None)
+            uf_code = _clean_text(processo.uf).upper() or "SEM_UF"
+            all_ufs.add(uf_code)
+            cpfs = cpf_by_processo.get(processo.id, set())
+
+            for card in cards:
+                if not isinstance(card, dict):
+                    continue
+
+                analysis_type = card.get("analysis_type") if isinstance(card.get("analysis_type"), dict) else {}
+                tipo_id = _safe_int(analysis_type.get("id"))
+                tipo_meta = tipo_lookup.get(tipo_id, {})
+                tipo_nome = _clean_text(analysis_type.get("nome")) or tipo_meta.get("nome") or "[Sem tipo]"
+                tipo_slug = _clean_text(analysis_type.get("slug")) or tipo_meta.get("slug") or "[sem-slug]"
+
+                carteira_card_id = _safe_int(card.get("carteira_id"))
+                carteira_id = carteira_card_id or carteira_default
+                carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
+
+                respostas_obj = card.get("tipo_de_acao_respostas")
+                if not isinstance(respostas_obj, dict):
+                    respostas_obj = {}
+
+                entry = {
+                    "processo_id": processo.id,
+                    "cpfs": cpfs,
+                    "uf": uf_code,
+                    "carteira_id": carteira_id,
+                    "carteira_nome": carteira_nome,
+                    "tipo_id": tipo_id,
+                    "tipo_nome": tipo_nome,
+                    "tipo_slug": tipo_slug,
+                    "respostas_obj": respostas_obj,
+                }
+                _process_entry_for_bucket(_get_bucket("ALL"), entry)
+                _process_entry_for_bucket(_get_bucket(uf_code), entry)
+
+        def _serialize_bucket(bucket):
+            combo_items = []
+            for combo in bucket["combos"].values():
+                cards_total = combo["cards"]
+                questions = []
+                for question in combo["questions"].values():
+                    answers_sorted = sorted(
+                        question["answers"].items(),
+                        key=lambda item: (-int((item[1] or {}).get("count", 0)), item[0]),
+                    )
+                    answers = []
+                    for answer, answer_data in answers_sorted:
+                        answer_count = int((answer_data or {}).get("count", 0))
+                        by_uf_map = (answer_data or {}).get("by_uf", {}) or {}
+                        by_uf_sorted = sorted(
+                            by_uf_map.items(),
+                            key=lambda item: (-int(item[1]), item[0]),
+                        )
+                        answers.append(
+                            {
+                                "valor": answer,
+                                "count": answer_count,
+                                "pct": round((answer_count * 100.0 / question["cards_com_resposta"]), 2)
+                                if question["cards_com_resposta"]
+                                else 0.0,
+                                "by_uf": [
+                                    {
+                                        "uf": uf_code,
+                                        "count": int(uf_count),
+                                        "pct": round((int(uf_count) * 100.0 / answer_count), 2)
+                                        if answer_count
+                                        else 0.0,
+                                    }
+                                    for uf_code, uf_count in by_uf_sorted
+                                ],
+                            }
+                        )
+                    questions.append(
+                        {
+                            "chave": question["chave"],
+                            "pergunta": question["pergunta"],
+                            "tipo_campo": question["tipo_campo"],
+                            "cards": question["cards_com_resposta"],
+                            "answers": answers,
+                        }
+                    )
+                questions.sort(key=lambda item: (-item["cards"], item["pergunta"]))
+
+                combo_items.append(
+                    {
+                        "carteira_id": combo["carteira_id"],
+                        "carteira_nome": combo["carteira_nome"],
+                        "tipo_id": combo["tipo_id"],
+                        "tipo_nome": combo["tipo_nome"],
+                        "tipo_slug": combo["tipo_slug"],
+                        "cards": cards_total,
+                        "processos": len(combo["process_ids"]),
+                        "cpfs": len(combo["cpfs"]),
+                        "pct_recomendou_monitoria": round(
+                            (combo["kpis"]["recomendou_monitoria"] * 100.0 / cards_total), 2
+                        )
+                        if cards_total
+                        else 0.0,
+                        "kpis": combo["kpis"],
+                        "questions": questions,
+                    }
+                )
+            combo_items.sort(
+                key=lambda item: (
+                    item["carteira_nome"] or "",
+                    item["tipo_nome"] or "",
+                    -(item["cards"] or 0),
+                )
+            )
+            return {
+                "cards_total": bucket["cards_total"],
+                "processos_total": len(bucket["process_ids"]),
+                "cpfs_total": len(bucket["cpfs"]),
+                "combos": combo_items,
+            }
+
+        uf_codes = sorted(all_ufs)
+        uf_options = [{"code": "ALL", "label": "Todas as UFs"}] + [
+            {"code": uf_code, "label": uf_code} for uf_code in uf_codes
+        ]
+
+        serialized_buckets = {uf_code: _serialize_bucket(bucket) for uf_code, bucket in buckets.items()}
+        if "ALL" not in serialized_buckets:
+            serialized_buckets["ALL"] = {
+                "cards_total": 0,
+                "processos_total": 0,
+                "cpfs_total": 0,
+                "combos": [],
+            }
+
+        # KPI adicional: peças geradas por tipo (Monitória, Cobrança, Habilitação)
+        peticao_type_defs = [
+            {"slug": "monitoria_inicial", "label": "Monitória"},
+            {"slug": "cobranca_judicial", "label": "Ação de Cobrança"},
+            {"slug": "habilitacao", "label": "Habilitação"},
+        ]
+        peticao_slugs = [item["slug"] for item in peticao_type_defs]
+
+        processo_carteiras = {}
+        processo_carteira_rows = (
+            ProcessoJudicial.objects.values_list("id", "carteira_id", "carteiras_vinculadas__id").distinct()
+        )
+        for processo_id, carteira_principal_id, carteira_vinculada_id in processo_carteira_rows:
+            bucket = processo_carteiras.setdefault(int(processo_id), set())
+            if carteira_principal_id:
+                bucket.add(int(carteira_principal_id))
+            if carteira_vinculada_id:
+                bucket.add(int(carteira_vinculada_id))
+
+        peticao_by_carteira = {
+            int(carteira_id): {
+                "carteira_id": int(carteira_id),
+                "carteira_nome": carteira_nome,
+                "pieces": {slug: 0 for slug in peticao_slugs},
+                "process_ids": {slug: set() for slug in peticao_slugs},
+            }
+            for carteira_id, carteira_nome in carteira_lookup.items()
+        }
+        peticao_totals = {
+            slug: {"pieces": 0, "process_ids": set()}
+            for slug in peticao_slugs
+        }
+
+        arquivo_rows = ProcessoArquivo.objects.values_list("processo_id", "nome", "arquivo")
+        for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
+            if not processo_id:
+                continue
+            tipo_slug = _classify_peticao_kind(nome_arquivo, arquivo_path)
+            if not tipo_slug:
+                continue
+
+            carteira_ids = processo_carteiras.get(int(processo_id), set())
+            if not carteira_ids:
+                continue
+
+            for carteira_id in carteira_ids:
+                carteira_bucket = peticao_by_carteira.get(carteira_id)
+                if carteira_bucket is None:
+                    carteira_bucket = {
+                        "carteira_id": int(carteira_id),
+                        "carteira_nome": carteira_lookup.get(carteira_id, f"Carteira {carteira_id}"),
+                        "pieces": {slug: 0 for slug in peticao_slugs},
+                        "process_ids": {slug: set() for slug in peticao_slugs},
+                    }
+                    peticao_by_carteira[carteira_id] = carteira_bucket
+                carteira_bucket["pieces"][tipo_slug] += 1
+                carteira_bucket["process_ids"][tipo_slug].add(int(processo_id))
+
+            peticao_totals[tipo_slug]["pieces"] += 1
+            peticao_totals[tipo_slug]["process_ids"].add(int(processo_id))
+
+        serialized_peticao_by_carteira = []
+        for carteira in sorted(peticao_by_carteira.values(), key=lambda item: (item["carteira_nome"] or "").upper()):
+            total_pieces = sum(int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs)
+            if total_pieces <= 0:
+                continue
+            processos_map = {
+                slug: len(carteira["process_ids"].get(slug, set()))
+                for slug in peticao_slugs
+            }
+            total_processos = len(set().union(*[carteira["process_ids"].get(slug, set()) for slug in peticao_slugs]))
+            serialized_peticao_by_carteira.append(
+                {
+                    "carteira_id": carteira["carteira_id"],
+                    "carteira_nome": carteira["carteira_nome"],
+                    "pieces": {slug: int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs},
+                    "processos": processos_map,
+                    "total_pieces": int(total_pieces),
+                    "total_processos": int(total_processos),
+                }
+            )
+
+        serialized_peticao_totals = [
+            {
+                "slug": item["slug"],
+                "label": item["label"],
+                "pieces": int(peticao_totals[item["slug"]]["pieces"]),
+                "processos": len(peticao_totals[item["slug"]]["process_ids"]),
+            }
+            for item in peticao_type_defs
+        ]
+
+        return {
+            "ufs": uf_options,
+            "buckets": serialized_buckets,
+            "process_changelist_url": process_changelist_url,
+            "peticao_types": peticao_type_defs,
+            "peticao_by_carteira": serialized_peticao_by_carteira,
+            "peticao_totals": serialized_peticao_totals,
+        }
+
     def changelist_view(self, request, extra_context=None):
         chart_data = list(self.get_queryset(request).values('nome', 'cor_grafico', 'total_processos', 'valor_total'))
         intersection_data = self._build_carteira_intersections()
+        kpi_data = self._build_carteira_kpi_data()
         extra_context = extra_context or {}
         extra_context['chart_data'] = json.dumps(chart_data, default=str)
         extra_context['intersection_data'] = json.dumps(intersection_data, default=str)
+        extra_context['kpi_data'] = json.dumps(kpi_data, default=str)
         return super().changelist_view(request, extra_context=extra_context)
 
     class Media:
@@ -3680,7 +4159,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260213f',
+            'admin/js/carteira_charts.js?v=20260217b',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -3872,6 +4351,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'intersection_carteira_a',
             'intersection_carteira_b',
             'show_counts',
+            'kpi_carteira_id',
+            'kpi_tipo_id',
+            'kpi_question',
+            'kpi_answer',
+            'kpi_uf',
+            'peticao_tipo',
+            'peticao_carteira_id',
             'ord_prescricao',
             'ord_ultima_edicao',
         ):
@@ -4003,6 +4489,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = super().get_queryset(request)
         qs = filter_processos_queryset_for_user(qs, request.user)
         qs = self._apply_intersection_pair_filter(qs, request)
+        qs = self._apply_kpi_response_filter(qs, request)
+        qs = self._apply_peticao_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
         order_filter = request.GET.get('ord_ultima_edicao')
         if order_filter not in {'recente', 'antigo'}:
@@ -4124,6 +4612,176 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
 
+    def _safe_positive_int(self, value):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _normalize_kpi_text(self, value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return ''
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _extract_kpi_cards(self, respostas):
+        if not isinstance(respostas, dict):
+            return []
+        saved_cards = respostas.get('saved_processos_vinculados')
+        if isinstance(saved_cards, list) and saved_cards:
+            return saved_cards
+        active_cards = respostas.get('processos_vinculados')
+        if isinstance(active_cards, list) and active_cards:
+            return active_cards
+        return []
+
+    def _parse_kpi_response_filter(self, request):
+        carteira_id = self._safe_positive_int(request.GET.get('kpi_carteira_id'))
+        tipo_id = self._safe_positive_int(request.GET.get('kpi_tipo_id'))
+        question_key = str(request.GET.get('kpi_question') or '').strip()
+        answer_value = str(request.GET.get('kpi_answer') or '').strip()
+        if not carteira_id or not tipo_id or not question_key or not answer_value:
+            return None
+        uf_code = str(request.GET.get('kpi_uf') or '').strip().upper()
+        if uf_code in {'ALL', 'TODAS', 'TODAS AS UFS'}:
+            uf_code = ''
+        return {
+            'carteira_id': carteira_id,
+            'tipo_id': tipo_id,
+            'question_key': question_key,
+            'answer_value': answer_value,
+            'answer_norm': self._normalize_kpi_text(answer_value),
+            'uf_code': uf_code,
+        }
+
+    def _build_kpi_response_process_ids(self, queryset, kpi_filter):
+        carteira_id = kpi_filter['carteira_id']
+        tipo_id = kpi_filter['tipo_id']
+        question_key = kpi_filter['question_key']
+        answer_norm = kpi_filter['answer_norm']
+        uf_code = kpi_filter['uf_code']
+
+        candidate_qs = queryset.filter(analise_processo__isnull=False)
+        if uf_code:
+            candidate_qs = candidate_qs.filter(uf__iexact=uf_code)
+        candidate_qs = candidate_qs.filter(
+            Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
+        ).select_related('analise_processo').prefetch_related(
+            Prefetch('carteiras_vinculadas', queryset=Carteira.objects.only('id'))
+        ).distinct()
+
+        process_ids = set()
+        for processo in candidate_qs:
+            respostas = getattr(getattr(processo, 'analise_processo', None), 'respostas', None)
+            cards = self._extract_kpi_cards(respostas)
+            if not cards:
+                continue
+
+            linked_ids = [carteira.id for carteira in processo.carteiras_vinculadas.all()]
+            carteira_default = processo.carteira_id or (linked_ids[0] if linked_ids else None)
+            if not carteira_default:
+                continue
+
+            matched = False
+            for card in cards:
+                if not isinstance(card, dict):
+                    continue
+                analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
+                card_tipo_id = self._safe_positive_int(analysis_type.get('id'))
+                if card_tipo_id != tipo_id:
+                    continue
+
+                card_carteira_id = self._safe_positive_int(card.get('carteira_id')) or carteira_default
+                if card_carteira_id != carteira_id:
+                    continue
+
+                respostas_obj = card.get('tipo_de_acao_respostas')
+                if not isinstance(respostas_obj, dict):
+                    continue
+                card_answer_norm = self._normalize_kpi_text(respostas_obj.get(question_key))
+                if card_answer_norm and card_answer_norm == answer_norm:
+                    matched = True
+                    break
+
+            if matched:
+                process_ids.add(processo.pk)
+        return process_ids
+
+    def _apply_kpi_response_filter(self, queryset, request):
+        kpi_filter = self._parse_kpi_response_filter(request)
+        if not kpi_filter:
+            return queryset
+        process_ids = self._build_kpi_response_process_ids(queryset, kpi_filter)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
+    def _normalize_filename_text(self, value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return ''
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace('_', ' ').replace('-', ' ')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _classify_peticao_kind(self, nome, arquivo_nome):
+        joined = f"{self._normalize_filename_text(nome)} {self._normalize_filename_text(arquivo_nome)}".strip()
+        if not joined:
+            return ''
+        if 'monitoria inicial' in joined:
+            return 'monitoria_inicial'
+        if 'cobranca judicial' in joined:
+            return 'cobranca_judicial'
+        if 'habilitacao' in joined:
+            return 'habilitacao'
+        return ''
+
+    def _parse_peticao_kpi_filter(self, request):
+        tipo_slug = str(request.GET.get('peticao_tipo') or '').strip().lower()
+        allowed = {'monitoria_inicial', 'cobranca_judicial', 'habilitacao'}
+        if tipo_slug not in allowed:
+            return None
+        return {
+            'tipo_slug': tipo_slug,
+            'carteira_id': self._safe_positive_int(request.GET.get('peticao_carteira_id')),
+        }
+
+    def _build_peticao_kpi_process_ids(self, queryset, peticao_filter):
+        candidate_qs = queryset
+        carteira_id = peticao_filter.get('carteira_id')
+        if carteira_id:
+            candidate_qs = candidate_qs.filter(
+                Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
+            )
+
+        candidate_ids = set(candidate_qs.values_list('id', flat=True).distinct())
+        if not candidate_ids:
+            return set()
+
+        target_tipo = peticao_filter.get('tipo_slug')
+        matched_ids = set()
+        arquivo_rows = ProcessoArquivo.objects.filter(
+            processo_id__in=candidate_ids
+        ).values_list('processo_id', 'nome', 'arquivo')
+        for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
+            tipo_slug = self._classify_peticao_kind(nome_arquivo, arquivo_path)
+            if tipo_slug == target_tipo:
+                matched_ids.add(int(processo_id))
+        return matched_ids
+
+    def _apply_peticao_kpi_filter(self, queryset, request):
+        peticao_filter = self._parse_peticao_kpi_filter(request)
+        if not peticao_filter:
+            return queryset
+        process_ids = self._build_peticao_kpi_process_ids(queryset, peticao_filter)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
     def _build_changelist_context_badge(self, request):
         pair_ids = self._parse_intersection_pair_ids(request)
         if pair_ids:
@@ -4138,6 +4796,54 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'title': 'Interseção',
                 'value': f'{nome_a} + {nome_b}',
                 'subtitle': 'Lista filtrada por CPFs em comum.',
+            }
+
+        kpi_filter = self._parse_kpi_response_filter(request)
+        if kpi_filter:
+            carteira_nome = (
+                Carteira.objects.filter(pk=kpi_filter['carteira_id'])
+                .values_list('nome', flat=True)
+                .first()
+            ) or f"Carteira {kpi_filter['carteira_id']}"
+            tipo_nome = (
+                TipoAnaliseObjetiva.objects.filter(pk=kpi_filter['tipo_id'])
+                .values_list('nome', flat=True)
+                .first()
+            ) or f"Tipo {kpi_filter['tipo_id']}"
+            pergunta = (
+                QuestaoAnalise.objects.filter(chave=kpi_filter['question_key'])
+                .values_list('texto_pergunta', flat=True)
+                .first()
+            ) or kpi_filter['question_key']
+            uf_label = kpi_filter['uf_code'] or 'Todas as UFs'
+            return {
+                'kind': 'kpi',
+                'title': 'KPI',
+                'value': f'{carteira_nome} · {tipo_nome}',
+                'subtitle': f'{pergunta}: {kpi_filter["answer_value"]} ({uf_label})',
+            }
+
+        peticao_filter = self._parse_peticao_kpi_filter(request)
+        if peticao_filter:
+            tipo_label = {
+                'monitoria_inicial': 'Monitória',
+                'cobranca_judicial': 'Ação de Cobrança',
+                'habilitacao': 'Habilitação',
+            }.get(peticao_filter['tipo_slug'], peticao_filter['tipo_slug'])
+            carteira_id = peticao_filter.get('carteira_id')
+            if carteira_id:
+                carteira_label = (
+                    Carteira.objects.filter(pk=carteira_id)
+                    .values_list('nome', flat=True)
+                    .first()
+                ) or f'Carteira {carteira_id}'
+            else:
+                carteira_label = 'Todas as carteiras'
+            return {
+                'kind': 'kpi',
+                'title': 'KPI',
+                'value': f'Peças geradas · {tipo_label}',
+                'subtitle': carteira_label,
             }
 
         carteira_id = self._get_filtered_carteira_id(request)
