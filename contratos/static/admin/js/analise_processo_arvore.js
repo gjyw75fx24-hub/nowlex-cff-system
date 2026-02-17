@@ -1233,6 +1233,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 combined.push({
                     ...normalizedCard,
                     __savedIndex: idx,
+                    __activeIndex: null,
                     __source: 'saved'
                 });
             });
@@ -1254,6 +1255,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 combined.push({
                     ...normalizedCard,
                     __savedIndex: null,
+                    __activeIndex: idx,
                     __source: 'active'
                 });
             });
@@ -4222,7 +4224,7 @@ function formatCnjDigits(raw) {
                 const cardIndex = idx;
                 const savedCardIndex = Number.isFinite(processo.__savedIndex)
                     ? processo.__savedIndex
-                    : cardIndex;
+                    : null;
                     const snapshot = buildProcessoDetailsSnapshot(processo);
                     const $cardVinculado = $('<div class="analise-summary-card"></div>');
                     const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
@@ -4366,8 +4368,21 @@ function formatCnjDigits(raw) {
                         const targetIdentity = getSummaryCardIdentity(targetCard, cardIndex, 'summary');
                         const targetCnjDigits = String((targetCard && targetCard.cnj) || '')
                             .replace(/\D/g, '');
+                        const targetSource = String((processo && processo.__source) || '').trim();
+                        const targetSavedIndex = Number.isFinite(processo && processo.__savedIndex)
+                            ? Number(processo.__savedIndex)
+                            : null;
+                        const targetActiveIndex = Number.isFinite(processo && processo.__activeIndex)
+                            ? Number(processo.__activeIndex)
+                            : null;
 
                         const isSameCard = (candidate, idx, source) => {
+                            if (source === 'saved' && targetSource === 'saved' && targetSavedIndex !== null && idx === targetSavedIndex) {
+                                return true;
+                            }
+                            if (source === 'active' && targetSource === 'active' && targetActiveIndex !== null && idx === targetActiveIndex) {
+                                return true;
+                            }
                             const normalizedCandidate = normalizeProcessCardForSummary(candidate) || candidate;
                             const candidateIdentity = getSummaryCardIdentity(normalizedCandidate, idx, source);
                             if (targetIdentity && candidateIdentity === targetIdentity) {
@@ -4394,12 +4409,7 @@ function formatCnjDigits(raw) {
                         }
 
                         const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
-                        const attrIndex = $(this).attr('data-card-index');
-                        const targetIndex = attrIndex ? Number(attrIndex) : null;
-                        if (Number.isFinite(targetIndex) && savedCards[targetIndex]) {
-                            tryMarkDeletion(savedCards[targetIndex]);
-                            savedCards.splice(targetIndex, 1);
-                        } else if (Array.isArray(savedCards) && savedCards.length) {
+                        if (Array.isArray(savedCards) && savedCards.length) {
                             userResponses[SAVED_PROCESSOS_KEY] = savedCards.filter((candidate, idx) => {
                                 const shouldRemove = isSameCard(candidate, idx, 'saved');
                                 if (shouldRemove) {
