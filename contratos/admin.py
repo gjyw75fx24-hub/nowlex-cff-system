@@ -3708,6 +3708,22 @@ class CarteiraAdmin(admin.ModelAdmin):
             text = text.replace("#", " ").replace("_", " ").replace("-", " ")
             return re.sub(r"\s+", " ", text).strip()
 
+        def _build_tipo_fallback_meta(nome, slug):
+            slug_norm = _normalize_type_text(slug)
+            nome_norm = _normalize_type_text(nome)
+            hashtag_norm = _normalize_type_text(slug)
+            search_text = " ".join(part for part in (slug_norm, nome_norm, hashtag_norm) if part)
+            return {
+                "id": None,
+                "nome": nome,
+                "slug": slug,
+                "hashtag": f"#{slug.replace('-', '_')}",
+                "slug_norm": slug_norm,
+                "nome_norm": nome_norm,
+                "hashtag_norm": hashtag_norm,
+                "search_text": search_text,
+            }
+
         def _classify_peticao_kind(nome, arquivo_nome):
             joined = f"{_normalize_filename_text(nome)} {_normalize_filename_text(arquivo_nome)}".strip()
             if not joined:
@@ -3808,13 +3824,30 @@ class CarteiraAdmin(admin.ModelAdmin):
             if hashtag_norm and hashtag_norm in tipo_by_hashtag:
                 return tipo_by_hashtag[hashtag_norm]
 
-            # 3) Legado: infere por sinais das respostas (mesma lógica do frontend)
-            has_monitoria_signals = any(
+            analysis_type_search = " ".join(
+                part for part in (slug_norm, nome_norm, hashtag_norm) if part
+            )
+            if "monitor" in analysis_type_search:
+                return tipo_monitoria_default
+            if "passiv" in analysis_type_search:
+                return tipo_passivas_default
+
+            # 3) Legado: infere por sinais das respostas
+            # Regras:
+            # - Sinais fortes de Monitória têm prioridade para evitar [Sem tipo] em casos óbvios.
+            # - Se não houver sinais fortes, cai para sinais de Passivas.
+            # - Persistindo dúvida, usa "tipo_de_acao" como heurística.
+            has_monitoria_hard_signals = any(
                 key in respostas_obj
                 for key in (
                     "judicializado_pela_massa",
                     "propor_monitoria",
                     "repropor_monitoria",
+                )
+            )
+            has_monitoria_soft_signals = any(
+                key in respostas_obj
+                for key in (
                     "contratos_para_monitoria",
                 )
             )
@@ -3829,12 +3862,15 @@ class CarteiraAdmin(admin.ModelAdmin):
                 )
             )
             tipo_acao_norm = _normalize_type_text(respostas_obj.get("tipo_de_acao"))
-            prefer_monitoria = has_monitoria_signals or ("monitor" in tipo_acao_norm)
-            prefer_passivas = has_passivas_signals or ("passiv" in tipo_acao_norm)
-
-            if prefer_monitoria and not prefer_passivas:
+            if has_monitoria_hard_signals:
                 return tipo_monitoria_default
-            if prefer_passivas and not prefer_monitoria:
+            if has_passivas_signals:
+                return tipo_passivas_default
+            if has_monitoria_soft_signals:
+                return tipo_monitoria_default
+            if "monitor" in tipo_acao_norm:
+                return tipo_monitoria_default
+            if "passiv" in tipo_acao_norm:
                 return tipo_passivas_default
 
             return None
@@ -3849,6 +3885,10 @@ class CarteiraAdmin(admin.ModelAdmin):
         # Fallback preferencial por slug conhecido
         tipo_monitoria_default = tipo_by_slug.get("novas monitorias") or tipo_by_slug.get("monitorias") or tipo_monitoria_default
         tipo_passivas_default = tipo_by_slug.get("passivas") or tipo_by_slug.get("passiva") or tipo_passivas_default
+        if tipo_monitoria_default is None:
+            tipo_monitoria_default = _build_tipo_fallback_meta("Novas Monitórias", "novas-monitorias")
+        if tipo_passivas_default is None:
+            tipo_passivas_default = _build_tipo_fallback_meta("Passivas", "passivas")
 
         questao_lookup = {
             questao["chave"]: {
