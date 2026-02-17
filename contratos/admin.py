@@ -3763,6 +3763,14 @@ class CarteiraAdmin(admin.ModelAdmin):
             carteira["id"]: carteira["nome"]
             for carteira in Carteira.objects.order_by("nome").values("id", "nome")
         }
+        passivas_carteira_id = next(
+            (
+                carteira_id
+                for carteira_id, carteira_nome in carteira_lookup.items()
+                if _normalize_type_text(carteira_nome) == "passivas"
+            ),
+            None,
+        )
         tipos_rows = list(TipoAnaliseObjetiva.objects.values("id", "nome", "slug", "hashtag"))
         tipo_lookup = {}
         tipo_by_slug = {}
@@ -4093,7 +4101,15 @@ class CarteiraAdmin(admin.ModelAdmin):
                 tipo_slug = (tipo_meta or {}).get("slug") or _clean_text(analysis_type.get("slug")) or "[sem-slug]"
 
                 carteira_card_id = _safe_int(card.get("carteira_id"))
-                carteira_id = carteira_card_id or carteira_default
+                carteira_id = carteira_card_id
+                if not carteira_id:
+                    tipo_norm_for_carteira = _normalize_type_text(f"{tipo_slug or ''} {tipo_nome or ''}")
+                    if passivas_carteira_id and "passiv" in tipo_norm_for_carteira:
+                        carteira_id = passivas_carteira_id
+                    else:
+                        carteira_id = carteira_default
+                if not carteira_id:
+                    continue
                 carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
 
                 entry = {
@@ -4794,6 +4810,31 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         text = ''.join(ch for ch in text if not unicodedata.combining(ch))
         return re.sub(r'\s+', ' ', text).strip()
 
+    def _resolve_kpi_card_carteira_id(
+        self,
+        *,
+        card_carteira_id=None,
+        carteira_default=None,
+        tipo_slug='',
+        tipo_nome='',
+        passivas_carteira_id=None,
+    ):
+        """
+        Regra de carteira para KPI por card:
+        1) usa carteira_id explícita do card (quando existir);
+        2) card do tipo Passivas vai para carteira Passivas;
+        3) demais casos usam carteira padrão do processo.
+        """
+        explicit_id = self._safe_positive_int(card_carteira_id)
+        if explicit_id:
+            return explicit_id
+
+        tipo_norm = self._normalize_kpi_text(f"{tipo_slug or ''} {tipo_nome or ''}")
+        if passivas_carteira_id and 'passiv' in tipo_norm:
+            return passivas_carteira_id
+
+        return self._safe_positive_int(carteira_default)
+
     def _extract_kpi_cards(self, respostas):
         if not isinstance(respostas, dict):
             return []
@@ -4830,13 +4871,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         question_key = kpi_filter['question_key']
         answer_norm = kpi_filter['answer_norm']
         uf_code = kpi_filter['uf_code']
+        passivas_carteira_id = (
+            Carteira.objects.filter(nome__iexact='Passivas').values_list('id', flat=True).first()
+        )
 
         candidate_qs = queryset.filter(analise_processo__isnull=False)
         if uf_code:
             candidate_qs = candidate_qs.filter(uf__iexact=uf_code)
-        candidate_qs = candidate_qs.filter(
-            Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
-        ).select_related('analise_processo').prefetch_related(
+        candidate_qs = candidate_qs.select_related('analise_processo').prefetch_related(
             Prefetch('carteiras_vinculadas', queryset=Carteira.objects.only('id'))
         ).distinct()
 
@@ -4849,8 +4891,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
             linked_ids = [carteira.id for carteira in processo.carteiras_vinculadas.all()]
             carteira_default = processo.carteira_id or (linked_ids[0] if linked_ids else None)
-            if not carteira_default:
-                continue
 
             matched = False
             for card in cards:
@@ -4861,7 +4901,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 if card_tipo_id != tipo_id:
                     continue
 
-                card_carteira_id = self._safe_positive_int(card.get('carteira_id')) or carteira_default
+                card_carteira_id = self._resolve_kpi_card_carteira_id(
+                    card_carteira_id=card.get('carteira_id'),
+                    carteira_default=carteira_default,
+                    tipo_slug=analysis_type.get('slug'),
+                    tipo_nome=analysis_type.get('nome'),
+                    passivas_carteira_id=passivas_carteira_id,
+                )
                 if card_carteira_id != carteira_id:
                     continue
 
