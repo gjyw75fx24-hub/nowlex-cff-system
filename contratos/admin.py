@@ -3832,6 +3832,23 @@ class CarteiraAdmin(admin.ModelAdmin):
             if "passiv" in analysis_type_search:
                 return tipo_passivas_default
 
+            # 2.5) Legado: inferência por chaves de perguntas (QuestaoAnalise -> tipo_analise)
+            # Isso cobre casos onde o card veio sem analysis_type, mas as respostas já
+            # pertencem claramente a um tipo (ex.: consignado/status_processo_passivo = Passivas).
+            tipo_hits_by_question = {}
+            for chave in respostas_obj.keys():
+                q_meta = questao_lookup.get(chave) if isinstance(questao_lookup, dict) else None
+                if not q_meta:
+                    continue
+                q_tipo_id = _safe_int(q_meta.get("tipo_analise_id"))
+                if not q_tipo_id:
+                    continue
+                tipo_hits_by_question[q_tipo_id] = tipo_hits_by_question.get(q_tipo_id, 0) + 1
+            if tipo_hits_by_question:
+                best_tipo_id = max(tipo_hits_by_question.items(), key=lambda item: item[1])[0]
+                if best_tipo_id in tipo_lookup:
+                    return tipo_lookup[best_tipo_id]
+
             # 3) Legado: infere por sinais das respostas
             # Regras:
             # - Sinais fortes de Monitória têm prioridade para evitar [Sem tipo] em casos óbvios.
@@ -3873,7 +3890,8 @@ class CarteiraAdmin(admin.ModelAdmin):
             if "passiv" in tipo_acao_norm:
                 return tipo_passivas_default
 
-            return None
+            # 4) Fallback final: nunca deixar KPI em [Sem tipo]
+            return tipo_passivas_default or tipo_monitoria_default
 
         for tipo_meta in tipo_lookup.values():
             search_text = tipo_meta.get("search_text", "")
@@ -3894,10 +3912,11 @@ class CarteiraAdmin(admin.ModelAdmin):
             questao["chave"]: {
                 "texto_pergunta": questao["texto_pergunta"],
                 "tipo_campo": questao["tipo_campo"],
+                "tipo_analise_id": _safe_int(questao.get("tipo_analise_id")),
             }
             for questao in QuestaoAnalise.objects.exclude(chave__isnull=True)
             .exclude(chave__exact="")
-            .values("chave", "texto_pergunta", "tipo_campo")
+            .values("chave", "texto_pergunta", "tipo_campo", "tipo_analise_id")
         }
 
         processos = (
