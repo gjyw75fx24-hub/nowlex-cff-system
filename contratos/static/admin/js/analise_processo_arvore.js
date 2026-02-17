@@ -817,6 +817,7 @@
                 userResponses[SAVED_PROCESSOS_KEY] = coerceLegacyProcessCardList(userResponses[SAVED_PROCESSOS_KEY]);
             }
             if (
+                !userResponses.saved_entries_migrated &&
                 !userResponses.processos_vinculados.length &&
                 !userResponses[SAVED_PROCESSOS_KEY].length
             ) {
@@ -4421,6 +4422,8 @@ function formatCnjDigits(raw) {
                         if (Array.isArray(userResponses.selected_analysis_cards)) {
                             userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
                         }
+                        // Evita ressuscitar card legado após exclusão explícita do usuário.
+                        userResponses.saved_entries_migrated = true;
                         saveResponses();
                         displayFormattedResponses();
                     });
