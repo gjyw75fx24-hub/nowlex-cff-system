@@ -4362,22 +4362,51 @@ function formatCnjDigits(raw) {
                                 markNjObservationAsDeleted(card.nj_label);
                             }
                         };
-                        const targetCard = Array.isArray(userResponses.processos_vinculados)
-                            ? userResponses.processos_vinculados[cardIndex]
-                            : null;
-                        tryMarkDeletion(targetCard);
+                        const targetCard = normalizeProcessCardForSummary(processo) || processo;
+                        const targetIdentity = getSummaryCardIdentity(targetCard, cardIndex, 'summary');
+                        const targetCnjDigits = String((targetCard && targetCard.cnj) || '')
+                            .replace(/\D/g, '');
+
+                        const isSameCard = (candidate, idx, source) => {
+                            const normalizedCandidate = normalizeProcessCardForSummary(candidate) || candidate;
+                            const candidateIdentity = getSummaryCardIdentity(normalizedCandidate, idx, source);
+                            if (targetIdentity && candidateIdentity === targetIdentity) {
+                                return true;
+                            }
+                            if (targetCnjDigits) {
+                                const candidateCnjDigits = String((normalizedCandidate && normalizedCandidate.cnj) || '')
+                                    .replace(/\D/g, '');
+                                if (candidateCnjDigits && candidateCnjDigits === targetCnjDigits) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
+
                         if (Array.isArray(userResponses.processos_vinculados)) {
-                            userResponses.processos_vinculados.splice(cardIndex, 1);
+                            userResponses.processos_vinculados = userResponses.processos_vinculados.filter((candidate, idx) => {
+                                const shouldRemove = isSameCard(candidate, idx, 'active');
+                                if (shouldRemove) {
+                                    tryMarkDeletion(candidate);
+                                }
+                                return !shouldRemove;
+                            });
                         }
+
                         const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
                         const attrIndex = $(this).attr('data-card-index');
                         const targetIndex = attrIndex ? Number(attrIndex) : null;
                         if (Number.isFinite(targetIndex) && savedCards[targetIndex]) {
                             tryMarkDeletion(savedCards[targetIndex]);
                             savedCards.splice(targetIndex, 1);
-                        } else if (savedCards[cardIndex]) {
-                            tryMarkDeletion(savedCards[cardIndex]);
-                            savedCards.splice(cardIndex, 1);
+                        } else if (Array.isArray(savedCards) && savedCards.length) {
+                            userResponses[SAVED_PROCESSOS_KEY] = savedCards.filter((candidate, idx) => {
+                                const shouldRemove = isSameCard(candidate, idx, 'saved');
+                                if (shouldRemove) {
+                                    tryMarkDeletion(candidate);
+                                }
+                                return !shouldRemove;
+                            });
                         }
                         if (Array.isArray(userResponses.selected_analysis_cards)) {
                             userResponses.selected_analysis_cards = userResponses.selected_analysis_cards.filter(sel => sel !== cardKey);
