@@ -592,6 +592,25 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const numberPt = (value) => Number(value || 0).toLocaleString('pt-BR');
     const pctPt = (value) => `${Number(value || 0).toLocaleString('pt-BR')}%`;
+    const getComboQuestionByKey = (combo, questionKey) => {
+        const questions = Array.isArray(combo?.questions) ? combo.questions : [];
+        const key = String(questionKey || '').trim();
+        if (!key) return null;
+        return questions.find((item) => String(item?.chave || '').trim() === key) || null;
+    };
+    const getComboQuestionBase = (combo, questionKey) => {
+        const question = getComboQuestionByKey(combo, questionKey);
+        return Number(question?.cards || 0);
+    };
+    const formatByQuestionBase = (countValue, baseValue) => {
+        const count = Number(countValue || 0);
+        const base = Number(baseValue || 0);
+        if (!base) {
+            return `${numberPt(count)} / 0`;
+        }
+        const pct = Number(((count * 100) / base).toFixed(2));
+        return `${numberPt(count)} / ${numberPt(base)} (${pctPt(pct)})`;
+    };
     const truncateLabel = (value, limit = 30) => {
         const text = String(value || '');
         if (text.length <= limit) return text;
@@ -869,6 +888,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const rows = combos.map((combo) => {
             const kpis = combo.kpis || {};
+            const proporBase = getComboQuestionBase(combo, 'propor_monitoria');
+            const reproporBase = getComboQuestionBase(combo, 'repropor_monitoria');
             return `
                 <tr>
                     <td style="text-align:left;">${escapeHtml(combo.carteira_nome || '[Sem carteira]')}</td>
@@ -876,8 +897,8 @@ window.addEventListener('DOMContentLoaded', () => {
                     <td style="text-align:right;">${numberPt(combo.cards)}</td>
                     <td style="text-align:right;">${numberPt(combo.processos)}</td>
                     <td style="text-align:right;">${numberPt(combo.cpfs)}</td>
-                    <td style="text-align:right;">${numberPt(kpis.propor_monitoria_sim)}</td>
-                    <td style="text-align:right;">${numberPt(kpis.repropor_monitoria_sim)}</td>
+                    <td style="text-align:right;">${formatByQuestionBase(kpis.propor_monitoria_sim, proporBase)}</td>
+                    <td style="text-align:right;">${formatByQuestionBase(kpis.repropor_monitoria_sim, reproporBase)}</td>
                     <td style="text-align:right;">${numberPt(kpis.cumprimento_sentenca_iniciar_cs)}</td>
                     <td style="text-align:right;">${numberPt(kpis.habilitar_sim)}</td>
                     <td style="text-align:right;">${numberPt(kpis.habilitar_nao)}</td>
@@ -887,6 +908,11 @@ window.addEventListener('DOMContentLoaded', () => {
         }).join('');
 
         tableWrapKpi.innerHTML = `
+            <div style="font-size:11px; color:#5b6f84; margin-bottom:6px;">
+                <strong>Leitura:</strong>
+                "Nova monitória" e "Repropor monitória" = <strong>SIM/base da própria pergunta</strong>.
+                "Recomendou monitória" = <strong>cards com SIM em propor/repropor ÷ total de cards do combo</strong>.
+            </div>
             <table style="width:100%; border-collapse:collapse; font-size:12px;">
                 <thead>
                     <tr style="background:#eef3f8;">
@@ -895,8 +921,8 @@ window.addEventListener('DOMContentLoaded', () => {
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Cards</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Processos</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">CPFs</th>
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Nova monitória</th>
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Repropor monitória</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Nova monitória (SIM/base)</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Repropor monitória (SIM/base)</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Iniciar CS</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Habilitar</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Não habilitar</th>
@@ -918,19 +944,22 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (!answers.length) {
                     return '';
                 }
+                const questionCards = Number(question.cards || 0);
+                const comboCards = Number(combo.cards || 0);
+                const coveragePct = comboCards > 0 ? Number(((questionCards * 100) / comboCards).toFixed(2)) : 0;
                 const verticalId = `kpi-answers-v-${comboIndex}-${questionIndex}-${ufCode}`;
                 const horizontalId = `kpi-answers-h-${comboIndex}-${questionIndex}-${ufCode}`;
                 chartJobs.push({ question, verticalId, horizontalId });
                 const answerRows = answers.map((answer) => {
                     const url = buildKpiResponseUrl(combo, question, answer, ufCode);
-                    const answerLabel = `${escapeHtml(answer.valor)} (${numberPt(answer.count)})`;
+                    const answerLabel = `${escapeHtml(answer.valor)} (${numberPt(answer.count)} de ${numberPt(questionCards)})`;
                     const answerLink = url
                         ? `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${answerLabel}</a>`
                         : `<span>${answerLabel}</span>`;
                     return `
                         <li style="margin-bottom:2px;">
                             ${answerLink}
-                            <span style="color:#6a7a8b;">· ${pctPt(answer.pct)}</span>
+                            <span style="color:#6a7a8b;">· ${pctPt(answer.pct)} da base da pergunta</span>
                         </li>
                     `;
                 }).join('');
@@ -939,6 +968,9 @@ window.addEventListener('DOMContentLoaded', () => {
                         <div>
                             <div style="font-size:12px; font-weight:700; color:#2f3d4a; margin-bottom:4px;">
                                 ${escapeHtml(question.pergunta || question.chave || '')}
+                            </div>
+                            <div style="font-size:11px; color:#5b6f84; margin-bottom:4px;">
+                                Base desta pergunta: ${numberPt(questionCards)} de ${numberPt(comboCards)} cards do combo (${pctPt(coveragePct)})
                             </div>
                             <ul style="margin:0; padding-left:16px; font-size:12px; color:#46576b;">
                                 ${answerRows}
