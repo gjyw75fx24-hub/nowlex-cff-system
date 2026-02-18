@@ -4049,6 +4049,7 @@ class CarteiraAdmin(admin.ModelAdmin):
         productivity_daily_all = {}
         productivity_totals = {"analises": 0, "tarefas": 0, "prazos": 0}
         productivity_sem_data = {"analises": 0, "tarefas": 0, "prazos": 0}
+        productivity_pending = {"tarefas": 0, "prazos": 0}
 
         known_users_by_norm = {}
         for user in User.objects.filter(is_active=True).only("id", "username", "first_name", "last_name"):
@@ -4106,6 +4107,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                     "user_key": normalized_key,
                     "user_label": normalized_label,
                     "totals": {"analises": 0, "tarefas": 0, "prazos": 0},
+                    "pending": {"tarefas": 0, "prazos": 0},
                     "sem_data": {"analises": 0, "tarefas": 0, "prazos": 0},
                     "daily": {},
                 }
@@ -4725,6 +4727,40 @@ class CarteiraAdmin(admin.ModelAdmin):
             concluded_date = concluded_at.date().isoformat() if concluded_at else ""
             _register_productivity_event("prazos", actor_key, actor_label, concluded_date)
 
+        tarefas_pendentes = (
+            Tarefa.objects.filter(concluida=False)
+            .select_related("responsavel")
+            .only(
+                "id",
+                "responsavel__id",
+                "responsavel__username",
+                "responsavel__first_name",
+                "responsavel__last_name",
+            )
+        )
+        for tarefa in tarefas_pendentes.iterator():
+            actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "responsavel", None))
+            user_bucket = _ensure_productivity_user(actor_key, actor_label)
+            user_bucket["pending"]["tarefas"] += 1
+            productivity_pending["tarefas"] += 1
+
+        prazos_pendentes = (
+            Prazo.objects.filter(concluido=False)
+            .select_related("responsavel")
+            .only(
+                "id",
+                "responsavel__id",
+                "responsavel__username",
+                "responsavel__first_name",
+                "responsavel__last_name",
+            )
+        )
+        for prazo in prazos_pendentes.iterator():
+            actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "responsavel", None))
+            user_bucket = _ensure_productivity_user(actor_key, actor_label)
+            user_bucket["pending"]["prazos"] += 1
+            productivity_pending["prazos"] += 1
+
         serialized_productivity_users = []
         for user_bucket in productivity_users.values():
             daily_rows = sorted(
@@ -4737,6 +4773,11 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "prazos": int(user_bucket["totals"]["prazos"]),
             }
             totals["total"] = int(totals["analises"] + totals["tarefas"] + totals["prazos"])
+            pending = {
+                "tarefas": int(user_bucket["pending"]["tarefas"]),
+                "prazos": int(user_bucket["pending"]["prazos"]),
+            }
+            pending["total"] = int(pending["tarefas"] + pending["prazos"])
 
             sem_data = {
                 "analises": int(user_bucket["sem_data"]["analises"]),
@@ -4750,6 +4791,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                     "user_key": user_bucket["user_key"],
                     "user_label": user_bucket["user_label"],
                     "totals": totals,
+                    "pending": pending,
                     "sem_data": sem_data,
                     "daily": [
                         {
@@ -4807,10 +4849,18 @@ class CarteiraAdmin(admin.ModelAdmin):
             + productivity_sem_data_payload["tarefas"]
             + productivity_sem_data_payload["prazos"]
         )
+        productivity_pending_payload = {
+            "tarefas": int(productivity_pending["tarefas"]),
+            "prazos": int(productivity_pending["prazos"]),
+        }
+        productivity_pending_payload["total"] = int(
+            productivity_pending_payload["tarefas"] + productivity_pending_payload["prazos"]
+        )
         productivity_kpi_data = {
             "users": serialized_productivity_users,
             "daily": serialized_productivity_daily,
             "totals": productivity_totals_payload,
+            "pending": productivity_pending_payload,
             "sem_data": productivity_sem_data_payload,
             "date_min": productivity_date_min,
             "date_max": productivity_date_max,
@@ -4847,7 +4897,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260218c',
+            'admin/js/carteira_charts.js?v=20260218d',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -5120,10 +5170,30 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return None
         return carteira_id if carteira_id > 0 else None
 
+    def _get_effective_carteira_id_for_prescricao(self, request):
+        """
+        Resolve a carteira efetiva da listagem para aplicar comportamentos
+        automáticos (ex.: incluir prescritos em Passivas), inclusive quando a
+        listagem veio de links de KPI que não usam o filtro `carteira`.
+        """
+        carteira_id = self._get_filtered_carteira_id(request)
+        if carteira_id:
+            return carteira_id
+
+        kpi_carteira_id = self._safe_positive_int(request.GET.get('kpi_carteira_id'))
+        if kpi_carteira_id:
+            return kpi_carteira_id
+
+        peticao_carteira_id = self._safe_positive_int(request.GET.get('peticao_carteira_id'))
+        if peticao_carteira_id:
+            return peticao_carteira_id
+
+        return None
+
     def _ensure_passivas_include_prescritos(self, request):
         if request.method != 'GET':
             return None
-        carteira_id = self._get_filtered_carteira_id(request)
+        carteira_id = self._get_effective_carteira_id_for_prescricao(request)
         if not carteira_id:
             return None
         if request.GET.get('ord_prescricao'):

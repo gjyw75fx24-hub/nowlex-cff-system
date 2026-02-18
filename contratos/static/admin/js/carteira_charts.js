@@ -572,6 +572,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const productivitySemData = (productivityKpi && typeof productivityKpi === 'object' && productivityKpi.sem_data)
         ? productivityKpi.sem_data
         : {};
+    const productivityPending = (productivityKpi && typeof productivityKpi === 'object' && productivityKpi.pending)
+        ? productivityKpi.pending
+        : {};
+    const productivityDateMin = String(productivityKpi?.date_min || '').trim();
+    const productivityDateMax = String(productivityKpi?.date_max || '').trim();
     if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
 
     const kpiSection = document.createElement('section');
@@ -1400,7 +1405,7 @@ window.addEventListener('DOMContentLoaded', () => {
         productivitySection.innerHTML = `
             <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
                 <h3 style="margin:0;">Produtividade por Usuário</h3>
-                <div style="font-size:12px; color:#5d6f83;">Análises concluídas (cards), tarefas e prazos concluídos.</div>
+                <div style="font-size:12px; color:#5d6f83;">Análises concluídas, tarefas e prazos concluídos.</div>
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
@@ -1415,6 +1420,14 @@ window.addEventListener('DOMContentLoaded', () => {
                         <option value="365">Últimos 365 dias</option>
                         <option value="all">Todo o histórico</option>
                     </select>
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    De:
+                    <input type="date" class="kpi-productivity-date-from" style="padding:4px 8px;">
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Até:
+                    <input type="date" class="kpi-productivity-date-to" style="padding:4px 8px;">
                 </label>
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Usuário:
@@ -1444,13 +1457,23 @@ window.addEventListener('DOMContentLoaded', () => {
         chartContainer.appendChild(productivitySection);
 
         const periodSelect = productivitySection.querySelector('.kpi-productivity-period');
+        const dateFromInput = productivitySection.querySelector('.kpi-productivity-date-from');
+        const dateToInput = productivitySection.querySelector('.kpi-productivity-date-to');
         const userSelect = productivitySection.querySelector('.kpi-productivity-user');
         const metricSelect = productivitySection.querySelector('.kpi-productivity-metric');
         const summaryEl = productivitySection.querySelector('.kpi-productivity-summary');
         const tableWrap = productivitySection.querySelector('.kpi-productivity-table-wrap');
         const usersCanvas = document.getElementById('kpiProductivityUsersChart');
         const dailyCanvas = document.getElementById('kpiProductivityDailyChart');
-        if (periodSelect && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
+        if (periodSelect && dateFromInput && dateToInput && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
+            if (productivityDateMin) {
+                dateFromInput.min = productivityDateMin;
+                dateToInput.min = productivityDateMin;
+            }
+            if (productivityDateMax) {
+                dateFromInput.max = productivityDateMax;
+                dateToInput.max = productivityDateMax;
+            }
             const parseDateKey = (value) => {
                 const raw = String(value || '').trim();
                 const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1493,11 +1516,37 @@ window.addEventListener('DOMContentLoaded', () => {
                 start.setDate(start.getDate() - days + 1);
                 return { start, end };
             };
+            const getCustomBounds = () => {
+                const fromValue = String(dateFromInput.value || '').trim();
+                const toValue = String(dateToInput.value || '').trim();
+                if (!fromValue && !toValue) {
+                    return null;
+                }
+                let start = fromValue ? parseDateKey(fromValue) : null;
+                let end = toValue ? parseDateKey(toValue) : null;
+                if (start && !end) {
+                    end = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+                }
+                if (start && end && start > end) {
+                    const swap = start;
+                    start = end;
+                    end = swap;
+                }
+                return { start, end };
+            };
+            const getActiveBounds = (periodValue) => {
+                const customBounds = getCustomBounds();
+                if (customBounds) {
+                    return { ...customBounds, source: 'custom' };
+                }
+                return { ...getPeriodBounds(periodValue), source: 'preset' };
+            };
             const isDateInBounds = (dateKey, bounds) => {
                 const dt = parseDateKey(dateKey);
                 if (!dt) return false;
-                if (!bounds.start) return true;
-                return dt >= bounds.start && dt <= bounds.end;
+                if (bounds.start && dt < bounds.start) return false;
+                if (bounds.end && dt > bounds.end) return false;
+                return true;
             };
             const filterDailyByBounds = (dailyRows, bounds) => {
                 if (!Array.isArray(dailyRows)) return [];
@@ -1538,7 +1587,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 const periodValue = String(periodSelect.value || '30');
                 const selectedUserKey = String(userSelect.value || 'ALL');
                 const metricValue = String(metricSelect.value || 'total');
-                const bounds = getPeriodBounds(periodValue);
+                const bounds = getActiveBounds(periodValue);
 
                 const rows = sortedUsers.map((user) => {
                     const dailyRows = filterDailyByBounds(user.daily || [], bounds);
@@ -1548,6 +1597,11 @@ window.addEventListener('DOMContentLoaded', () => {
                     const overallTotal = Number(overallTotals.total || sumMetrics(overallTotals));
                     const semDataTotals = user.sem_data || {};
                     const semDataTotal = Number(semDataTotals.total || sumMetrics(semDataTotals));
+                    const pendingTotals = user.pending || {};
+                    const pending = {
+                        tarefas: Number(pendingTotals.tarefas || 0),
+                        prazos: Number(pendingTotals.prazos || 0),
+                    };
                     return {
                         user_key: user.user_key,
                         user_label: user.user_label || 'Sem usuário',
@@ -1557,6 +1611,7 @@ window.addEventListener('DOMContentLoaded', () => {
                         overallTotal,
                         semDataTotals,
                         semDataTotal,
+                        pending,
                         dailyRows,
                     };
                 });
@@ -1569,14 +1624,36 @@ window.addEventListener('DOMContentLoaded', () => {
                 }, { analises: 0, tarefas: 0, prazos: 0 });
                 const periodTotalAll = periodTotals.analises + periodTotals.tarefas + periodTotals.prazos;
                 const semDataTotalAll = Number(productivitySemData.total || sumMetrics(productivitySemData || {}));
+                const pendingTotals = selectedUserKey === 'ALL'
+                    ? {
+                        tarefas: Number(productivityPending.tarefas || 0),
+                        prazos: Number(productivityPending.prazos || 0),
+                    }
+                    : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.pending || { tarefas: 0, prazos: 0 });
+                const formatBoundsLabel = () => {
+                    const toLabel = (dateObj) => (dateObj ? dateObj.toLocaleDateString('pt-BR') : '');
+                    if (bounds.source === 'custom') {
+                        const startLabel = bounds.start
+                            ? toLabel(bounds.start)
+                            : (productivityDateMin ? formatDateLabel(productivityDateMin) : 'início');
+                        const endLabel = bounds.end
+                            ? toLabel(bounds.end)
+                            : 'hoje';
+                        return `Período customizado: ${startLabel} até ${endLabel} (com data)`;
+                    }
+                    if (periodValue === 'all') {
+                        return 'Todo o histórico com data';
+                    }
+                    return `Últimos ${Number(periodValue)} dias (com data)`;
+                };
+                const periodLabel = formatBoundsLabel();
 
-                const periodLabel = periodValue === 'all'
-                    ? 'Todo o histórico com data'
-                    : `Últimos ${Number(periodValue)} dias (com data)`;
                 summaryEl.innerHTML = `
                     <strong>Total geral:</strong> ${numberPt(productivityTotals.total || 0)}
                     &nbsp;|&nbsp;
                     <strong>${escapeHtml(periodLabel)}:</strong> ${numberPt(periodTotalAll)}
+                    &nbsp;|&nbsp;
+                    <strong>Pendentes atuais (tarefas/prazos):</strong> ${numberPt(pendingTotals.tarefas)} / ${numberPt(pendingTotals.prazos)}
                     &nbsp;|&nbsp;
                     <strong>Sem data de conclusão:</strong> ${numberPt(semDataTotalAll)}
                 `;
@@ -1586,7 +1663,9 @@ window.addEventListener('DOMContentLoaded', () => {
                         <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.user_label)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.analises)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.tarefas)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.pending.tarefas)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.prazos)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.pending.prazos)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><strong>${numberPt(row.periodTotal)}</strong></td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.overallTotal)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.semDataTotal)}</td>
@@ -1597,10 +1676,12 @@ window.addEventListener('DOMContentLoaded', () => {
                         <thead>
                             <tr style="background:#eef3f8;">
                                 <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Usuário</th>
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Análises (período)</th>
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas (período)</th>
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos (período)</th>
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (período)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Análises<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas concluídas<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas pendentes<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual</span></th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos concluídos<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos pendentes<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual</span></th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (geral)</th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Sem data</th>
                             </tr>
@@ -1766,6 +1847,8 @@ window.addEventListener('DOMContentLoaded', () => {
             };
 
             periodSelect.addEventListener('change', renderProductivity);
+            dateFromInput.addEventListener('change', renderProductivity);
+            dateToInput.addEventListener('change', renderProductivity);
             userSelect.addEventListener('change', renderProductivity);
             metricSelect.addEventListener('change', renderProductivity);
             renderProductivity();
