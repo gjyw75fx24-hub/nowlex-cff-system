@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 import unicodedata
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 from typing import Optional
 
 from django import forms
@@ -5162,13 +5162,51 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return HttpResponseRedirect(target_url)
         return None
 
-    def _get_filtered_carteira_id(self, request):
-        raw_carteira_id = request.GET.get('carteira') or request.GET.get('carteira__id__exact')
+    def _get_filtered_carteira_id_from_params(self, params):
+        raw_carteira_id = params.get('carteira') or params.get('carteira__id__exact')
         try:
             carteira_id = int(raw_carteira_id)
         except (TypeError, ValueError):
             return None
         return carteira_id if carteira_id > 0 else None
+
+    def _get_filtered_carteira_id(self, request):
+        return self._get_filtered_carteira_id_from_params(request.GET)
+
+    def _get_single_allowed_carteira_id_for_user(self, user):
+        allowed_ids = get_user_allowed_carteira_ids(user)
+        if allowed_ids is None or len(allowed_ids) != 1:
+            return None
+        try:
+            carteira_id = int(allowed_ids[0])
+        except (TypeError, ValueError):
+            return None
+        return carteira_id if carteira_id > 0 else None
+
+    def _is_passivas_carteira(self, carteira_id):
+        if not carteira_id:
+            return False
+        return Carteira.objects.filter(
+            pk=carteira_id,
+            nome__iexact='Passivas',
+        ).exists()
+
+    def _get_effective_carteira_id_for_prescricao_from_params(self, params, user=None):
+        carteira_id = self._get_filtered_carteira_id_from_params(params)
+        if carteira_id:
+            return carteira_id
+
+        kpi_carteira_id = self._safe_positive_int(params.get('kpi_carteira_id'))
+        if kpi_carteira_id:
+            return kpi_carteira_id
+
+        peticao_carteira_id = self._safe_positive_int(params.get('peticao_carteira_id'))
+        if peticao_carteira_id:
+            return peticao_carteira_id
+
+        if user is not None:
+            return self._get_single_allowed_carteira_id_for_user(user)
+        return None
 
     def _get_effective_carteira_id_for_prescricao(self, request):
         """
@@ -5176,35 +5214,74 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         automáticos (ex.: incluir prescritos em Passivas), inclusive quando a
         listagem veio de links de KPI que não usam o filtro `carteira`.
         """
-        carteira_id = self._get_filtered_carteira_id(request)
-        if carteira_id:
-            return carteira_id
+        return self._get_effective_carteira_id_for_prescricao_from_params(
+            request.GET,
+            user=request.user,
+        )
 
-        kpi_carteira_id = self._safe_positive_int(request.GET.get('kpi_carteira_id'))
-        if kpi_carteira_id:
-            return kpi_carteira_id
+    def _should_include_prescritos_for_params(self, params, user=None):
+        if params.get('ord_prescricao'):
+            return False
+        if params.get('nao_judicializado') is not None:
+            return False
+        carteira_id = self._get_effective_carteira_id_for_prescricao_from_params(params, user=user)
+        return self._is_passivas_carteira(carteira_id)
 
-        peticao_carteira_id = self._safe_positive_int(request.GET.get('peticao_carteira_id'))
-        if peticao_carteira_id:
-            return peticao_carteira_id
+    def _extract_changelist_filters_for_navigation(self, request):
+        changelist_filters = request.GET.get('_changelist_filters')
+        if changelist_filters:
+            changelist_filters = unquote(str(changelist_filters))
 
-        return None
+        if not changelist_filters and request.GET:
+            direct = QueryDict(request.GET.urlencode(), mutable=True)
+            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+                direct.pop(key, None)
+            if direct.urlencode():
+                changelist_filters = direct.urlencode()
+
+        if not changelist_filters:
+            referer = (request.META.get('HTTP_REFERER') or '').strip()
+            if referer:
+                try:
+                    parsed = urlparse(referer)
+                except ValueError:
+                    parsed = None
+                if parsed:
+                    changelist_path = reverse('admin:contratos_processojudicial_changelist').rstrip('/')
+                    referer_path = (parsed.path or '').rstrip('/')
+                    if referer_path == changelist_path:
+                        ref_params = QueryDict(parsed.query, mutable=True)
+                        nested = ref_params.get('_changelist_filters')
+                        if nested:
+                            changelist_filters = unquote(str(nested))
+                        else:
+                            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+                                ref_params.pop(key, None)
+                            if ref_params.urlencode():
+                                changelist_filters = ref_params.urlencode()
+
+        if not changelist_filters:
+            saved_filters = request.session.get(self.FILTER_SESSION_KEY)
+            if saved_filters and '=' in str(saved_filters):
+                changelist_filters = str(saved_filters)
+
+        if not changelist_filters:
+            params = QueryDict('', mutable=True)
+        else:
+            params = QueryDict(str(changelist_filters), mutable=True)
+
+        for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+            params.pop(key, None)
+        if self._should_include_prescritos_for_params(params, user=request.user):
+            params['ord_prescricao'] = 'incluir'
+        return params.urlencode()
 
     def _ensure_passivas_include_prescritos(self, request):
         if request.method != 'GET':
             return None
-        carteira_id = self._get_effective_carteira_id_for_prescricao(request)
-        if not carteira_id:
-            return None
-        if request.GET.get('ord_prescricao'):
-            return None
-        is_passivas = Carteira.objects.filter(
-            pk=carteira_id,
-            nome__iexact='Passivas',
-        ).exists()
-        if not is_passivas:
-            return None
         params = request.GET.copy()
+        if not self._should_include_prescritos_for_params(params, user=request.user):
+            return None
         params['ord_prescricao'] = 'incluir'
         target_url = f"{request.path}?{params.urlencode()}"
         if target_url != request.get_full_path():
@@ -6106,17 +6183,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cnj_active_display'] = ''
             extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps([]))
         
-        # Preserva os filtros da changelist para a navegação.
-        # Preferimos o parâmetro especial do Django admin "_changelist_filters",
-        # mas aceitamos também querystring "direta" (quando alguém acessa o detalhe manualmente).
-        changelist_filters = request.GET.get('_changelist_filters')
-        if not changelist_filters and request.GET:
-            # Evita que o Django tente aplicar parâmetros que não são filtros reais.
-            direct = QueryDict(request.GET.urlencode(), mutable=True)
-            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
-                direct.pop(key, None)
-            if direct.urlencode():
-                changelist_filters = direct.urlencode()
+        # Preserva os filtros da changelist para a navegação:
+        # 1) _changelist_filters (padrão admin), 2) query direta,
+        # 3) referer da changelist, 4) últimos filtros salvos em sessão.
+        # Também força ord_prescricao=incluir quando o contexto efetivo for Passivas.
+        changelist_filters = self._extract_changelist_filters_for_navigation(request)
 
         # Clona os filtros para o queryset da changelist, evitando que o Django
         # tente filtrar pelo parâmetro especial "_changelist_filters"
