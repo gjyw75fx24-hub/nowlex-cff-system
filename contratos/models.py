@@ -761,6 +761,19 @@ class Tarefa(models.Model):
     responsavel = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tarefas_responsaveis')
     prioridade = models.CharField(max_length=1, choices=PRIORIDADE_CHOICES, default='M')
     concluida = models.BooleanField(default=False)
+    concluido_em = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Concluído em",
+    )
+    concluido_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='tarefas_concluidas',
+        null=True,
+        blank=True,
+        verbose_name="Concluído por",
+    )
     observacoes = models.TextField(blank=True, null=True, verbose_name="Observações")
     criado_em = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Criado em", editable=True)
     criado_por = models.ForeignKey(
@@ -813,6 +826,33 @@ class Prazo(models.Model):
     responsavel = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='prazos_responsaveis')
     observacoes = models.TextField(blank=True, null=True)
     concluido = models.BooleanField(default=False)
+    concluido_em = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Concluído em",
+    )
+    concluido_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='prazos_concluidos',
+        null=True,
+        blank=True,
+        verbose_name="Concluído por",
+    )
+    criado_em = models.DateTimeField(
+        auto_now_add=True,
+        null=True,
+        blank=True,
+        verbose_name="Criado em",
+    )
+    criado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='prazos_criados',
+        null=True,
+        blank=True,
+        verbose_name="Criado por",
+    )
 
     def __str__(self):
         return self.titulo

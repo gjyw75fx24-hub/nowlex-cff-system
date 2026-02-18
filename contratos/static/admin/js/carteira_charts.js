@@ -561,6 +561,17 @@ window.addEventListener('DOMContentLoaded', () => {
     const priorityTotals = (priorityKpi && typeof priorityKpi === 'object' && priorityKpi.totals)
         ? priorityKpi.totals
         : {};
+    const productivityKpi = (kpiData && typeof kpiData === 'object' && kpiData.productivity_kpi)
+        ? kpiData.productivity_kpi
+        : {};
+    const productivityUsers = Array.isArray(productivityKpi.users) ? productivityKpi.users : [];
+    const productivityDaily = Array.isArray(productivityKpi.daily) ? productivityKpi.daily : [];
+    const productivityTotals = (productivityKpi && typeof productivityKpi === 'object' && productivityKpi.totals)
+        ? productivityKpi.totals
+        : {};
+    const productivitySemData = (productivityKpi && typeof productivityKpi === 'object' && productivityKpi.sem_data)
+        ? productivityKpi.sem_data
+        : {};
     if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
 
     const kpiSection = document.createElement('section');
@@ -1376,6 +1387,388 @@ window.addEventListener('DOMContentLoaded', () => {
                     },
                 },
             });
+        }
+    }
+
+    if (productivityUsers.length || Number(productivityTotals.total || 0) > 0) {
+        const productivitySection = document.createElement('section');
+        productivitySection.style.marginTop = '16px';
+        productivitySection.style.padding = '14px';
+        productivitySection.style.border = '1px solid #d9e1ea';
+        productivitySection.style.borderRadius = '10px';
+        productivitySection.style.background = '#fff';
+        productivitySection.innerHTML = `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                <h3 style="margin:0;">Produtividade por Usuário</h3>
+                <div style="font-size:12px; color:#5d6f83;">Análises concluídas (cards), tarefas e prazos concluídos.</div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Período:
+                    <select class="kpi-productivity-period" style="padding:4px 8px;">
+                        <option value="7">Últimos 7 dias</option>
+                        <option value="15">Últimos 15 dias</option>
+                        <option value="30" selected>Últimos 30 dias</option>
+                        <option value="60">Últimos 60 dias</option>
+                        <option value="90">Últimos 90 dias</option>
+                        <option value="180">Últimos 180 dias</option>
+                        <option value="365">Últimos 365 dias</option>
+                        <option value="all">Todo o histórico</option>
+                    </select>
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Usuário:
+                    <select class="kpi-productivity-user" style="padding:4px 8px; min-width:180px;"></select>
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Série diária:
+                    <select class="kpi-productivity-metric" style="padding:4px 8px;">
+                        <option value="total" selected>Total</option>
+                        <option value="analises">Análises</option>
+                        <option value="tarefas">Tarefas</option>
+                        <option value="prazos">Prazos</option>
+                    </select>
+                </label>
+            </div>
+            <div class="kpi-productivity-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:10px; margin-bottom:10px;">
+                <div style="height:320px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                    <canvas id="kpiProductivityUsersChart"></canvas>
+                </div>
+                <div style="height:320px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                    <canvas id="kpiProductivityDailyChart"></canvas>
+                </div>
+            </div>
+            <div class="kpi-productivity-table-wrap" style="overflow:auto;"></div>
+        `;
+        chartContainer.appendChild(productivitySection);
+
+        const periodSelect = productivitySection.querySelector('.kpi-productivity-period');
+        const userSelect = productivitySection.querySelector('.kpi-productivity-user');
+        const metricSelect = productivitySection.querySelector('.kpi-productivity-metric');
+        const summaryEl = productivitySection.querySelector('.kpi-productivity-summary');
+        const tableWrap = productivitySection.querySelector('.kpi-productivity-table-wrap');
+        const usersCanvas = document.getElementById('kpiProductivityUsersChart');
+        const dailyCanvas = document.getElementById('kpiProductivityDailyChart');
+        if (periodSelect && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
+            const parseDateKey = (value) => {
+                const raw = String(value || '').trim();
+                const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (!match) return null;
+                return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+            };
+            const formatDateLabel = (value) => {
+                const dt = parseDateKey(value);
+                if (!dt) return String(value || '');
+                return dt.toLocaleDateString('pt-BR');
+            };
+            const sumMetrics = (row) => (
+                Number(row.analises || 0)
+                + Number(row.tarefas || 0)
+                + Number(row.prazos || 0)
+            );
+            const toDateKey = (dateObj) => {
+                const yyyy = dateObj.getFullYear();
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            };
+            const referenceDate = (() => {
+                const lastDate = productivityDaily.length
+                    ? parseDateKey(productivityDaily[productivityDaily.length - 1].date)
+                    : null;
+                return lastDate || new Date();
+            })();
+
+            const getPeriodBounds = (periodValue) => {
+                if (String(periodValue) === 'all') {
+                    return { start: null, end: referenceDate };
+                }
+                const days = Number(periodValue || 0);
+                if (!Number.isFinite(days) || days <= 0) {
+                    return { start: null, end: referenceDate };
+                }
+                const end = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+                const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+                start.setDate(start.getDate() - days + 1);
+                return { start, end };
+            };
+            const isDateInBounds = (dateKey, bounds) => {
+                const dt = parseDateKey(dateKey);
+                if (!dt) return false;
+                if (!bounds.start) return true;
+                return dt >= bounds.start && dt <= bounds.end;
+            };
+            const filterDailyByBounds = (dailyRows, bounds) => {
+                if (!Array.isArray(dailyRows)) return [];
+                return dailyRows.filter((row) => isDateInBounds(row.date, bounds));
+            };
+            const aggregateDailyRows = (dailyRows) => {
+                return dailyRows.reduce((acc, row) => {
+                    acc.analises += Number(row.analises || 0);
+                    acc.tarefas += Number(row.tarefas || 0);
+                    acc.prazos += Number(row.prazos || 0);
+                    return acc;
+                }, { analises: 0, tarefas: 0, prazos: 0 });
+            };
+
+            const sortedUsers = productivityUsers
+                .slice()
+                .sort((a, b) => {
+                    const totalB = Number(b?.totals?.total || sumMetrics(b?.totals || {}));
+                    const totalA = Number(a?.totals?.total || sumMetrics(a?.totals || {}));
+                    if (totalB !== totalA) return totalB - totalA;
+                    return String(a?.user_label || '').localeCompare(String(b?.user_label || ''), 'pt-BR');
+                });
+
+            userSelect.innerHTML = `
+                <option value="ALL">Todos os usuários</option>
+                ${sortedUsers.map((user) => `
+                    <option value="${escapeHtml(user.user_key || '')}">
+                        ${escapeHtml(user.user_label || 'Sem usuário')}
+                    </option>
+                `).join('')}
+            `;
+            userSelect.value = 'ALL';
+
+            let usersChart = null;
+            let dailyChart = null;
+
+            const renderProductivity = () => {
+                const periodValue = String(periodSelect.value || '30');
+                const selectedUserKey = String(userSelect.value || 'ALL');
+                const metricValue = String(metricSelect.value || 'total');
+                const bounds = getPeriodBounds(periodValue);
+
+                const rows = sortedUsers.map((user) => {
+                    const dailyRows = filterDailyByBounds(user.daily || [], bounds);
+                    const period = aggregateDailyRows(dailyRows);
+                    const periodTotal = period.analises + period.tarefas + period.prazos;
+                    const overallTotals = user.totals || {};
+                    const overallTotal = Number(overallTotals.total || sumMetrics(overallTotals));
+                    const semDataTotals = user.sem_data || {};
+                    const semDataTotal = Number(semDataTotals.total || sumMetrics(semDataTotals));
+                    return {
+                        user_key: user.user_key,
+                        user_label: user.user_label || 'Sem usuário',
+                        period,
+                        periodTotal,
+                        overallTotals,
+                        overallTotal,
+                        semDataTotals,
+                        semDataTotal,
+                        dailyRows,
+                    };
+                });
+
+                const periodTotals = rows.reduce((acc, row) => {
+                    acc.analises += Number(row.period.analises || 0);
+                    acc.tarefas += Number(row.period.tarefas || 0);
+                    acc.prazos += Number(row.period.prazos || 0);
+                    return acc;
+                }, { analises: 0, tarefas: 0, prazos: 0 });
+                const periodTotalAll = periodTotals.analises + periodTotals.tarefas + periodTotals.prazos;
+                const semDataTotalAll = Number(productivitySemData.total || sumMetrics(productivitySemData || {}));
+
+                const periodLabel = periodValue === 'all'
+                    ? 'Todo o histórico com data'
+                    : `Últimos ${Number(periodValue)} dias (com data)`;
+                summaryEl.innerHTML = `
+                    <strong>Total geral:</strong> ${numberPt(productivityTotals.total || 0)}
+                    &nbsp;|&nbsp;
+                    <strong>${escapeHtml(periodLabel)}:</strong> ${numberPt(periodTotalAll)}
+                    &nbsp;|&nbsp;
+                    <strong>Sem data de conclusão:</strong> ${numberPt(semDataTotalAll)}
+                `;
+
+                const tableRows = rows.map((row) => `
+                    <tr>
+                        <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.user_label)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.analises)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.tarefas)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.prazos)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><strong>${numberPt(row.periodTotal)}</strong></td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.overallTotal)}</td>
+                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.semDataTotal)}</td>
+                    </tr>
+                `).join('');
+                tableWrap.innerHTML = `
+                    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                        <thead>
+                            <tr style="background:#eef3f8;">
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Usuário</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Análises (período)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas (período)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos (período)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (período)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (geral)</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Sem data</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                `;
+
+                if (usersChart) usersChart.destroy();
+                const usersCtx = usersCanvas.getContext('2d');
+                if (usersCtx) {
+                    const topRows = rows
+                        .slice()
+                        .sort((a, b) => b.periodTotal - a.periodTotal)
+                        .slice(0, 20);
+                    usersChart = new Chart(usersCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: topRows.map((row) => truncateLabel(row.user_label, 24)),
+                            datasets: [
+                                {
+                                    label: 'Análises',
+                                    data: topRows.map((row) => Number(row.period.analises || 0)),
+                                    backgroundColor: 'rgba(61, 109, 138, 0.72)',
+                                    borderColor: 'rgba(61, 109, 138, 0.96)',
+                                    borderWidth: 1,
+                                },
+                                {
+                                    label: 'Tarefas',
+                                    data: topRows.map((row) => Number(row.period.tarefas || 0)),
+                                    backgroundColor: 'rgba(46, 139, 192, 0.72)',
+                                    borderColor: 'rgba(46, 139, 192, 0.96)',
+                                    borderWidth: 1,
+                                },
+                                {
+                                    label: 'Prazos',
+                                    data: topRows.map((row) => Number(row.period.prazos || 0)),
+                                    backgroundColor: 'rgba(77, 170, 87, 0.72)',
+                                    borderColor: 'rgba(77, 170, 87, 0.96)',
+                                    borderWidth: 1,
+                                },
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: { boxWidth: 12, font: { size: 10 } },
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)}`,
+                                    },
+                                },
+                            },
+                            scales: {
+                                x: {
+                                    stacked: true,
+                                    ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true },
+                                    grid: { display: false },
+                                },
+                                y: {
+                                    stacked: true,
+                                    beginAtZero: true,
+                                    ticks: { precision: 0, font: { size: 10 } },
+                                },
+                            },
+                        },
+                    });
+                }
+
+                const sourceDaily = (() => {
+                    if (selectedUserKey === 'ALL') {
+                        return filterDailyByBounds(productivityDaily, bounds);
+                    }
+                    const selectedUser = rows.find((row) => String(row.user_key || '') === selectedUserKey);
+                    return selectedUser ? selectedUser.dailyRows : [];
+                })();
+                const sourceDailyMap = {};
+                sourceDaily.forEach((row) => {
+                    sourceDailyMap[String(row.date || '')] = row;
+                });
+
+                const dateLabels = [];
+                if (bounds.start) {
+                    const cursor = new Date(bounds.start.getFullYear(), bounds.start.getMonth(), bounds.start.getDate());
+                    const end = bounds.end || referenceDate;
+                    while (cursor <= end) {
+                        dateLabels.push(toDateKey(cursor));
+                        cursor.setDate(cursor.getDate() + 1);
+                    }
+                } else {
+                    sourceDaily.forEach((row) => {
+                        const key = String(row.date || '').trim();
+                        if (key) dateLabels.push(key);
+                    });
+                }
+
+                const metricResolver = (row, key) => {
+                    if (!row) return 0;
+                    if (key === 'total') return Number(row.total || sumMetrics(row));
+                    return Number(row[key] || 0);
+                };
+                const dailyValues = dateLabels.map((dateKey) => metricResolver(sourceDailyMap[dateKey], metricValue));
+
+                if (dailyChart) dailyChart.destroy();
+                const dailyCtx = dailyCanvas.getContext('2d');
+                if (dailyCtx) {
+                    const labelBase = metricValue === 'total'
+                        ? 'Total diário'
+                        : metricValue === 'analises'
+                            ? 'Análises/dia'
+                            : metricValue === 'tarefas'
+                                ? 'Tarefas/dia'
+                                : 'Prazos/dia';
+                    const labelUser = selectedUserKey === 'ALL'
+                        ? 'Todos os usuários'
+                        : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.user_label || 'Usuário');
+                    dailyChart = new Chart(dailyCtx, {
+                        type: 'line',
+                        data: {
+                            labels: dateLabels.map((dateKey) => formatDateLabel(dateKey)),
+                            datasets: [{
+                                label: `${labelBase} · ${labelUser}`,
+                                data: dailyValues,
+                                backgroundColor: 'rgba(61, 109, 138, 0.20)',
+                                borderColor: 'rgba(61, 109, 138, 0.96)',
+                                borderWidth: 2,
+                                pointRadius: 2,
+                                tension: 0.22,
+                                fill: true,
+                            }],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: { boxWidth: 12, font: { size: 10 } },
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)}`,
+                                    },
+                                },
+                            },
+                            scales: {
+                                x: {
+                                    ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true },
+                                    grid: { display: false },
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: { precision: 0, font: { size: 10 } },
+                                },
+                            },
+                        },
+                    });
+                }
+            };
+
+            periodSelect.addEventListener('change', renderProductivity);
+            userSelect.addEventListener('change', renderProductivity);
+            metricSelect.addEventListener('change', renderProductivity);
+            renderProductivity();
         }
     }
 });

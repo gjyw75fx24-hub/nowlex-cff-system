@@ -831,7 +831,14 @@ class TarefaCreateAPIView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         processo = get_object_or_404(ProcessoJudicial, pk=self.kwargs.get('processo_id'))
-        serializer.save(processo=processo)
+        extra = {
+            'processo': processo,
+            'criado_por': self.request.user,
+        }
+        if bool(serializer.validated_data.get('concluida')):
+            extra['concluido_em'] = timezone.now()
+            extra['concluido_por'] = self.request.user
+        serializer.save(**extra)
 
 class PrazoCreateAPIView(generics.CreateAPIView):
     """
@@ -842,7 +849,14 @@ class PrazoCreateAPIView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         processo = get_object_or_404(ProcessoJudicial, pk=self.kwargs.get('processo_id'))
-        serializer.save(processo=processo)
+        extra = {
+            'processo': processo,
+            'criado_por': self.request.user,
+        }
+        if bool(serializer.validated_data.get('concluido')):
+            extra['concluido_em'] = timezone.now()
+            extra['concluido_por'] = self.request.user
+        serializer.save(**extra)
 
 def _bulk_payload_from_request(request):
     payload_raw = request.data.get('payload') if hasattr(request, 'data') else None
@@ -984,6 +998,8 @@ class TarefaBulkCreateAPIView(APIView):
                 responsavel=responsavel,
                 prioridade=prioridade,
                 concluida=concluida,
+                concluido_em=timezone.now() if concluida else None,
+                concluido_por=request.user if concluida else None,
                 observacoes=observacoes,
                 criado_por=request.user,
             )
@@ -1059,7 +1075,11 @@ class TarefaBulkHistoryActionAPIView(APIView):
 
         tarefas_qs = Tarefa.objects.filter(lote_id__in=allowed_ids)
         if action in ('concluir', 'concluida', 'concluidas', 'finalizar'):
-            updated = tarefas_qs.update(concluida=True)
+            updated = tarefas_qs.filter(concluida=False).update(
+                concluida=True,
+                concluido_em=timezone.now(),
+                concluido_por=request.user,
+            )
             return Response({'updated': updated, 'action': 'concluir'})
         if action in ('delete', 'deletar', 'excluir', 'remover'):
             deleted = tarefas_qs.count()
@@ -1135,6 +1155,9 @@ class PrazoBulkCreateAPIView(APIView):
                 responsavel=responsavel,
                 observacoes=observacoes,
                 concluido=concluido,
+                concluido_em=timezone.now() if concluido else None,
+                concluido_por=request.user if concluido else None,
+                criado_por=request.user,
             )
             created_prazos.append(prazo)
             if comentario_texto or arquivo:

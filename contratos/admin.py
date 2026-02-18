@@ -3711,6 +3711,23 @@ class CarteiraAdmin(admin.ModelAdmin):
             text = text.replace("#", " ").replace("_", " ").replace("-", " ")
             return re.sub(r"\s+", " ", text).strip()
 
+        def _parse_datetime_value(value):
+            if isinstance(value, datetime.datetime):
+                dt = value
+            elif isinstance(value, str):
+                raw = value.strip()
+                if not raw:
+                    return None
+                try:
+                    dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    return None
+            else:
+                return None
+            if timezone.is_naive(dt):
+                dt = timezone.make_aware(dt, timezone.get_default_timezone())
+            return timezone.localtime(dt)
+
         def _build_tipo_fallback_meta(nome, slug):
             slug_norm = _normalize_type_text(slug)
             nome_norm = _normalize_type_text(nome)
@@ -3995,9 +4012,19 @@ class CarteiraAdmin(admin.ModelAdmin):
 
         processos = (
             ProcessoJudicial.objects.filter(analise_processo__isnull=False)
-            .select_related("analise_processo")
+            .select_related("analise_processo", "analise_processo__updated_by")
             .prefetch_related(Prefetch("carteiras_vinculadas", queryset=Carteira.objects.only("id")))
-            .only("id", "uf", "carteira_id", "analise_processo__respostas")
+            .only(
+                "id",
+                "uf",
+                "carteira_id",
+                "analise_processo__respostas",
+                "analise_processo__updated_at",
+                "analise_processo__updated_by__id",
+                "analise_processo__updated_by__username",
+                "analise_processo__updated_by__first_name",
+                "analise_processo__updated_by__last_name",
+            )
         )
 
         process_ids = [processo.id for processo in processos]
@@ -4018,6 +4045,25 @@ class CarteiraAdmin(admin.ModelAdmin):
 
         all_ufs = set()
         buckets = {}
+        productivity_users = {}
+        productivity_daily_all = {}
+        productivity_totals = {"analises": 0, "tarefas": 0, "prazos": 0}
+        productivity_sem_data = {"analises": 0, "tarefas": 0, "prazos": 0}
+
+        known_users_by_norm = {}
+        for user in User.objects.filter(is_active=True).only("id", "username", "first_name", "last_name"):
+            display_name = _clean_text(user.get_full_name()) or _clean_text(getattr(user, "username", ""))
+            if not display_name:
+                continue
+            candidate_keys = {display_name, _clean_text(getattr(user, "username", ""))}
+            for candidate in candidate_keys:
+                norm = _normalize_answer(candidate)
+                if not norm:
+                    continue
+                known_users_by_norm.setdefault(
+                    norm,
+                    {"id": int(user.id), "label": display_name},
+                )
 
         def _get_bucket(uf_code):
             bucket = buckets.get(uf_code)
@@ -4030,6 +4076,69 @@ class CarteiraAdmin(admin.ModelAdmin):
                 }
                 buckets[uf_code] = bucket
             return bucket
+
+        def _resolve_user_display(user_obj):
+            if not user_obj:
+                return ""
+            return _clean_text(user_obj.get_full_name()) or _clean_text(getattr(user_obj, "username", ""))
+
+        def _resolve_actor_key_label(author_text="", fallback_user=None):
+            fallback_id = _safe_int(getattr(fallback_user, "id", None)) if fallback_user else None
+            fallback_label = _resolve_user_display(fallback_user) if fallback_user else ""
+            normalized_author_text = _clean_text(author_text)
+            normalized_key = _normalize_answer(normalized_author_text)
+
+            if normalized_key and normalized_key in known_users_by_norm:
+                known_user = known_users_by_norm[normalized_key]
+                return f"user:{known_user['id']}", known_user["label"]
+            if fallback_id:
+                return f"user:{fallback_id}", fallback_label or normalized_author_text or f"Usuário {fallback_id}"
+            if normalized_author_text:
+                return f"author:{normalized_key or normalized_author_text.lower()}", normalized_author_text
+            return "unknown", "Sem usuário"
+
+        def _ensure_productivity_user(user_key, user_label):
+            normalized_key = _clean_text(user_key) or "unknown"
+            normalized_label = _clean_text(user_label) or "Sem usuário"
+            bucket = productivity_users.get(normalized_key)
+            if bucket is None:
+                bucket = {
+                    "user_key": normalized_key,
+                    "user_label": normalized_label,
+                    "totals": {"analises": 0, "tarefas": 0, "prazos": 0},
+                    "sem_data": {"analises": 0, "tarefas": 0, "prazos": 0},
+                    "daily": {},
+                }
+                productivity_users[normalized_key] = bucket
+            else:
+                if not bucket.get("user_label") and normalized_label:
+                    bucket["user_label"] = normalized_label
+            return bucket
+
+        def _register_productivity_event(metric_key, user_key, user_label, date_key=None):
+            if metric_key not in ("analises", "tarefas", "prazos"):
+                return
+            user_bucket = _ensure_productivity_user(user_key, user_label)
+            user_bucket["totals"][metric_key] += 1
+            productivity_totals[metric_key] += 1
+
+            normalized_date = _clean_text(date_key)
+            if not normalized_date:
+                user_bucket["sem_data"][metric_key] += 1
+                productivity_sem_data[metric_key] += 1
+                return
+
+            daily_item = user_bucket["daily"].setdefault(
+                normalized_date,
+                {"date": normalized_date, "analises": 0, "tarefas": 0, "prazos": 0},
+            )
+            daily_item[metric_key] += 1
+
+            daily_total_item = productivity_daily_all.setdefault(
+                normalized_date,
+                {"date": normalized_date, "analises": 0, "tarefas": 0, "prazos": 0},
+            )
+            daily_total_item[metric_key] += 1
 
         def _process_entry_for_bucket(bucket, entry):
             bucket["cards_total"] += 1
@@ -4151,7 +4260,8 @@ class CarteiraAdmin(admin.ModelAdmin):
                 answer_item["by_uf"][uf_code] = answer_item["by_uf"].get(uf_code, 0) + 1
 
         for processo in processos:
-            respostas = getattr(getattr(processo, "analise_processo", None), "respostas", None)
+            analise_obj = getattr(processo, "analise_processo", None)
+            respostas = getattr(analise_obj, "respostas", None)
             cards = _get_cards_from_respostas(respostas)
             if not cards:
                 continue
@@ -4170,6 +4280,18 @@ class CarteiraAdmin(admin.ModelAdmin):
                 respostas_obj = card.get("tipo_de_acao_respostas")
                 if not isinstance(respostas_obj, dict):
                     respostas_obj = {}
+
+                if _card_has_analysis_content(card):
+                    analysis_author = _clean_text(card.get("analysis_author"))
+                    fallback_user = getattr(analise_obj, "updated_by", None)
+                    author_key, author_label = _resolve_actor_key_label(analysis_author, fallback_user=fallback_user)
+                    card_timestamp = (
+                        _parse_datetime_value(card.get("saved_at"))
+                        or _parse_datetime_value(card.get("updated_at"))
+                        or _parse_datetime_value(getattr(analise_obj, "updated_at", None))
+                    )
+                    card_date = card_timestamp.date().isoformat() if card_timestamp else ""
+                    _register_productivity_event("analises", author_key, author_label, card_date)
 
                 tipo_meta = _resolve_tipo_meta(analysis_type, respostas_obj)
                 tipo_id = int(tipo_meta["id"]) if isinstance(tipo_meta, dict) and tipo_meta.get("id") else None
@@ -4567,6 +4689,133 @@ class CarteiraAdmin(admin.ModelAdmin):
             "by_uf": serialized_priority_by_uf,
         }
 
+        tarefas_concluidas = (
+            Tarefa.objects.filter(concluida=True)
+            .select_related("concluido_por")
+            .only(
+                "id",
+                "concluido_em",
+                "concluido_por__id",
+                "concluido_por__username",
+                "concluido_por__first_name",
+                "concluido_por__last_name",
+            )
+        )
+        for tarefa in tarefas_concluidas.iterator():
+            actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "concluido_por", None))
+            concluded_at = _parse_datetime_value(getattr(tarefa, "concluido_em", None))
+            concluded_date = concluded_at.date().isoformat() if concluded_at else ""
+            _register_productivity_event("tarefas", actor_key, actor_label, concluded_date)
+
+        prazos_concluidos = (
+            Prazo.objects.filter(concluido=True)
+            .select_related("concluido_por")
+            .only(
+                "id",
+                "concluido_em",
+                "concluido_por__id",
+                "concluido_por__username",
+                "concluido_por__first_name",
+                "concluido_por__last_name",
+            )
+        )
+        for prazo in prazos_concluidos.iterator():
+            actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "concluido_por", None))
+            concluded_at = _parse_datetime_value(getattr(prazo, "concluido_em", None))
+            concluded_date = concluded_at.date().isoformat() if concluded_at else ""
+            _register_productivity_event("prazos", actor_key, actor_label, concluded_date)
+
+        serialized_productivity_users = []
+        for user_bucket in productivity_users.values():
+            daily_rows = sorted(
+                user_bucket["daily"].values(),
+                key=lambda item: item["date"],
+            )
+            totals = {
+                "analises": int(user_bucket["totals"]["analises"]),
+                "tarefas": int(user_bucket["totals"]["tarefas"]),
+                "prazos": int(user_bucket["totals"]["prazos"]),
+            }
+            totals["total"] = int(totals["analises"] + totals["tarefas"] + totals["prazos"])
+
+            sem_data = {
+                "analises": int(user_bucket["sem_data"]["analises"]),
+                "tarefas": int(user_bucket["sem_data"]["tarefas"]),
+                "prazos": int(user_bucket["sem_data"]["prazos"]),
+            }
+            sem_data["total"] = int(sem_data["analises"] + sem_data["tarefas"] + sem_data["prazos"])
+
+            serialized_productivity_users.append(
+                {
+                    "user_key": user_bucket["user_key"],
+                    "user_label": user_bucket["user_label"],
+                    "totals": totals,
+                    "sem_data": sem_data,
+                    "daily": [
+                        {
+                            "date": row["date"],
+                            "analises": int(row.get("analises") or 0),
+                            "tarefas": int(row.get("tarefas") or 0),
+                            "prazos": int(row.get("prazos") or 0),
+                            "total": int((row.get("analises") or 0) + (row.get("tarefas") or 0) + (row.get("prazos") or 0)),
+                        }
+                        for row in daily_rows
+                    ],
+                }
+            )
+
+        serialized_productivity_users.sort(
+            key=lambda item: (
+                -int(item.get("totals", {}).get("total") or 0),
+                (item.get("user_label") or "").upper(),
+            )
+        )
+
+        productivity_daily_rows = sorted(
+            productivity_daily_all.values(),
+            key=lambda item: item["date"],
+        )
+        serialized_productivity_daily = [
+            {
+                "date": row["date"],
+                "analises": int(row.get("analises") or 0),
+                "tarefas": int(row.get("tarefas") or 0),
+                "prazos": int(row.get("prazos") or 0),
+                "total": int((row.get("analises") or 0) + (row.get("tarefas") or 0) + (row.get("prazos") or 0)),
+            }
+            for row in productivity_daily_rows
+        ]
+        productivity_date_min = serialized_productivity_daily[0]["date"] if serialized_productivity_daily else ""
+        productivity_date_max = serialized_productivity_daily[-1]["date"] if serialized_productivity_daily else ""
+        productivity_totals_payload = {
+            "analises": int(productivity_totals["analises"]),
+            "tarefas": int(productivity_totals["tarefas"]),
+            "prazos": int(productivity_totals["prazos"]),
+        }
+        productivity_totals_payload["total"] = int(
+            productivity_totals_payload["analises"]
+            + productivity_totals_payload["tarefas"]
+            + productivity_totals_payload["prazos"]
+        )
+        productivity_sem_data_payload = {
+            "analises": int(productivity_sem_data["analises"]),
+            "tarefas": int(productivity_sem_data["tarefas"]),
+            "prazos": int(productivity_sem_data["prazos"]),
+        }
+        productivity_sem_data_payload["total"] = int(
+            productivity_sem_data_payload["analises"]
+            + productivity_sem_data_payload["tarefas"]
+            + productivity_sem_data_payload["prazos"]
+        )
+        productivity_kpi_data = {
+            "users": serialized_productivity_users,
+            "daily": serialized_productivity_daily,
+            "totals": productivity_totals_payload,
+            "sem_data": productivity_sem_data_payload,
+            "date_min": productivity_date_min,
+            "date_max": productivity_date_max,
+        }
+
         return {
             "ufs": uf_options,
             "buckets": serialized_buckets,
@@ -4575,6 +4824,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "peticao_by_carteira": serialized_peticao_by_carteira,
             "peticao_totals": serialized_peticao_totals,
             "priority_kpi": priority_kpi_data,
+            "productivity_kpi": productivity_kpi_data,
         }
 
     def changelist_view(self, request, extra_context=None):
@@ -4597,7 +4847,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260218b',
+            'admin/js/carteira_charts.js?v=20260218c',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -5982,6 +6232,104 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             cleaned['numero_cnj'] = resolved
             inline_form.instance.numero_cnj = resolved
 
+    def _save_tarefa_formset_with_audit(self, request, formset):
+        instances = formset.save(commit=False)
+        for obj in formset.deleted_objects:
+            obj.delete()
+
+        existing_ids = [instance.pk for instance in instances if instance.pk]
+        previous_state = {}
+        if existing_ids:
+            for row in Tarefa.objects.filter(pk__in=existing_ids).values(
+                "id",
+                "concluida",
+                "concluido_em",
+                "concluido_por_id",
+            ):
+                previous_state[int(row["id"])] = row
+
+        now = timezone.now()
+        for instance in instances:
+            previous = previous_state.get(int(instance.pk)) if instance.pk else None
+            was_concluded = bool(previous.get("concluida")) if previous else False
+            is_new = instance.pk is None
+
+            if is_new and not instance.criado_por_id:
+                instance.criado_por = request.user
+
+            is_concluded = bool(instance.concluida)
+            if is_concluded:
+                if not was_concluded:
+                    if not instance.concluido_em:
+                        instance.concluido_em = now
+                    if not instance.concluido_por_id:
+                        instance.concluido_por = request.user
+                else:
+                    if not instance.concluido_em:
+                        instance.concluido_em = previous.get("concluido_em") or now
+                    if not instance.concluido_por_id:
+                        previous_user_id = previous.get("concluido_por_id")
+                        if previous_user_id:
+                            instance.concluido_por_id = int(previous_user_id)
+                        else:
+                            instance.concluido_por = request.user
+            else:
+                instance.concluido_em = None
+                instance.concluido_por = None
+
+            instance.save()
+
+        formset.save_m2m()
+
+    def _save_prazo_formset_with_audit(self, request, formset):
+        instances = formset.save(commit=False)
+        for obj in formset.deleted_objects:
+            obj.delete()
+
+        existing_ids = [instance.pk for instance in instances if instance.pk]
+        previous_state = {}
+        if existing_ids:
+            for row in Prazo.objects.filter(pk__in=existing_ids).values(
+                "id",
+                "concluido",
+                "concluido_em",
+                "concluido_por_id",
+            ):
+                previous_state[int(row["id"])] = row
+
+        now = timezone.now()
+        for instance in instances:
+            previous = previous_state.get(int(instance.pk)) if instance.pk else None
+            was_concluded = bool(previous.get("concluido")) if previous else False
+            is_new = instance.pk is None
+
+            if is_new and not instance.criado_por_id:
+                instance.criado_por = request.user
+
+            is_concluded = bool(instance.concluido)
+            if is_concluded:
+                if not was_concluded:
+                    if not instance.concluido_em:
+                        instance.concluido_em = now
+                    if not instance.concluido_por_id:
+                        instance.concluido_por = request.user
+                else:
+                    if not instance.concluido_em:
+                        instance.concluido_em = previous.get("concluido_em") or now
+                    if not instance.concluido_por_id:
+                        previous_user_id = previous.get("concluido_por_id")
+                        if previous_user_id:
+                            instance.concluido_por_id = int(previous_user_id)
+                        else:
+                            instance.concluido_por = request.user
+            else:
+                instance.concluido_em = None
+                instance.concluido_por = None
+
+            instance.save()
+
+        formset.save_m2m()
+
 
     def save_formset(self, request, form, formset, change):
         if formset.model == AnaliseProcesso:
@@ -6051,6 +6399,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     seen_keys.add(chave)
 
             return super().save_formset(request, form, formset, change)
+        elif formset.model == Tarefa:
+            return self._save_tarefa_formset_with_audit(request, formset)
+        elif formset.model == Prazo:
+            return self._save_prazo_formset_with_audit(request, formset)
         else:
             super().save_formset(request, form, formset, change)
 
