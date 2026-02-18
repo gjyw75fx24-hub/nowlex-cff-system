@@ -3518,6 +3518,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'intersection_carteira_a',
         'intersection_carteira_b',
         'show_counts',
+        'tab',
         'kpi_carteira_id',
         'kpi_tipo_id',
         'kpi_question',
@@ -5175,6 +5176,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'p',
             '_changelist_filters',
             '_skip_saved_filters',
+            'tab',
             'intersection_carteira_a',
             'intersection_carteira_b',
             'show_counts',
@@ -5323,7 +5325,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
         if not changelist_filters and request.GET:
             direct = QueryDict(request.GET.urlencode(), mutable=True)
-            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters', 'tab'):
                 direct.pop(key, None)
             if direct.urlencode():
                 changelist_filters = direct.urlencode()
@@ -5344,7 +5346,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                         if nested:
                             changelist_filters = unquote(str(nested))
                         else:
-                            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+                            for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters', 'tab'):
                                 ref_params.pop(key, None)
                             if ref_params.urlencode():
                                 changelist_filters = ref_params.urlencode()
@@ -5359,7 +5361,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         else:
             params = QueryDict(str(changelist_filters), mutable=True)
 
-        for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters'):
+        for key in ('o', 'p', '_changelist_filters', '_skip_saved_filters', 'tab'):
             params.pop(key, None)
         if self._should_include_prescritos_for_params(params, user=request.user):
             params['ord_prescricao'] = 'incluir'
