@@ -6,6 +6,14 @@ import dj_database_url
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
+
+def _env_positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return int(default)
+    return value if value > 0 else int(default)
+
 # Sentry configuration
 sentry_enabled = os.getenv('SENTRY_ENABLED', 'False').lower() in ('true', '1', 'yes')
 if sentry_enabled:
@@ -198,6 +206,14 @@ NOWLEX_CALC_DATA_CORRENTE_MES = os.getenv("NOWLEX_CALC_DATA_CORRENTE_MES")
 NOWLEX_CALC_DATA_CORRENTE_ANO = os.getenv("NOWLEX_CALC_DATA_CORRENTE_ANO")
 NOWLEX_CALC_INDICE = os.getenv("NOWLEX_CALC_INDICE")
 NOWLEX_CALC_OBSERVATIONS = os.getenv("NOWLEX_CALC_OBSERVATIONS")
+ONLINE_PRESENCE_REDIS_URL = os.getenv("ONLINE_PRESENCE_REDIS_URL", os.getenv("REDIS_URL", "")).strip()
+ONLINE_PRESENCE_HEARTBEAT_SECONDS = _env_positive_int("ONLINE_PRESENCE_HEARTBEAT_SECONDS", 15)
+ONLINE_PRESENCE_TTL_SECONDS = _env_positive_int("ONLINE_PRESENCE_TTL_SECONDS", 60)
+if ONLINE_PRESENCE_TTL_SECONDS < ONLINE_PRESENCE_HEARTBEAT_SECONDS:
+    ONLINE_PRESENCE_TTL_SECONDS = ONLINE_PRESENCE_HEARTBEAT_SECONDS
+ONLINE_PRESENCE_IDLE_SECONDS = _env_positive_int("ONLINE_PRESENCE_IDLE_SECONDS", 300)
+if ONLINE_PRESENCE_IDLE_SECONDS < ONLINE_PRESENCE_HEARTBEAT_SECONDS:
+    ONLINE_PRESENCE_IDLE_SECONDS = ONLINE_PRESENCE_HEARTBEAT_SECONDS
 
 # Gotenberg - Serviço de conversão de documentos (DOCX -> PDF)
 GOTENBERG_URL = os.getenv("GOTENBERG_URL", "")

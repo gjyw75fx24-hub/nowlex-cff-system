@@ -16,6 +16,7 @@ window.__cnj_entries = {{ cnj_entries_json|default:"[]"|safe }};
 window.__cnj_active_index = {{ cnj_active_index|default:0 }};
 window.__cnj_active_display = "{{ cnj_active_display|default:''|escapejs }}";
 window.__carteiras_vinculadas_ids = {{ carteiras_vinculadas_ids_json|default:"[]"|safe }};
+window.__processo_online_presence = {{ online_presence_config_json|default:"{}"|safe }};
 </script>
 {% endblock %}
 

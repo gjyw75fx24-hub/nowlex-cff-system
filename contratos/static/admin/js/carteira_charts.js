@@ -577,6 +577,9 @@ window.addEventListener('DOMContentLoaded', () => {
         : {};
     const productivityDateMin = String(productivityKpi?.date_min || '').trim();
     const productivityDateMax = String(productivityKpi?.date_max || '').trim();
+    const onlinePresenceKpi = (kpiData && typeof kpiData === 'object' && kpiData.online_presence_kpi)
+        ? kpiData.online_presence_kpi
+        : {};
     if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
 
     const kpiSection = document.createElement('section');
@@ -1852,6 +1855,145 @@ window.addEventListener('DOMContentLoaded', () => {
             userSelect.addEventListener('change', renderProductivity);
             metricSelect.addEventListener('change', renderProductivity);
             renderProductivity();
+        }
+    }
+
+    const onlinePresenceEnabled = Boolean(onlinePresenceKpi && onlinePresenceKpi.enabled && onlinePresenceKpi.snapshot_url);
+    if (onlinePresenceEnabled) {
+        const refreshSeconds = Math.max(5, Number(onlinePresenceKpi.heartbeat_seconds || 15));
+        const idleSeconds = Math.max(60, Number(onlinePresenceKpi.idle_seconds || 300));
+        const snapshotUrl = String(onlinePresenceKpi.snapshot_url || '').trim();
+        const onlineSection = document.createElement('section');
+        onlineSection.style.marginTop = '16px';
+        onlineSection.style.padding = '14px';
+        onlineSection.style.border = '1px solid #d9e1ea';
+        onlineSection.style.borderRadius = '10px';
+        onlineSection.style.background = '#fff';
+        onlineSection.innerHTML = `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                <h3 style="margin:0;">KPI Online (Espião)</h3>
+                <button type="button" class="kpi-online-refresh" style="padding:4px 10px; font-size:12px;">Atualizar</button>
+            </div>
+            <div class="kpi-online-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
+            <div class="kpi-online-table-wrap" style="overflow:auto;"></div>
+        `;
+        chartContainer.appendChild(onlineSection);
+
+        const refreshButton = onlineSection.querySelector('.kpi-online-refresh');
+        const summaryEl = onlineSection.querySelector('.kpi-online-summary');
+        const tableWrap = onlineSection.querySelector('.kpi-online-table-wrap');
+        if (refreshButton && summaryEl && tableWrap) {
+            let inFlight = false;
+
+            const formatDuration = (secondsValue) => {
+                const total = Math.max(0, Number(secondsValue || 0));
+                const hours = Math.floor(total / 3600);
+                const minutes = Math.floor((total % 3600) / 60);
+                const seconds = Math.floor(total % 60);
+                const hh = String(hours).padStart(2, '0');
+                const mm = String(minutes).padStart(2, '0');
+                const ss = String(seconds).padStart(2, '0');
+                return `${hh}:${mm}:${ss}`;
+            };
+            const formatDateTime = (epoch) => {
+                const parsed = Number(epoch || 0);
+                if (!parsed) return '-';
+                return new Date(parsed * 1000).toLocaleString('pt-BR');
+            };
+            const formatTabLabel = (tabId) => {
+                const value = String(tabId || '').trim();
+                if (!value) return '-';
+                if (value.length <= 10) return value;
+                return value.slice(0, 10);
+            };
+            const renderRows = (payload) => {
+                const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+                const onlineRows = rows.filter((item) => item && item.is_online);
+                const idleRows = onlineRows.filter((item) => item.is_idle);
+                const activeRows = onlineRows.length - idleRows.length;
+                summaryEl.innerHTML = `
+                    <strong>Abas online:</strong> ${numberPt(onlineRows.length)}
+                    &nbsp;|&nbsp;
+                    <strong>Em atividade:</strong> ${numberPt(activeRows)}
+                    &nbsp;|&nbsp;
+                    <strong>Ociosas:</strong> ${numberPt(idleRows.length)}
+                    &nbsp;|&nbsp;
+                    <strong>Ociosidade:</strong> após ${numberPt(idleSeconds / 60)} min
+                    &nbsp;|&nbsp;
+                    <strong>Atualização:</strong> a cada ${numberPt(refreshSeconds)}s
+                `;
+                if (!rows.length) {
+                    tableWrap.innerHTML = '<div style="font-size:12px; color:#62758a; padding:6px 0;">Nenhum usuário online em cadastro/processo.</div>';
+                    return;
+                }
+                const body = rows
+                    .sort((a, b) => Number(b.last_seen_at || 0) - Number(a.last_seen_at || 0))
+                    .map((row) => {
+                        const statusLabel = row.is_idle ? 'Ocioso' : 'Ativo';
+                        const statusColor = row.is_idle ? '#a86f13' : '#2f7d32';
+                        const processLabel = escapeHtml(row.processo_label || `Cadastro #${row.processo_id}`);
+                        const processLink = row.processo_url
+                            ? `<a href="${escapeHtml(row.processo_url)}" style="color:#1d5f9c; font-weight:600;">${processLabel}</a>`
+                            : processLabel;
+                        return `
+                            <tr>
+                                <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.user_label || '-')}</td>
+                                <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${processLink}</td>
+                                <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.carteira_label || '-')}</td>
+                                <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(formatTabLabel(row.tab_id))}</td>
+                                <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(formatDuration(row.elapsed_seconds))}</td>
+                                <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(formatDuration(row.idle_for_seconds))}</td>
+                                <td style="text-align:center; padding:6px; border:1px solid #d8e1ea; color:${statusColor}; font-weight:700;">${statusLabel}</td>
+                                <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(formatDateTime(row.last_seen_at))}</td>
+                            </tr>
+                        `;
+                    })
+                    .join('');
+                tableWrap.innerHTML = `
+                    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                        <thead>
+                            <tr style="background:#eef3f8;">
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Usuário</th>
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Cadastro/Processo</th>
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira</th>
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Aba</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tempo em atuação</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tempo ocioso</th>
+                                <th style="text-align:center; padding:6px; border:1px solid #d8e1ea;">Status</th>
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Último heartbeat</th>
+                            </tr>
+                        </thead>
+                        <tbody>${body}</tbody>
+                    </table>
+                `;
+            };
+
+            const fetchSnapshot = async () => {
+                if (inFlight || !snapshotUrl) return;
+                inFlight = true;
+                refreshButton.disabled = true;
+                try {
+                    const response = await fetch(snapshotUrl, {
+                        method: 'GET',
+                        headers: { Accept: 'application/json' },
+                        credentials: 'same-origin',
+                    });
+                    if (!response.ok) {
+                        throw new Error('Falha ao carregar KPI online.');
+                    }
+                    const payload = await response.json();
+                    renderRows(payload);
+                } catch (error) {
+                    tableWrap.innerHTML = '<div style="font-size:12px; color:#9d2f2f; padding:6px 0;">Não foi possível carregar a atividade online.</div>';
+                } finally {
+                    refreshButton.disabled = false;
+                    inFlight = false;
+                }
+            };
+
+            refreshButton.addEventListener('click', fetchSnapshot);
+            fetchSnapshot();
+            setInterval(fetchSnapshot, refreshSeconds * 1000);
         }
     }
 });

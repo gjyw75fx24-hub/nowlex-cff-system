@@ -8,6 +8,7 @@ import unicodedata
 from urllib.parse import quote, unquote, urlparse
 from typing import Optional
 
+from django.conf import settings
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
@@ -19,6 +20,7 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
+from django.core import signing
 from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
@@ -49,6 +51,13 @@ from .widgets import EnderecoWidget
 from .forms import DemandasAnaliseForm, DemandasAnalisePlanilhaForm
 from .services.demandas import DemandasImportError, DemandasImportService, _format_currency, _format_cpf
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
+from .services.online_presence import (
+    TOKEN_SALT as ONLINE_PRESENCE_TOKEN_SALT,
+    get_presence_settings,
+    is_online_presence_enabled,
+    list_online_presence_rows,
+    record_online_presence,
+)
 from .services.passivas_planilha import (
     PassivasPlanilhaError,
     build_passivas_rows_from_file_bytes,
@@ -3553,6 +3562,72 @@ class CarteiraAdmin(admin.ModelAdmin):
         if not self._can_edit_carteira(request):
             return False
         return super().has_change_permission(request, obj=obj)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'kpi-online-presence/',
+                self.admin_site.admin_view(self.kpi_online_presence_view),
+                name='contratos_carteira_kpi_online_presence',
+            ),
+        ]
+        return custom_urls + urls
+
+    def kpi_online_presence_view(self, request):
+        if request.method != 'GET':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not is_user_supervisor(request.user):
+            return JsonResponse({'error': 'Permissão negada.'}, status=403)
+
+        settings_map = get_presence_settings()
+        if not is_online_presence_enabled():
+            return JsonResponse(
+                {
+                    'enabled': False,
+                    'rows': [],
+                    'idle_seconds': int(settings_map['idle_seconds']),
+                    'ttl_seconds': int(settings_map['ttl_seconds']),
+                }
+            )
+
+        rows = []
+        for item in list_online_presence_rows():
+            processo_id = int(item.get('processo_id') or 0)
+            if not processo_id:
+                continue
+            rows.append(
+                {
+                    'user_id': int(item.get('user_id') or 0),
+                    'user_label': item.get('user_label') or '',
+                    'processo_id': processo_id,
+                    'processo_label': item.get('processo_label') or f'Cadastro #{processo_id}',
+                    'processo_url': reverse('admin:contratos_processojudicial_change', args=[processo_id]),
+                    'carteira_id': int(item.get('carteira_id') or 0),
+                    'carteira_label': item.get('carteira_label') or '',
+                    'session_key': item.get('session_key') or '',
+                    'tab_id': item.get('tab_id') or '',
+                    'path': item.get('path') or '',
+                    'visible': bool(item.get('visible')),
+                    'is_idle': bool(item.get('is_idle')),
+                    'is_online': bool(item.get('is_online')),
+                    'elapsed_seconds': int(item.get('elapsed_seconds') or 0),
+                    'idle_for_seconds': int(item.get('idle_for_seconds') or 0),
+                    'last_seen_at': int(item.get('last_seen_at') or 0),
+                    'last_interaction_at': int(item.get('last_interaction_at') or 0),
+                    'started_at': int(item.get('started_at') or 0),
+                }
+            )
+
+        return JsonResponse(
+            {
+                'enabled': True,
+                'rows': rows,
+                'idle_seconds': int(settings_map['idle_seconds']),
+                'ttl_seconds': int(settings_map['ttl_seconds']),
+                'generated_at': timezone.now().isoformat(),
+            }
+        )
     
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
@@ -3673,7 +3748,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "process_changelist_url": process_changelist_url,
         }
 
-    def _build_carteira_kpi_data(self):
+    def _build_carteira_kpi_data(self, request=None):
         def _safe_int(value):
             try:
                 return int(value)
@@ -4865,6 +4940,19 @@ class CarteiraAdmin(admin.ModelAdmin):
             "date_min": productivity_date_min,
             "date_max": productivity_date_max,
         }
+        settings_map = get_presence_settings()
+        online_presence_enabled_for_user = bool(
+            request
+            and is_user_supervisor(getattr(request, "user", None))
+            and is_online_presence_enabled()
+        )
+        online_presence_kpi_data = {
+            "enabled": online_presence_enabled_for_user,
+            "snapshot_url": reverse('admin:contratos_carteira_kpi_online_presence') if online_presence_enabled_for_user else "",
+            "heartbeat_seconds": int(settings_map["heartbeat_seconds"]),
+            "ttl_seconds": int(settings_map["ttl_seconds"]),
+            "idle_seconds": int(settings_map["idle_seconds"]),
+        }
 
         return {
             "ufs": uf_options,
@@ -4875,12 +4963,13 @@ class CarteiraAdmin(admin.ModelAdmin):
             "peticao_totals": serialized_peticao_totals,
             "priority_kpi": priority_kpi_data,
             "productivity_kpi": productivity_kpi_data,
+            "online_presence_kpi": online_presence_kpi_data,
         }
 
     def changelist_view(self, request, extra_context=None):
         chart_data = list(self.get_queryset(request).values('nome', 'cor_grafico', 'total_processos', 'valor_total'))
         intersection_data = self._build_carteira_intersections()
-        kpi_data = self._build_carteira_kpi_data()
+        kpi_data = self._build_carteira_kpi_data(request)
         extra_context = extra_context or {}
         extra_context['chart_data'] = json.dumps(chart_data, default=str)
         extra_context['intersection_data'] = json.dumps(intersection_data, default=str)
@@ -4897,7 +4986,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260218d',
+            'admin/js/carteira_charts.js?v=20260218e',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -6165,6 +6254,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
         obj = self.get_object(request, object_id)
+        online_presence_config = {"enabled": False}
         if obj:
             extra_context['valuation_display'] = self.valor_causa_display(obj)
             cnj_entries = self._build_cnj_entries_context(obj)
@@ -6177,11 +6267,29 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             else:
                 linked_ids = []
             extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps(linked_ids))
+            if is_online_presence_enabled() and request.user.is_authenticated:
+                settings_map = get_presence_settings()
+                carteira_nome = str(getattr(getattr(obj, 'carteira', None), 'nome', '') or '').strip()
+                processo_label = str(obj.cnj or '').strip() or f"Cadastro #{obj.pk}"
+                token_payload = {
+                    "uid": int(request.user.pk),
+                    "pid": int(obj.pk),
+                    "processo_label": processo_label,
+                    "carteira_id": int(obj.carteira_id or 0),
+                    "carteira_label": carteira_nome,
+                }
+                online_presence_config = {
+                    "enabled": True,
+                    "endpoint_url": reverse('admin:processo_online_presence_heartbeat', args=[obj.pk]),
+                    "heartbeat_seconds": int(settings_map["heartbeat_seconds"]),
+                    "token": signing.dumps(token_payload, salt=ONLINE_PRESENCE_TOKEN_SALT),
+                }
         else:
             extra_context['cnj_entries_json'] = mark_safe(json.dumps([]))
             extra_context['cnj_active_index'] = 0
             extra_context['cnj_active_display'] = ''
             extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps([]))
+        extra_context['online_presence_config_json'] = mark_safe(json.dumps(online_presence_config))
         
         # Preserva os filtros da changelist para a navegação:
         # 1) _changelist_filters (padrão admin), 2) query direta,
@@ -6637,6 +6745,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'admin/js/vendor/jquery/jquery.min.js',
             'admin/js/jquery.init.js',
             'admin/js/processo_judicial_enhancer.js?v=20260217c',
+            'admin/js/processo_online_presence.js?v=20260218a',
             'admin/js/admin_tabs.js',
             'admin/js/processo_judicial_lazy_loader.js?v=20260217c',
             'admin/js/etiqueta_interface.js',
@@ -6653,6 +6762,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/bulk/', self.admin_site.admin_view(self.etiquetas_bulk_view), name='processo_etiquetas_bulk'),
             path('<path:object_id>/checagem-sistemas/', self.admin_site.admin_view(self.checagem_sistemas_view), name='processo_checagem_sistemas'),
+            path('<path:object_id>/online-presence/', self.admin_site.admin_view(self.online_presence_heartbeat_view), name='processo_online_presence_heartbeat'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
@@ -6662,6 +6772,77 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
+
+    def online_presence_heartbeat_view(self, request, object_id):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        if not is_online_presence_enabled():
+            return JsonResponse({'enabled': False, 'saved': False}, status=503)
+
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Payload inválido.'}, status=400)
+
+        token = str(payload.get('token') or '').strip()
+        tab_id = str(payload.get('tab_id') or '').strip()
+        if not token or not tab_id:
+            return JsonResponse({'error': 'Token e tab_id são obrigatórios.'}, status=400)
+
+        try:
+            token_data = signing.loads(
+                token,
+                salt=ONLINE_PRESENCE_TOKEN_SALT,
+                max_age=60 * 60 * 12,
+            )
+        except signing.SignatureExpired:
+            return JsonResponse({'error': 'Token expirado.'}, status=400)
+        except signing.BadSignature:
+            return JsonResponse({'error': 'Token inválido.'}, status=400)
+
+        token_user_id = int(token_data.get('uid') or 0)
+        token_processo_id = int(token_data.get('pid') or 0)
+        if token_user_id != int(request.user.pk):
+            return JsonResponse({'error': 'Token não pertence ao usuário.'}, status=403)
+
+        try:
+            route_object_id = int(object_id)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Cadastro inválido.'}, status=400)
+        if token_processo_id != route_object_id:
+            return JsonResponse({'error': 'Token não corresponde ao cadastro.'}, status=400)
+
+        if request.session.session_key is None:
+            request.session.save()
+        session_key = request.session.session_key or ''
+
+        heartbeat_path = str(payload.get('path') or request.path).strip()
+        visible = bool(payload.get('visible', True))
+        try:
+            last_interaction_ts = int(payload.get('last_interaction_ts'))
+        except (TypeError, ValueError):
+            last_interaction_ts = None
+
+        user_label = request.user.get_full_name() or request.user.username or f'Usuário {request.user.pk}'
+        processo_label = str(token_data.get('processo_label') or '').strip() or f'Cadastro #{route_object_id}'
+        carteira_id = int(token_data.get('carteira_id') or 0)
+        carteira_label = str(token_data.get('carteira_label') or '').strip()
+        saved = record_online_presence(
+            user_id=int(request.user.pk),
+            user_label=user_label,
+            session_key=session_key,
+            tab_id=tab_id,
+            processo_id=route_object_id,
+            processo_label=processo_label,
+            carteira_id=carteira_id,
+            carteira_label=carteira_label,
+            current_path=heartbeat_path,
+            is_visible=visible,
+            last_interaction_ts=last_interaction_ts,
+        )
+        return JsonResponse({'enabled': True, 'saved': bool(saved)})
 
     def checagem_sistemas_view(self, request, object_id):
         processo = get_object_or_404(ProcessoJudicial, pk=object_id)
