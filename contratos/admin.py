@@ -3516,6 +3516,9 @@ class ProcessoJudicialChangeList(ChangeList):
         'kpi_uf',
         'peticao_tipo',
         'peticao_carteira_id',
+        'priority_kpi_tag_id',
+        'priority_kpi_status',
+        'priority_kpi_uf',
     )
 
     def get_filters_params(self, params=None):
@@ -3752,6 +3755,38 @@ class CarteiraAdmin(admin.ModelAdmin):
             if isinstance(active_cards, list) and active_cards:
                 return active_cards
             return []
+
+        def _is_filled_response_value(value):
+            if value is None:
+                return False
+            if isinstance(value, str):
+                cleaned = value.strip()
+                if not cleaned:
+                    return False
+                if cleaned in {"---", "-", "—"}:
+                    return False
+                return True
+            if isinstance(value, dict):
+                return any(_is_filled_response_value(item) for item in value.values())
+            if isinstance(value, (list, tuple, set)):
+                return any(_is_filled_response_value(item) for item in value)
+            return True
+
+        def _card_has_analysis_content(card):
+            if not isinstance(card, dict):
+                return False
+            if _is_filled_response_value(card.get("observacoes")):
+                return True
+            respostas_obj = card.get("tipo_de_acao_respostas")
+            if not isinstance(respostas_obj, dict):
+                return False
+            return any(_is_filled_response_value(value) for value in respostas_obj.values())
+
+        def _process_has_analysis_content(respostas):
+            cards = _get_cards_from_respostas(respostas)
+            if not cards:
+                return False
+            return any(_card_has_analysis_content(card) for card in cards if isinstance(card, dict))
 
         technical_response_keys = {
             "ativar_botao_monitoria",
@@ -4404,6 +4439,134 @@ class CarteiraAdmin(admin.ModelAdmin):
             for item in peticao_type_defs
         ]
 
+        # KPI adicional: cadastros importados com etiqueta de prioridade da planilha
+        priority_default_bg = "#f5c242"
+        priority_default_fg = "#3e2a00"
+        priority_tags = list(
+            Etiqueta.objects.filter(
+                cor_fundo__iexact=priority_default_bg,
+                cor_fonte__iexact=priority_default_fg,
+            )
+            .values("id", "nome")
+            .order_by("nome")
+        )
+        priority_tag_ids = [int(item["id"]) for item in priority_tags if item.get("id")]
+        priority_tag_ids_set = set(priority_tag_ids)
+        priority_lookup = {
+            int(item["id"]): _clean_text(item.get("nome")) or f"Prioridade {item['id']}"
+            for item in priority_tags
+            if item.get("id")
+        }
+
+        priority_rows_map = {}
+        priority_by_priority_map = {}
+        priority_by_uf_map = {}
+        priority_process_count = 0
+        priority_process_analisados = 0
+
+        if priority_tag_ids:
+            processos_com_prioridade = (
+                ProcessoJudicial.objects.filter(etiquetas__id__in=priority_tag_ids)
+                .distinct()
+                .select_related("analise_processo")
+                .prefetch_related(
+                    Prefetch(
+                        "etiquetas",
+                        queryset=Etiqueta.objects.filter(id__in=priority_tag_ids).only("id", "nome"),
+                    )
+                )
+                .only("id", "uf", "analise_processo__respostas")
+            )
+
+            for processo in processos_com_prioridade:
+                uf_code = _clean_text(processo.uf).upper() or "SEM_UF"
+                respostas = getattr(getattr(processo, "analise_processo", None), "respostas", None)
+                processo_analisado = _process_has_analysis_content(respostas)
+                priority_process_count += 1
+                if processo_analisado:
+                    priority_process_analisados += 1
+
+                uf_bucket = priority_by_uf_map.setdefault(
+                    uf_code,
+                    {"uf": uf_code, "total": 0, "analisados": 0, "pendentes": 0},
+                )
+                uf_bucket["total"] += 1
+                if processo_analisado:
+                    uf_bucket["analisados"] += 1
+                else:
+                    uf_bucket["pendentes"] += 1
+
+                process_priority_ids = set()
+                for tag in processo.etiquetas.all():
+                    tag_id = int(getattr(tag, "id", 0) or 0)
+                    if not tag_id or tag_id not in priority_tag_ids_set or tag_id in process_priority_ids:
+                        continue
+                    process_priority_ids.add(tag_id)
+                    tag_nome = priority_lookup.get(tag_id) or _clean_text(getattr(tag, "nome", "")) or f"Prioridade {tag_id}"
+
+                    row_key = (uf_code, tag_id)
+                    row_bucket = priority_rows_map.setdefault(
+                        row_key,
+                        {
+                            "uf": uf_code,
+                            "prioridade_id": tag_id,
+                            "prioridade_nome": tag_nome,
+                            "total": 0,
+                            "analisados": 0,
+                            "pendentes": 0,
+                        },
+                    )
+                    row_bucket["total"] += 1
+                    if processo_analisado:
+                        row_bucket["analisados"] += 1
+                    else:
+                        row_bucket["pendentes"] += 1
+
+                    priority_bucket = priority_by_priority_map.setdefault(
+                        tag_id,
+                        {
+                            "prioridade_id": tag_id,
+                            "prioridade_nome": tag_nome,
+                            "total": 0,
+                            "analisados": 0,
+                            "pendentes": 0,
+                        },
+                    )
+                    priority_bucket["total"] += 1
+                    if processo_analisado:
+                        priority_bucket["analisados"] += 1
+                    else:
+                        priority_bucket["pendentes"] += 1
+
+        serialized_priority_rows = sorted(
+            priority_rows_map.values(),
+            key=lambda item: ((item.get("prioridade_nome") or "").upper(), item.get("uf") or ""),
+        )
+        serialized_priority_by_priority = sorted(
+            priority_by_priority_map.values(),
+            key=lambda item: ((item.get("prioridade_nome") or "").upper(), int(item.get("prioridade_id") or 0)),
+        )
+        serialized_priority_by_uf = sorted(
+            priority_by_uf_map.values(),
+            key=lambda item: item.get("uf") or "",
+        )
+        serialized_priority_tags = [
+            {"id": tag_id, "nome": priority_lookup.get(tag_id) or f"Prioridade {tag_id}"}
+            for tag_id in priority_tag_ids
+        ]
+        priority_totals = {
+            "processos": int(priority_process_count),
+            "analisados": int(priority_process_analisados),
+            "pendentes": int(max(priority_process_count - priority_process_analisados, 0)),
+        }
+        priority_kpi_data = {
+            "tags": serialized_priority_tags,
+            "totals": priority_totals,
+            "rows": serialized_priority_rows,
+            "by_priority": serialized_priority_by_priority,
+            "by_uf": serialized_priority_by_uf,
+        }
+
         return {
             "ufs": uf_options,
             "buckets": serialized_buckets,
@@ -4411,6 +4574,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "peticao_types": peticao_type_defs,
             "peticao_by_carteira": serialized_peticao_by_carteira,
             "peticao_totals": serialized_peticao_totals,
+            "priority_kpi": priority_kpi_data,
         }
 
     def changelist_view(self, request, extra_context=None):
@@ -4433,7 +4597,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260218a',
+            'admin/js/carteira_charts.js?v=20260218b',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -4632,6 +4796,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'kpi_uf',
             'peticao_tipo',
             'peticao_carteira_id',
+            'priority_kpi_tag_id',
+            'priority_kpi_status',
+            'priority_kpi_uf',
             'ord_prescricao',
             'ord_ultima_edicao',
         ):
@@ -4765,6 +4932,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_intersection_pair_filter(qs, request)
         qs = self._apply_kpi_response_filter(qs, request)
         qs = self._apply_peticao_kpi_filter(qs, request)
+        qs = self._apply_priority_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
         order_filter = request.GET.get('ord_ultima_edicao')
         if order_filter not in {'recente', 'antigo'}:
@@ -4937,6 +5105,39 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return active_cards
         return []
 
+    def _kpi_has_filled_value(self, value):
+        if value is None:
+            return False
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return False
+            if cleaned in {'---', '-', '—'}:
+                return False
+            return True
+        if isinstance(value, dict):
+            return any(self._kpi_has_filled_value(item) for item in value.values())
+        if isinstance(value, (list, tuple, set)):
+            return any(self._kpi_has_filled_value(item) for item in value)
+        return True
+
+    def _kpi_card_has_analysis_content(self, card):
+        if not isinstance(card, dict):
+            return False
+        if self._kpi_has_filled_value(card.get('observacoes')):
+            return True
+        respostas_obj = card.get('tipo_de_acao_respostas')
+        if not isinstance(respostas_obj, dict):
+            return False
+        return any(self._kpi_has_filled_value(value) for value in respostas_obj.values())
+
+    def _kpi_process_has_analysis_content(self, processo):
+        respostas = getattr(getattr(processo, 'analise_processo', None), 'respostas', None)
+        cards = self._extract_kpi_cards(respostas)
+        if not cards:
+            return False
+        return any(self._kpi_card_has_analysis_content(card) for card in cards if isinstance(card, dict))
+
     def _parse_kpi_response_filter(self, request):
         carteira_id = self._safe_positive_int(request.GET.get('kpi_carteira_id'))
         tipo_id = self._safe_positive_int(request.GET.get('kpi_tipo_id'))
@@ -5019,6 +5220,50 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not kpi_filter:
             return queryset
         process_ids = self._build_kpi_response_process_ids(queryset, kpi_filter)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
+    def _parse_priority_kpi_filter(self, request):
+        tag_id = self._safe_positive_int(request.GET.get('priority_kpi_tag_id'))
+        if not tag_id:
+            return None
+        status = str(request.GET.get('priority_kpi_status') or 'all').strip().lower()
+        if status not in {'all', 'analisado', 'pendente'}:
+            status = 'all'
+        uf_code = str(request.GET.get('priority_kpi_uf') or '').strip().upper()
+        if uf_code in {'ALL', 'TODAS', 'TODAS AS UFS'}:
+            uf_code = ''
+        return {
+            'tag_id': tag_id,
+            'status': status,
+            'uf_code': uf_code,
+        }
+
+    def _build_priority_kpi_process_ids(self, queryset, priority_filter):
+        tag_id = priority_filter['tag_id']
+        status = priority_filter['status']
+        uf_code = priority_filter['uf_code']
+
+        candidate_qs = queryset.filter(etiquetas__id=tag_id).distinct().select_related('analise_processo')
+        if uf_code:
+            candidate_qs = candidate_qs.filter(uf__iexact=uf_code)
+
+        process_ids = set()
+        for processo in candidate_qs.iterator():
+            analisado = self._kpi_process_has_analysis_content(processo)
+            if status == 'analisado' and not analisado:
+                continue
+            if status == 'pendente' and analisado:
+                continue
+            process_ids.add(int(processo.pk))
+        return process_ids
+
+    def _apply_priority_kpi_filter(self, queryset, request):
+        priority_filter = self._parse_priority_kpi_filter(request)
+        if not priority_filter:
+            return queryset
+        process_ids = self._build_priority_kpi_process_ids(queryset, priority_filter)
         if not process_ids:
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
@@ -5148,6 +5393,27 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'title': 'KPI',
                 'value': f'Peças geradas · {tipo_label}',
                 'subtitle': carteira_label,
+            }
+
+        priority_filter = self._parse_priority_kpi_filter(request)
+        if priority_filter:
+            tag_id = priority_filter['tag_id']
+            tag_nome = (
+                Etiqueta.objects.filter(pk=tag_id)
+                .values_list('nome', flat=True)
+                .first()
+            ) or f'Prioridade {tag_id}'
+            status_label = {
+                'all': 'Todos',
+                'analisado': 'Analisados',
+                'pendente': 'Pendentes',
+            }.get(priority_filter['status'], 'Todos')
+            uf_label = priority_filter['uf_code'] or 'Todas as UFs'
+            return {
+                'kind': 'kpi',
+                'title': 'KPI',
+                'value': f'Importados com Prioridade · {tag_nome}',
+                'subtitle': f'{status_label} ({uf_label})',
             }
 
         carteira_id = self._get_filtered_carteira_id(request)

@@ -552,6 +552,15 @@ window.addEventListener('DOMContentLoaded', () => {
     const peticaoTypes = Array.isArray(kpiData.peticao_types) ? kpiData.peticao_types : [];
     const peticaoByCarteira = Array.isArray(kpiData.peticao_by_carteira) ? kpiData.peticao_by_carteira : [];
     const peticaoTotals = Array.isArray(kpiData.peticao_totals) ? kpiData.peticao_totals : [];
+    const priorityKpi = (kpiData && typeof kpiData === 'object' && kpiData.priority_kpi)
+        ? kpiData.priority_kpi
+        : {};
+    const priorityRows = Array.isArray(priorityKpi.rows) ? priorityKpi.rows : [];
+    const priorityByPriority = Array.isArray(priorityKpi.by_priority) ? priorityKpi.by_priority : [];
+    const priorityByUf = Array.isArray(priorityKpi.by_uf) ? priorityKpi.by_uf : [];
+    const priorityTotals = (priorityKpi && typeof priorityKpi === 'object' && priorityKpi.totals)
+        ? priorityKpi.totals
+        : {};
     if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
 
     const kpiSection = document.createElement('section');
@@ -655,6 +664,23 @@ window.addEventListener('DOMContentLoaded', () => {
         const carteiraParsed = Number(carteiraId || 0);
         if (carteiraParsed > 0) {
             params.set('peticao_carteira_id', String(carteiraParsed));
+        }
+        return `${kpiProcessChangelistUrl}?${params.toString()}`;
+    };
+
+    const buildPriorityKpiUrl = (tagId, status, ufCode) => {
+        if (!kpiProcessChangelistUrl) return '';
+        const parsedTagId = Number(tagId || 0);
+        if (!parsedTagId) return '';
+        const statusValue = String(status || 'all').trim().toLowerCase();
+        const params = new URLSearchParams();
+        params.set('priority_kpi_tag_id', String(parsedTagId));
+        if (statusValue && statusValue !== 'all') {
+            params.set('priority_kpi_status', statusValue);
+        }
+        const ufValue = String(ufCode || '').trim().toUpperCase();
+        if (ufValue && ufValue !== 'ALL') {
+            params.set('priority_kpi_uf', ufValue);
         }
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
@@ -1147,6 +1173,203 @@ window.addEventListener('DOMContentLoaded', () => {
                         const carteira = peticaoByCarteira[dataIndex];
                         if (!tipo || !carteira) return;
                         const url = buildPeticaoUrl(tipo.slug, carteira.carteira_id);
+                        if (url) {
+                            window.location.href = url;
+                        }
+                    },
+                },
+            });
+        }
+    }
+
+    if (priorityRows.length) {
+        const prioritySection = document.createElement('section');
+        prioritySection.style.marginTop = '16px';
+        prioritySection.style.padding = '14px';
+        prioritySection.style.border = '1px solid #d9e1ea';
+        prioritySection.style.borderRadius = '10px';
+        prioritySection.style.background = '#fff';
+        prioritySection.innerHTML = `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+                <h3 style="margin:0;">Importados com Prioridade</h3>
+                <div style="font-size:12px; color:#5d6f83;">Clique nos números ou barras para abrir a lista filtrada.</div>
+            </div>
+            <div class="carteira-kpi-priority-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px; margin-bottom:10px;">
+                <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                    <canvas id="kpiPriorityUfChart"></canvas>
+                </div>
+                <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                    <canvas id="kpiPriorityStatusChart"></canvas>
+                </div>
+            </div>
+            <div class="carteira-kpi-priority-table-wrap" style="overflow:auto;"></div>
+        `;
+        chartContainer.appendChild(prioritySection);
+
+        const summaryEl = prioritySection.querySelector('.carteira-kpi-priority-summary');
+        const tableWrap = prioritySection.querySelector('.carteira-kpi-priority-table-wrap');
+        if (summaryEl) {
+            summaryEl.innerHTML = `
+                <strong>Cadastros com prioridade:</strong> ${numberPt(priorityTotals.processos || 0)}
+                &nbsp;|&nbsp;
+                <strong>Analisados:</strong> ${numberPt(priorityTotals.analisados || 0)}
+                &nbsp;|&nbsp;
+                <strong>Pendentes:</strong> ${numberPt(priorityTotals.pendentes || 0)}
+            `;
+        }
+
+        const makeCountLink = (count, tagId, status, ufCode) => {
+            const numericCount = Number(count || 0);
+            if (numericCount <= 0) return `${numberPt(numericCount)}`;
+            const url = buildPriorityKpiUrl(tagId, status, ufCode);
+            if (!url) return `${numberPt(numericCount)}`;
+            return `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${numberPt(numericCount)}</a>`;
+        };
+
+        if (tableWrap) {
+            const rowsHtml = priorityRows.map((row) => `
+                <tr>
+                    <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.uf || 'SEM_UF')}</td>
+                    <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.prioridade_nome || `Prioridade ${row.prioridade_id || ''}`)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.total, row.prioridade_id, 'all', row.uf)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.analisados, row.prioridade_id, 'analisado', row.uf)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.pendentes, row.prioridade_id, 'pendente', row.uf)}</td>
+                </tr>
+            `).join('');
+            tableWrap.innerHTML = `
+                <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                    <thead>
+                        <tr style="background:#eef3f8;">
+                            <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">UF</th>
+                            <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Prioridade</th>
+                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total</th>
+                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Analisados</th>
+                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Pendentes</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            `;
+        }
+
+        const priorityUfCanvas = document.getElementById('kpiPriorityUfChart');
+        const priorityUfCtx = priorityUfCanvas ? priorityUfCanvas.getContext('2d') : null;
+        if (priorityUfCtx && priorityByUf.length && priorityByPriority.length) {
+            const ufLabels = priorityByUf.map((item) => String(item.uf || 'SEM_UF'));
+            const datasets = priorityByPriority.map((priorityItem, idx) => {
+                const tagId = Number(priorityItem.prioridade_id || 0);
+                return {
+                    label: String(priorityItem.prioridade_nome || `Prioridade ${tagId || idx + 1}`),
+                    data: ufLabels.map((ufCode) => {
+                        const match = priorityRows.find((row) =>
+                            String(row.uf || '') === ufCode
+                            && Number(row.prioridade_id || 0) === tagId
+                        );
+                        return Number(match?.total || 0);
+                    }),
+                    backgroundColor: paletteColor(idx, 0.68),
+                    borderColor: paletteColor(idx, 0.96),
+                    borderWidth: 1,
+                };
+            });
+
+            new Chart(priorityUfCtx, {
+                type: 'bar',
+                data: {
+                    labels: ufLabels,
+                    datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { boxWidth: 12, font: { size: 10 } },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { stacked: true, ticks: { font: { size: 10 } }, grid: { display: false } },
+                        y: { stacked: true, beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                    },
+                    onClick(event, elements) {
+                        if (!elements || !elements.length) return;
+                        const first = elements[0];
+                        const datasetIndex = Number(first.datasetIndex);
+                        const dataIndex = Number(first.index);
+                        const priorityItem = priorityByPriority[datasetIndex];
+                        const ufCode = ufLabels[dataIndex];
+                        const tagId = Number(priorityItem?.prioridade_id || 0);
+                        const url = buildPriorityKpiUrl(tagId, 'all', ufCode);
+                        if (url) {
+                            window.location.href = url;
+                        }
+                    },
+                },
+            });
+        }
+
+        const priorityStatusCanvas = document.getElementById('kpiPriorityStatusChart');
+        const priorityStatusCtx = priorityStatusCanvas ? priorityStatusCanvas.getContext('2d') : null;
+        if (priorityStatusCtx && priorityByPriority.length) {
+            const labels = priorityByPriority.map((item) => String(item.prioridade_nome || `Prioridade ${item.prioridade_id || ''}`));
+            const analyzedData = priorityByPriority.map((item) => Number(item.analisados || 0));
+            const pendingData = priorityByPriority.map((item) => Number(item.pendentes || 0));
+
+            new Chart(priorityStatusCtx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Analisados',
+                            data: analyzedData,
+                            backgroundColor: 'rgba(61, 109, 138, 0.72)',
+                            borderColor: 'rgba(61, 109, 138, 0.96)',
+                            borderWidth: 1,
+                        },
+                        {
+                            label: 'Pendentes',
+                            data: pendingData,
+                            backgroundColor: 'rgba(212, 106, 74, 0.72)',
+                            borderColor: 'rgba(212, 106, 74, 0.96)',
+                            borderWidth: 1,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { boxWidth: 12, font: { size: 10 } },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                    },
+                    onClick(event, elements) {
+                        if (!elements || !elements.length) return;
+                        const first = elements[0];
+                        const datasetIndex = Number(first.datasetIndex);
+                        const dataIndex = Number(first.index);
+                        const priorityItem = priorityByPriority[dataIndex];
+                        const tagId = Number(priorityItem?.prioridade_id || 0);
+                        const status = datasetIndex === 0 ? 'analisado' : 'pendente';
+                        const url = buildPriorityKpiUrl(tagId, status, '');
                         if (url) {
                             window.location.href = url;
                         }
