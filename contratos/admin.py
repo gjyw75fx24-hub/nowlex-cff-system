@@ -3916,16 +3916,47 @@ class CarteiraAdmin(admin.ModelAdmin):
         if tipo_passivas_default is None:
             tipo_passivas_default = _build_tipo_fallback_meta("Passivas", "passivas")
 
-        questao_lookup = {
-            questao["chave"]: {
-                "texto_pergunta": questao["texto_pergunta"],
-                "tipo_campo": questao["tipo_campo"],
-                "tipo_analise_id": _safe_int(questao.get("tipo_analise_id")),
-            }
-            for questao in QuestaoAnalise.objects.exclude(chave__isnull=True)
+        questoes_rows = list(
+            QuestaoAnalise.objects.exclude(chave__isnull=True)
             .exclude(chave__exact="")
-            .values("chave", "texto_pergunta", "tipo_campo", "tipo_analise_id")
-        }
+            .values("id", "chave", "texto_pergunta", "tipo_campo", "tipo_analise_id")
+        )
+        opcoes_by_chave = {}
+        opcoes_seen_by_chave = {}
+        for opcao in (
+            OpcaoResposta.objects.filter(questao_origem__chave__isnull=False, ativo=True)
+            .exclude(questao_origem__chave__exact="")
+            .exclude(texto_resposta__isnull=True)
+            .exclude(texto_resposta__exact="")
+            .values("questao_origem__chave", "texto_resposta")
+            .order_by("questao_origem_id", "id")
+        ):
+            chave = _clean_text(opcao.get("questao_origem__chave"))
+            texto_resposta = _clean_text(opcao.get("texto_resposta"))
+            if not chave or not texto_resposta:
+                continue
+            texto_norm = _normalize_answer(texto_resposta)
+            if not texto_norm:
+                continue
+            if chave not in opcoes_by_chave:
+                opcoes_by_chave[chave] = []
+                opcoes_seen_by_chave[chave] = set()
+            if texto_norm in opcoes_seen_by_chave[chave]:
+                continue
+            opcoes_seen_by_chave[chave].add(texto_norm)
+            opcoes_by_chave[chave].append(texto_resposta)
+
+        questao_lookup = {}
+        for questao in questoes_rows:
+            chave = _clean_text(questao.get("chave"))
+            if not chave:
+                continue
+            questao_lookup[chave] = {
+                "texto_pergunta": questao.get("texto_pergunta"),
+                "tipo_campo": questao.get("tipo_campo"),
+                "tipo_analise_id": _safe_int(questao.get("tipo_analise_id")),
+                "opcoes": opcoes_by_chave.get(chave, []),
+            }
 
         processos = (
             ProcessoJudicial.objects.filter(analise_processo__isnull=False)
@@ -3987,6 +4018,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                     "process_ids": set(),
                     "cpfs": set(),
                     "cards": 0,
+                    "cards_by_uf": {},
                     "kpis": {
                         "propor_monitoria_sim": 0,
                         "propor_monitoria_nao": 0,
@@ -4006,6 +4038,8 @@ class CarteiraAdmin(admin.ModelAdmin):
             combo["cards"] += 1
             combo["process_ids"].add(entry["processo_id"])
             combo["cpfs"].update(entry["cpfs"])
+            uf_code = _clean_text(entry.get("uf")).upper() or "SEM_UF"
+            combo["cards_by_uf"][uf_code] = combo["cards_by_uf"].get(uf_code, 0) + 1
 
             respostas_obj = entry["respostas_obj"]
             propor_monitoria = respostas_obj.get("propor_monitoria")
@@ -4054,24 +4088,31 @@ class CarteiraAdmin(admin.ModelAdmin):
                 question_meta = questao_lookup.get(chave, {})
                 question_item = combo["questions"].get(chave)
                 if question_item is None:
+                    expected_options = list(question_meta.get("opcoes") or [])
                     question_item = {
                         "chave": chave,
                         "pergunta": question_meta.get("texto_pergunta") or chave,
                         "tipo_campo": question_meta.get("tipo_campo") or "",
                         "cards_com_resposta": 0,
+                        "cards_com_resposta_by_uf": {},
+                        "expected_options": expected_options,
                         "answers": {},
                     }
                     combo["questions"][chave] = question_item
                 question_item["cards_com_resposta"] += 1
-                answer_item = question_item["answers"].get(resposta_valor)
+                question_item["cards_com_resposta_by_uf"][uf_code] = (
+                    question_item["cards_com_resposta_by_uf"].get(uf_code, 0) + 1
+                )
+                answer_key = _normalize_answer(resposta_valor) or resposta_valor
+                answer_item = question_item["answers"].get(answer_key)
                 if answer_item is None:
                     answer_item = {
+                        "valor": resposta_valor,
                         "count": 0,
                         "by_uf": {},
                     }
-                    question_item["answers"][resposta_valor] = answer_item
+                    question_item["answers"][answer_key] = answer_item
                 answer_item["count"] += 1
-                uf_code = _clean_text(entry.get("uf")).upper() or "SEM_UF"
                 answer_item["by_uf"][uf_code] = answer_item["by_uf"].get(uf_code, 0) + 1
 
         for processo in processos:
@@ -4132,43 +4173,93 @@ class CarteiraAdmin(admin.ModelAdmin):
                 cards_total = combo["cards"]
                 questions = []
                 for question in combo["questions"].values():
-                    answers_sorted = sorted(
-                        question["answers"].items(),
-                        key=lambda item: (-int((item[1] or {}).get("count", 0)), item[0]),
-                    )
+                    question_cards = int(question["cards_com_resposta"])
+                    answer_map = question.get("answers", {}) or {}
+                    expected_options = list(question.get("expected_options") or [])
                     answers = []
-                    for answer, answer_data in answers_sorted:
-                        answer_count = int((answer_data or {}).get("count", 0))
-                        by_uf_map = (answer_data or {}).get("by_uf", {}) or {}
+
+                    def _build_answer_payload(label, answer_count, by_uf_map, *, is_sem_resposta=False):
+                        answer_count_int = int(answer_count or 0)
+                        by_uf_source = by_uf_map or {}
                         by_uf_sorted = sorted(
-                            by_uf_map.items(),
+                            by_uf_source.items(),
                             key=lambda item: (-int(item[1]), item[0]),
                         )
+                        pct_base_pergunta = round((answer_count_int * 100.0 / question_cards), 2) if question_cards else 0.0
+                        pct_total_analises = round((answer_count_int * 100.0 / cards_total), 2) if cards_total else 0.0
+                        return {
+                            "valor": label,
+                            "count": answer_count_int,
+                            "pct": pct_base_pergunta,
+                            "pct_base_pergunta": pct_base_pergunta,
+                            "pct_total_analises": pct_total_analises,
+                            "is_sem_resposta": bool(is_sem_resposta),
+                            "by_uf": [
+                                {
+                                    "uf": uf_code,
+                                    "count": int(uf_count),
+                                    "pct": round((int(uf_count) * 100.0 / answer_count_int), 2)
+                                    if answer_count_int
+                                    else 0.0,
+                                }
+                                for uf_code, uf_count in by_uf_sorted
+                            ],
+                        }
+
+                    consumed_answer_keys = set()
+                    for option_text in expected_options:
+                        option_label = _clean_text(option_text)
+                        if not option_label:
+                            continue
+                        option_key = _normalize_answer(option_label)
+                        option_data = answer_map.get(option_key)
+                        option_count = int((option_data or {}).get("count", 0))
+                        option_by_uf = (option_data or {}).get("by_uf", {}) if option_data else {}
                         answers.append(
-                            {
-                                "valor": answer,
-                                "count": answer_count,
-                                "pct": round((answer_count * 100.0 / question["cards_com_resposta"]), 2)
-                                if question["cards_com_resposta"]
-                                else 0.0,
-                                "by_uf": [
-                                    {
-                                        "uf": uf_code,
-                                        "count": int(uf_count),
-                                        "pct": round((int(uf_count) * 100.0 / answer_count), 2)
-                                        if answer_count
-                                        else 0.0,
-                                    }
-                                    for uf_code, uf_count in by_uf_sorted
-                                ],
-                            }
+                            _build_answer_payload(option_label, option_count, option_by_uf)
                         )
+                        if option_data is not None:
+                            consumed_answer_keys.add(option_key)
+
+                    fallback_answers = []
+                    for answer_key, answer_data in answer_map.items():
+                        if answer_key in consumed_answer_keys:
+                            continue
+                        answer_count = int((answer_data or {}).get("count", 0))
+                        if answer_count <= 0:
+                            continue
+                        answer_label = _clean_text((answer_data or {}).get("valor")) or _clean_text(answer_key)
+                        fallback_answers.append((answer_label, answer_count, (answer_data or {}).get("by_uf", {}) or {}))
+
+                    fallback_answers.sort(key=lambda item: (-int(item[1]), item[0]))
+                    for answer_label, answer_count, answer_by_uf in fallback_answers:
+                        answers.append(_build_answer_payload(answer_label, answer_count, answer_by_uf))
+
+                    sem_resposta_count = max(cards_total - question_cards, 0)
+                    if sem_resposta_count > 0:
+                        sem_resposta_by_uf = {}
+                        cards_by_uf = combo.get("cards_by_uf", {}) or {}
+                        cards_com_resposta_by_uf = question.get("cards_com_resposta_by_uf", {}) or {}
+                        for uf_code, total_cards_uf in cards_by_uf.items():
+                            responded_count_uf = int(cards_com_resposta_by_uf.get(uf_code, 0))
+                            unanswered_count_uf = max(int(total_cards_uf) - responded_count_uf, 0)
+                            if unanswered_count_uf > 0:
+                                sem_resposta_by_uf[uf_code] = unanswered_count_uf
+                        answers.append(
+                            _build_answer_payload(
+                                "Sem resposta",
+                                sem_resposta_count,
+                                sem_resposta_by_uf,
+                                is_sem_resposta=True,
+                            )
+                        )
+
                     questions.append(
                         {
                             "chave": question["chave"],
                             "pergunta": question["pergunta"],
                             "tipo_campo": question["tipo_campo"],
-                            "cards": question["cards_com_resposta"],
+                            "cards": question_cards,
                             "answers": answers,
                         }
                     )
@@ -4342,7 +4433,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260217c',
+            'admin/js/carteira_charts.js?v=20260218a',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):

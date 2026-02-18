@@ -745,7 +745,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 data: {
                     labels,
                     datasets: [{
-                        label: 'Cards',
+                        label: 'Análises',
                         data: values,
                         backgroundColor: labels.map((_, idx) => paletteColor(idx, 0.66)),
                         borderColor: labels.map((_, idx) => paletteColor(idx, 0.92)),
@@ -871,13 +871,13 @@ window.addEventListener('DOMContentLoaded', () => {
         const combos = Array.isArray(bucket.combos) ? bucket.combos : [];
 
         summaryWrap.innerHTML = `
-            <strong>Cards:</strong> ${numberPt(bucket.cards_total)}
+            <strong>Análises registradas:</strong> ${numberPt(bucket.cards_total)}
             &nbsp;|&nbsp;
             <strong>Processos:</strong> ${numberPt(bucket.processos_total)}
             &nbsp;|&nbsp;
             <strong>CPFs:</strong> ${numberPt(bucket.cpfs_total)}
             &nbsp;|&nbsp;
-            <strong>Combinações carteira/tipo:</strong> ${numberPt(combos.length)}
+            <strong>Recortes carteira/tipo:</strong> ${numberPt(combos.length)}
         `;
 
         if (!combos.length) {
@@ -911,14 +911,14 @@ window.addEventListener('DOMContentLoaded', () => {
             <div style="font-size:11px; color:#5b6f84; margin-bottom:6px;">
                 <strong>Leitura:</strong>
                 "Nova monitória" e "Repropor monitória" = <strong>SIM/base da própria pergunta</strong>.
-                "Recomendou monitória" = <strong>cards com SIM em propor/repropor ÷ total de cards do combo</strong>.
+                "Recomendou monitória" = <strong>análises com SIM em propor/repropor ÷ total de análises registradas no recorte</strong>.
             </div>
             <table style="width:100%; border-collapse:collapse; font-size:12px;">
                 <thead>
                     <tr style="background:#eef3f8;">
                         <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira</th>
                         <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Tipo de análise</th>
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Cards</th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Análises</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Processos</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">CPFs</th>
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Nova monitória (SIM/base)</th>
@@ -951,15 +951,29 @@ window.addEventListener('DOMContentLoaded', () => {
                 const horizontalId = `kpi-answers-h-${comboIndex}-${questionIndex}-${ufCode}`;
                 chartJobs.push({ question, verticalId, horizontalId });
                 const answerRows = answers.map((answer) => {
-                    const url = buildKpiResponseUrl(combo, question, answer, ufCode);
-                    const answerLabel = `${escapeHtml(answer.valor)} (${numberPt(answer.count)} de ${numberPt(questionCards)})`;
-                    const answerLink = url
+                    const isSemResposta = Boolean(answer?.is_sem_resposta);
+                    const answerCount = Number(answer?.count || 0);
+                    const baseDenominator = isSemResposta ? comboCards : questionCards;
+                    const pctBasePergunta = typeof answer?.pct_base_pergunta === 'number'
+                        ? answer.pct_base_pergunta
+                        : Number(answer?.pct || 0);
+                    const pctTotalAnalises = typeof answer?.pct_total_analises === 'number'
+                        ? answer.pct_total_analises
+                        : (comboCards > 0 ? Number(((answerCount * 100) / comboCards).toFixed(2)) : 0);
+                    const url = (!isSemResposta && answerCount > 0)
+                        ? buildKpiResponseUrl(combo, question, answer, ufCode)
+                        : '';
+                    const answerLabel = `${escapeHtml(answer.valor)} (${numberPt(answerCount)} de ${numberPt(baseDenominator)})`;
+                    const answerLink = url && answerCount > 0
                         ? `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${answerLabel}</a>`
                         : `<span>${answerLabel}</span>`;
+                    const answerMetrics = isSemResposta
+                        ? `<span style="color:#6a7a8b;">· ${pctPt(pctTotalAnalises)} do total analisado</span>`
+                        : `<span style="color:#6a7a8b;">· ${pctPt(pctBasePergunta)} da base da pergunta · ${pctPt(pctTotalAnalises)} do total analisado</span>`;
                     return `
                         <li style="margin-bottom:2px;">
                             ${answerLink}
-                            <span style="color:#6a7a8b;">· ${pctPt(answer.pct)} da base da pergunta</span>
+                            ${answerMetrics}
                         </li>
                     `;
                 }).join('');
@@ -970,7 +984,7 @@ window.addEventListener('DOMContentLoaded', () => {
                                 ${escapeHtml(question.pergunta || question.chave || '')}
                             </div>
                             <div style="font-size:11px; color:#5b6f84; margin-bottom:4px;">
-                                Base desta pergunta: ${numberPt(questionCards)} de ${numberPt(comboCards)} cards do combo (${pctPt(coveragePct)})
+                                Denominador: ${numberPt(questionCards)} de ${numberPt(comboCards)} análises registradas no recorte (${pctPt(coveragePct)})
                             </div>
                             <ul style="margin:0; padding-left:16px; font-size:12px; color:#46576b;">
                                 ${answerRows}
@@ -1005,7 +1019,7 @@ window.addEventListener('DOMContentLoaded', () => {
         questionsWrap.innerHTML = questionCards
             ? `
                 <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:#2f3d4a;">
-                    Respostas contabilizáveis (amostra por carteira/tipo)
+                    Questionário da Análise (amostra por carteira/tipo)
                 </div>
                 <div style="display:grid; gap:8px;">
                     ${questionCards}
