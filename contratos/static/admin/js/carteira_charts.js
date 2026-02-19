@@ -1828,18 +1828,19 @@ window.addEventListener('DOMContentLoaded', () => {
                 const dd = String(dateObj.getDate()).padStart(2, '0');
                 return `${yyyy}-${mm}-${dd}`;
             };
-            const referenceDate = (() => {
+            const latestDataDate = (() => {
                 const lastDate = productivityDaily.length
                     ? parseDateKey(productivityDaily[productivityDaily.length - 1].date)
                     : null;
                 return lastDate || new Date();
             })();
+            const todayDate = new Date();
+            const today = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate());
 
             const getPeriodBounds = (periodValue) => {
                 const periodKey = String(periodValue || '').trim().toLowerCase();
-                const today = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
                 if (periodKey === 'all') {
-                    return { start: null, end: referenceDate };
+                    return { start: null, end: latestDataDate };
                 }
                 if (periodKey === 'yesterday') {
                     const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1848,7 +1849,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
                 const days = Number(periodKey || 0);
                 if (!Number.isFinite(days) || days <= 0) {
-                    return { start: null, end: referenceDate };
+                    return { start: null, end: latestDataDate };
                 }
                 const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                 const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
@@ -1864,7 +1865,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 let start = fromValue ? parseDateKey(fromValue) : null;
                 let end = toValue ? parseDateKey(toValue) : null;
                 if (start && !end) {
-                    end = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+                    end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                 }
                 if (start && end && start > end) {
                     const swap = start;
@@ -2116,7 +2117,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 const dateLabels = [];
                 if (bounds.start) {
                     const cursor = new Date(bounds.start.getFullYear(), bounds.start.getMonth(), bounds.start.getDate());
-                    const end = bounds.end || referenceDate;
+                    const end = bounds.end || today;
                     while (cursor <= end) {
                         dateLabels.push(toDateKey(cursor));
                         cursor.setDate(cursor.getDate() + 1);
