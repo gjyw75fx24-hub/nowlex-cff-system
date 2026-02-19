@@ -2001,25 +2001,75 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             return deferred.promise();
         }
 
-        function restoreTreeFromCard(cardIndex) {
+        function restoreTreeFromCard(cardIndex, options = {}) {
             analysisHasStarted = true;
+            const sourceRaw = String(options && options.source ? options.source : 'saved').trim().toLowerCase();
+            const source = sourceRaw === 'active' ? 'active' : 'saved';
             const parsedIndex = Number(cardIndex);
             if (!Number.isFinite(parsedIndex)) {
-                console.warn('restoreTreeFromCard: índice inválido:', cardIndex);
+                console.warn('restoreTreeFromCard: índice inválido:', cardIndex, 'source=', source);
                 return;
             }
             cardIndex = parsedIndex;
 
-            console.log('=== INICIANDO EDIÇÃO DO CARD ===', cardIndex);
-
-            userResponses._editing_card_index = cardIndex;
             const savedCards = getSavedProcessCards();
-            const cardData = savedCards[cardIndex];
+            const activeCards = Array.isArray(userResponses.processos_vinculados)
+                ? userResponses.processos_vinculados
+                : [];
+            let resolvedEditIndex = null;
+            let cardData = null;
+
+            if (source === 'active') {
+                cardData = activeCards[cardIndex] || null;
+                if (cardData) {
+                    const normalizedActive = normalizeProcessCardForSummary(cardData) || cardData;
+                    const activeIdentity = getSummaryCardIdentity(normalizedActive, cardIndex, 'active');
+                    const activeCnjDigits = String((normalizedActive && normalizedActive.cnj) || '').replace(/\D/g, '');
+                    const matchedSavedIndex = savedCards.findIndex((candidate, idx) => {
+                        const normalizedCandidate = normalizeProcessCardForSummary(candidate) || candidate;
+                        const savedIdentity = getSummaryCardIdentity(normalizedCandidate, idx, 'saved');
+                        if (activeIdentity && savedIdentity === activeIdentity) {
+                            return true;
+                        }
+                        if (activeCnjDigits) {
+                            const savedCnjDigits = String((normalizedCandidate && normalizedCandidate.cnj) || '').replace(/\D/g, '');
+                            return Boolean(savedCnjDigits && savedCnjDigits === activeCnjDigits);
+                        }
+                        return false;
+                    });
+                    if (matchedSavedIndex > -1) {
+                        resolvedEditIndex = matchedSavedIndex;
+                        cardData = savedCards[matchedSavedIndex];
+                    }
+                }
+            } else {
+                cardData = savedCards[cardIndex] || null;
+                if (cardData) {
+                    resolvedEditIndex = cardIndex;
+                }
+            }
+
+            if (resolvedEditIndex !== null) {
+                userResponses._editing_card_index = resolvedEditIndex;
+            } else {
+                delete userResponses._editing_card_index;
+            }
 
             if (!cardData) {
-                console.warn('restoreTreeFromCard: card não encontrado no índice:', cardIndex);
+                console.warn('restoreTreeFromCard: card não encontrado.', {
+                    source,
+                    cardIndex,
+                    savedCount: savedCards.length,
+                    activeCount: activeCards.length,
+                });
                 return;
             }
+
+            console.log('=== INICIANDO EDIÇÃO DO CARD ===', {
+                requestedIndex: cardIndex,
+                source,
+                resolvedEditIndex,
+            });
 
             const startPopulationCascade = () => {
                 setTimeout(() => {
@@ -2215,7 +2265,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                         console.log('=== EDIÇÃO CARREGADA COM SUCESSO ===');
 
-                        showEditModeIndicator(cardData.cnj, cardIndex);
+                        showEditModeIndicator(cardData.cnj, resolvedEditIndex !== null ? resolvedEditIndex : cardIndex);
                     }
 
                     populateFieldsCascade();
@@ -4328,10 +4378,17 @@ function formatCnjDigits(raw) {
                     $headerVinculado.append($editBtn);
                     const cardKey = `card-${cardIndex}`;
                     const savedIndexAttr = Number.isFinite(savedCardIndex) ? String(savedCardIndex) : '';
+                    const activeCardIndex = Number.isFinite(processo.__activeIndex)
+                        ? processo.__activeIndex
+                        : null;
+                    const activeIndexAttr = Number.isFinite(activeCardIndex) ? String(activeCardIndex) : '';
+                    const sourceAttr = String(processo.__source || '').trim().toLowerCase();
                     $deleteBtn.attr('data-card-index', savedIndexAttr);
                     $editBtn.attr('data-saved-index', savedIndexAttr);
 	                    $editBtn.attr('data-cnj', snapshot.cnj || '');
 	                    $editBtn.attr('data-visual-index', String(cardIndex));
+                    $editBtn.attr('data-active-index', activeIndexAttr);
+                    $editBtn.attr('data-card-source', sourceAttr || 'saved');
 	                    $copyBtn.on('click', function (event) {
 	                        event.stopPropagation();
 	                        const contratosLine = mentionContractNumbers.length
@@ -4430,30 +4487,47 @@ function formatCnjDigits(raw) {
                     $editBtn.on('click', function () {
                         suppressGeneralSummaryUntilFirstAnswer = false;
                         activateInnerTab('analise');
-
-                        const savedIndexRaw = $(this).attr('data-saved-index');
-                        const savedIndex = savedIndexRaw !== null && savedIndexRaw !== '' ? Number(savedIndexRaw) : NaN;
-                        if (Number.isFinite(savedIndex)) {
-                            restoreTreeFromCard(savedIndex);
+                        const restoreAndScroll = (indexValue, options = {}) => {
+                            restoreTreeFromCard(indexValue, options);
                             setTimeout(() => {
                                 if ($dynamicQuestionsContainer.length) {
                                     $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
                                 }
                             }, 300);
+                        };
+                        const normalizeCnjDigits = (value) => String(value || '').replace(/\D/g, '');
+
+                        const savedIndexRaw = $(this).attr('data-saved-index');
+                        const savedIndex = savedIndexRaw !== null && savedIndexRaw !== '' ? Number(savedIndexRaw) : NaN;
+                        if (Number.isFinite(savedIndex)) {
+                            restoreAndScroll(savedIndex, { source: 'saved' });
+                            return;
+                        }
+
+                        const sourceRaw = String($(this).attr('data-card-source') || '').trim().toLowerCase();
+                        const source = sourceRaw === 'active' ? 'active' : 'saved';
+                        const activeIndexRaw = $(this).attr('data-active-index');
+                        const activeIndex = activeIndexRaw !== null && activeIndexRaw !== '' ? Number(activeIndexRaw) : NaN;
+                        if (source === 'active' && Number.isFinite(activeIndex)) {
+                            restoreAndScroll(activeIndex, { source: 'active' });
                             return;
                         }
 
                         const cnj = String($(this).attr('data-cnj') || '').trim();
-                        if (cnj) {
+                        const cnjDigits = normalizeCnjDigits(cnj);
+                        if (cnjDigits) {
                             const savedCards = getSavedProcessCards();
-                            const foundIndex = savedCards.findIndex(card => card && String(card.cnj || '').trim() === cnj);
+                            const foundIndex = savedCards.findIndex(card => normalizeCnjDigits(card && card.cnj) === cnjDigits);
                             if (foundIndex > -1) {
-                                restoreTreeFromCard(foundIndex);
-                                setTimeout(() => {
-                                    if ($dynamicQuestionsContainer.length) {
-                                        $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    }
-                                }, 300);
+                                restoreAndScroll(foundIndex, { source: 'saved' });
+                                return;
+                            }
+                            const activeCards = Array.isArray(userResponses.processos_vinculados)
+                                ? userResponses.processos_vinculados
+                                : [];
+                            const activeFoundIndex = activeCards.findIndex(card => normalizeCnjDigits(card && card.cnj) === cnjDigits);
+                            if (activeFoundIndex > -1) {
+                                restoreAndScroll(activeFoundIndex, { source: 'active' });
                                 return;
                             }
                         }
@@ -4461,16 +4535,17 @@ function formatCnjDigits(raw) {
                         const visualIndexRaw = $(this).attr('data-visual-index');
                         const visualIndex = visualIndexRaw ? Number(visualIndexRaw) : NaN;
                         if (Number.isFinite(visualIndex)) {
-                            restoreTreeFromCard(visualIndex);
-                            setTimeout(() => {
-                                if ($dynamicQuestionsContainer.length) {
-                                    $dynamicQuestionsContainer.get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                            }, 300);
+                            restoreAndScroll(visualIndex, { source });
                             return;
                         }
 
-                        console.warn('Editar: não foi possível resolver o card para edição.', { savedIndexRaw, cnj, visualIndexRaw });
+                        console.warn('Editar: não foi possível resolver o card para edição.', {
+                            savedIndexRaw,
+                            activeIndexRaw,
+                            sourceRaw,
+                            cnj,
+                            visualIndexRaw,
+                        });
                     });
                     const actionResponses = processo && processo.tipo_de_acao_respostas;
                     let contractCandidates = parseContractsField(
