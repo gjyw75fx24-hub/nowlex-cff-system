@@ -1740,6 +1740,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Período:
                     <select class="kpi-productivity-period" style="padding:4px 8px;">
+                        <option value="1">Hoje</option>
+                        <option value="yesterday">Ontem</option>
                         <option value="7">Últimos 7 dias</option>
                         <option value="15">Últimos 15 dias</option>
                         <option value="30" selected>Últimos 30 dias</option>
@@ -1834,14 +1836,21 @@ window.addEventListener('DOMContentLoaded', () => {
             })();
 
             const getPeriodBounds = (periodValue) => {
-                if (String(periodValue) === 'all') {
+                const periodKey = String(periodValue || '').trim().toLowerCase();
+                const today = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+                if (periodKey === 'all') {
                     return { start: null, end: referenceDate };
                 }
-                const days = Number(periodValue || 0);
+                if (periodKey === 'yesterday') {
+                    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    return { start: yesterday, end: yesterday };
+                }
+                const days = Number(periodKey || 0);
                 if (!Number.isFinite(days) || days <= 0) {
                     return { start: null, end: referenceDate };
                 }
-                const end = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+                const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                 const start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
                 start.setDate(start.getDate() - days + 1);
                 return { start, end };
@@ -1915,6 +1924,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
             const renderProductivity = () => {
                 const periodValue = String(periodSelect.value || '30');
+                const periodValueKey = periodValue.trim().toLowerCase();
                 const selectedUserKey = String(userSelect.value || 'ALL');
                 const metricValue = String(metricSelect.value || 'total');
                 const bounds = getActiveBounds(periodValue);
@@ -1971,10 +1981,16 @@ window.addEventListener('DOMContentLoaded', () => {
                             : 'hoje';
                         return `Período customizado: ${startLabel} até ${endLabel} (com data)`;
                     }
-                    if (periodValue === 'all') {
+                    if (periodValueKey === 'all') {
                         return 'Todo o histórico com data';
                     }
-                    return `Últimos ${Number(periodValue)} dias (com data)`;
+                    if (periodValueKey === '1') {
+                        return 'Hoje (com data)';
+                    }
+                    if (periodValueKey === 'yesterday') {
+                        return 'Ontem (com data)';
+                    }
+                    return `Últimos ${Number(periodValueKey)} dias (com data)`;
                 };
                 const periodLabel = formatBoundsLabel();
 
