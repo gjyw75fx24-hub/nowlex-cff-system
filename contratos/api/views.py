@@ -287,7 +287,15 @@ class AgendaGeralAPIView(APIView):
                 item['parte_cpf'] = meta.get('cpf', '')
                 item['documento'] = meta.get('cpf', '')
 
-        supervision_entries = self._get_supervision_entries(show_completed, request, target_user=agenda_user)
+        # Supervisões (S):
+        # - por padrão, supervisor deve enxergar toda a fila de supervisão;
+        # - quando `user_id` é informado, filtra para o usuário selecionado.
+        supervision_target_user = target_user if target_user_id_raw else None
+        supervision_entries = self._get_supervision_entries(
+            show_completed,
+            request,
+            target_user=supervision_target_user,
+        )
         agenda_items = sorted(
             tarefas_data + prazos_data + supervision_entries,
             key=lambda x: x.get('date') or ''
@@ -485,8 +493,48 @@ class AgendaGeralAPIView(APIView):
             ProcessoJudicial.VIABILIDADE_INCONCLUSIVO: 'Inconclusivo',
         }
 
+        def _build_contract_lookup_keys(value):
+            raw = str(value or '').strip()
+            if not raw:
+                return set()
+            keys = {raw, re.sub(r'\s+', '', raw)}
+            digits = re.sub(r'\D', '', raw)
+            if digits:
+                keys.add(digits)
+            return {item for item in keys if item}
+
+        def _extract_contract_refs(raw_contract):
+            ids = set()
+            numbers = set()
+
+            if isinstance(raw_contract, dict):
+                id_candidates = [raw_contract.get('id'), raw_contract.get('pk')]
+                number_candidates = [
+                    raw_contract.get('numero_contrato'),
+                    raw_contract.get('numero'),
+                    raw_contract.get('contrato'),
+                    raw_contract.get('label'),
+                ]
+            else:
+                id_candidates = [raw_contract]
+                number_candidates = [raw_contract]
+
+            for candidate in id_candidates:
+                try:
+                    parsed = int(str(candidate or '').strip())
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0:
+                    ids.add(parsed)
+
+            for candidate in number_candidates:
+                numbers.update(_build_contract_lookup_keys(candidate))
+
+            return ids, numbers
+
         cards_data = []
         contract_ids = set()
+        contract_numbers = set()
         seen_keys = set()
 
         for analise in AnaliseProcesso.objects.select_related('processo_judicial', 'updated_by'):
@@ -513,12 +561,12 @@ class AgendaGeralAPIView(APIView):
                         if isinstance(tipo_respostas, dict):
                             contract_values = tipo_respostas.get('contratos_para_monitoria') or []
                     parsed_ids = set()
+                    parsed_numbers = set()
                     for raw_contract in contract_values or []:
-                        try:
-                            parsed_ids.add(int(raw_contract))
-                        except (TypeError, ValueError):
-                            continue
-                    if not parsed_ids:
+                        extracted_ids, extracted_numbers = _extract_contract_refs(raw_contract)
+                        parsed_ids.update(extracted_ids)
+                        parsed_numbers.update(extracted_numbers)
+                    if not parsed_ids and not parsed_numbers:
                         continue
                     card_key_id = f"{analise.pk}-{source}-{idx}"
                     key = (
@@ -532,10 +580,12 @@ class AgendaGeralAPIView(APIView):
                         continue
                     seen_keys.add(key)
                     contract_ids.update(parsed_ids)
+                    contract_numbers.update(parsed_numbers)
                     cards_data.append({
                         'analise': analise,
                         'card': card,
                         'contract_ids': parsed_ids,
+                        'contract_numbers': parsed_numbers,
                         'source': source,
                         'index': idx,
                         'status': status,
@@ -545,17 +595,54 @@ class AgendaGeralAPIView(APIView):
         if not cards_data:
             return []
 
-        contracts = Contrato.objects.filter(id__in=contract_ids).only('id', 'numero_contrato', 'valor_causa', 'data_prescricao')
+        contract_filter = Q()
+        has_contract_filter = False
+        if contract_ids:
+            contract_filter |= Q(id__in=contract_ids)
+            has_contract_filter = True
+        if contract_numbers:
+            contract_filter |= Q(numero_contrato__in=contract_numbers)
+            has_contract_filter = True
+        if not has_contract_filter:
+            return []
+
+        contracts = Contrato.objects.filter(contract_filter).only(
+            'id',
+            'numero_contrato',
+            'valor_causa',
+            'data_prescricao',
+        )
         contract_map = {contract.id: contract for contract in contracts}
+        contract_map_by_number = {}
+        for contract in contracts:
+            for lookup_key in _build_contract_lookup_keys(contract.numero_contrato):
+                contract_map_by_number.setdefault(lookup_key, contract)
         today = timezone.localdate()
 
         entries = []
         for card_info in cards_data:
-            valid_contracts = [
-                contract_map.get(cid)
-                for cid in card_info['contract_ids']
-                if contract_map.get(cid)
-            ]
+            valid_contracts = []
+            seen_contracts = set()
+
+            def _append_contract(contract):
+                if not contract:
+                    return
+                if contract.pk in seen_contracts:
+                    return
+                seen_contracts.add(contract.pk)
+                valid_contracts.append(contract)
+
+            for cid in card_info.get('contract_ids', set()):
+                _append_contract(contract_map.get(cid))
+
+            for token in card_info.get('contract_numbers', set()):
+                matched = None
+                for lookup_key in _build_contract_lookup_keys(token):
+                    matched = contract_map_by_number.get(lookup_key)
+                    if matched:
+                        break
+                _append_contract(matched)
+
             if not valid_contracts:
                 continue
             contracts_with_prescricao = [c for c in valid_contracts if c.data_prescricao]
