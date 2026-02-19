@@ -4186,6 +4186,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                     "pending": {"tarefas": 0, "prazos": 0},
                     "sem_data": {"analises": 0, "tarefas": 0, "prazos": 0},
                     "daily": {},
+                    "carteiras": {},
                 }
                 productivity_users[normalized_key] = bucket
             else:
@@ -4193,10 +4194,30 @@ class CarteiraAdmin(admin.ModelAdmin):
                     bucket["user_label"] = normalized_label
             return bucket
 
-        def _register_productivity_event(metric_key, user_key, user_label, date_key=None):
+        def _register_productivity_carteira(user_bucket, carteira_id=None, carteira_nome=""):
+            if not user_bucket:
+                return
+            carteira_id_int = _safe_int(carteira_id)
+            if carteira_id_int and carteira_id_int in carteira_lookup:
+                label = _clean_text(carteira_lookup.get(carteira_id_int))
+            else:
+                label = _clean_text(carteira_nome)
+            if not label:
+                label = "Sem carteira"
+            user_bucket["carteiras"][label] = int(user_bucket["carteiras"].get(label, 0)) + 1
+
+        def _register_productivity_event(
+            metric_key,
+            user_key,
+            user_label,
+            date_key=None,
+            carteira_id=None,
+            carteira_nome="",
+        ):
             if metric_key not in ("analises", "tarefas", "prazos"):
                 return
             user_bucket = _ensure_productivity_user(user_key, user_label)
+            _register_productivity_carteira(user_bucket, carteira_id=carteira_id, carteira_nome=carteira_nome)
             user_bucket["totals"][metric_key] += 1
             productivity_totals[metric_key] += 1
 
@@ -4359,17 +4380,23 @@ class CarteiraAdmin(admin.ModelAdmin):
                 if not isinstance(respostas_obj, dict):
                     respostas_obj = {}
 
-                if _card_has_analysis_content(card):
+                card_has_content = _card_has_analysis_content(card)
+                card_author_key = ""
+                card_author_label = ""
+                card_date = ""
+                if card_has_content:
                     analysis_author = _clean_text(card.get("analysis_author"))
                     fallback_user = getattr(analise_obj, "updated_by", None)
-                    author_key, author_label = _resolve_actor_key_label(analysis_author, fallback_user=fallback_user)
+                    card_author_key, card_author_label = _resolve_actor_key_label(
+                        analysis_author,
+                        fallback_user=fallback_user,
+                    )
                     card_timestamp = (
                         _parse_datetime_value(card.get("saved_at"))
                         or _parse_datetime_value(card.get("updated_at"))
                         or _parse_datetime_value(getattr(analise_obj, "updated_at", None))
                     )
                     card_date = card_timestamp.date().isoformat() if card_timestamp else ""
-                    _register_productivity_event("analises", author_key, author_label, card_date)
 
                 tipo_meta = _resolve_tipo_meta(analysis_type, respostas_obj)
                 tipo_id = int(tipo_meta["id"]) if isinstance(tipo_meta, dict) and tipo_meta.get("id") else None
@@ -4387,6 +4414,15 @@ class CarteiraAdmin(admin.ModelAdmin):
                 if not carteira_id:
                     continue
                 carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
+                if card_has_content:
+                    _register_productivity_event(
+                        "analises",
+                        card_author_key,
+                        card_author_label,
+                        card_date,
+                        carteira_id=carteira_id,
+                        carteira_nome=carteira_nome,
+                    )
 
                 entry = {
                     "processo_id": processo.id,
@@ -4769,7 +4805,7 @@ class CarteiraAdmin(admin.ModelAdmin):
 
         tarefas_concluidas = (
             Tarefa.objects.filter(concluida=True)
-            .select_related("concluido_por")
+            .select_related("concluido_por", "processo__carteira")
             .only(
                 "id",
                 "concluido_em",
@@ -4777,17 +4813,30 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "concluido_por__username",
                 "concluido_por__first_name",
                 "concluido_por__last_name",
+                "processo_id",
+                "processo__carteira_id",
+                "processo__carteira__nome",
             )
         )
         for tarefa in tarefas_concluidas.iterator():
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "concluido_por", None))
             concluded_at = _parse_datetime_value(getattr(tarefa, "concluido_em", None))
             concluded_date = concluded_at.date().isoformat() if concluded_at else ""
-            _register_productivity_event("tarefas", actor_key, actor_label, concluded_date)
+            processo_obj = getattr(tarefa, "processo", None)
+            carteira_id = _safe_int(getattr(processo_obj, "carteira_id", None)) if processo_obj else None
+            carteira_nome = _clean_text(getattr(getattr(processo_obj, "carteira", None), "nome", "")) if processo_obj else ""
+            _register_productivity_event(
+                "tarefas",
+                actor_key,
+                actor_label,
+                concluded_date,
+                carteira_id=carteira_id,
+                carteira_nome=carteira_nome,
+            )
 
         prazos_concluidos = (
             Prazo.objects.filter(concluido=True)
-            .select_related("concluido_por")
+            .select_related("concluido_por", "processo__carteira")
             .only(
                 "id",
                 "concluido_em",
@@ -4795,45 +4844,72 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "concluido_por__username",
                 "concluido_por__first_name",
                 "concluido_por__last_name",
+                "processo_id",
+                "processo__carteira_id",
+                "processo__carteira__nome",
             )
         )
         for prazo in prazos_concluidos.iterator():
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "concluido_por", None))
             concluded_at = _parse_datetime_value(getattr(prazo, "concluido_em", None))
             concluded_date = concluded_at.date().isoformat() if concluded_at else ""
-            _register_productivity_event("prazos", actor_key, actor_label, concluded_date)
+            processo_obj = getattr(prazo, "processo", None)
+            carteira_id = _safe_int(getattr(processo_obj, "carteira_id", None)) if processo_obj else None
+            carteira_nome = _clean_text(getattr(getattr(processo_obj, "carteira", None), "nome", "")) if processo_obj else ""
+            _register_productivity_event(
+                "prazos",
+                actor_key,
+                actor_label,
+                concluded_date,
+                carteira_id=carteira_id,
+                carteira_nome=carteira_nome,
+            )
 
         tarefas_pendentes = (
             Tarefa.objects.filter(concluida=False)
-            .select_related("responsavel")
+            .select_related("responsavel", "processo__carteira")
             .only(
                 "id",
                 "responsavel__id",
                 "responsavel__username",
                 "responsavel__first_name",
                 "responsavel__last_name",
+                "processo_id",
+                "processo__carteira_id",
+                "processo__carteira__nome",
             )
         )
         for tarefa in tarefas_pendentes.iterator():
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "responsavel", None))
             user_bucket = _ensure_productivity_user(actor_key, actor_label)
+            processo_obj = getattr(tarefa, "processo", None)
+            carteira_id = _safe_int(getattr(processo_obj, "carteira_id", None)) if processo_obj else None
+            carteira_nome = _clean_text(getattr(getattr(processo_obj, "carteira", None), "nome", "")) if processo_obj else ""
+            _register_productivity_carteira(user_bucket, carteira_id=carteira_id, carteira_nome=carteira_nome)
             user_bucket["pending"]["tarefas"] += 1
             productivity_pending["tarefas"] += 1
 
         prazos_pendentes = (
             Prazo.objects.filter(concluido=False)
-            .select_related("responsavel")
+            .select_related("responsavel", "processo__carteira")
             .only(
                 "id",
                 "responsavel__id",
                 "responsavel__username",
                 "responsavel__first_name",
                 "responsavel__last_name",
+                "processo_id",
+                "processo__carteira_id",
+                "processo__carteira__nome",
             )
         )
         for prazo in prazos_pendentes.iterator():
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "responsavel", None))
             user_bucket = _ensure_productivity_user(actor_key, actor_label)
+            processo_obj = getattr(prazo, "processo", None)
+            carteira_id = _safe_int(getattr(processo_obj, "carteira_id", None)) if processo_obj else None
+            carteira_nome = _clean_text(getattr(getattr(processo_obj, "carteira", None), "nome", "")) if processo_obj else ""
+            _register_productivity_carteira(user_bucket, carteira_id=carteira_id, carteira_nome=carteira_nome)
             user_bucket["pending"]["prazos"] += 1
             productivity_pending["prazos"] += 1
 
@@ -4843,6 +4919,20 @@ class CarteiraAdmin(admin.ModelAdmin):
                 user_bucket["daily"].values(),
                 key=lambda item: item["date"],
             )
+            carteira_items = sorted(
+                (
+                    {"nome": str(nome), "eventos": int(count)}
+                    for nome, count in (user_bucket.get("carteiras") or {}).items()
+                    if str(nome).strip()
+                ),
+                key=lambda item: (-int(item.get("eventos") or 0), (item.get("nome") or "").upper()),
+            )
+            carteira_label = "Sem carteira"
+            if carteira_items:
+                carteira_label = carteira_items[0]["nome"]
+                if len(carteira_items) > 1:
+                    carteira_label = f"{carteira_label} (+{len(carteira_items) - 1})"
+
             totals = {
                 "analises": int(user_bucket["totals"]["analises"]),
                 "tarefas": int(user_bucket["totals"]["tarefas"]),
@@ -4866,6 +4956,9 @@ class CarteiraAdmin(admin.ModelAdmin):
                 {
                     "user_key": user_bucket["user_key"],
                     "user_label": user_bucket["user_label"],
+                    "carteira_label": carteira_label,
+                    "carteira_count": len(carteira_items),
+                    "carteiras": carteira_items,
                     "totals": totals,
                     "pending": pending,
                     "sem_data": sem_data,
@@ -4987,7 +5080,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260218e',
+            'admin/js/carteira_charts.js?v=20260219a',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):

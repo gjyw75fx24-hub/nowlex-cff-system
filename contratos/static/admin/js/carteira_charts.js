@@ -1939,6 +1939,16 @@ window.addEventListener('DOMContentLoaded', () => {
                     const semDataTotals = user.sem_data || {};
                     const semDataTotal = Number(semDataTotals.total || sumMetrics(semDataTotals));
                     const pendingTotals = user.pending || {};
+                    const carteiraItems = Array.isArray(user.carteiras) ? user.carteiras : [];
+                    const carteiraDetails = carteiraItems
+                        .map((item) => {
+                            const nome = String(item?.nome || '').trim();
+                            const eventos = Number(item?.eventos || 0);
+                            if (!nome) return '';
+                            return `${nome}: ${numberPt(eventos)}`;
+                        })
+                        .filter(Boolean)
+                        .join(' | ');
                     const pending = {
                         tarefas: Number(pendingTotals.tarefas || 0),
                         prazos: Number(pendingTotals.prazos || 0),
@@ -1946,6 +1956,8 @@ window.addEventListener('DOMContentLoaded', () => {
                     return {
                         user_key: user.user_key,
                         user_label: user.user_label || 'Sem usuário',
+                        carteira_label: String(user.carteira_label || '').trim() || 'Sem carteira',
+                        carteira_title: carteiraDetails,
                         period,
                         periodTotal,
                         overallTotals,
@@ -2007,6 +2019,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 const tableRows = rows.map((row) => `
                     <tr>
+                        <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;" title="${escapeHtml(row.carteira_title || row.carteira_label)}">${escapeHtml(row.carteira_label)}</td>
                         <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.user_label)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.analises)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.tarefas)}</td>
@@ -2022,6 +2035,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     <table style="width:100%; border-collapse:collapse; font-size:12px;">
                         <thead>
                             <tr style="background:#eef3f8;">
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Carteira</th>
                                 <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Usuário</th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Análises<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas concluídas<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
