@@ -139,6 +139,299 @@ window.addEventListener('DOMContentLoaded', () => {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    const sanitizeFileName = (value) => {
+        const normalized = String(value || 'kpi')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .toLowerCase();
+        return normalized || 'kpi';
+    };
+    const makeTimestampForFile = () => {
+        const now = new Date();
+        const yyyy = String(now.getFullYear());
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mi = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        return `${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+    };
+    const createKpiFileName = (panelTitle, extension = 'jpg') => {
+        const base = sanitizeFileName(panelTitle || 'kpi');
+        const ext = String(extension || 'jpg').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'jpg';
+        return `${base}-${makeTimestampForFile()}.${ext}`;
+    };
+    const triggerDownloadDataUrl = (dataUrl, fileName) => {
+        const href = String(dataUrl || '').trim();
+        if (!href) return;
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        anchor.download = String(fileName || 'kpi.jpg');
+        anchor.rel = 'noopener';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+    let html2CanvasLoaderPromise = null;
+    const ensureHtml2Canvas = () => {
+        if (typeof window.html2canvas === 'function') {
+            return Promise.resolve(window.html2canvas);
+        }
+        if (html2CanvasLoaderPromise) {
+            return html2CanvasLoaderPromise;
+        }
+        html2CanvasLoaderPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+            script.async = true;
+            script.onload = () => {
+                if (typeof window.html2canvas === 'function') {
+                    resolve(window.html2canvas);
+                    return;
+                }
+                reject(new Error('html2canvas indisponivel'));
+            };
+            script.onerror = () => reject(new Error('Falha ao carregar html2canvas'));
+            document.head.appendChild(script);
+        });
+        return html2CanvasLoaderPromise;
+    };
+    const clonePanelWithImageCharts = (panel) => {
+        const clone = panel.cloneNode(true);
+        clone.setAttribute('data-print-kpi-root', '1');
+        clone.querySelectorAll('[data-kpi-print-btn]').forEach((btn) => btn.remove());
+        const sourceCanvases = Array.from(panel.querySelectorAll('canvas'));
+        const clonedCanvases = Array.from(clone.querySelectorAll('canvas'));
+        clonedCanvases.forEach((canvas, index) => {
+            const sourceCanvas = sourceCanvases[index];
+            if (!sourceCanvas) return;
+            try {
+                const img = document.createElement('img');
+                img.src = sourceCanvas.toDataURL('image/png');
+                img.alt = 'Grafico do KPI';
+                img.style.display = 'block';
+                img.style.maxWidth = '100%';
+                const width = Number(sourceCanvas.clientWidth || sourceCanvas.width || 0);
+                if (width > 0) {
+                    img.style.width = `${width}px`;
+                }
+                canvas.replaceWith(img);
+            } catch (error) {
+                // ignore canvas conversion failures and keep the canvas node
+            }
+        });
+        return clone;
+    };
+    const renderPanelToJpegFallback = (panel) => {
+        return new Promise((resolve, reject) => {
+            try {
+                const clone = clonePanelWithImageCharts(panel);
+                const rect = panel.getBoundingClientRect();
+                const width = Math.max(1, Math.ceil(panel.scrollWidth || rect.width || 1));
+                const height = Math.max(1, Math.ceil(panel.scrollHeight || rect.height || 1));
+                const xhtml = `
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px; height:${height}px; background:#fff; padding:0; margin:0;">
+                        ${clone.outerHTML}
+                    </div>
+                `;
+                const svg = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+                        <foreignObject x="0" y="0" width="100%" height="100%">${xhtml}</foreignObject>
+                    </svg>
+                `;
+                const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+                const objectUrl = URL.createObjectURL(blob);
+                const image = new Image();
+                image.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            URL.revokeObjectURL(objectUrl);
+                            reject(new Error('Canvas indisponivel'));
+                            return;
+                        }
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, width, height);
+                        ctx.drawImage(image, 0, 0, width, height);
+                        const jpegData = canvas.toDataURL('image/jpeg', 0.92);
+                        URL.revokeObjectURL(objectUrl);
+                        resolve(jpegData);
+                    } catch (error) {
+                        URL.revokeObjectURL(objectUrl);
+                        reject(error);
+                    }
+                };
+                image.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(new Error('Falha ao renderizar imagem'));
+                };
+                image.src = objectUrl;
+            } catch (error) {
+                reject(error);
+            }
+        });
+    };
+    const exportPanelAsJpeg = async (panel, panelTitle, triggerButton) => {
+        if (!panel) return false;
+        const fileName = createKpiFileName(panelTitle, 'jpg');
+        const button = triggerButton || null;
+        const originalTitle = button ? button.title : '';
+        const previousPointerEvents = button ? button.style.pointerEvents : '';
+        if (button) {
+            button.title = 'Gerando JPG...';
+            button.style.pointerEvents = 'none';
+        }
+        try {
+            const html2canvas = await ensureHtml2Canvas();
+            const canvas = await html2canvas(panel, {
+                backgroundColor: '#ffffff',
+                scale: Math.max(2, Math.ceil(window.devicePixelRatio || 1)),
+                useCORS: true,
+                logging: false,
+                ignoreElements: (element) => Boolean(element?.dataset?.kpiPrintBtn),
+            });
+            const jpegData = canvas.toDataURL('image/jpeg', 0.92);
+            triggerDownloadDataUrl(jpegData, fileName);
+            return true;
+        } catch (error) {
+            try {
+                const fallbackData = await renderPanelToJpegFallback(panel);
+                triggerDownloadDataUrl(fallbackData, fileName);
+                return true;
+            } catch (fallbackError) {
+                window.alert('Nao foi possivel gerar o JPG desta janela de KPI.');
+                return false;
+            }
+        } finally {
+            if (button) {
+                button.style.pointerEvents = previousPointerEvents;
+                button.title = originalTitle;
+            }
+        }
+    };
+    const printPanelElement = (panel, panelTitle) => {
+        if (!panel) return;
+        const titleText = String(panelTitle || 'KPI').trim() || 'KPI';
+        const printWindow = window.open('about:blank', '_blank', 'width=1200,height=900');
+        if (!printWindow) return;
+
+        const clone = clonePanelWithImageCharts(panel);
+
+        const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+            .map((link) => {
+                const href = String(link.getAttribute('href') || '').trim();
+                if (!href) return '';
+                return `<link rel="stylesheet" href="${escapeHtml(href)}">`;
+            })
+            .join('');
+
+        let doc = null;
+        try {
+            doc = printWindow.document;
+        } catch (error) {
+            return;
+        }
+
+        const htmlContent = `
+            <!doctype html>
+            <html lang="pt-BR">
+                <head>
+                    <meta charset="utf-8">
+                    <title>${escapeHtml(titleText)}</title>
+                    ${stylesheets}
+                    <style>
+                        @page { size: auto; margin: 12mm; }
+                        html, body { margin: 0; padding: 0; background: #fff; }
+                        body { font-family: Arial, sans-serif; color: #1f2f3e; }
+                        [data-print-kpi-root] { margin: 0; width: 100%; box-sizing: border-box; overflow: visible !important; }
+                        [data-print-kpi-root] * { box-sizing: border-box; }
+                        [data-print-kpi-root] canvas,
+                        [data-print-kpi-root] img,
+                        [data-print-kpi-root] svg { max-width: 100%; }
+                    </style>
+                </head>
+                <body>${clone.outerHTML}</body>
+            </html>
+        `;
+
+        try {
+            doc.open();
+            doc.write(htmlContent);
+            doc.close();
+        } catch (error) {
+            try {
+                printWindow.location.replace(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+            } catch (fallbackError) {
+                return;
+            }
+        }
+
+        const executePrint = () => {
+            printWindow.focus();
+            printWindow.print();
+            setTimeout(() => {
+                try { printWindow.close(); } catch (error) { /* noop */ }
+            }, 120);
+        };
+        if (doc.readyState === 'complete') {
+            setTimeout(executePrint, 120);
+        } else {
+            printWindow.addEventListener('load', () => setTimeout(executePrint, 120), { once: true });
+        }
+    };
+    const attachPrintButtonToPanel = (panel, panelTitle) => {
+        if (!panel || panel.dataset.kpiPrintReady === '1') return;
+        panel.dataset.kpiPrintReady = '1';
+        panel.style.position = panel.style.position || 'relative';
+        const currentPaddingBottom = Number.parseFloat(panel.style.paddingBottom || '0');
+        if (!Number.isFinite(currentPaddingBottom) || currentPaddingBottom < 38) {
+            panel.style.paddingBottom = '40px';
+        }
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.kpiPrintBtn = '1';
+        button.title = 'Clique: imprimir/PDF. Shift+clique: baixar JPG';
+        button.setAttribute('aria-label', 'Imprimir ou baixar JPG desta janela do KPI');
+        button.style.position = 'absolute';
+        button.style.right = '10px';
+        button.style.bottom = '8px';
+        button.style.width = '28px';
+        button.style.height = '28px';
+        button.style.borderRadius = '999px';
+        button.style.border = '1px solid #d4dee9';
+        button.style.background = '#ffffff';
+        button.style.color = '#466480';
+        button.style.display = 'inline-flex';
+        button.style.alignItems = 'center';
+        button.style.justifyContent = 'center';
+        button.style.cursor = 'pointer';
+        button.style.opacity = '0.82';
+        button.style.boxShadow = '0 1px 3px rgba(24, 39, 53, 0.12)';
+        button.style.padding = '0';
+        button.innerHTML = `
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M9 4h6l1 2h3c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V8c0-1.1.9-2 2-2h3l1-2zm3 12a4 4 0 100-8 4 4 0 000 8zM7 9a1 1 0 100-2 1 1 0 000 2z"></path>
+            </svg>
+        `;
+        button.addEventListener('mouseenter', () => { button.style.opacity = '1'; });
+        button.addEventListener('mouseleave', () => { button.style.opacity = '0.82'; });
+        button.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.shiftKey) {
+                await exportPanelAsJpeg(panel, panelTitle, button);
+                return;
+            }
+            printPanelElement(panel, panelTitle);
+        });
+        panel.appendChild(button);
+    };
     const pairKey = (aId, bId) => {
         const a = Number(aId || 0);
         const b = Number(bId || 0);
@@ -187,6 +480,7 @@ window.addEventListener('DOMContentLoaded', () => {
         <div class="carteira-intersection-table-wrap" style="margin-top:12px;"></div>
     `;
     chartContainer.appendChild(section);
+    attachPrintButtonToPanel(section, 'Intersecao de Cadastros e CPFs');
 
     const diagramWrap = section.querySelector('.carteira-intersection-diagram');
     const tableWrap = section.querySelector('.carteira-intersection-table-wrap');
@@ -601,6 +895,7 @@ window.addEventListener('DOMContentLoaded', () => {
         <div class="carteira-kpi-questions-wrap" style="margin-top:10px;"></div>
     `;
     chartContainer.appendChild(kpiSection);
+    attachPrintButtonToPanel(kpiSection, 'KPIs da Analise por Carteira e Tipo');
 
     const ufSelect = kpiSection.querySelector('.carteira-kpi-uf');
     const summaryWrap = kpiSection.querySelector('.carteira-kpi-summary');
@@ -1023,9 +1318,9 @@ window.addEventListener('DOMContentLoaded', () => {
                     `;
                 }).join('');
                 return `
-                    <div style="display:grid; grid-template-columns:minmax(260px, 1fr) minmax(260px, 330px); gap:10px; align-items:start; border:1px dashed #dbe4ee; border-radius:8px; padding:8px; background:#fff;">
+                    <div class="kpi-question-panel" style="display:grid; grid-template-columns:minmax(260px, 1fr) minmax(260px, 330px); gap:10px; align-items:start; border:1px dashed #dbe4ee; border-radius:8px; padding:8px; background:#fff;">
                         <div>
-                            <div style="font-size:12px; font-weight:700; color:#2f3d4a; margin-bottom:4px;">
+                            <div class="kpi-question-panel-title" style="font-size:12px; font-weight:700; color:#2f3d4a; margin-bottom:4px;">
                                 ${escapeHtml(question.pergunta || question.chave || '')}
                             </div>
                             <div style="font-size:11px; color:#5b6f84; margin-bottom:4px;">
@@ -1071,6 +1366,10 @@ window.addEventListener('DOMContentLoaded', () => {
                 </div>
             `
             : '';
+        questionsWrap.querySelectorAll('.kpi-question-panel').forEach((panel) => {
+            const panelTitle = String(panel.querySelector('.kpi-question-panel-title')?.textContent || '').trim();
+            attachPrintButtonToPanel(panel, panelTitle || 'Pergunta do KPI');
+        });
 
         chartJobs.forEach(({ question, verticalId, horizontalId }) => {
             renderQuestionCharts(question, verticalId, horizontalId);
@@ -1100,6 +1399,7 @@ window.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         chartContainer.appendChild(peticaoSection);
+        attachPrintButtonToPanel(peticaoSection, 'Pecas Geradas por Tipo e Carteira');
 
         const totalsWrap = peticaoSection.querySelector('.carteira-kpi-peticao-totals');
         if (totalsWrap) {
@@ -1226,6 +1526,7 @@ window.addEventListener('DOMContentLoaded', () => {
             <div class="carteira-kpi-priority-table-wrap" style="overflow:auto;"></div>
         `;
         chartContainer.appendChild(prioritySection);
+        attachPrintButtonToPanel(prioritySection, 'Importados com Prioridade');
 
         const summaryEl = prioritySection.querySelector('.carteira-kpi-priority-summary');
         const byPriorityWrap = prioritySection.querySelector('.carteira-kpi-priority-by-priority');
@@ -1483,6 +1784,7 @@ window.addEventListener('DOMContentLoaded', () => {
             <div class="kpi-productivity-table-wrap" style="overflow:auto;"></div>
         `;
         chartContainer.appendChild(productivitySection);
+        attachPrintButtonToPanel(productivitySection, 'Produtividade por Usuario');
 
         const periodSelect = productivitySection.querySelector('.kpi-productivity-period');
         const dateFromInput = productivitySection.querySelector('.kpi-productivity-date-from');
@@ -1903,6 +2205,7 @@ window.addEventListener('DOMContentLoaded', () => {
             <div class="kpi-online-table-wrap" style="overflow:auto;"></div>
         `;
         chartContainer.appendChild(onlineSection);
+        attachPrintButtonToPanel(onlineSection, 'KPI Online');
 
         const refreshButton = onlineSection.querySelector('.kpi-online-refresh');
         const summaryEl = onlineSection.querySelector('.kpi-online-summary');
