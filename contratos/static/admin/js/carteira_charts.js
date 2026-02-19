@@ -1214,6 +1214,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 <div style="font-size:12px; color:#5d6f83;">Clique nos números ou barras para abrir a lista filtrada.</div>
             </div>
             <div class="carteira-kpi-priority-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
+            <div class="carteira-kpi-priority-by-priority" style="margin-bottom:10px;"></div>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px; margin-bottom:10px;">
                 <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
                     <canvas id="kpiPriorityUfChart"></canvas>
@@ -1227,6 +1228,7 @@ window.addEventListener('DOMContentLoaded', () => {
         chartContainer.appendChild(prioritySection);
 
         const summaryEl = prioritySection.querySelector('.carteira-kpi-priority-summary');
+        const byPriorityWrap = prioritySection.querySelector('.carteira-kpi-priority-by-priority');
         const tableWrap = prioritySection.querySelector('.carteira-kpi-priority-table-wrap');
         if (summaryEl) {
             summaryEl.innerHTML = `
@@ -1245,6 +1247,29 @@ window.addEventListener('DOMContentLoaded', () => {
             if (!url) return `${numberPt(numericCount)}`;
             return `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${numberPt(numericCount)}</a>`;
         };
+
+        if (byPriorityWrap && priorityByPriority.length) {
+            const cardsHtml = priorityByPriority.map((item) => {
+                const tagId = Number(item.prioridade_id || 0);
+                const tagName = escapeHtml(item.prioridade_nome || `Prioridade ${tagId || ''}`);
+                return `
+                    <div style="border:1px solid #d8e1ea; border-radius:8px; padding:8px 10px; background:#fbfdff; min-width:220px;">
+                        <div style="font-size:12px; color:#2d3e50; font-weight:700; margin-bottom:6px;">${tagName}</div>
+                        <div style="font-size:12px; color:#46576b; line-height:1.6;">
+                            <div><strong>Importados:</strong> ${makeCountLink(item.total, tagId, 'all', '')}</div>
+                            <div><strong>Analisados:</strong> ${makeCountLink(item.analisados, tagId, 'analisado', '')}</div>
+                            <div><strong>Pendentes:</strong> ${makeCountLink(item.pendentes, tagId, 'pendente', '')}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            byPriorityWrap.innerHTML = `
+                <div style="font-size:12px; color:#46576b; margin-bottom:6px;"><strong>Totais por tipo de prioridade</strong></div>
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                    ${cardsHtml}
+                </div>
+            `;
+        }
 
         if (tableWrap) {
             const rowsHtml = priorityRows.map((row) => `
