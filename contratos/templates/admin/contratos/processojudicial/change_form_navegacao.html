@@ -150,6 +150,34 @@ document.addEventListener('DOMContentLoaded', function () {
   text-transform: capitalize;
 }
 
+.documento-peticoes-selected-file {
+  font-size: 0.76rem;
+  color: #5d6d86;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documento-peticoes-file-input-carrier {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(1px, 1px, 1px, 1px);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.documento-peticoes-file-errors {
+  margin-top: 6px;
+}
+
+.documento-peticoes-file-errors ul.errorlist {
+  margin: 0;
+  color: #ba2121;
+}
+
 #arquivos-group th.column-enviado_por,
 #processoarquivo_set-group th.column-enviado_por,
 #arquivos-group td.field-enviado_por,
@@ -765,6 +793,26 @@ document.addEventListener('DOMContentLoaded', function() {
       button.type = 'button';
       button.className = 'button button-secondary';
       button.textContent = 'Procurar...';
+      const selectedFile = document.createElement('span');
+      selectedFile.className = 'documento-peticoes-selected-file';
+      selectedFile.textContent = hasFileLink ? 'Arquivo atual disponível' : 'Nenhum arquivo selecionado';
+      let inputCarrier = row.querySelector('.documento-peticoes-file-input-carrier');
+      if (!inputCarrier) {
+        inputCarrier = document.createElement('span');
+        inputCarrier.className = 'documento-peticoes-file-input-carrier';
+      }
+      if (fileInput.parentElement !== inputCarrier) {
+        inputCarrier.appendChild(fileInput);
+      }
+      const syncSelectedFile = () => {
+        const picked = fileInput?.files?.[0];
+        if (picked && picked.name) {
+          selectedFile.textContent = picked.name;
+        } else {
+          selectedFile.textContent = hasFileLink ? 'Arquivo atual disponível' : 'Nenhum arquivo selecionado';
+        }
+      };
+      fileInput.addEventListener('change', syncSelectedFile);
       button.addEventListener('click', (event) => {
         event.preventDefault();
         if (fileInput) {
@@ -773,12 +821,97 @@ document.addEventListener('DOMContentLoaded', function() {
       });
       modifyRow.appendChild(label);
       modifyRow.appendChild(button);
+      modifyRow.appendChild(selectedFile);
+      modifyRow.appendChild(inputCarrier);
       nomeCell.appendChild(modifyRow);
       renderUploaderLine(row, nomeCell);
+      syncSelectedFile();
       if (fileUpload) {
         fileUpload.style.display = 'none';
       }
       row.dataset.modifyControlAdded = '1';
+    };
+
+    const revealArquivoRowErrors = (row) => {
+      if (!row) {
+        return false;
+      }
+      const arquivoCell = row.querySelector('td.field-arquivo');
+      const nomeCell = row.querySelector('td.field-nome');
+      if (!arquivoCell || !nomeCell) {
+        return false;
+      }
+      const fileErrors = arquivoCell.querySelector('.errorlist');
+      let mirror = row.querySelector('.documento-peticoes-file-errors');
+      if (!fileErrors) {
+        if (mirror) {
+          mirror.remove();
+        }
+        return false;
+      }
+      if (!mirror) {
+        mirror = document.createElement('div');
+        mirror.className = 'documento-peticoes-file-errors';
+        nomeCell.appendChild(mirror);
+      }
+      mirror.innerHTML = '';
+      mirror.appendChild(fileErrors.cloneNode(true));
+      return true;
+    };
+
+    const activateArquivosTab = () => {
+      const tabs = Array.from(document.querySelectorAll('.inline-group-tabs button'));
+      const arquivosTab = tabs.find((button) => /arquivos/i.test((button.textContent || '').trim()));
+      if (arquivosTab) {
+        arquivosTab.click();
+      }
+    };
+
+    const validateArquivoRowsBeforeSubmit = () => {
+      const rows = arquivosGroup.querySelectorAll('tr.dynamic-processoarquivo, tr.dynamic-arquivos');
+      let missingFileRows = 0;
+      rows.forEach((row) => {
+        if (row.classList.contains('empty-form')) {
+          return;
+        }
+        const formIdInput = row.querySelector('input[name$="-id"]');
+        const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+        if (deleteCheckbox && deleteCheckbox.checked) {
+          return;
+        }
+        const fileInput = row.querySelector('input[type="file"][name$="-arquivo"]');
+        if (!fileInput || !formIdInput) {
+          return;
+        }
+        const isExisting = Boolean((formIdInput.value || '').trim());
+        if (isExisting) {
+          revealArquivoRowErrors(row);
+          return;
+        }
+        const hasFile = Boolean(fileInput.files && fileInput.files.length > 0);
+        const nomeValue = (row.querySelector('input[name$="-nome"]')?.value || '').trim();
+        const enviadoPorValue = (
+          row.querySelector('input[name$="-enviado_por"], select[name$="-enviado_por"]')?.value || ''
+        ).trim();
+        const protocolado = Boolean(
+          row.querySelector('input[type="checkbox"][name$="-protocolado_no_tribunal"]')?.checked
+        );
+        const hasAnyData = hasFile || Boolean(nomeValue) || Boolean(enviadoPorValue) || protocolado;
+
+        if (!hasAnyData) {
+          if (deleteCheckbox) {
+            deleteCheckbox.checked = true;
+            row.style.display = 'none';
+          }
+          return;
+        }
+
+        if (!hasFile) {
+          missingFileRows += 1;
+        }
+        revealArquivoRowErrors(row);
+      });
+      return missingFileRows;
     };
 
     const createConfirmOverlay = (message) => {
@@ -1045,12 +1178,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const tryInsert = () => {
       const rows = arquivosGroup.querySelectorAll('tr.dynamic-processoarquivo, tr.dynamic-arquivos');
-      rows.forEach(processRow);
+      let hasErrors = false;
+      rows.forEach((row) => {
+        processRow(row);
+        if (revealArquivoRowErrors(row)) {
+          hasErrors = true;
+        }
+      });
+      if (hasErrors) {
+        activateArquivosTab();
+      }
     };
 
     tryInsert();
     const observer = new MutationObserver(tryInsert);
     observer.observe(arquivosGroup, { childList: true, subtree: true });
+
+    const formEl = arquivosGroup.closest('form');
+    if (formEl && !formEl.dataset.arquivosValidationBound) {
+      formEl.addEventListener('submit', (event) => {
+        const missingFileRows = validateArquivoRowsBeforeSubmit();
+        if (missingFileRows > 0) {
+          event.preventDefault();
+          activateArquivosTab();
+          alert(
+            missingFileRows === 1
+              ? 'Existe 1 linha de Arquivos sem arquivo selecionado. Selecione o arquivo ou remova a linha.'
+              : `Existem ${missingFileRows} linhas de Arquivos sem arquivo selecionado. Selecione os arquivos ou remova as linhas.`
+          );
+        }
+      });
+      formEl.dataset.arquivosValidationBound = '1';
+    }
   })();
 
 
