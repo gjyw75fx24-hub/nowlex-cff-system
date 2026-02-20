@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from django.conf import settings
 from django.db import connections, transaction
+from django.db.models.expressions import RawSQL
 from django.db.models import Q
 from django.db.utils import OperationalError
 
@@ -95,6 +96,15 @@ def _normalize_cnj_digits(value: Optional[str]) -> str:
     return re.sub(r'\D', '', str(value or ''))[:20]
 
 
+def _normalize_cnj_lookup(value: Optional[str]) -> str:
+    digits = re.sub(r'\D', '', str(value or ''))
+    if not digits:
+        return ''
+    if len(digits) >= 20:
+        return digits[:20]
+    return digits.zfill(20)
+
+
 def _format_cnj(value: Optional[str]) -> str:
     digits = _normalize_cnj_digits(value)
     if len(digits) != 20:
@@ -102,9 +112,43 @@ def _format_cnj(value: Optional[str]) -> str:
     return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13:14]}.{digits[14:16]}.{digits[16:20]}"
 
 
+CNJ_UF_MAP = {
+    '8.01': 'AC', '8.02': 'AL', '8.03': 'AP', '8.04': 'AM', '8.05': 'BA',
+    '8.06': 'CE', '8.07': 'DF', '8.08': 'ES', '8.09': 'GO', '8.10': 'MA',
+    '8.11': 'MT', '8.12': 'MS', '8.13': 'MG', '8.14': 'PA', '8.15': 'PB',
+    '8.16': 'PR', '8.17': 'PE', '8.18': 'PI', '8.19': 'RJ', '8.20': 'RN',
+    '8.21': 'RS', '8.22': 'RO', '8.23': 'RR', '8.24': 'SC', '8.25': 'SE',
+    '8.26': 'SP', '8.27': 'TO',
+}
+
+
+def _extract_uf_from_cnj_like(value: Optional[str]) -> str:
+    digits = _normalize_digits(value)
+    if not digits:
+        return ''
+    cnj_base = ''
+    if len(digits) >= 20:
+        cnj_base = digits[:20]
+    elif len(digits) in (18, 19):
+        # Mantém aderência ao mapeamento usado no botão "Preencher UF":
+        # completa à esquerda quando o CNJ vem sem zeros iniciais.
+        cnj_base = digits.zfill(20)
+    else:
+        return ''
+    j = cnj_base[13:14]
+    tr = cnj_base[14:16]
+    if not j or len(tr) != 2:
+        return ''
+    return CNJ_UF_MAP.get(f'{j}.{tr}', '')
+
+
 
 class DemandasImportService:
     SOURCE_ALIAS = 'carteira'
+    IDENTIFIER_SPLIT_RE = re.compile(r'[\s,;]+')
+    LITIS_SIM_LABEL = "Litis sim"
+    LITIS_SIM_BG = "#F2C94C"
+    LITIS_SIM_FG = "#3D2B00"
 
     def __init__(self, db_alias: Optional[str] = None):
         self.db_alias = db_alias or self.SOURCE_ALIAS
@@ -122,9 +166,128 @@ class DemandasImportService:
             return f"{nome_carteira} · {period_label}"
         return nome_carteira
 
-    def build_preview(self, data_de, data_ate) -> Tuple[List[Dict[str, str]], Decimal]:
-        grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
-        rows = []
+    def parse_batch_identifiers(self, identifiers: Optional[Iterable[str] | str]) -> Dict[str, object]:
+        tokens: List[str] = []
+        if isinstance(identifiers, str):
+            tokens = [
+                token.strip()
+                for token in self.IDENTIFIER_SPLIT_RE.split(identifiers)
+                if token and token.strip()
+            ]
+        elif identifiers:
+            for item in identifiers:
+                raw = str(item or '').strip()
+                if not raw:
+                    continue
+                tokens.extend(
+                    token.strip()
+                    for token in self.IDENTIFIER_SPLIT_RE.split(raw)
+                    if token and token.strip()
+                )
+
+        cpfs: List[str] = []
+        cnjs: List[str] = []
+        invalid_tokens: List[str] = []
+        invalid_cnjs: List[str] = []
+        invalid_cpfs: List[str] = []
+        invalid_details: List[Dict[str, str]] = []
+        input_uf_counts: Dict[str, int] = {}
+        input_uf_total_count = 0
+        valid_uf_counts: Dict[str, int] = {}
+        valid_cnjs_by_uf: Dict[str, List[str]] = {}
+
+        def add_input_uf_from_cnj(token_value: str) -> str:
+            nonlocal input_uf_total_count
+            guessed = _extract_uf_from_cnj_like(token_value)
+            key = guessed or 'SEM_UF'
+            input_uf_counts[key] = input_uf_counts.get(key, 0) + 1
+            input_uf_total_count += 1
+            return key
+
+        def add_valid_cnj_by_uf(cnj_digits: str, uf_key: str):
+            if not cnj_digits:
+                return
+            key = uf_key or 'SEM_UF'
+            valid_uf_counts[key] = valid_uf_counts.get(key, 0) + 1
+            bucket = valid_cnjs_by_uf.setdefault(key, [])
+            if cnj_digits not in bucket:
+                bucket.append(cnj_digits)
+
+        for token in tokens:
+            digits = _normalize_digits(token)
+            if len(digits) == 11:
+                cpfs.append(digits)
+            elif len(digits) == 20:
+                cnjs.append(digits)
+                uf_key = add_input_uf_from_cnj(token)
+                add_valid_cnj_by_uf(digits, uf_key)
+            else:
+                invalid_tokens.append(token)
+                uf_guess = ''
+                if not digits:
+                    reason = "Sem dígitos numéricos."
+                    kind = "indefinido"
+                elif len(digits) < 11:
+                    reason = f"CPF incompleto ({len(digits)} dígitos)."
+                    kind = "cpf"
+                elif len(digits) < 20:
+                    reason = f"CNJ incompleto ({len(digits)} dígitos)."
+                    kind = "cnj"
+                else:
+                    reason = f"CNJ com dígitos excedentes ({len(digits)} dígitos)."
+                    kind = "cnj"
+                if kind == "cnj":
+                    invalid_cnjs.append(token)
+                    if len(digits) >= 18:
+                        uf_guess = add_input_uf_from_cnj(token)
+                elif kind == "cpf":
+                    invalid_cpfs.append(token)
+                invalid_details.append({
+                    "token": token,
+                    "digits": digits,
+                    "kind": kind,
+                    "reason": reason,
+                    "uf_guess": uf_guess,
+                })
+
+        cpfs = list(dict.fromkeys(cpfs))
+        cnjs = list(dict.fromkeys(cnjs))
+        invalid_cnjs = list(dict.fromkeys(invalid_cnjs))
+        invalid_cpfs = list(dict.fromkeys(invalid_cpfs))
+        input_uf_totals = [
+            {"uf": uf, "total": total}
+            for uf, total in sorted(
+                input_uf_counts.items(),
+                key=lambda item: (item[0] == 'SEM_UF', item[0]),
+            )
+        ]
+        valid_uf_totals = [
+            {"uf": uf, "total": total}
+            for uf, total in sorted(
+                valid_uf_counts.items(),
+                key=lambda item: (item[0] == 'SEM_UF', item[0]),
+            )
+        ]
+        return {
+            "tokens": tokens,
+            "cpfs": cpfs,
+            "cnjs": cnjs,
+            "invalid_tokens": invalid_tokens,
+            "invalid_cnjs": invalid_cnjs,
+            "invalid_cpfs": invalid_cpfs,
+            "invalid_details": invalid_details,
+            "total_tokens": len(tokens),
+            "valid_tokens": len(cpfs) + len(cnjs),
+            "valid_cpfs": len(cpfs),
+            "valid_cnjs": len(cnjs),
+            "input_uf_totals": input_uf_totals,
+            "input_uf_total_count": input_uf_total_count,
+            "valid_uf_totals": valid_uf_totals,
+            "valid_cnjs_by_uf": valid_cnjs_by_uf,
+        }
+
+    def _build_preview_rows(self, grouped: Dict[str, List[Dict]]) -> Tuple[List[Dict[str, str]], Decimal]:
+        rows: List[Dict[str, str]] = []
         total_aberto_sum = Decimal('0')
         for cpf, contracts in grouped.items():
             nome = next((c.get('cliente_nome') for c in contracts if c.get('cliente_nome')), 'Cliente sem nome')
@@ -135,7 +298,7 @@ class DemandasImportService:
             cpf_normalized = _normalize_digits(cpf)
             uf_endereco = ''
             for contract in contracts:
-                uf_candidate = (contract.get('endereco_uf') or '').strip().upper()
+                uf_candidate = (contract.get('endereco_uf') or contract.get('uf') or '').strip().upper()
                 if uf_candidate:
                     uf_endereco = uf_candidate
                     break
@@ -150,9 +313,68 @@ class DemandasImportService:
             })
         return rows, total_aberto_sum
 
+    def build_preview(self, data_de, data_ate) -> Tuple[List[Dict[str, str]], Decimal]:
+        grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
+        return self._build_preview_rows(grouped)
+
+    def build_preview_for_identifiers(
+        self,
+        identifiers: Optional[Iterable[str] | str],
+    ) -> Tuple[List[Dict[str, str]], Decimal, Dict[str, object]]:
+        parsed = self.parse_batch_identifiers(identifiers)
+        cpfs = parsed["cpfs"]
+        cnjs = parsed["cnjs"]
+        parsed["matched_contracts"] = 0
+        parsed["matched_cpfs"] = 0
+        parsed["matched_cnjs"] = 0
+        parsed["missing_cpfs"] = cpfs
+        parsed["missing_cnjs"] = cnjs
+        if not cpfs and not cnjs:
+            parsed["found_cpfs"] = 0
+            return [], Decimal('0'), parsed
+        if not self.has_carteira_connection:
+            raise DemandasImportError(
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
+            )
+        try:
+            contratos = self._fetch_contracts_by_cpf_or_cnj(cpfs, cnjs)
+        except OperationalError as exc:
+            logger.exception("Falha ao buscar contratos por CNJ/CPF na base da carteira")
+            raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
+        if not contratos:
+            parsed["found_cpfs"] = 0
+            return [], Decimal('0'), parsed
+
+        contratos = self._hydrate_contracts_with_parcelas(contratos)
+        parsed["matched_contracts"] = len(contratos)
+        matched_cpfs = {
+            _normalize_digits(item.get("cpf"))
+            for item in contratos
+            if _normalize_digits(item.get("cpf"))
+        }
+        matched_cnjs = {
+            _normalize_cnj_digits(item.get("num_processo_jud"))
+            for item in contratos
+            if _normalize_cnj_digits(item.get("num_processo_jud"))
+        }
+        parsed["matched_cpfs"] = len(matched_cpfs)
+        parsed["matched_cnjs"] = len(matched_cnjs)
+        parsed["missing_cpfs"] = [cpf for cpf in cpfs if cpf not in matched_cpfs]
+        parsed["missing_cnjs"] = [cnj for cnj in cnjs if cnj not in matched_cnjs]
+        grouped = self._group_contracts_by_cpf(contratos)
+        parsed["found_cpfs"] = len(grouped)
+        rows, total = self._build_preview_rows(grouped)
+        return rows, total, parsed
+
     def import_period(self, data_de, data_ate, etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
-        return self._apply_import(grouped, etiqueta_nome, carteira)
+        return self._apply_import(
+            grouped,
+            etiqueta_nome,
+            carteira,
+            apply_litis_sim_label=True,
+        )
 
     def import_selected_cpfs(
         self,
@@ -166,13 +388,21 @@ class DemandasImportService:
             return {"imported": 0, "skipped": 0}
         normalized_cpfs = [_normalize_digits(cpf) for cpf in selected_cpfs if _normalize_digits(cpf)]
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate, normalized_cpfs)
-        return self._apply_import(grouped, etiqueta_nome, carteira)
+        return self._apply_import(
+            grouped,
+            etiqueta_nome,
+            carteira,
+            apply_litis_sim_label=True,
+        )
 
     def _apply_import(
         self,
         grouped: Dict[str, List[Dict]],
         etiqueta_nome: str,
         carteira: Optional[Carteira],
+        *,
+        link_only_existing: bool = False,
+        apply_litis_sim_label: bool = False,
     ) -> Dict[str, int]:
         if not grouped:
             return {"imported": 0, "skipped": 0}
@@ -181,6 +411,12 @@ class DemandasImportService:
             nome=etiqueta_nome,
             defaults={"cor_fundo": "#b5b5b5", "cor_fonte": "#222222"}
         )[0]
+        litis_sim_tag = None
+        if apply_litis_sim_label:
+            litis_sim_tag = Etiqueta.objects.get_or_create(
+                nome=self.LITIS_SIM_LABEL,
+                defaults={"cor_fundo": self.LITIS_SIM_BG, "cor_fonte": self.LITIS_SIM_FG},
+            )[0]
         imported = 0
         skipped = 0
         for cpf, contracts in grouped.items():
@@ -188,16 +424,179 @@ class DemandasImportService:
                 processo = self._find_existing_processo(cpf, carteira)
                 changed = False
                 if processo:
-                    changed = self._upsert_existing_processo(processo, cpf, contracts, carteira)
+                    if link_only_existing:
+                        changed = self._ensure_carteira_link(processo, carteira)
+                    else:
+                        changed = self._upsert_existing_processo(processo, cpf, contracts, carteira)
                 else:
                     processo = self._build_processo(cpf, contracts, carteira)
                     changed = True
                 processo.etiquetas.add(etiqueta)
+                if litis_sim_tag and self._contracts_have_cnj(contracts):
+                    processo.etiquetas.add(litis_sim_tag)
                 if changed:
                     imported += 1
                 else:
                     skipped += 1
         return {"imported": imported, "skipped": skipped}
+
+    def _contracts_have_cnj(self, contracts: List[Dict]) -> bool:
+        for contract in contracts or []:
+            raw_cnj = contract.get("num_processo_jud")
+            if len(_normalize_digits(raw_cnj)) >= 18:
+                return True
+        return False
+
+    def _find_existing_processo_by_cnj(self, cnj_digits: str) -> Optional[ProcessoJudicial]:
+        cnj_digits = _normalize_cnj_lookup(cnj_digits)
+        if not cnj_digits:
+            return None
+
+        processo = (
+            ProcessoJudicial.objects
+            .annotate(
+                cnj_digits=RawSQL(
+                    "RIGHT(LPAD(regexp_replace(COALESCE(\"contratos_processojudicial\".\"cnj\", ''), '\\D', '', 'g'), 20, '0'), 20)",
+                    [],
+                )
+            )
+            .filter(cnj_digits=cnj_digits)
+            .order_by('id')
+            .first()
+        )
+        if processo:
+            return processo
+
+        numero_entry = (
+            ProcessoJudicialNumeroCnj.objects
+            .annotate(
+                cnj_digits=RawSQL(
+                    "RIGHT(LPAD(regexp_replace(COALESCE(\"contratos_processojudicialnumerocnj\".\"cnj\", ''), '\\D', '', 'g'), 20, '0'), 20)",
+                    [],
+                )
+            )
+            .filter(cnj_digits=cnj_digits)
+            .select_related('processo')
+            .order_by('id')
+            .first()
+        )
+        return numero_entry.processo if numero_entry else None
+
+    def _ensure_numero_cnj_entry(
+        self,
+        processo: ProcessoJudicial,
+        cnj_digits: str,
+        carteira: Optional[Carteira] = None,
+    ) -> bool:
+        cnj_digits = _normalize_cnj_lookup(cnj_digits)
+        if not processo or not processo.pk or not cnj_digits:
+            return False
+
+        formatted_cnj = _format_cnj(cnj_digits)
+        uf = _extract_uf_from_cnj_like(cnj_digits)
+        target = None
+        for entry in processo.numeros_cnj.all():
+            if _normalize_cnj_lookup(entry.cnj) == cnj_digits:
+                target = entry
+                break
+
+        if not target:
+            ProcessoJudicialNumeroCnj.objects.create(
+                processo=processo,
+                cnj=formatted_cnj,
+                uf=uf,
+                carteira=carteira if carteira and carteira.id else None,
+                vara='',
+                tribunal='',
+            )
+            return True
+
+        update_fields = []
+        if uf and not (target.uf or '').strip():
+            target.uf = uf
+            update_fields.append('uf')
+        if carteira and carteira.id and not target.carteira_id:
+            target.carteira = carteira
+            update_fields.append('carteira')
+        if update_fields:
+            target.save(update_fields=update_fields)
+            return True
+        return False
+
+    def _import_minimal_cnjs(
+        self,
+        cnjs: Iterable[str],
+        carteira: Optional[Carteira] = None,
+        etiqueta_nome: str = "",
+    ) -> Dict[str, int]:
+        unique_cnjs = []
+        for cnj in cnjs:
+            normalized = _normalize_cnj_lookup(cnj)
+            if normalized:
+                unique_cnjs.append(normalized)
+        unique_cnjs = list(dict.fromkeys(unique_cnjs))
+
+        result = {
+            "imported": 0,
+            "skipped": 0,
+            "minimal_created": 0,
+            "minimal_linked": 0,
+        }
+        if not unique_cnjs:
+            return result
+
+        etiqueta = None
+        if etiqueta_nome:
+            etiqueta = Etiqueta.objects.get_or_create(
+                nome=etiqueta_nome,
+                defaults={"cor_fundo": "#b5b5b5", "cor_fonte": "#222222"}
+            )[0]
+
+        for cnj_digits in unique_cnjs:
+            formatted_cnj = _format_cnj(cnj_digits)
+            uf = _extract_uf_from_cnj_like(cnj_digits)
+            processo = self._find_existing_processo_by_cnj(cnj_digits)
+            if processo:
+                changed = False
+                update_fields = []
+                if not (processo.cnj or '').strip():
+                    processo.cnj = formatted_cnj
+                    update_fields.append('cnj')
+                if uf and not (processo.uf or '').strip():
+                    processo.uf = uf
+                    update_fields.append('uf')
+                if carteira and carteira.id and not processo.carteira_id:
+                    processo.carteira = carteira
+                    update_fields.append('carteira')
+                if update_fields:
+                    processo.save(update_fields=update_fields)
+                    changed = True
+                if self._ensure_carteira_link(processo, carteira):
+                    changed = True
+                if self._ensure_numero_cnj_entry(processo, cnj_digits, carteira):
+                    changed = True
+                if changed:
+                    if etiqueta:
+                        processo.etiquetas.add(etiqueta)
+                    result["imported"] += 1
+                    result["minimal_linked"] += 1
+                else:
+                    result["skipped"] += 1
+                continue
+
+            processo = ProcessoJudicial.objects.create(
+                cnj=formatted_cnj,
+                uf=uf,
+                carteira=carteira if carteira and carteira.id else None,
+            )
+            self._ensure_carteira_link(processo, carteira)
+            self._ensure_numero_cnj_entry(processo, cnj_digits, carteira)
+            if etiqueta:
+                processo.etiquetas.add(etiqueta)
+            result["imported"] += 1
+            result["minimal_created"] += 1
+
+        return result
 
     def _find_existing_processo(self, cpf: str, carteira: Optional[Carteira]) -> Optional[ProcessoJudicial]:
         cpf_digits = _normalize_digits(cpf)
@@ -517,30 +916,7 @@ class DemandasImportService:
             cursor.execute(sql, [list(cpfs), data_de, data_ate])
             rows = cursor.fetchall()
             column_names = [desc[0] for desc in cursor.description]
-
-        contracts = []
-        for row in rows:
-            mapped = dict(zip(column_names, row))
-            cpf_value = (mapped.get("cpf_cgc") or "").strip()
-            mapped["cpf"] = cpf_value
-            uf = (mapped.get("endereco_uf") or '').strip().upper()
-            cep = _format_cep(mapped.get("endereco_cep"))
-            endereco_map = {
-                "A": _clean_street_name(mapped.get("endereco_rua"), mapped.get("endereco_numero")),
-                "B": mapped.get("endereco_numero") or '',
-                "C": mapped.get("endereco_complemento") or '',
-                "D": mapped.get("endereco_bairro") or '',
-                "E": mapped.get("endereco_cidade") or '',
-                "F": _uf_to_nome(uf),
-                "G": cep,
-                "H": uf,
-            }
-            mapped["endereco"] = _montar_texto_endereco(endereco_map)
-            mapped["telefone"] = _build_telefone(mapped)
-            mapped["contato_tipo_pessoa"] = _determine_tipo_pessoa(mapped["cpf"])
-            mapped["valor_aberto"] = Decimal(mapped.get("valor_aberto") or 0)
-            contracts.append(mapped)
-        return contracts
+        return self._map_contract_rows(rows, column_names)
 
     def _fetch_contracts_by_cpf(self, cpfs: Iterable[str]) -> List[Dict]:
         sql = """
@@ -572,8 +948,59 @@ class DemandasImportService:
             cursor.execute(sql, [list(cpfs)])
             rows = cursor.fetchall()
             column_names = [desc[0] for desc in cursor.description]
+        return self._map_contract_rows(rows, column_names)
 
-        contracts = []
+    def _fetch_contracts_by_cpf_or_cnj(self, cpfs: Iterable[str], cnjs: Iterable[str]) -> List[Dict]:
+        cpf_values = [cpf for cpf in cpfs if cpf]
+        cnj_values = [_normalize_cnj_lookup(cnj) for cnj in cnjs if _normalize_cnj_lookup(cnj)]
+        if not cpf_values and not cnj_values:
+            return []
+
+        clauses: List[str] = []
+        params: List[object] = []
+        if cpf_values:
+            clauses.append("c.cpf_cgc = ANY(%s)")
+            params.append(cpf_values)
+        if cnj_values:
+            clauses.append(
+                "NULLIF(regexp_replace(COALESCE(c.num_processo_jud, ''), '\\D', '', 'g'), '') IS NOT NULL "
+                "AND RIGHT(LPAD(regexp_replace(COALESCE(c.num_processo_jud, ''), '\\D', '', 'g'), 20, '0'), 20) = ANY(%s)"
+            )
+            params.append(cnj_values)
+
+        sql = f"""
+            SELECT
+                c.id,
+                c.contrato,
+                c.cpf_cgc,
+                COALESCE(c.valor_aberto, 0) as valor_aberto,
+                c.data_prescricao,
+                COALESCE(c.uf, '') as uf,
+                COALESCE(c.loja_nome, c.loja, '') as loja_nome,
+                COALESCE(c.num_processo_jud, '') as num_processo_jud,
+                COALESCE(cl.nome, '') as cliente_nome,
+                cl.endereco_rua,
+                cl.endereco_numero,
+                cl.endereco_complemento,
+                cl.endereco_bairro,
+                cl.endereco_cidade,
+                cl.endereco_uf,
+                cl.endereco_cep,
+                cl.telefone_ddd,
+                cl.telefone_numero
+            FROM b6_erp_contratos c
+            LEFT JOIN b6_erp_clientes cl ON cl.cpf_cgc = c.cpf_cgc
+            WHERE {" OR ".join(clauses)}
+            ORDER BY c.cpf_cgc, c.data_prescricao
+        """
+        with connections[self.db_alias].cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            column_names = [desc[0] for desc in cursor.description]
+        return self._map_contract_rows(rows, column_names)
+
+    def _map_contract_rows(self, rows: List[Tuple], column_names: List[str]) -> List[Dict]:
+        contracts: List[Dict] = []
         for row in rows:
             mapped = dict(zip(column_names, row))
             cpf_value = (mapped.get("cpf_cgc") or "").strip()
@@ -596,6 +1023,16 @@ class DemandasImportService:
             mapped["valor_aberto"] = Decimal(mapped.get("valor_aberto") or 0)
             contracts.append(mapped)
         return contracts
+
+    def _hydrate_contracts_with_parcelas(self, contratos: List[Dict]) -> List[Dict]:
+        if not contratos:
+            return contratos
+        contrato_ids = [c["id"] for c in contratos if c.get("id")]
+        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
+        for row in contratos:
+            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
+            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+        return contratos
 
     def _fetch_parcelas_em_aberto(self, contrato_ids: List[int]) -> Dict[int, Dict[str, Decimal]]:
         if not contrato_ids:
@@ -642,11 +1079,7 @@ class DemandasImportService:
             raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
         if not contratos:
             return {}
-        contrato_ids = [c["id"] for c in contratos if c.get("id")]
-        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
-        for row in contratos:
-            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
-            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+        contratos = self._hydrate_contracts_with_parcelas(contratos)
 
         primeiro = contratos[0]
         nome = primeiro.get("cliente_nome") or "Cliente sem nome"
@@ -692,38 +1125,10 @@ class DemandasImportService:
             raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
         if not contratos:
             return [], Decimal('0')
-        contrato_ids = [c["id"] for c in contratos if c.get("id")]
-        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
-        for row in contratos:
-            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
-            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+        contratos = self._hydrate_contracts_with_parcelas(contratos)
 
         grouped = self._group_contracts_by_cpf(contratos)
-        rows = []
-        total_aberto_sum = Decimal('0')
-        for cpf, contracts in grouped.items():
-            nome = next((c.get('cliente_nome') for c in contracts if c.get('cliente_nome')), 'Cliente sem nome')
-            total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)
-            prescricao_dates = [c['data_prescricao'] for c in contracts if c.get('data_prescricao')]
-            prescricao_text = prescricao_dates[0].strftime('%d/%m/%Y') if prescricao_dates else ''
-            total_aberto_sum += total_aberto
-            cpf_normalized = _normalize_digits(cpf)
-            uf_endereco = ''
-            for contract in contracts:
-                uf_candidate = (contract.get('endereco_uf') or '').strip().upper()
-                if uf_candidate:
-                    uf_endereco = uf_candidate
-                    break
-            rows.append({
-                "cpf": _format_cpf(cpf),
-                "cpf_raw": cpf_normalized,
-                "nome": nome,
-                "contratos": len(contracts),
-                "total_aberto": _format_currency(total_aberto),
-                "prescricao_ativadora": prescricao_text,
-                "uf_endereco": uf_endereco,
-            })
-        return rows, total_aberto_sum
+        return self._build_preview_rows(grouped)
 
     def import_cpfs(self, cpfs: Iterable[str], etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
         normalized = [_normalize_digits(cpf) for cpf in cpfs if _normalize_digits(cpf)]
@@ -741,13 +1146,90 @@ class DemandasImportService:
             raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
         if not contratos:
             return {"imported": 0, "skipped": 0}
-        contrato_ids = [c["id"] for c in contratos if c.get("id")]
-        parcelas_map = self._fetch_parcelas_em_aberto(contrato_ids)
-        for row in contratos:
-            row["parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("parcelas", 0)
-            row["valor_parcelas_aberto"] = parcelas_map.get(row.get("id"), {}).get("valor", Decimal('0'))
+        contratos = self._hydrate_contracts_with_parcelas(contratos)
         grouped = self._group_contracts_by_cpf(contratos)
-        return self._apply_import(grouped, etiqueta_nome, carteira)
+        return self._apply_import(
+            grouped,
+            etiqueta_nome,
+            carteira,
+            apply_litis_sim_label=True,
+        )
+
+    def import_identifiers(
+        self,
+        identifiers: Optional[Iterable[str] | str],
+        etiqueta_nome: str,
+        carteira: Optional[Carteira] = None,
+        *,
+        link_only_existing: bool = True,
+        allow_minimal_missing_cnjs: bool = False,
+        allowed_ufs: Optional[Iterable[str]] = None,
+    ) -> Dict[str, int]:
+        parsed = self.parse_batch_identifiers(identifiers)
+        cpfs = list(parsed["cpfs"])
+        cnjs = list(parsed["cnjs"])
+        if allowed_ufs:
+            allowed = {str(uf or '').strip().upper() for uf in allowed_ufs if str(uf or '').strip()}
+            if allowed:
+                cnjs = [
+                    cnj for cnj in cnjs
+                    if (_extract_uf_from_cnj_like(cnj) or 'SEM_UF') in allowed
+                ]
+                # CPF não carrega UF no token; só mantém quando seleção inclui SEM_UF.
+                if 'SEM_UF' not in allowed:
+                    cpfs = []
+
+        result = {
+            "imported": 0,
+            "skipped": 0,
+            "minimal_created": 0,
+            "minimal_linked": 0,
+        }
+        if not cpfs and not cnjs:
+            return result
+        if not self.has_carteira_connection:
+            raise DemandasImportError(
+                f"Carteira configurada com a fonte '{self.db_alias}' não está disponível. "
+                "Verifique a configuração em DATABASES."
+            )
+        try:
+            contratos = self._fetch_contracts_by_cpf_or_cnj(cpfs, cnjs)
+        except OperationalError as exc:
+            logger.exception("Falha ao buscar contratos por CNJ/CPF na base da carteira")
+            raise DemandasImportError("Não foi possível carregar os contratos da carteira.") from exc
+
+        matched_cnjs = set()
+        if contratos:
+            contratos = self._hydrate_contracts_with_parcelas(contratos)
+            grouped = self._group_contracts_by_cpf(contratos)
+            base_result = self._apply_import(
+                grouped,
+                etiqueta_nome,
+                carteira,
+                link_only_existing=link_only_existing,
+                apply_litis_sim_label=bool(cpfs) and not bool(cnjs),
+            )
+            result["imported"] += int(base_result.get("imported") or 0)
+            result["skipped"] += int(base_result.get("skipped") or 0)
+        matched_cnjs = {
+            _normalize_cnj_lookup(item.get("num_processo_jud"))
+            for item in contratos
+            if _normalize_cnj_lookup(item.get("num_processo_jud"))
+        }
+
+        if allow_minimal_missing_cnjs and cnjs:
+            missing_cnjs = [cnj for cnj in cnjs if _normalize_cnj_digits(cnj) not in matched_cnjs]
+            minimal_result = self._import_minimal_cnjs(
+                missing_cnjs,
+                carteira=carteira,
+                etiqueta_nome=etiqueta_nome,
+            )
+            result["imported"] += int(minimal_result.get("imported") or 0)
+            result["skipped"] += int(minimal_result.get("skipped") or 0)
+            result["minimal_created"] += int(minimal_result.get("minimal_created") or 0)
+            result["minimal_linked"] += int(minimal_result.get("minimal_linked") or 0)
+
+        return result
 
     def _build_processo(self, cpf: str, contracts: List[Dict], carteira: Optional[Carteira] = None) -> ProcessoJudicial:
         total_aberto = sum((c.get('valor_aberto') or Decimal('0')) for c in contracts)

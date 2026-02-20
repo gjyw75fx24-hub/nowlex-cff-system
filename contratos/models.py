@@ -745,6 +745,47 @@ class TarefaLote(models.Model):
         verbose_name_plural = "Lotes de Tarefas"
         ordering = ['-criado_em']
 
+
+class DemandaAnaliseLoteSalvo(models.Model):
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='demandas_lotes_salvos',
+        verbose_name='Usuário',
+    )
+    nome = models.CharField(max_length=120, verbose_name='Nome do lote')
+    carteira = models.ForeignKey(
+        Carteira,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='demandas_lotes_salvos',
+        verbose_name='Carteira sugerida',
+    )
+    identificadores = models.TextField(verbose_name='CNJs/CPFs')
+    ultimo_importado_em = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Última importação',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
+
+    class Meta:
+        verbose_name = 'Lote salvo de demandas'
+        verbose_name_plural = 'Lotes salvos de demandas'
+        ordering = ['-atualizado_em', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['usuario', 'nome'],
+                name='uniq_demandas_lote_salvo_usuario_nome',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.nome} ({self.usuario})'
+
+
 class Tarefa(models.Model):
     PRIORIDADE_CHOICES = [
         ('B', 'Baixa'),

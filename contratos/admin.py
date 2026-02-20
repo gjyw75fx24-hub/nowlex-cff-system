@@ -25,6 +25,7 @@ from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
 from django.db.utils import IntegrityError, OperationalError, ProgrammingError
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
-    Carteira, CarteiraUsuarioAcesso, Contrato, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
+    Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     Parte, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
@@ -49,7 +50,12 @@ from .models import (
 from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .widgets import EnderecoWidget
 from .forms import DemandasAnaliseForm, DemandasAnalisePlanilhaForm
-from .services.demandas import DemandasImportError, DemandasImportService, _format_currency, _format_cpf
+from .services.demandas import (
+    DemandasImportError,
+    DemandasImportService,
+    _format_currency,
+    _format_cpf,
+)
 from .services.peticao_combo import build_preview, generate_zip, PreviewError
 from .services.online_presence import (
     TOKEN_SALT as ONLINE_PRESENCE_TOKEN_SALT,
@@ -971,54 +977,563 @@ def demandas_analise_view(request):
         messages.error(request, "Acesso restrito a supervisores.")
         return HttpResponseRedirect(reverse('admin:index'))
 
-    form = DemandasAnaliseForm(request.POST or None)
+    lote_session_key = f"demandas_analise_lote_state_{request.user.id}"
+    lote_selected_session_key = f"demandas_analise_lote_saved_id_{request.user.id}"
+    saved_lote_state = request.session.get(lote_session_key, {}) if request.method != 'POST' else {}
+    saved_lotes = list(
+        DemandaAnaliseLoteSalvo.objects.filter(usuario=request.user)
+        .select_related('carteira')
+        .order_by('nome')
+    )
+    saved_lotes_by_id = {str(item.id): item for item in saved_lotes}
+    if request.method == 'POST':
+        form = DemandasAnaliseForm(request.POST or None)
+    else:
+        form = DemandasAnaliseForm(initial={
+            "modo_busca": saved_lote_state.get("modo_busca") or DemandasAnaliseForm.MODO_PERIODO,
+            "lote_identificadores": saved_lote_state.get("lote_identificadores") or "",
+            "carteira": saved_lote_state.get("carteira_id"),
+        })
+
     preview_rows = []
     period_label = ""
+    selected_saved_lote_id = (
+        str(
+            (request.POST.get('lote_salvo_id') if request.method == 'POST' else request.session.get(lote_selected_session_key))
+            or ''
+        ).strip()
+    )
+    lote_salvo_nome = (request.POST.get('lote_salvo_nome') or '').strip() if request.method == 'POST' else ''
+    if not lote_salvo_nome and selected_saved_lote_id in saved_lotes_by_id:
+        lote_salvo_nome = saved_lotes_by_id[selected_saved_lote_id].nome
+    selected_mode = (
+        request.POST.get('modo_busca')
+        or saved_lote_state.get("modo_busca")
+        or DemandasAnaliseForm.MODO_PERIODO
+    ).strip()
     preview_ready = False
     preview_total_label = _format_currency(Decimal('0'))
-    import_action = request.POST.get('import_action')
+    import_action = (request.POST.get('import_action') or request.POST.get('action_override') or '').strip()
     selected_cpfs = request.POST.getlist('selected_cpfs')
+    selected_ufs = [str(uf or '').strip().upper() for uf in request.POST.getlist('selected_ufs') if str(uf or '').strip()]
+    preview_parse_meta = {}
+    preview_uf_totals = []
+    preview_uf_options = []
+    preview_uf_summary_total = 0
+    preview_uf_summary_title = "Quantidade por UF (cadastros encontrados)"
+    preview_uf_unmapped_count = 0
+    preview_uf_explainer = ""
+    import_feedback_text = ""
+    import_feedback_level = ""
     preview_hint = (
-        "Use o intervalo de prescrições para identificar CPFs elegíveis. "
-        "Após implementar a importação em lote, esta lista mostrará os cadastros encontrados."
+        "Use o intervalo de prescrições para identificar CPFs elegíveis e revisar os cadastros "
+        "antes de confirmar a importação."
     )
+    form_is_valid = False
+
+    def _normalize_preview_uf(value: Optional[str]) -> str:
+        uf = (value or '').strip().upper()
+        return uf or 'SEM_UF'
+
+    def _get_imported_cpfs_for_carteira(rows, carteira_obj):
+        if not carteira_obj or not carteira_obj.id or not rows:
+            return set()
+        cpf_values = sorted({
+            str(row.get("cpf_raw") or "").strip()
+            for row in rows
+            if str(row.get("cpf_raw") or "").strip()
+        })
+        if not cpf_values:
+            return set()
+        queryset = (
+            Parte.objects.filter(tipo_polo='PASSIVO')
+            .filter(
+                Q(processo__carteira_id=carteira_obj.id)
+                | Q(processo__carteiras_vinculadas__id=carteira_obj.id)
+            )
+            .annotate(
+                documento_digits=RawSQL(
+                    "regexp_replace(COALESCE(documento, ''), '\\D', '', 'g')",
+                    []
+                )
+            )
+            .filter(documento_digits__in=cpf_values)
+            .values_list('documento_digits', flat=True)
+            .distinct()
+        )
+        return set(queryset)
+
+    def _sort_preview_rows_by_uf(rows):
+        return sorted(
+            rows,
+            key=lambda row: (
+                _normalize_preview_uf(row.get('uf_endereco')) == 'SEM_UF',
+                _normalize_preview_uf(row.get('uf_endereco')),
+                (row.get('cpf_raw') or row.get('cpf') or ''),
+            )
+        )
+
+    def _build_preview_uf_totals(rows):
+        counts = {}
+        for row in rows:
+            uf = _normalize_preview_uf(row.get('uf_endereco'))
+            counts[uf] = counts.get(uf, 0) + 1
+        ordered = sorted(
+            counts.items(),
+            key=lambda item: (
+                item[0] == 'SEM_UF',
+                item[0],
+            )
+        )
+        return [{"uf": uf, "total": total} for uf, total in ordered]
+
+    def _build_preview_uf_options(rows, imported_cpfs):
+        grouped = {}
+        for row in rows:
+            uf = _normalize_preview_uf(row.get('uf_endereco'))
+            cpf = str(row.get('cpf_raw') or '').strip()
+            is_imported = cpf in imported_cpfs if cpf else False
+            row['already_imported'] = is_imported
+            if uf not in grouped:
+                grouped[uf] = {
+                    "uf": uf,
+                    "total": 0,
+                    "imported": 0,
+                    "pending": 0,
+                    "disabled": False,
+                }
+            grouped[uf]["total"] += 1
+            if is_imported:
+                grouped[uf]["imported"] += 1
+            else:
+                grouped[uf]["pending"] += 1
+        ordered = sorted(
+            grouped.values(),
+            key=lambda item: (item["uf"] == 'SEM_UF', item["uf"])
+        )
+        for item in ordered:
+            item["disabled"] = item["pending"] == 0
+        return ordered
+
+    def _get_imported_cnjs_for_carteira(valid_cnjs, carteira_obj):
+        if not carteira_obj or not carteira_obj.id:
+            return set()
+        normalized_cnjs = sorted({
+            str(cnj or "").strip()
+            for cnj in (valid_cnjs or [])
+            if str(cnj or "").strip()
+        })
+        if not normalized_cnjs:
+            return set()
+
+        processos_match = (
+            ProcessoJudicial.objects
+            .annotate(
+                cnj_digits=RawSQL(
+                    "RIGHT(LPAD(regexp_replace(COALESCE(\"contratos_processojudicial\".\"cnj\", ''), '\\D', '', 'g'), 20, '0'), 20)",
+                    [],
+                )
+            )
+            .filter(cnj_digits__in=normalized_cnjs)
+            .filter(
+                Q(carteira_id=carteira_obj.id)
+                | Q(carteiras_vinculadas__id=carteira_obj.id)
+            )
+            .values_list('cnj_digits', flat=True)
+            .distinct()
+        )
+        numeros_match = (
+            ProcessoJudicialNumeroCnj.objects
+            .annotate(
+                cnj_digits=RawSQL(
+                    "RIGHT(LPAD(regexp_replace(COALESCE(\"contratos_processojudicialnumerocnj\".\"cnj\", ''), '\\D', '', 'g'), 20, '0'), 20)",
+                    [],
+                )
+            )
+            .filter(cnj_digits__in=normalized_cnjs)
+            .filter(
+                Q(carteira_id=carteira_obj.id)
+                | Q(processo__carteira_id=carteira_obj.id)
+                | Q(processo__carteiras_vinculadas__id=carteira_obj.id)
+            )
+            .values_list('cnj_digits', flat=True)
+            .distinct()
+        )
+        return set(processos_match).union(set(numeros_match))
+
+    def _build_preview_uf_options_from_input(uf_totals, valid_uf_totals, valid_cnjs_by_uf, carteira_obj):
+        valid_map = {
+            str(item.get("uf") or "SEM_UF"): int(item.get("total") or 0)
+            for item in (valid_uf_totals or [])
+        }
+        all_valid_cnjs = []
+        for cnj_list in (valid_cnjs_by_uf or {}).values():
+            all_valid_cnjs.extend(list(cnj_list or []))
+        imported_cnjs = _get_imported_cnjs_for_carteira(all_valid_cnjs, carteira_obj)
+
+        ordered = sorted(
+            uf_totals,
+            key=lambda item: (str(item.get("uf") or "") == 'SEM_UF', str(item.get("uf") or ""))
+        )
+        options = []
+        for item in ordered:
+            uf = str(item.get("uf") or "SEM_UF")
+            total = int(item.get("total") or 0)
+            valid_total = int(valid_map.get(uf, 0))
+            uf_valid_cnjs = list((valid_cnjs_by_uf or {}).get(uf, []) or [])
+            imported_total = sum(1 for cnj in uf_valid_cnjs if str(cnj or "").strip() in imported_cnjs)
+            pending_total = max(0, valid_total - imported_total)
+            options.append({
+                "uf": uf,
+                "total": total,
+                "imported": imported_total,
+                "pending": pending_total,
+                "valid_total": valid_total,
+                "disabled": pending_total == 0,
+            })
+        return options
+
+    def _get_saved_lote_by_id(raw_id: Optional[str]) -> Optional[DemandaAnaliseLoteSalvo]:
+        lote_id = str(raw_id or '').strip()
+        if not lote_id:
+            return None
+        if lote_id in saved_lotes_by_id:
+            return saved_lotes_by_id[lote_id]
+        try:
+            lote_pk = int(lote_id)
+        except (TypeError, ValueError):
+            return None
+        return (
+            DemandaAnaliseLoteSalvo.objects
+            .filter(usuario=request.user, id=lote_pk)
+            .select_related('carteira')
+            .first()
+        )
+
+    def _resolve_carteira_from_post() -> Optional[Carteira]:
+        raw_id = str(request.POST.get('carteira') or '').strip()
+        if not raw_id:
+            return None
+        try:
+            carteira_id = int(raw_id)
+        except (TypeError, ValueError):
+            return None
+        return Carteira.objects.filter(id=carteira_id).first()
+
+    if request.method == 'POST' and (
+        selected_mode == DemandasAnaliseForm.MODO_LOTE
+        or import_action in {"save_lote", "load_lote", "delete_lote"}
+    ):
+        if selected_saved_lote_id:
+            try:
+                request.session[lote_selected_session_key] = int(selected_saved_lote_id)
+            except (TypeError, ValueError):
+                request.session.pop(lote_selected_session_key, None)
+        else:
+            request.session.pop(lote_selected_session_key, None)
+
+    if request.method == 'POST' and import_action in {"save_lote", "load_lote", "delete_lote"}:
+        lote_obj = _get_saved_lote_by_id(selected_saved_lote_id)
+        identifiers_text_post = (request.POST.get('lote_identificadores') or '').strip()
+        carteira_post = _resolve_carteira_from_post()
+
+        if import_action == "save_lote":
+            if (request.POST.get('modo_busca') or '').strip() != DemandasAnaliseForm.MODO_LOTE:
+                messages.warning(request, "A lista salva está disponível apenas no modo CNJ/CPF (lote).")
+            elif not lote_salvo_nome:
+                messages.warning(request, "Informe um nome para salvar a lista.")
+            elif not identifiers_text_post:
+                messages.warning(request, "Informe ao menos um CNJ/CPF para salvar a lista.")
+            else:
+                created = False
+                if lote_obj and lote_obj.nome == lote_salvo_nome:
+                    lote_to_save = lote_obj
+                else:
+                    lote_to_save = (
+                        DemandaAnaliseLoteSalvo.objects
+                        .filter(usuario=request.user, nome=lote_salvo_nome)
+                        .first()
+                    )
+                    if not lote_to_save:
+                        lote_to_save = DemandaAnaliseLoteSalvo(usuario=request.user, nome=lote_salvo_nome)
+                        created = True
+                lote_to_save.identificadores = identifiers_text_post
+                lote_to_save.carteira = carteira_post
+                lote_to_save.save()
+                request.session[lote_selected_session_key] = lote_to_save.id
+                request.session[lote_session_key] = {
+                    "modo_busca": DemandasAnaliseForm.MODO_LOTE,
+                    "lote_identificadores": identifiers_text_post,
+                    "carteira_id": carteira_post.id if carteira_post and carteira_post.id else None,
+                }
+                if created:
+                    messages.success(request, f"Lista '{lote_to_save.nome}' salva com sucesso.")
+                else:
+                    messages.success(request, f"Lista '{lote_to_save.nome}' atualizada com sucesso.")
+
+        elif import_action == "load_lote":
+            if not lote_obj:
+                messages.warning(request, "Selecione uma lista salva para carregar.")
+            else:
+                request.session[lote_selected_session_key] = lote_obj.id
+                request.session[lote_session_key] = {
+                    "modo_busca": DemandasAnaliseForm.MODO_LOTE,
+                    "lote_identificadores": lote_obj.identificadores or "",
+                    "carteira_id": lote_obj.carteira_id,
+                }
+                messages.success(request, f"Lista '{lote_obj.nome}' carregada.")
+
+        elif import_action == "delete_lote":
+            if not lote_obj:
+                messages.warning(request, "Selecione uma lista salva para excluir.")
+            else:
+                deleted_name = lote_obj.nome
+                current_state = request.session.get(lote_session_key) or {}
+                current_identifiers = str(current_state.get("lote_identificadores") or "").strip()
+                current_carteira_id = current_state.get("carteira_id")
+                lote_identifiers = str(lote_obj.identificadores or "").strip()
+                lote_carteira_id = lote_obj.carteira_id
+                lote_obj.delete()
+                request.session.pop(lote_selected_session_key, None)
+                if current_identifiers == lote_identifiers and current_carteira_id == lote_carteira_id:
+                    request.session.pop(lote_session_key, None)
+                messages.success(request, f"Lista '{deleted_name}' excluída.")
+
+        return HttpResponseRedirect(reverse('admin:contratos_demandas_analise'))
+
     if form.is_valid():
+        form_is_valid = True
         carteira = form.cleaned_data['carteira']
         alias = (carteira.fonte_alias or '').strip() or DemandasImportService.SOURCE_ALIAS
         preview_service = DemandasImportService(db_alias=alias)
-        data_de = form.cleaned_data['data_de']
-        data_ate = form.cleaned_data['data_ate']
-        period_label = preview_service.build_period_label(data_de, data_ate)
-        try:
-            preview_rows, preview_total = preview_service.build_preview(data_de, data_ate)
-            preview_total_label = _format_currency(preview_total)
-            preview_ready = True
-            if import_action in ("import_all", "import_selected"):
-                etiqueta_nome = preview_service.build_etiqueta_nome(carteira, period_label)
-                import_result = None
-                if import_action == "import_selected":
-                    filtered_cpfs = [cpf for cpf in selected_cpfs if cpf]
-                    if not filtered_cpfs:
-                        messages.warning(request, "Selecione pelo menos um CPF para importar.")
-                    else:
-                        import_result = preview_service.import_selected_cpfs(
-                            data_de, data_ate, filtered_cpfs, etiqueta_nome, carteira
-                        )
-                else:
-                    import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome, carteira)
+        selected_mode = form.cleaned_data.get('modo_busca') or DemandasAnaliseForm.MODO_PERIODO
 
-                if import_result:
-                    summary = []
-                    if import_result.get("imported"):
-                        summary.append(f"{import_result['imported']} importados")
-                    if import_result.get("skipped"):
-                        summary.append(f"{import_result['skipped']} ignorados")
-                    if summary:
-                        messages.success(request, "Importação concluída: " + ", ".join(summary))
+        try:
+            if selected_mode == DemandasAnaliseForm.MODO_LOTE:
+                identifiers_text = (form.cleaned_data.get('lote_identificadores') or '').strip()
+                period_label = "CNJ/CPF (lote)"
+                preview_hint = (
+                    "Use CNJ ou CPF (com/sem formatação). Se o cadastro já existir em outra carteira, "
+                    "a importação apenas vincula a nova carteira indicada."
+                )
+                if identifiers_text:
+                    request.session[lote_session_key] = {
+                        "modo_busca": DemandasAnaliseForm.MODO_LOTE,
+                        "lote_identificadores": identifiers_text,
+                        "carteira_id": carteira.id if carteira and carteira.id else None,
+                    }
+                preview_rows, preview_total, preview_parse_meta = preview_service.build_preview_for_identifiers(
+                    identifiers_text
+                )
+                preview_total_label = _format_currency(preview_total)
+                preview_ready = True
+                imported_cpfs_for_preview = _get_imported_cpfs_for_carteira(preview_rows, carteira)
+                for row in preview_rows:
+                    cpf_raw = str(row.get('cpf_raw') or '').strip()
+                    row['already_imported'] = cpf_raw in imported_cpfs_for_preview if cpf_raw else False
+
+                invalid_tokens = preview_parse_meta.get("invalid_tokens") or []
+                if invalid_tokens and import_action == "preview":
+                    sample = ", ".join(invalid_tokens[:5])
+                    suffix = "..." if len(invalid_tokens) > 5 else ""
+                    messages.warning(
+                        request,
+                        f"Foram ignorados {len(invalid_tokens)} item(ns) inválidos no lote: {sample}{suffix}",
+                    )
+
+                if import_action in ("import_all", "import_selected"):
+                    etiqueta_nome = preview_service.build_etiqueta_nome(carteira, period_label)
+                    import_result = None
+                    import_scope_label = ""
+                    if import_action == "import_selected":
+                        filtered_cpfs = [cpf for cpf in selected_cpfs if cpf]
+                        selected_ufs_set = {uf for uf in selected_ufs if uf}
+                        selected_cnjs = []
+                        if not filtered_cpfs and selected_ufs and preview_rows:
+                            filtered_cpfs = sorted({
+                                str(row.get('cpf_raw') or '').strip()
+                                for row in preview_rows
+                                if str(row.get('cpf_raw') or '').strip()
+                                and _normalize_preview_uf(row.get('uf_endereco')) in selected_ufs_set
+                                and not bool(row.get('already_imported'))
+                            })
+                            if filtered_cpfs and selected_ufs_set:
+                                import_scope_label = "UFs: " + ", ".join(sorted(selected_ufs_set))
+                        if not filtered_cpfs and selected_ufs_set:
+                            valid_cnjs_by_uf = preview_parse_meta.get("valid_cnjs_by_uf") or {}
+                            selected_cnjs = sorted({
+                                str(cnj or "").strip()
+                                for uf in selected_ufs_set
+                                for cnj in (valid_cnjs_by_uf.get(uf) or [])
+                                if str(cnj or "").strip()
+                            })
+                            if selected_cnjs and not import_scope_label:
+                                import_scope_label = "UFs: " + ", ".join(sorted(selected_ufs_set))
+                        if not filtered_cpfs:
+                            if selected_cnjs:
+                                import_result = preview_service.import_identifiers(
+                                    selected_cnjs,
+                                    etiqueta_nome,
+                                    carteira,
+                                    link_only_existing=True,
+                                    allow_minimal_missing_cnjs=False,
+                                    allowed_ufs=selected_ufs_set or None,
+                                )
+                            elif selected_ufs and not preview_rows:
+                                if selected_ufs_set:
+                                    import_scope_label = "UFs: " + ", ".join(sorted(selected_ufs_set))
+                                import_result = preview_service.import_identifiers(
+                                    identifiers_text,
+                                    etiqueta_nome,
+                                    carteira,
+                                    link_only_existing=True,
+                                    allow_minimal_missing_cnjs=False,
+                                    allowed_ufs=selected_ufs_set,
+                                )
+                                if not import_result or (
+                                    not int(import_result.get("imported") or 0)
+                                    and not int(import_result.get("minimal_created") or 0)
+                                    and not int(import_result.get("minimal_linked") or 0)
+                                ):
+                                    messages.warning(request, "As UFs selecionadas não possuem CNJ válido (20 dígitos) pendente de importação.")
+                                    import_feedback_text = "As UFs selecionadas não possuem CNJ válido (20 dígitos) pendente de importação."
+                                    import_feedback_level = "warning"
+                            else:
+                                messages.warning(request, "Selecione pelo menos um CPF ou UF com pendência para importar.")
+                                import_feedback_text = "Selecione pelo menos um CPF ou UF com pendência para importar."
+                                import_feedback_level = "warning"
+                        else:
+                            import_result = preview_service.import_identifiers(
+                                filtered_cpfs,
+                                etiqueta_nome,
+                                carteira,
+                                link_only_existing=True,
+                                allow_minimal_missing_cnjs=False,
+                                allowed_ufs=selected_ufs_set or None,
+                            )
                     else:
-                        messages.info(request, "Nenhum CPF foi importado.")
+                        import_result = preview_service.import_identifiers(
+                            identifiers_text,
+                            etiqueta_nome,
+                            carteira,
+                            link_only_existing=True,
+                            allow_minimal_missing_cnjs=False,
+                        )
+
+                    if import_result:
+                        lote_obj_for_import = _get_saved_lote_by_id(selected_saved_lote_id)
+                        if lote_obj_for_import:
+                            lote_obj_for_import.ultimo_importado_em = timezone.now()
+                            lote_obj_for_import.identificadores = identifiers_text
+                            lote_obj_for_import.carteira = carteira
+                            lote_obj_for_import.save()
+                            request.session[lote_selected_session_key] = lote_obj_for_import.id
+                        summary = []
+                        if import_result.get("imported"):
+                            summary.append(f"{import_result['imported']} importados")
+                        if import_result.get("skipped"):
+                            summary.append(f"{import_result['skipped']} ignorados")
+                        minimal_created = int(import_result.get("minimal_created") or 0)
+                        minimal_linked = int(import_result.get("minimal_linked") or 0)
+                        if minimal_created:
+                            summary.append(f"{minimal_created} criados por CNJ")
+                        if minimal_linked:
+                            summary.append(f"{minimal_linked} vinculados por CNJ")
+                        ignored_invalid_count = len(preview_parse_meta.get("invalid_tokens") or [])
+                        if ignored_invalid_count:
+                            summary.append(f"{ignored_invalid_count} inválidos ignorados")
+                        if summary:
+                            if import_scope_label:
+                                messages.success(request, f"Importação concluída ({import_scope_label}): " + ", ".join(summary))
+                                import_feedback_text = f"Importação concluída ({import_scope_label}): " + ", ".join(summary)
+                            else:
+                                messages.success(request, "Importação concluída: " + ", ".join(summary))
+                                import_feedback_text = "Importação concluída: " + ", ".join(summary)
+                            import_feedback_level = "success"
+                        else:
+                            messages.info(request, "Nenhum cadastro foi importado.")
+                            import_feedback_text = "Nenhum cadastro foi importado."
+                            import_feedback_level = "info"
+                    elif import_action in ("import_all", "import_selected") and not import_feedback_text:
+                        messages.info(request, "Nenhum cadastro foi importado.")
+                        import_feedback_text = "Nenhum cadastro foi importado."
+                        import_feedback_level = "info"
+            else:
+                data_de = form.cleaned_data['data_de']
+                data_ate = form.cleaned_data['data_ate']
+                period_label = preview_service.build_period_label(data_de, data_ate)
+                preview_hint = (
+                    "Use o intervalo de prescrições para identificar CPFs elegíveis e revisar os cadastros "
+                    "antes de confirmar a importação."
+                )
+                preview_rows, preview_total = preview_service.build_preview(data_de, data_ate)
+                preview_total_label = _format_currency(preview_total)
+                preview_ready = True
+                if import_action in ("import_all", "import_selected"):
+                    etiqueta_nome = preview_service.build_etiqueta_nome(carteira, period_label)
+                    import_result = None
+                    if import_action == "import_selected":
+                        filtered_cpfs = [cpf for cpf in selected_cpfs if cpf]
+                        if not filtered_cpfs:
+                            messages.warning(request, "Selecione pelo menos um CPF para importar.")
+                        else:
+                            import_result = preview_service.import_selected_cpfs(
+                                data_de, data_ate, filtered_cpfs, etiqueta_nome, carteira
+                            )
+                    else:
+                        import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome, carteira)
+
+                    if import_result:
+                        summary = []
+                        if import_result.get("imported"):
+                            summary.append(f"{import_result['imported']} importados")
+                        if import_result.get("skipped"):
+                            summary.append(f"{import_result['skipped']} ignorados")
+                        if summary:
+                            messages.success(request, "Importação concluída: " + ", ".join(summary))
+                        else:
+                            messages.info(request, "Nenhum CPF foi importado.")
         except DemandasImportError as exc:
             messages.error(request, str(exc))
+
+    if preview_rows:
+        preview_rows = _sort_preview_rows_by_uf(preview_rows)
+        carteira_for_status = form.cleaned_data.get('carteira') if form_is_valid else None
+        imported_cpfs = _get_imported_cpfs_for_carteira(preview_rows, carteira_for_status)
+        preview_uf_options = _build_preview_uf_options(preview_rows, imported_cpfs)
+        preview_uf_totals = _build_preview_uf_totals(preview_rows)
+        preview_uf_summary_total = len(preview_rows)
+    elif selected_mode == DemandasAnaliseForm.MODO_LOTE:
+        parsed_uf_totals = preview_parse_meta.get("input_uf_totals") or []
+        if parsed_uf_totals:
+            preview_uf_totals = parsed_uf_totals
+            carteira_for_options = form.cleaned_data.get('carteira') if form_is_valid else None
+            preview_uf_options = _build_preview_uf_options_from_input(
+                parsed_uf_totals,
+                preview_parse_meta.get("valid_uf_totals") or [],
+                preview_parse_meta.get("valid_cnjs_by_uf") or {},
+                carteira_for_options,
+            )
+            preview_uf_summary_total = int(preview_parse_meta.get("input_uf_total_count") or 0)
+            preview_uf_summary_title = "Quantidade por UF (entradas CNJ do lote)"
+    if selected_mode == DemandasAnaliseForm.MODO_LOTE and preview_parse_meta.get("total_tokens"):
+        preview_uf_unmapped_count = max(
+            0,
+            int(preview_parse_meta.get("total_tokens") or 0) - int(preview_uf_summary_total or 0),
+        )
+        preview_uf_explainer = (
+            "Resumo por UF usa o mapeamento do CNJ (mesma regra do botão Preencher UF). "
+            "Entradas sem estrutura mínima para inferência entram em 'Sem UF inferível'."
+        )
+
+    saved_lotes = list(
+        DemandaAnaliseLoteSalvo.objects.filter(usuario=request.user)
+        .select_related('carteira')
+        .order_by('nome')
+    )
+    saved_lotes_by_id = {str(item.id): item for item in saved_lotes}
+    if not lote_salvo_nome and selected_saved_lote_id in saved_lotes_by_id:
+        lote_salvo_nome = saved_lotes_by_id[selected_saved_lote_id].nome
 
     context = admin.site.each_context(request)
     context.update({
@@ -1027,9 +1542,23 @@ def demandas_analise_view(request):
         "preview_rows": preview_rows,
         "preview_ready": preview_ready,
         "period_label": period_label,
-        "period_label_sample": period_label or "xx/xx/xxxx - xx/xx/xxxx",
+        "period_label_sample": period_label or ("CNJ/CPF (lote)" if selected_mode == DemandasAnaliseForm.MODO_LOTE else "xx/xx/xxxx - xx/xx/xxxx"),
         "preview_total_label": preview_total_label,
         "preview_hint": preview_hint,
+        "preview_parse_meta": preview_parse_meta,
+        "preview_uf_totals": preview_uf_totals,
+        "preview_uf_options": preview_uf_options,
+        "preview_uf_summary_total": preview_uf_summary_total,
+        "preview_uf_summary_title": preview_uf_summary_title,
+        "preview_uf_unmapped_count": preview_uf_unmapped_count,
+        "preview_uf_explainer": preview_uf_explainer,
+        "import_feedback_text": import_feedback_text,
+        "import_feedback_level": import_feedback_level,
+        "selected_ufs": selected_ufs,
+        "selected_mode": selected_mode,
+        "saved_lotes": saved_lotes,
+        "selected_saved_lote_id": selected_saved_lote_id,
+        "lote_salvo_nome": lote_salvo_nome,
     })
     return render(request, "admin/contratos/demandas_analise.html", context)
 
@@ -3574,6 +4103,23 @@ class ProcessoJudicialChangeList(ChangeList):
             if key not in excluded:
                 excluded.append(key)
         return super().get_queryset(request, exclude_parameters=excluded)
+
+    def get_results(self, request):
+        super().get_results(request)
+        # Em contextos filtrados por carteira/KPI/interseção, o "X total"
+        # do Django (full_result_count global) confunde a leitura do usuário.
+        # Forçamos a mesma base do filtro aplicado.
+        scoped_params = (
+            "carteira",
+            "carteira__id__exact",
+            "intersection_carteira_a",
+            "intersection_carteira_b",
+            "kpi_carteira_id",
+            "peticao_carteira_id",
+            "priority_kpi_tag_id",
+        )
+        if any(request.GET.get(param) for param in scoped_params):
+            self.full_result_count = self.result_count
 
 @admin.register(Carteira)
 class CarteiraAdmin(admin.ModelAdmin):

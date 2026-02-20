@@ -50,6 +50,38 @@
             flex-wrap: wrap;
         }
 
+        .demandas-form__mode-switch {
+            display: inline-flex;
+            gap: 0.5rem;
+            margin: 0 0 1rem 0;
+            flex-wrap: wrap;
+        }
+
+        .demandas-mode-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border: 1px solid rgba(15, 58, 118, 0.2);
+            border-radius: 999px;
+            padding: 0.38rem 0.72rem;
+            background: #f8fbff;
+            color: #1f3552;
+            font-size: 0.82rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .demandas-mode-option.is-active {
+            background: #1f6da0;
+            color: #fff;
+            border-color: #1f6da0;
+        }
+
+        .demandas-mode-option input[type="radio"] {
+            margin: 0;
+            accent-color: #1f6da0;
+        }
+
         .demandas-form__row--stacked {
             flex-direction: column;
             margin-top: 1.25rem;
@@ -65,6 +97,49 @@
         .demandas-form__group--wide {
             flex: 1 1 100%;
             max-width: 420px;
+        }
+
+        .demandas-form__group--lote {
+            max-width: 100%;
+        }
+
+        .demandas-form__group--lote textarea {
+            width: 100%;
+            min-height: 140px;
+            resize: vertical;
+        }
+
+        .demandas-saved-lote {
+            border: 1px dashed rgba(15, 58, 118, 0.22);
+            border-radius: 12px;
+            background: #f8fbff;
+            padding: 0.65rem;
+            margin-top: 0.55rem;
+        }
+        .demandas-saved-lote__row {
+            display: flex;
+            gap: 0.45rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .demandas-saved-lote__row + .demandas-saved-lote__row {
+            margin-top: 0.45rem;
+        }
+        .demandas-saved-lote__input {
+            flex: 1 1 260px;
+            min-width: 220px;
+        }
+        .demandas-saved-lote__select {
+            flex: 1 1 320px;
+            min-width: 250px;
+        }
+        .demandas-saved-lote__actions {
+            display: inline-flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+        }
+        .demandas-saved-lote__actions .button {
+            min-width: 102px;
         }
 
         .demandas-form__group label {
@@ -176,11 +251,130 @@
             gap: 0.5rem;
         }
         .checagem-question-uf {
-            margin-left: auto;
             font-size: 0.72rem;
             color: #4c5a6b;
             letter-spacing: 0.05em;
             text-transform: uppercase;
+            font-weight: 700;
+        }
+        .checagem-question-uf--left {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 56px;
+            padding: 0.18rem 0.42rem;
+            border-radius: 999px;
+            background: rgba(15, 58, 118, 0.08);
+            color: #0f3a60;
+        }
+        .demandas-uf-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem 0.7rem;
+            margin-top: 0.35rem;
+        }
+        .demandas-uf-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.28rem;
+            padding: 0.22rem 0.45rem;
+            border: 1px solid rgba(15, 58, 118, 0.18);
+            border-radius: 999px;
+            font-size: 0.74rem;
+            color: #1f3552;
+            background: #f8fbff;
+        }
+        .demandas-uf-option input[type="checkbox"] {
+            margin: 0;
+        }
+        .demandas-uf-option small {
+            color: #52617a;
+            font-size: 0.68rem;
+        }
+        .demandas-uf-option.is-disabled {
+            opacity: 0.55;
+            background: #f2f4f8;
+        }
+        .checagem-question-checkbox.is-disabled {
+            opacity: 0.55;
+        }
+        .demandas-import-feedback {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #c9d7e7;
+            background: #f5f9ff;
+            color: #1f3552;
+            font-size: 0.86rem;
+        }
+        .demandas-import-feedback--success {
+            border-color: #9fd3ad;
+            background: #edf8f0;
+            color: #1f5a2e;
+        }
+        .demandas-import-feedback--warning {
+            border-color: #e7d39f;
+            background: #fff8e8;
+            color: #684d14;
+        }
+        .demandas-import-feedback--info {
+            border-color: #c9d7e7;
+            background: #f5f9ff;
+            color: #1f3552;
+        }
+
+        .demandas-feedback-modal {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            background: rgba(15, 23, 42, 0.38);
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s ease;
+        }
+        .demandas-feedback-modal.is-open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .demandas-feedback-modal__card {
+            width: min(640px, 100%);
+            border-radius: 16px;
+            border: 1px solid #e5d39a;
+            background: #f6edcf;
+            box-shadow: 0 16px 38px rgba(15, 23, 42, 0.25);
+            padding: 1.1rem 1.2rem 1rem;
+        }
+        .demandas-feedback-modal__title {
+            margin: 0 0 0.35rem;
+            font-size: 1.12rem;
+            color: #3a3216;
+            font-weight: 700;
+        }
+        .demandas-feedback-modal__message {
+            margin: 0;
+            color: #3f3420;
+            font-size: 1rem;
+            line-height: 1.45;
+            white-space: pre-line;
+        }
+        .demandas-feedback-modal__actions {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+        .demandas-feedback-modal__ok {
+            border: 1px solid #cda62f;
+            background: #f2c445;
+            color: #3f2f00;
+            border-radius: 12px;
+            padding: 0.38rem 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
         }
     </style>
 {% endblock %}
@@ -195,7 +389,7 @@
                 <div>
                     <h2 class="checagem-modal__title">Demandas P/ Análise</h2>
                     <p class="checagem-modal__subtitle">
-                        Selecione o período para buscar demandas para análise considerando a data de prescrição dos contratos.
+                        Selecione o modo de busca para importar por período de prescrição ou por lote de CNJ/CPF.
                     </p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:flex-start;">
@@ -209,12 +403,23 @@
 
             <form method="post" action="{% url 'admin:contratos_demandas_analise' %}">
                 {% csrf_token %}
+                <input type="hidden" name="action_override" id="demandas_action_override" value="">
                 {% if form.non_field_errors %}
                     <div class="checagem-question">
                         {{ form.non_field_errors }}
                     </div>
                 {% endif %}
-                <div class="demandas-form__row">
+                <div class="demandas-form__mode-switch">
+                    {% for value, label in form.modo_busca.field.choices %}
+                        <label class="demandas-mode-option{% if selected_mode == value %} is-active{% endif %}">
+                            <input type="radio" name="{{ form.modo_busca.html_name }}" value="{{ value }}" {% if selected_mode == value %}checked{% endif %}>
+                            <span>{{ label }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
+                {{ form.modo_busca.errors }}
+
+                <div class="demandas-form__row js-mode-periodo"{% if selected_mode == 'lote' %} style="display:none;"{% endif %}>
                     <div class="demandas-form__group">
                         <label class="demandas-form__label" for="{{ form.data_de.id_for_label }}">{{ form.data_de.label }}</label>
                         {{ form.data_de }}
@@ -224,6 +429,53 @@
                         <label class="demandas-form__label" for="{{ form.data_ate.id_for_label }}">{{ form.data_ate.label }}</label>
                         {{ form.data_ate }}
                         {{ form.data_ate.errors }}
+                    </div>
+                </div>
+                <div class="demandas-form__row js-mode-lote"{% if selected_mode != 'lote' %} style="display:none;"{% endif %}>
+                    <div class="demandas-form__group demandas-form__group--wide demandas-form__group--lote">
+                        <label class="demandas-form__label" for="{{ form.lote_identificadores.id_for_label }}">{{ form.lote_identificadores.label }}</label>
+                        {{ form.lote_identificadores }}
+                        {{ form.lote_identificadores.errors }}
+                        <div class="help">
+                            Cole CNJs e/ou CPFs (com ou sem máscara), separados por linha, vírgula ou ponto e vírgula.
+                        </div>
+                        <div class="help">
+                            Lista salva automaticamente para continuar a importação em etapas.
+                        </div>
+                        <div class="demandas-saved-lote">
+                            <div class="demandas-saved-lote__row">
+                                <input
+                                    type="text"
+                                    class="form-control text-input demandas-saved-lote__input"
+                                    name="lote_salvo_nome"
+                                    value="{{ lote_salvo_nome }}"
+                                    placeholder="Nome da lista salva (ex.: Lote DF - etapa 1)"
+                                >
+                                <div class="demandas-saved-lote__actions">
+                                    <button type="submit" class="button" name="import_action" value="save_lote">
+                                        Salvar lista
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="demandas-saved-lote__row">
+                                <select name="lote_salvo_id" class="form-control demandas-saved-lote__select">
+                                    <option value="">Selecionar lista salva</option>
+                                    {% for lote in saved_lotes %}
+                                        <option value="{{ lote.id }}" {% if selected_saved_lote_id == lote.id|stringformat:'s' %}selected{% endif %}>
+                                            {{ lote.nome }}{% if lote.carteira %} · {{ lote.carteira.nome }}{% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                                <div class="demandas-saved-lote__actions">
+                                    <button type="submit" class="button" name="import_action" value="load_lote" {% if not saved_lotes %}disabled{% endif %}>
+                                        Carregar
+                                    </button>
+                                    <button type="submit" class="button" name="import_action" value="delete_lote" {% if not saved_lotes %}disabled{% endif %}>
+                                        Excluir
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="demandas-form__row demandas-form__row--stacked">
@@ -254,8 +506,27 @@
                             <p class="agenda-checagem-panel__subtitle">Resultados que serão considerados na importação em lote.</p>
                         </div>
                         <div class="agenda-checagem-panel__header-right">
-                            <span class="agenda-checagem-panel__stat">{{ preview_rows|length }} CPFs únicos</span>
+                            <span class="agenda-checagem-panel__stat">
+                                {% if selected_mode == 'lote' %}
+                                    {{ preview_rows|length }} cadastros encontrados
+                                {% else %}
+                                    {{ preview_rows|length }} CPFs únicos
+                                {% endif %}
+                            </span>
                             <span class="agenda-checagem-panel__stat">Valor total: {{ preview_total_label }}</span>
+                            {% if preview_parse_meta.total_tokens %}
+                                <span class="agenda-checagem-panel__stat">
+                                    Entradas: {{ preview_parse_meta.total_tokens }} · Válidas: {{ preview_parse_meta.valid_tokens }} · Inválidas: {{ preview_parse_meta.invalid_tokens|length }}
+                                </span>
+                            {% endif %}
+                            {% if preview_ready and selected_mode == 'lote' and preview_parse_meta.total_tokens %}
+                                <span class="agenda-checagem-panel__stat">
+                                    Válidas por tipo: CNJ {{ preview_parse_meta.valid_cnjs|default:0 }} · CPF {{ preview_parse_meta.valid_cpfs|default:0 }}
+                                </span>
+                                <span class="agenda-checagem-panel__stat">
+                                    Sem correspondência: CNJ {{ preview_parse_meta.missing_cnjs|length }} · CPF {{ preview_parse_meta.missing_cpfs|length }}
+                                </span>
+                            {% endif %}
                             {% if period_label %}
                                 <span class="agenda-checagem-panel__badge">{{ period_label }}</span>
                             {% else %}
@@ -265,11 +536,59 @@
                     </div>
                     <div class="agenda-checagem-panel__body">
                         {% if preview_ready %}
+                            {% if import_feedback_text %}
+                                <div class="demandas-import-feedback demandas-import-feedback--{{ import_feedback_level|default:'info' }}">
+                                    {{ import_feedback_text }}
+                                </div>
+                            {% endif %}
+                            {% if preview_uf_totals %}
+                                <div class="checagem-question" style="margin-bottom: 14px;">
+                                    <div class="checagem-question-title">{{ preview_uf_summary_title }}</div>
+                                    <div class="checagem-question-body">
+                                        <p class="checagem-question-observation" style="margin-top: 6px;">
+                                            <strong>Total geral:</strong> {{ preview_uf_summary_total }}
+                                        </p>
+                                        {% if selected_mode == 'lote' %}
+                                            <p class="checagem-question-observation" style="margin-top: 6px;">
+                                                <strong>Sem UF inferível:</strong> {{ preview_uf_unmapped_count }}
+                                            </p>
+                                            {% if preview_uf_explainer %}
+                                                <p class="checagem-question-observation" style="margin-top: 6px;">
+                                                    {{ preview_uf_explainer }}
+                                                </p>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if preview_uf_options %}
+                                <div class="checagem-question" style="margin-bottom: 12px;">
+                                    <div class="checagem-question-title">Selecionar UFs para importar</div>
+                                    <div class="checagem-question-body">
+                                        <div class="demandas-uf-selector">
+                                            {% for uf_item in preview_uf_options %}
+                                                <label class="demandas-uf-option{% if uf_item.disabled %} is-disabled{% endif %}">
+                                                    <input type="checkbox"
+                                                           name="selected_ufs"
+                                                           value="{{ uf_item.uf }}"
+                                                           {% if uf_item.disabled %}disabled{% endif %}
+                                                           {% if uf_item.uf in selected_ufs and not uf_item.disabled %}checked{% endif %}>
+                                                    <strong>{{ uf_item.uf }}</strong>
+                                                    <small>{{ uf_item.pending }} pend. / {{ uf_item.total }} total</small>
+                                                </label>
+                                            {% endfor %}
+                                        </div>
+                                        <p class="checagem-question-observation" style="margin-top: 8px;">
+                                            UFs sem CNJ válido (20 dígitos) ficam inativas.
+                                        </p>
+                                    </div>
+                                </div>
+                            {% endif %}
                             <div class="agenda-checagem-panel__actions">
-                                <button type="submit" class="button button-primary" name="import_action" value="import_all" {% if not preview_ready %}disabled{% endif %}>
+                                <button type="submit" class="button button-primary" name="import_action" value="import_all" {% if not preview_rows and not preview_parse_meta.valid_tokens %}disabled{% endif %}>
                                     Importar todos
                                 </button>
-                                <button type="submit" class="button" name="import_action" value="import_selected" {% if not preview_ready %}disabled{% endif %}>
+                                <button type="submit" class="button" name="import_action" value="import_selected" {% if not preview_rows and not preview_uf_options %}disabled{% endif %}>
                                     Importar selecionados
                                 </button>
                             </div>
@@ -278,16 +597,19 @@
                                     {% for row in preview_rows %}
                                         <div class="checagem-question">
                                             <div class="checagem-question-top">
-                                                <label class="checagem-question-checkbox">
-                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}">
+                                                <label class="checagem-question-checkbox{% if row.already_imported %} is-disabled{% endif %}">
+                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}" {% if row.already_imported %}disabled{% endif %}>
                                                     <span></span>
                                                 </label>
+                                                <span class="checagem-question-uf checagem-question-uf--left">{{ row.uf_endereco|default:'SEM_UF' }}</span>
                                                 <div class="checagem-question-title">CPF {{ row.cpf }}</div>
-                                                <span class="checagem-question-uf">{{ row.uf_endereco|default:'--' }}</span>
                                             </div>
                                             <div class="checagem-question-body">
                                                 <p class="checagem-question-observation">
                                                     {{ row.nome }} · Contratos: {{ row.contratos }} · Total aberto: {{ row.total_aberto }}
+                                                    {% if row.already_imported %}
+                                                        · <strong>Já importado nesta carteira</strong>
+                                                    {% endif %}
                                                 </p>
                                                 <p class="checagem-question-observation">
                                                     Prescrição ativadora: {{ row.prescricao_ativadora }}
@@ -297,13 +619,50 @@
                                     {% endfor %}
                                 </div>
                             {% else %}
-                                <p class="checagem-question-observation">
-                                    Nenhum CPF retornado ainda. A listagem real será exibida após implementar a importação.
-                                </p>
+                                {% if selected_mode == 'lote' %}
+                                    {% if preview_parse_meta.valid_tokens %}
+                                        <p class="checagem-question-observation">
+                                            Nenhum cadastro foi encontrado para os CNJs/CPFs válidos informados.
+                                        </p>
+                                    {% else %}
+                                        <p class="checagem-question-observation">
+                                            Nenhuma entrada válida foi identificada no lote informado.
+                                        </p>
+                                    {% endif %}
+                                {% else %}
+                                    <p class="checagem-question-observation">
+                                        Nenhum cadastro foi encontrado para o período informado.
+                                    </p>
+                                {% endif %}
+                            {% endif %}
+                            {% if selected_mode == 'lote' and preview_parse_meta.invalid_details %}
+                                <div class="checagem-question" style="margin-top: 14px;">
+                                    <div class="checagem-question-title">Entradas inválidas ({{ preview_parse_meta.invalid_details|length }})</div>
+                                    <div class="checagem-question-body">
+                                        <ul class="checagem-question-observation" style="margin: 0; padding-left: 18px;">
+                                            {% for invalid_item in preview_parse_meta.invalid_details %}
+                                                <li><strong>[{{ invalid_item.uf_guess|default:'SEM_UF' }}]</strong> <strong>{{ invalid_item.token }}</strong> — {{ invalid_item.reason }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            {% if selected_mode == 'lote' and preview_parse_meta.invalid_cnjs %}
+                                <div class="checagem-question" style="margin-top: 10px;">
+                                    <div class="checagem-question-title">CNJs inválidos para tratamento (copiar)</div>
+                                    <div class="checagem-question-body">
+                                        <textarea readonly style="width:100%; min-height:120px;">{% for invalid_cnj in preview_parse_meta.invalid_cnjs %}{{ invalid_cnj }}{% if not forloop.last %}
+{% endif %}{% endfor %}</textarea>
+                                    </div>
+                                </div>
                             {% endif %}
                         {% else %}
                             <p class="checagem-question-observation">
-                                Informe o período desejado e clique em “Buscar cadastros” para ativar a pré-visualização.
+                                {% if selected_mode == 'lote' %}
+                                    Informe os CNJs/CPFs desejados e clique em “Buscar cadastros” para ativar a pré-visualização.
+                                {% else %}
+                                    Informe o período desejado e clique em “Buscar cadastros” para ativar a pré-visualização.
+                                {% endif %}
                             </p>
                         {% endif %}
                         <p class="checagem-footer-hint">
@@ -315,4 +674,184 @@
         </div>
     </div>
 </div>
+<div id="demandasFeedbackModal" class="demandas-feedback-modal" aria-hidden="true">
+    <div class="demandas-feedback-modal__card" role="dialog" aria-modal="true" aria-labelledby="demandasFeedbackModalTitle">
+        <h3 id="demandasFeedbackModalTitle" class="demandas-feedback-modal__title">Aviso</h3>
+        <p id="demandasFeedbackModalMessage" class="demandas-feedback-modal__message"></p>
+        <div class="demandas-feedback-modal__actions">
+            <button type="button" id="demandasFeedbackModalClose" class="demandas-feedback-modal__ok">OK</button>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modeRadios = Array.from(document.querySelectorAll('input[name="{{ form.modo_busca.html_name }}"]'));
+    const periodBlocks = Array.from(document.querySelectorAll('.js-mode-periodo'));
+    const loteBlocks = Array.from(document.querySelectorAll('.js-mode-lote'));
+
+    const applyMode = (mode) => {
+        const isLote = mode === 'lote';
+        periodBlocks.forEach((el) => {
+            el.style.display = isLote ? 'none' : '';
+        });
+        loteBlocks.forEach((el) => {
+            el.style.display = isLote ? '' : 'none';
+        });
+        modeRadios.forEach((radio) => {
+            const label = radio.closest('.demandas-mode-option');
+            if (!label) return;
+            label.classList.toggle('is-active', radio.checked);
+        });
+    };
+
+    modeRadios.forEach((radio) => {
+        radio.addEventListener('change', () => applyMode(radio.value));
+    });
+    const active = modeRadios.find((radio) => radio.checked);
+    applyMode(active ? active.value : 'periodo');
+
+    const demandasForm = document.querySelector('.demandas-card form');
+    const actionOverrideField = document.getElementById('demandas_action_override');
+    const feedbackModal = document.getElementById('demandasFeedbackModal');
+    const feedbackModalTitle = document.getElementById('demandasFeedbackModalTitle');
+    const feedbackModalMessage = document.getElementById('demandasFeedbackModalMessage');
+    const feedbackModalClose = document.getElementById('demandasFeedbackModalClose');
+    const showFeedbackModal = (message, title = 'Aviso') => {
+        if (!feedbackModal || !feedbackModalTitle || !feedbackModalMessage) return;
+        feedbackModalTitle.textContent = title || 'Aviso';
+        feedbackModalMessage.textContent = message || '';
+        feedbackModal.classList.add('is-open');
+        feedbackModal.setAttribute('aria-hidden', 'false');
+        setTimeout(() => {
+            feedbackModalClose?.focus();
+        }, 0);
+    };
+    const hideFeedbackModal = () => {
+        if (!feedbackModal) return;
+        feedbackModal.classList.remove('is-open');
+        feedbackModal.setAttribute('aria-hidden', 'true');
+    };
+    feedbackModalClose?.addEventListener('click', hideFeedbackModal);
+    feedbackModal?.addEventListener('click', (event) => {
+        if (event.target === feedbackModal) {
+            hideFeedbackModal();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && feedbackModal?.classList.contains('is-open')) {
+            hideFeedbackModal();
+        }
+    });
+
+    if (demandasForm) {
+        const actionButtons = Array.from(
+            demandasForm.querySelectorAll('button[type="submit"][name="import_action"]')
+        );
+        const savedNameInput = demandasForm.querySelector('input[name="lote_salvo_nome"]');
+        const savedIdSelect = demandasForm.querySelector('select[name="lote_salvo_id"]');
+        const loteIdentifiersInput = demandasForm.querySelector('textarea[name="lote_identificadores"]');
+        actionButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                if (actionOverrideField) {
+                    actionOverrideField.value = button.value || '';
+                }
+            });
+        });
+
+        let submitting = false;
+        demandasForm.addEventListener('submit', (event) => {
+            if (submitting) {
+                event.preventDefault();
+                return;
+            }
+            const submitter = event.submitter || (
+                document.activeElement instanceof HTMLButtonElement ? document.activeElement : null
+            );
+            const action = (
+                (submitter instanceof HTMLButtonElement ? submitter.value : '')
+                || (actionOverrideField ? actionOverrideField.value : '')
+                || 'preview'
+            );
+            if (actionOverrideField) {
+                actionOverrideField.value = action || '';
+            }
+            if (action === 'save_lote') {
+                const nome = (savedNameInput?.value || '').trim();
+                const conteudo = (loteIdentifiersInput?.value || '').trim();
+                if (!nome) {
+                    event.preventDefault();
+                    showFeedbackModal('Informe o nome da lista para salvar.', 'Lista salva');
+                    return;
+                }
+                if (!conteudo) {
+                    event.preventDefault();
+                    showFeedbackModal('Informe ao menos um CNJ/CPF para salvar a lista.', 'Lista salva');
+                    return;
+                }
+                if (submitter instanceof HTMLButtonElement) {
+                    submitter.textContent = 'Salvando...';
+                }
+            } else if (action === 'load_lote') {
+                const loteId = (savedIdSelect?.value || '').trim();
+                if (!loteId) {
+                    event.preventDefault();
+                    showFeedbackModal('Selecione uma lista salva para carregar.', 'Lista salva');
+                    return;
+                }
+                if (submitter instanceof HTMLButtonElement) {
+                    submitter.textContent = 'Carregando...';
+                }
+            } else if (action === 'delete_lote') {
+                const loteId = (savedIdSelect?.value || '').trim();
+                if (!loteId) {
+                    event.preventDefault();
+                    showFeedbackModal('Selecione uma lista salva para excluir.', 'Lista salva');
+                    return;
+                }
+                if (!window.confirm('Excluir a lista salva selecionada?')) {
+                    event.preventDefault();
+                    return;
+                }
+                if (submitter instanceof HTMLButtonElement) {
+                    submitter.textContent = 'Excluindo...';
+                }
+            } else if (action === 'preview') {
+                if (submitter instanceof HTMLButtonElement) {
+                    submitter.textContent = 'Buscando...';
+                }
+            } else if (action === 'import_all') {
+                if (submitter instanceof HTMLButtonElement) {
+                    submitter.textContent = 'Importando...';
+                }
+            } else if (action === 'import_selected') {
+                const selectedCpfs = Array.from(demandasForm.querySelectorAll('input[name="selected_cpfs"]:checked'));
+                const selectedUfs = Array.from(demandasForm.querySelectorAll('input[name="selected_ufs"]:checked'));
+                if (!selectedCpfs.length && !selectedUfs.length) {
+                    event.preventDefault();
+                    showFeedbackModal('Selecione pelo menos um CPF ou UF para importar.', 'Importação');
+                    return;
+                }
+                if (submitter instanceof HTMLButtonElement) {
+                    if (selectedUfs.length === 1) {
+                        submitter.textContent = `Importando ${selectedUfs[0].value}...`;
+                    } else if (selectedUfs.length > 1) {
+                        submitter.textContent = `Importando ${selectedUfs.length} UFs...`;
+                    } else {
+                        submitter.textContent = 'Importando selecionados...';
+                    }
+                }
+            }
+            submitting = true;
+            demandasForm.dataset.submitting = '1';
+        });
+    }
+
+    const importFeedbackText = "{{ import_feedback_text|default:''|escapejs }}";
+    if (importFeedbackText) {
+        window.setTimeout(() => {
+            showFeedbackModal(importFeedbackText, 'Importação');
+        }, 60);
+    }
+});
+</script>
 {% endblock %}

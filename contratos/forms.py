@@ -14,9 +14,24 @@ class AndamentoSearchForm(forms.Form):
 
 
 class DemandasAnaliseForm(forms.Form):
+    MODO_PERIODO = "periodo"
+    MODO_LOTE = "lote"
+    MODO_CHOICES = (
+        (MODO_PERIODO, "Por período"),
+        (MODO_LOTE, "Por CNJ/CPF (lote)"),
+    )
+
+    modo_busca = forms.ChoiceField(
+        label="Modo de busca",
+        required=True,
+        initial=MODO_PERIODO,
+        choices=MODO_CHOICES,
+        widget=forms.RadioSelect,
+    )
+
     data_de = forms.DateField(
         label="Data de prescrição (de)",
-        required=True,
+        required=False,
         widget=forms.DateInput(attrs={
             'class': 'form-control text-input',
             'type': 'date',
@@ -24,11 +39,23 @@ class DemandasAnaliseForm(forms.Form):
     )
     data_ate = forms.DateField(
         label="Data de prescrição (até)",
-        required=True,
+        required=False,
         widget=forms.DateInput(attrs={
             'class': 'form-control text-input',
             'type': 'date',
         })
+    )
+    lote_identificadores = forms.CharField(
+        label="CNJs/CPFs (lote)",
+        required=False,
+        widget=forms.Textarea(attrs={
+            'class': 'form-control text-input',
+            'rows': 6,
+            'placeholder': (
+                "Cole aqui os CNJs e/ou CPFs (com ou sem formatação), "
+                "separados por quebra de linha, vírgula ou ponto e vírgula."
+            ),
+        }),
     )
     preview_only = forms.BooleanField(
         label="Mostrar pré-visualização antes de importar",
@@ -47,10 +74,22 @@ class DemandasAnaliseForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        modo_busca = cleaned.get("modo_busca") or self.MODO_PERIODO
         data_de = cleaned.get('data_de')
         data_ate = cleaned.get('data_ate')
-        if data_de and data_ate and data_de > data_ate:
-            raise forms.ValidationError("A data inicial deve ser anterior ou igual à data final.")
+        lote_identificadores = (cleaned.get("lote_identificadores") or "").strip()
+
+        if modo_busca == self.MODO_PERIODO:
+            if not data_de or not data_ate:
+                raise forms.ValidationError("Informe o período completo para buscar por data de prescrição.")
+            if data_de > data_ate:
+                raise forms.ValidationError("A data inicial deve ser anterior ou igual à data final.")
+        elif modo_busca == self.MODO_LOTE:
+            if not lote_identificadores:
+                raise forms.ValidationError("Informe ao menos um CNJ ou CPF para busca em lote.")
+        else:
+            raise forms.ValidationError("Modo de busca inválido.")
+
         return cleaned
 
 
