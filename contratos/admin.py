@@ -771,6 +771,120 @@ def configuracao_analise_tipo_objetiva_export_view(request, tipo_id: int):
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
+def _normalize_question_match_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+def _build_question_key_candidate_for_tipo(tipo: TipoAnaliseObjetiva, texto_pergunta: str) -> str:
+    base = normalize_label_title(getattr(tipo, "slug", None) or getattr(tipo, "nome", None) or "tipo")
+    base_slug = re.sub(r"[^a-z0-9]+", "-", (base or "").lower()).strip("-")[:18] or "tipo"
+    question_slug = re.sub(r"[^a-z0-9]+", "-", (texto_pergunta or "").lower()).strip("-")[:24] or "pergunta"
+    candidate = f"{base_slug}-{question_slug}"[:50].strip("-")
+    return candidate or f"tipo-{getattr(tipo, 'id', None) or 'x'}"
+
+def _resolve_unique_question_key_for_tipo(
+    tipo: TipoAnaliseObjetiva,
+    candidate: str,
+    existing_target_keys: set[str],
+    reserved_keys: set[str],
+) -> str:
+    candidate = (candidate or "").strip()[:50].strip("-")
+    if not candidate:
+        candidate = f"tipo-{getattr(tipo, 'id', None) or 'x'}"
+
+    unique = candidate
+    counter = 2
+    while True:
+        if unique in reserved_keys:
+            pass
+        elif unique in existing_target_keys:
+            reserved_keys.add(unique)
+            return unique
+        elif not QuestaoAnalise.objects.filter(chave=unique).exclude(tipo_analise=tipo).exists():
+            reserved_keys.add(unique)
+            return unique
+
+        suffix = f"-{counter}"
+        unique = (candidate[: max(1, 50 - len(suffix))] + suffix).strip("-")
+        counter += 1
+
+def _build_compatible_payload_for_target_type(payload: dict, tipo_target: TipoAnaliseObjetiva):
+    if not isinstance(payload, dict):
+        raise ValueError("JSON inválido: estrutura principal ausente.")
+
+    questoes_data = payload.get("questoes") or []
+    if not isinstance(questoes_data, list):
+        raise ValueError("JSON inválido: campo 'questoes' deve ser uma lista.")
+
+    target_rows = list(
+        QuestaoAnalise.objects.filter(tipo_analise=tipo_target).values("chave", "texto_pergunta")
+    )
+    existing_target_keys = {str(row["chave"]).strip() for row in target_rows if (row.get("chave") or "").strip()}
+    target_key_by_text = {}
+    for row in target_rows:
+        chave = (row.get("chave") or "").strip()
+        texto = row.get("texto_pergunta") or ""
+        normalized_text = _normalize_question_match_text(texto)
+        if normalized_text and chave and normalized_text not in target_key_by_text:
+            target_key_by_text[normalized_text] = chave
+
+    reserved_keys = set()
+    old_to_new_key_map = {}
+    converted_questions = []
+
+    for qd in questoes_data:
+        if not isinstance(qd, dict):
+            continue
+
+        question_text = (qd.get("texto_pergunta") or "").strip()
+        old_key = (qd.get("chave") or "").strip()
+        normalized_text = _normalize_question_match_text(question_text)
+
+        preferred_key = None
+        if old_key and old_key in existing_target_keys and old_key not in reserved_keys:
+            preferred_key = old_key
+        elif normalized_text:
+            by_text = target_key_by_text.get(normalized_text)
+            if by_text and by_text not in reserved_keys:
+                preferred_key = by_text
+
+        if not preferred_key:
+            candidate = _build_question_key_candidate_for_tipo(tipo_target, question_text)
+            preferred_key = _resolve_unique_question_key_for_tipo(
+                tipo_target,
+                candidate,
+                existing_target_keys,
+                reserved_keys,
+            )
+        else:
+            reserved_keys.add(preferred_key)
+
+        if old_key:
+            old_to_new_key_map[old_key] = preferred_key
+
+        converted_question = dict(qd)
+        converted_question["chave"] = preferred_key
+        raw_options = qd.get("opcoes") or []
+        converted_question["opcoes"] = [dict(od) for od in raw_options if isinstance(od, dict)]
+        converted_questions.append(converted_question)
+
+    for converted_question in converted_questions:
+        for option_data in converted_question.get("opcoes") or []:
+            old_next_key = (option_data.get("proxima_questao_chave") or "").strip()
+            option_data["proxima_questao_chave"] = old_to_new_key_map.get(old_next_key) if old_next_key else None
+
+    converted_tipo = {
+        "nome": tipo_target.nome,
+        "slug": tipo_target.slug,
+        "hashtag": tipo_target.hashtag,
+        "ativo": bool(tipo_target.ativo),
+        "versao": int(tipo_target.versao or 1),
+    }
+
+    converted_payload = dict(payload)
+    converted_payload["tipo"] = converted_tipo
+    converted_payload["questoes"] = converted_questions
+    return converted_payload
+
 def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: bool = False):
     tipo_data = payload.get("tipo") or {}
     questoes_data = payload.get("questoes") or []
@@ -923,6 +1037,7 @@ def configuracao_analise_tipo_objetiva_import_view(request, tipo_id: Optional[in
     context.update({
         "title": "Importar Tipo de Análise (JSON)",
         "tipo_target": tipo_target,
+        "force_compatible_import": bool(tipo_target),
     })
 
     if request.method != 'POST':
@@ -941,9 +1056,34 @@ def configuracao_analise_tipo_objetiva_import_view(request, tipo_id: Optional[in
         return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
 
     bump_version = request.POST.get("bump_version") in ("on", "1", "true", "True")
+    force_compatible_import = request.POST.get("force_compatible_import") in ("on", "1", "true", "True")
+    context["force_compatible_import"] = force_compatible_import
+
+    tipo_data = payload.get("tipo") or {}
+    source_slug = (tipo_data.get("slug") or "").strip()
+    source_nome = (tipo_data.get("nome") or "").strip() or source_slug or "origem"
+    payload_to_sync = payload
+    compatibility_applied = False
+
+    if tipo_target and source_slug and source_slug != tipo_target.slug:
+        if not force_compatible_import:
+            messages.error(
+                request,
+                (
+                    f"Este import é para '{tipo_target.slug}', mas o JSON é de '{source_slug}'. "
+                    "Ative a conversão de compatibilidade para importar assim mesmo."
+                ),
+            )
+            return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+        payload_to_sync = _build_compatible_payload_for_target_type(payload, tipo_target)
+        compatibility_applied = True
 
     try:
-        tipo, created, changed = _sync_tipo_objetiva_from_payload(payload, user=request.user, bump_version=bump_version)
+        tipo, created, changed = _sync_tipo_objetiva_from_payload(
+            payload_to_sync,
+            user=request.user,
+            bump_version=bump_version,
+        )
     except ValueError as exc:
         messages.error(request, str(exc))
         return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
@@ -958,10 +1098,19 @@ def configuracao_analise_tipo_objetiva_import_view(request, tipo_id: Optional[in
     if created:
         messages.success(request, f"Tipo '{tipo.nome}' importado (criado) com sucesso.")
     else:
-        messages.success(
-            request,
-            f"Tipo '{tipo.nome}' importado com sucesso. Alterações: {'sim' if changed else 'não'}.",
-        )
+        if compatibility_applied:
+            messages.success(
+                request,
+                (
+                    f"Tipo '{tipo.nome}' importado com conversão de compatibilidade "
+                    f"(origem: {source_nome}). Alterações: {'sim' if changed else 'não'}."
+                ),
+            )
+        else:
+            messages.success(
+                request,
+                f"Tipo '{tipo.nome}' importado com sucesso. Alterações: {'sim' if changed else 'não'}.",
+            )
     return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
 
 def configuracao_analise_novas_monitorias_view(request):
