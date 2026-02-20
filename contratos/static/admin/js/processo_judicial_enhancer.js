@@ -1238,6 +1238,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
+    const AGENDA_CONCLUIR_URL = '/api/agenda/concluir/';
     let agendaLoadMoreButton = null;
     const isAgendaDebugEnabled = () => {
         try {
@@ -2403,6 +2404,63 @@ document.addEventListener('DOMContentLoaded', function() {
         return entry;
     };
 
+    const buildAgendaSelectableKey = (entry, fallbackType = '') => {
+        const type = String(fallbackType || entry?.type || '').trim().toUpperCase();
+        if (type !== 'T' && type !== 'P') {
+            return '';
+        }
+        const backendRaw = entry?.backendId ?? entry?.id;
+        const backendId = Number.parseInt(`${backendRaw ?? ''}`, 10);
+        if (!Number.isFinite(backendId) || backendId <= 0) {
+            return '';
+        }
+        return `${type}:${backendId}`;
+    };
+
+    const syncInlineCompletionStateFromAgenda = (taskIds = [], prazoIds = []) => {
+        const markInlineRowsConcluded = ({ rowsSelector, idSelector, checkboxSelector, ids }) => {
+            const targetIds = new Set(
+                (Array.isArray(ids) ? ids : [])
+                    .map((value) => Number.parseInt(`${value}`, 10))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            );
+            if (!targetIds.size) {
+                return;
+            }
+            document.querySelectorAll(rowsSelector).forEach((row) => {
+                if (row.classList.contains('empty-form')) {
+                    return;
+                }
+                const idInput = row.querySelector(idSelector);
+                const rowId = Number.parseInt(`${idInput?.value || ''}`, 10);
+                if (!Number.isFinite(rowId) || !targetIds.has(rowId)) {
+                    return;
+                }
+                const checkbox = row.querySelector(checkboxSelector);
+                if (!(checkbox instanceof HTMLInputElement)) {
+                    return;
+                }
+                checkbox.dataset.skipCompletionPrompt = '1';
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                }
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        };
+        markInlineRowsConcluded({
+            rowsSelector: '#tarefas-group .dynamic-tarefas',
+            idSelector: 'input[id$="-id"]',
+            checkboxSelector: 'input[id$="-concluida"]',
+            ids: taskIds,
+        });
+        markInlineRowsConcluded({
+            rowsSelector: '#prazos-group .dynamic-prazos',
+            idSelector: 'input[id$="-id"]',
+            checkboxSelector: 'input[id$="-concluido"]',
+            ids: prazoIds,
+        });
+    };
+
     const refreshAgendaLoadMoreButton = (state) => {
         if (!agendaLoadMoreButton) return;
         const shouldShow = Boolean(state && state.agendaHasMore);
@@ -2514,10 +2572,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null, selectionState = null) => {
         setDetailTitle?.(dayData?.day, type);
         if (typeof onEntrySelect === 'function') {
-            onEntrySelect(null, null);
+            onEntrySelect(null, null, null);
         }
         const navWrap = detailList?.__navWrap;
         const navPrev = detailList?.__navPrev;
@@ -2533,6 +2591,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            if (selectionState?.onChange) {
+                selectionState.onChange();
+            }
             return;
         }
         detailList.innerHTML = '';
@@ -2557,8 +2618,38 @@ document.addEventListener('DOMContentLoaded', function() {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
             entry.tabIndex = 0;
+            const isTaskOrPrazo = type === 'T' || type === 'P';
             if (type === 'T' || type === 'P') {
                 entry.classList.add('agenda-panel__details-item--task');
+            }
+            if (isTaskOrPrazo && selectionState && !isCompletedMode) {
+                const selectionKey = selectionState.getKey?.(entryData, type) || '';
+                if (selectionKey) {
+                    const selectWrap = document.createElement('label');
+                    selectWrap.className = 'agenda-panel__details-item-select-wrap';
+                    const selectInput = document.createElement('input');
+                    selectInput.type = 'checkbox';
+                    selectInput.className = 'agenda-panel__details-item-select';
+                    selectInput.checked = Boolean(selectionState.isSelected?.(selectionKey));
+                    const selectText = document.createElement('span');
+                    selectText.className = 'agenda-panel__details-item-select-text';
+                    selectText.textContent = 'Selecionar';
+                    selectWrap.append(selectInput, selectText);
+                    entry.classList.toggle('agenda-panel__details-item--selected', selectInput.checked);
+                    selectInput.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                    });
+                    selectInput.addEventListener('dblclick', (event) => {
+                        event.stopPropagation();
+                    });
+                    selectInput.addEventListener('change', (event) => {
+                        const checked = Boolean(event.target?.checked);
+                        entry.classList.toggle('agenda-panel__details-item--selected', checked);
+                        selectionState.toggle?.(selectionKey, checked, entryData, type);
+                        selectionState.onChange?.();
+                    });
+                    entry.appendChild(selectWrap);
+                }
             }
             const priorityCode = (entryData.priority || '').toUpperCase();
             const priorityClass = priorityCode === 'A'
@@ -2749,9 +2840,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (enableNav && entryElements.length) {
             selectEntryAt(0);
         }
+        if (selectionState?.onChange) {
+            selectionState.onChange();
+        }
     };
 
-    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle, onEntrySelect = null) => {
+    const renderCalendarDays = (gridElement, detailList, detailCardBody, state, rerender, setDetailTitle, onEntrySelect = null, selectionState = null) => {
         if (!gridElement || !detailList || !detailCardBody) {
             return;
         }
@@ -2762,7 +2856,7 @@ document.addEventListener('DOMContentLoaded', function() {
             detailCardBody.innerHTML = '';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
             if (typeof onEntrySelect === 'function') {
-                onEntrySelect(null, null);
+                onEntrySelect(null, null, null);
             }
         };
         gridElement.innerHTML = '';
@@ -2852,7 +2946,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
                     resetDetailCardBody();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
@@ -3009,7 +3103,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     card.addEventListener('click', (event) => {
                         event.stopPropagation();
                         resetDetailCardBody();
-                        populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                        populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                         recordActiveDay(dayInfo, type);
                         setActiveDay(dayCell);
                         const detailEntry = detailList.querySelector(`[data-entry-id="${entry.id}"]`);
@@ -3038,13 +3132,13 @@ document.addEventListener('DOMContentLoaded', function() {
             dayCell.addEventListener('click', () => {
                 resetDetailCardBody();
                 if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'P');
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
@@ -3143,19 +3237,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
                 if (preferredType === 'S' && dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                 } else if (preferredType === 'T' && dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                 } else if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'P');
                 }
             }
@@ -3253,6 +3347,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>
                 <div class="agenda-panel__footer">
+                    <button type="button" class="agenda-panel__concluir-btn" disabled>Concluir</button>
                     <button type="button" class="agenda-panel__form-btn" data-form="tarefas">Tarefas</button>
                     <button type="button" class="agenda-panel__form-btn" data-form="prazos">Prazos</button>
                     <button type="button" class="agenda-panel__split" aria-pressed="false">Abrir em tela cheia</button>
@@ -3270,6 +3365,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const monthTitleEl = overlay.querySelector('.agenda-panel__month-title');
         const monthYearEl = overlay.querySelector('.agenda-panel__year-label');
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
+        const concludeButton = overlay.querySelector('.agenda-panel__concluir-btn');
         const fullscreenButton = overlay.querySelector('.agenda-panel__split');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const detailTitleWrapper = overlay.querySelector('.agenda-panel__details-title');
@@ -3299,6 +3395,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
         let activeSupervisionEntry = null;
+        let activeConcludableEntry = null;
+        const selectedConcludeEntries = new Map();
         let persistedSupervisionEntryId = null;
         agendaLoadMoreButton = overlay.querySelector('.agenda-panel__load-more-btn');
         if (detailList) {
@@ -3306,6 +3404,55 @@ document.addEventListener('DOMContentLoaded', function() {
             detailList.__navPrev = detailNavPrev;
             detailList.__navNext = detailNavNext;
         }
+        const buildConcludePayload = (entryData, forcedType = '') => {
+            const key = buildAgendaSelectableKey(entryData, forcedType);
+            if (!key) {
+                return null;
+            }
+            const [typeCode, rawId] = key.split(':');
+            const numericId = Number.parseInt(rawId, 10);
+            if (!Number.isFinite(numericId)) {
+                return null;
+            }
+            return {
+                key,
+                type: typeCode,
+                id: numericId,
+            };
+        };
+        const updateConcludeButtonState = () => {
+            if (!concludeButton) return;
+            const selectedCount = selectedConcludeEntries.size;
+            const showCompleted = Boolean(calendarState?.showCompleted);
+            const canConclude = !showCompleted && selectedCount > 0;
+            concludeButton.disabled = !canConclude;
+            concludeButton.textContent = selectedCount > 0 ? `Concluir (${selectedCount})` : 'Concluir';
+            if (showCompleted) {
+                concludeButton.title = 'Disponível apenas na visualização de pendentes.';
+            } else if (selectedCount > 0) {
+                concludeButton.title = 'Concluir itens selecionados';
+            } else {
+                concludeButton.title = 'Selecione um item T/P para concluir.';
+            }
+        };
+        const detailSelectionState = {
+            getKey: (entryData, type) => buildAgendaSelectableKey(entryData, type),
+            isSelected: (key) => selectedConcludeEntries.has(key),
+            toggle: (key, checked, entryData, type) => {
+                const payload = buildConcludePayload(entryData, type);
+                if (!payload || payload.key !== key) {
+                    return;
+                }
+                if (checked) {
+                    selectedConcludeEntries.set(key, payload);
+                } else {
+                    selectedConcludeEntries.delete(key);
+                }
+            },
+            onChange: () => {
+                updateConcludeButtonState();
+            },
+        };
         const setFullscreenState = (enabled) => {
             if (!fullscreenButton) return;
             overlay.classList.toggle('agenda-panel-overlay--fullscreen', enabled);
@@ -3581,10 +3728,16 @@ document.addEventListener('DOMContentLoaded', function() {
         hideDetailStatusButton();
         hideBarrarControls();
         const handleDetailEntrySelect = (entryData, type) => {
+            if (entryData && (type === 'T' || type === 'P')) {
+                activeConcludableEntry = { entryData, type };
+            } else {
+                activeConcludableEntry = null;
+            }
             persistedSupervisionEntryId = entryData?.id || null;
             updateDetailStatusButton(entryData, type);
             updateDetailBarrarControls(entryData, type);
             updateDetailAnalystLabel(entryData, type);
+            updateConcludeButtonState();
         };
 
         const restoreActiveDetailControls = () => {
@@ -3653,10 +3806,11 @@ document.addEventListener('DOMContentLoaded', function() {
         completedButton.addEventListener('click', () => {
             calendarState.showCompleted = !calendarState.showCompleted;
             completedButton.classList.toggle('agenda-panel__history-toggle--active', calendarState.showCompleted);
+            updateConcludeButtonState();
             refreshAgendaData(true);
         });
-        const firstFormBtn = footer.querySelector('.agenda-panel__form-btn');
-        footer.insertBefore(completedButton, firstFormBtn);
+        const firstActionBtn = concludeButton || footer.querySelector('.agenda-panel__form-btn');
+        footer.insertBefore(completedButton, firstActionBtn);
         footer.insertBefore(historyButton, completedButton);
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
         const capitalizeLabel = (value) => {
@@ -3706,7 +3860,28 @@ document.addEventListener('DOMContentLoaded', function() {
             agendaHasMore: false,
             agendaTotalEntries: null,
         };
+        const syncSelectedConcludeEntries = () => {
+            const availableKeys = new Set(
+                (calendarState.lastAppliedEntries || [])
+                    .map((entry) => buildAgendaSelectableKey(entry, entry?.type || ''))
+                    .filter(Boolean)
+            );
+            Array.from(selectedConcludeEntries.keys()).forEach((key) => {
+                if (!availableKeys.has(key)) {
+                    selectedConcludeEntries.delete(key);
+                }
+            });
+            const activePayload = buildConcludePayload(
+                activeConcludableEntry?.entryData,
+                activeConcludableEntry?.type || '',
+            );
+            if (activePayload && !availableKeys.has(activePayload.key)) {
+                activeConcludableEntry = null;
+            }
+            updateConcludeButtonState();
+        };
         refreshAgendaLoadMoreButton(calendarState);
+        updateConcludeButtonState();
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
         let agendaEntries = getInlineEntries();
         const loadMoreAgendaPage = () => {
@@ -3851,6 +4026,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         applyEntriesToCalendar(entriesToApply);
         calendarState.lastAppliedEntries = entriesToApply;
+        syncSelectedConcludeEntries();
         if (!calendarState.preserveView) {
             if (entriesToApply.length) {
                 const focusEntries = entriesToApply.filter(entry => !(entry.type === 'S' && entry.expired));
@@ -3992,16 +4168,29 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarGridEl.classList.toggle('agenda-panel__users-grid--active', isUserView);
             usersToggle?.setAttribute('aria-pressed', `${isUserView}`);
             if (isUserView) {
+                selectedConcludeEntries.clear();
+                activeConcludableEntry = null;
+                updateConcludeButtonState();
                 renderUserSelectionGrid();
                 return;
             }
             applyAgendaEntriesToState();
-            renderCalendarDays(calendarGridEl, detailList, detailCardBody, calendarState, renderCalendar, setDetailTitle, handleDetailEntrySelect);
+            renderCalendarDays(
+                calendarGridEl,
+                detailList,
+                detailCardBody,
+                calendarState,
+                renderCalendar,
+                setDetailTitle,
+                handleDetailEntrySelect,
+                detailSelectionState,
+            );
             agendaDebug({
                 renderedTags: overlay.querySelectorAll('.agenda-panel__day-tag').length,
                 renderedCards: overlay.querySelectorAll('.agenda-panel__day-card').length,
             });
             renderSummaryBar(calendarState.lastAppliedEntries || []);
+            updateConcludeButtonState();
         };
         if (focusToggle) {
             focusToggle.addEventListener('click', () => {
@@ -4028,6 +4217,101 @@ document.addEventListener('DOMContentLoaded', function() {
                 agendaEntries = combined;
             }, preferApiOnly);
         };
+        const requestAgendaConclusionJustification = (count) => {
+            const plural = count > 1;
+            return requestCompletionJustification({
+                modalId: 'agenda-conclusao-justificativa-modal',
+                titleText: plural
+                    ? `Justifique a conclusão de ${count} itens`
+                    : 'Justifique a ação de conclusão',
+                placeholderText: plural
+                    ? 'Descreva o que foi feito para concluir os itens selecionados.'
+                    : 'Descreva o que foi feito para concluir este item.',
+            });
+        };
+        const collectAgendaConcludeTargets = () => {
+            return Array.from(selectedConcludeEntries.values());
+        };
+        const concludeAgendaTargets = async () => {
+            if (calendarState.showCompleted) {
+                createSystemAlert('Agenda Geral', 'A conclusão só está disponível no modo de pendentes.');
+                return;
+            }
+            const targets = collectAgendaConcludeTargets();
+            if (!targets.length) {
+                createSystemAlert('Agenda Geral', 'Selecione ao menos uma tarefa ou prazo para concluir.');
+                return;
+            }
+            const justificativa = await requestAgendaConclusionJustification(targets.length);
+            if (justificativa === null) {
+                return;
+            }
+            const comentario = (justificativa || '').trim();
+            if (!comentario) {
+                createSystemAlert('Agenda Geral', 'A conclusão exige uma justificativa.');
+                return;
+            }
+            const confirmText = targets.length > 1
+                ? `Deseja concluir os ${targets.length} itens selecionados?`
+                : 'Deseja concluir este item?';
+            const confirmed = await showCffConfirm('Confirmar conclusão', confirmText);
+            if (!confirmed) {
+                return;
+            }
+            const originalText = concludeButton ? concludeButton.textContent : 'Concluir';
+            if (concludeButton) {
+                concludeButton.disabled = true;
+                concludeButton.textContent = 'Concluindo...';
+            }
+            try {
+                const response = await fetch(AGENDA_CONCLUIR_URL, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken,
+                    },
+                    body: JSON.stringify({
+                        items: targets.map((item) => ({ type: item.type, id: item.id })),
+                        comentario_texto: comentario,
+                    }),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.detail || 'Não foi possível concluir os itens selecionados.');
+                }
+                const updatedTasks = Number(payload.updated_tasks || 0);
+                const updatedPrazos = Number(payload.updated_prazos || 0);
+                const updatedTotal = Number(payload.updated_total || 0);
+                syncInlineCompletionStateFromAgenda(payload.task_ids || [], payload.prazo_ids || []);
+                if (updatedTotal <= 0) {
+                    createSystemAlert('Agenda Geral', 'Nenhum item pendente foi concluído.');
+                } else {
+                    createSystemAlert(
+                        'Agenda Geral',
+                        `Concluído(s): ${updatedTotal} item(ns) (T: ${updatedTasks} | P: ${updatedPrazos}).`,
+                    );
+                }
+                selectedConcludeEntries.clear();
+                activeConcludableEntry = null;
+                calendarState.preserveView = true;
+                refreshAgendaData(true);
+            } catch (error) {
+                createSystemAlert(
+                    'Agenda Geral',
+                    error?.message || 'Não foi possível concluir os itens selecionados.',
+                );
+            } finally {
+                if (concludeButton) {
+                    concludeButton.textContent = originalText;
+                }
+                updateConcludeButtonState();
+            }
+        };
+        concludeButton?.addEventListener('click', (event) => {
+            event.preventDefault();
+            concludeAgendaTargets();
+        });
         if (refreshButton) {
             refreshButton.addEventListener('click', () => {
                 refreshAgendaData();
@@ -6467,7 +6751,12 @@ document.addEventListener('DOMContentLoaded', function() {
             Array.from(datetime.childNodes).forEach((node) => {
                 if (node.nodeType !== Node.TEXT_NODE) return;
                 const normalized = (node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-                if (normalized === 'data:' || normalized.startsWith('data:')) {
+                if (
+                    normalized === 'data:'
+                    || normalized.startsWith('data:')
+                    || normalized === 'hora:'
+                    || normalized.startsWith('hora:')
+                ) {
                     node.remove();
                 }
             });
@@ -6486,8 +6775,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (dateInput && dateInput.parentElement !== datetime) {
                 datetime.appendChild(dateInput);
             }
-            if (timeLabel && timeLabel.parentElement !== datetime) {
-                datetime.appendChild(timeLabel);
+            if (timeLabel) {
+                timeLabel.remove();
             }
             if (timeInput && timeInput.parentElement !== datetime) {
                 datetime.appendChild(timeInput);
@@ -6532,7 +6821,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (dateInput) dateInput.style.order = '1';
             if (dateShortcut) dateShortcut.style.order = '2';
-            if (timeLabel) timeLabel.style.order = '3';
             if (timeInput) timeInput.style.order = '4';
             if (timeShortcut) timeShortcut.style.order = '5';
         });
@@ -6805,6 +7093,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const handleTarefaCompletionToggle = async (checkbox) => {
             if (!(checkbox instanceof HTMLInputElement)) return;
+            if (checkbox.dataset.skipCompletionPrompt === '1') {
+                checkbox.removeAttribute('data-skip-completion-prompt');
+                return;
+            }
             const row = checkbox.closest('tr.dynamic-tarefas');
             if (!row || row.classList.contains('empty-form')) {
                 return;
@@ -6847,6 +7139,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const handlePrazoCompletionToggle = async (checkbox) => {
             if (!(checkbox instanceof HTMLInputElement)) return;
+            if (checkbox.dataset.skipCompletionPrompt === '1') {
+                checkbox.removeAttribute('data-skip-completion-prompt');
+                return;
+            }
             const row = checkbox.closest('tr.dynamic-prazos');
             if (!row || row.classList.contains('empty-form')) {
                 return;

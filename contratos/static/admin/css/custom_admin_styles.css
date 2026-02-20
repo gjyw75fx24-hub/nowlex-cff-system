@@ -3933,17 +3933,42 @@ a.historylink {
 }
 .agenda-panel__details-item--task {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+}
+.agenda-panel__details-item-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    align-self: flex-start;
+    gap: 6px;
+    margin: 0 0 2px 0;
+    color: #60708d;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+.agenda-panel__details-item-select {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: #2f62c9;
+    cursor: pointer;
+}
+.agenda-panel__details-item-select-text {
+    user-select: none;
+    opacity: 0.7;
 }
 .agenda-panel__details-item--task .agenda-panel__details-item-title {
-    align-items: flex-start;
+    align-items: center;
     margin-bottom: 2px;
     font-size: 0.8rem;
+    text-align: center;
 }
 .agenda-panel__details-item--task .agenda-panel__details-item-title-name {
     font-weight: 600;
     font-size: 0.82rem;
-    text-align: left;
+    text-align: center;
 }
 .agenda-panel__details-item--task .agenda-panel__details-item-title-cpf {
     font-size: 0.7rem;
@@ -3952,6 +3977,7 @@ a.historylink {
     font-weight: 600;
     color: #1f2a40;
     width: 100%;
+    text-align: center;
 }
 
 .cpf-demandas-group {
@@ -4087,6 +4113,9 @@ a.historylink {
     border: 1px solid #4a63cf;
     background: #e0e5f7;
 }
+.agenda-panel__details-item--selected {
+    box-shadow: inset 0 0 0 1px rgba(47, 98, 201, 0.35);
+}
 .agenda-panel__details-item--priority-low {
     background: #e8f1fb;
     border: 1px solid #b9d4f5;
@@ -4143,6 +4172,7 @@ a.historylink {
     border-top: 1px solid #e0e7f1;
 }
 .agenda-panel__form-btn,
+.agenda-panel__concluir-btn,
 .agenda-panel__split {
     border-radius: 10px;
     padding: 8px 16px;
@@ -4154,7 +4184,15 @@ a.historylink {
     background: #0f4f92;
     color: #fff;
 }
-.
+.agenda-panel__concluir-btn {
+    background: #1d7f4c;
+    color: #fff;
+}
+.agenda-panel__concluir-btn:disabled {
+    background: #d5deea;
+    color: #6a7890;
+    cursor: not-allowed;
+}
 .agenda-panel__split {
     background: #d7e5fb;
     color: #1d3a5a;
@@ -4208,7 +4246,7 @@ a.historylink {
     color: #495575;
     margin-left: 6px;
 }
-.agenda-panel__details-item {
+.agenda-panel__details-item:not(.agenda-panel__details-item--task) {
     display: flex;
     justify-content: space-between;
     align-items: center;

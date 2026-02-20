@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -113,6 +114,16 @@ def get_next_supervision_status(current_status):
     current_index = SUPERVISION_STATUS_SEQUENCE.index(normalized)
     next_index = (current_index + 1) % len(SUPERVISION_STATUS_SEQUENCE)
     return SUPERVISION_STATUS_SEQUENCE[next_index]
+
+
+def is_supervisor_user(user):
+    return bool(
+        user
+        and (
+            user.is_superuser
+            or user.groups.filter(name__iexact='Supervisor').exists()
+        )
+    )
 
 
 class AgendaAPIView(APIView):
@@ -1575,6 +1586,145 @@ class AgendaPrazoUpdateDateAPIView(APIView):
             'data_limite': prazo.data_limite,
             'data_limite_origem': prazo.data_limite_origem,
         })
+
+
+class AgendaConcluirAPIView(APIView):
+    """
+    Conclui tarefas e/ou prazos diretamente a partir da Agenda Geral,
+    exigindo justificativa em comentário.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _normalize_items(items):
+        tarefa_ids = []
+        prazo_ids = []
+        if not isinstance(items, list):
+            return tarefa_ids, prazo_ids
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get('type') or '').strip().upper()
+            if item_type not in ('T', 'P'):
+                continue
+            try:
+                item_id = int(item.get('id'))
+            except (TypeError, ValueError):
+                continue
+            if item_id <= 0:
+                continue
+            if item_type == 'T':
+                tarefa_ids.append(item_id)
+            else:
+                prazo_ids.append(item_id)
+        # remove duplicados preservando ordem
+        tarefa_ids = list(dict.fromkeys(tarefa_ids))
+        prazo_ids = list(dict.fromkeys(prazo_ids))
+        return tarefa_ids, prazo_ids
+
+    def _filter_tarefas(self, request, ids):
+        qs = Tarefa.objects.filter(id__in=ids).select_related('processo', 'responsavel', 'criado_por')
+        if not is_supervisor_user(request.user):
+            qs = qs.filter(
+                Q(responsavel=request.user)
+                | (Q(responsavel__isnull=True) & Q(criado_por=request.user))
+            )
+        allowed_carteiras = get_user_allowed_carteira_ids(request.user)
+        if allowed_carteiras not in (None, []) and allowed_carteiras:
+            qs = qs.filter(
+                Q(processo__isnull=True)
+                | Q(processo__carteira_id__in=allowed_carteiras)
+                | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
+            ).distinct()
+        return qs
+
+    def _filter_prazos(self, request, ids):
+        qs = Prazo.objects.filter(id__in=ids).select_related('processo', 'responsavel')
+        if not is_supervisor_user(request.user):
+            qs = qs.filter(responsavel=request.user)
+        allowed_carteiras = get_user_allowed_carteira_ids(request.user)
+        if allowed_carteiras not in (None, []) and allowed_carteiras:
+            qs = qs.filter(
+                Q(processo__isnull=True)
+                | Q(processo__carteira_id__in=allowed_carteiras)
+                | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
+            ).distinct()
+        return qs
+
+    def post(self, request):
+        payload = request.data or {}
+        comentario_texto = (payload.get('comentario_texto') or '').strip()
+        if not comentario_texto:
+            return Response(
+                {'detail': 'A conclusão exige comentário de justificativa.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tarefa_ids, prazo_ids = self._normalize_items(payload.get('items'))
+        if not tarefa_ids and not prazo_ids:
+            return Response(
+                {'detail': 'Selecione ao menos uma tarefa ou prazo para concluir.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tarefas_qs = self._filter_tarefas(request, tarefa_ids)
+        prazos_qs = self._filter_prazos(request, prazo_ids)
+
+        found_tarefa_ids = set(tarefas_qs.values_list('id', flat=True))
+        found_prazo_ids = set(prazos_qs.values_list('id', flat=True))
+        requested_tarefa_ids = set(tarefa_ids)
+        requested_prazo_ids = set(prazo_ids)
+        missing = (requested_tarefa_ids - found_tarefa_ids) | (requested_prazo_ids - found_prazo_ids)
+        if missing:
+            return Response(
+                {'detail': 'Um ou mais itens não podem ser concluídos por este usuário.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        tarefas_to_close_ids = list(tarefas_qs.filter(concluida=False).values_list('id', flat=True))
+        prazos_to_close_ids = list(prazos_qs.filter(concluido=False).values_list('id', flat=True))
+        now = timezone.now()
+
+        with transaction.atomic():
+            if tarefas_to_close_ids:
+                Tarefa.objects.filter(id__in=tarefas_to_close_ids).update(
+                    concluida=True,
+                    concluido_em=now,
+                    concluido_por=request.user,
+                )
+                TarefaMensagem.objects.bulk_create([
+                    TarefaMensagem(
+                        tarefa_id=tarefa_id,
+                        autor=request.user,
+                        texto=comentario_texto,
+                    )
+                    for tarefa_id in tarefas_to_close_ids
+                ])
+
+            if prazos_to_close_ids:
+                Prazo.objects.filter(id__in=prazos_to_close_ids).update(
+                    concluido=True,
+                    concluido_em=now,
+                    concluido_por=request.user,
+                )
+                PrazoMensagem.objects.bulk_create([
+                    PrazoMensagem(
+                        prazo_id=prazo_id,
+                        autor=request.user,
+                        texto=comentario_texto,
+                    )
+                    for prazo_id in prazos_to_close_ids
+                ])
+
+        updated_tasks = len(tarefas_to_close_ids)
+        updated_prazos = len(prazos_to_close_ids)
+        return Response({
+            'updated_tasks': updated_tasks,
+            'updated_prazos': updated_prazos,
+            'updated_total': updated_tasks + updated_prazos,
+            'task_ids': tarefas_to_close_ids,
+            'prazo_ids': prazos_to_close_ids,
+        })
+
 
 class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     """
