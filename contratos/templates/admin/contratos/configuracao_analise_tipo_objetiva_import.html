@@ -23,6 +23,14 @@
                 <label for="id_json_file">Arquivo JSON:</label>
                 <input type="file" name="json_file" id="id_json_file" accept="application/json">
             </div>
+            {% if tipo_target %}
+            <div class="form-row">
+                <label>
+                    <input type="checkbox" name="force_compatible_import" {% if force_compatible_import %}checked{% endif %}>
+                    Converter compatibilidade quando o JSON for de outro tipo (recomendado para copiar questionário entre tipos)
+                </label>
+            </div>
+            {% endif %}
             <div class="form-row">
                 <label>
                     <input type="checkbox" name="bump_version">
@@ -38,4 +46,3 @@
     </form>
 </div>
 {% endblock %}
-
