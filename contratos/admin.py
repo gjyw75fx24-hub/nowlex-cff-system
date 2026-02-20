@@ -1065,18 +1065,20 @@ def configuracao_analise_tipo_objetiva_import_view(request, tipo_id: Optional[in
     payload_to_sync = payload
     compatibility_applied = False
 
-    if tipo_target and source_slug and source_slug != tipo_target.slug:
-        if not force_compatible_import:
-            messages.error(
-                request,
-                (
-                    f"Este import é para '{tipo_target.slug}', mas o JSON é de '{source_slug}'. "
-                    "Ative a conversão de compatibilidade para importar assim mesmo."
-                ),
-            )
-            return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
+    # Quando o usuário marca conversão de compatibilidade, sempre converte para o tipo destino.
+    # Isso evita conflitos de chave mesmo quando o JSON vier com slug inconsistente/vazio.
+    if tipo_target and force_compatible_import:
         payload_to_sync = _build_compatible_payload_for_target_type(payload, tipo_target)
         compatibility_applied = True
+    elif tipo_target and source_slug and source_slug != tipo_target.slug:
+        messages.error(
+            request,
+            (
+                f"Este import é para '{tipo_target.slug}', mas o JSON é de '{source_slug}'. "
+                "Ative a conversão de compatibilidade para importar assim mesmo."
+            ),
+        )
+        return render(request, "admin/contratos/configuracao_analise_tipo_objetiva_import.html", context)
 
     try:
         tipo, created, changed = _sync_tipo_objetiva_from_payload(
