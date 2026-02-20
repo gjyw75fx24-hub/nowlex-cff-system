@@ -1403,13 +1403,10 @@ def demandas_analise_view(request):
                                 import_feedback_text = "Selecione pelo menos um CPF ou UF com pendência para importar."
                                 import_feedback_level = "warning"
                         else:
-                            import_result = preview_service.import_identifiers(
+                            import_result = preview_service.import_cpfs(
                                 filtered_cpfs,
                                 etiqueta_nome,
                                 carteira,
-                                link_only_existing=True,
-                                allow_minimal_missing_cnjs=False,
-                                allowed_ufs=selected_ufs_set or None,
                             )
                     else:
                         import_result = preview_service.import_identifiers(
