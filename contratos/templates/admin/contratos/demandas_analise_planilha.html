@@ -336,6 +336,7 @@
 	        <li><strong>Linhas:</strong> {{ preview.rows }}</li>
 	        <li><strong>Analisados:</strong> {{ preview.analysed_cpfs }} CPF(s)</li>
 	        <li><strong>Já importados:</strong> {{ preview.imported_cpfs }} CPF(s)</li>
+	        <li><strong>Não importados:</strong> {{ preview.not_imported_cpfs|default:0 }} CPF(s)</li>
 	        <li><strong>CPFs:</strong> {{ preview.cpfs }}</li>
 	        <li><strong>CNJs:</strong> {{ preview.cnjs }}</li>
 	        <li><strong>UFs:</strong> {{ preview.ufs }}</li>
@@ -343,6 +344,30 @@
 	          <li><strong>Prioridades na prévia:</strong> {{ preview.priority_options_count }}</li>
 	        {% endif %}
 	      </ul>
+
+	      {% if preview.not_imported_by_uf %}
+	        <h3 style="margin-top: 14px;">Não importados por UF (filtros atuais)</h3>
+	        <div style="display:grid; gap:8px; margin:8px 0 12px 0;">
+	          {% for uf_item in preview.not_imported_by_uf %}
+	            <details class="mini-postit" style="padding:8px 10px;">
+	              <summary style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer;">
+	                <span><strong>{{ uf_item.uf }}</strong>: {{ uf_item.total }} cadastro(s) não importado(s)</span>
+	                <button type="button" class="button sel-not-imported-uf" data-uf="{{ uf_item.uf }}">Selecionar UF</button>
+	              </summary>
+	              <div style="margin-top:8px;">
+	                <ul style="margin: 0; padding-left: 18px;">
+	                  {% for cadastro in uf_item.cadastros %}
+	                    <li>
+	                      {{ cadastro.cpf }} · {{ cadastro.parte_contraria }}
+	                      (CNJs: {{ cadastro.imported_count }}/{{ cadastro.imported_total }})
+	                    </li>
+	                  {% endfor %}
+	                </ul>
+	              </div>
+	            </details>
+	          {% endfor %}
+	        </div>
+	      {% endif %}
 	
 	      {% if preview.cpf_rows %}
 	        <h3 style="margin-top: 14px;">Selecionar CPFs para importar</h3>
@@ -377,6 +402,7 @@
 	                    type="checkbox"
 	                    class="js-planilha-cpf-box"
 	                    data-cpf="{{ row.cpf }}"
+	                    data-uf="{{ row.uf }}"
 	                    data-prechecked="{{ row.prechecked|yesno:'1,0' }}"
 	                    data-imported-full="{{ row.imported_full|yesno:'1,0' }}"
 	                    data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}"
@@ -465,18 +491,36 @@
 	              });
 	              syncSelectedCpfsPayload();
 	            };
+	            const setNotImportedByUf = (uf) => {
+	              const targetUf = String(uf || '').trim().toUpperCase();
+	              if (!targetUf) return;
+	              visibleBoxes().forEach((b) => {
+	                const sameUf = String(b.dataset.uf || '').trim().toUpperCase() === targetUf;
+	                b.checked = sameUf && b.dataset.importedFull !== '1';
+	              });
+	              syncSelectedCpfsPayload();
+	            };
 	            const allBtn = document.getElementById('sel-all');
 	            const notImportedBtn = document.getElementById('sel-not-imported');
 	            const noneBtn = document.getElementById('sel-none');
 	            const analysedBtn = document.getElementById('sel-analysed');
 	            const filterOnlyOtherBtn = document.getElementById('filter-only-other-carteira');
 	            const filterShowAllBtn = document.getElementById('filter-show-all');
+	            const notImportedByUfButtons = Array.from(document.querySelectorAll('.sel-not-imported-uf'));
 	            boxes().forEach((b) => b.addEventListener('change', syncSelectedCpfsPayload));
 	            if (formEl) formEl.addEventListener('submit', syncSelectedCpfsPayload);
 	            if (allBtn) allBtn.addEventListener('click', () => setAll(true));
 	            if (notImportedBtn) notImportedBtn.addEventListener('click', () => setNotImported());
 	            if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
 	            if (analysedBtn) analysedBtn.addEventListener('click', () => setAnalysed());
+	            if (notImportedByUfButtons.length) {
+	              notImportedByUfButtons.forEach((btn) => {
+	                btn.addEventListener('click', (event) => {
+	                  event.preventDefault();
+	                  setNotImportedByUf(btn.dataset.uf);
+	                });
+	              });
+	            }
 	            if (filterOnlyOtherBtn) {
 	              filterOnlyOtherBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(true));
 	            }

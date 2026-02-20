@@ -482,6 +482,14 @@ class AgendaGeralAPIView(APIView):
             return []
         if target_user and not isinstance(target_user, User):
             target_user = None
+        if target_user:
+            target_user_is_supervisor = (
+                target_user.is_superuser
+                or target_user.groups.filter(name__iexact='Supervisor').exists()
+            )
+            if not target_user_is_supervisor:
+                return []
+        agenda_supervisor_user = target_user or request.user
 
         pending_statuses = {'pendente', 'pre_aprovado'}
         completed_statuses = {'aprovado', 'reprovado'}
@@ -678,9 +686,8 @@ class AgendaGeralAPIView(APIView):
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = float(valor_total_causa)
-            responsavel_user = analise.updated_by if analise.updated_by else request.user
-            if target_user and responsavel_user and responsavel_user.id != target_user.id:
-                continue
+            # Supervisão é fila do supervisor (não do analista que atualizou o card).
+            responsavel_user = agenda_supervisor_user
             responsavel = self._serialize_user(responsavel_user)
             active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())

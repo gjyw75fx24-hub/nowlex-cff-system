@@ -1586,6 +1586,35 @@ def demandas_analise_planilha_view(request):
                     str(x["cpf"]),
                 )
             )
+            not_imported_by_uf_map = {}
+            not_imported_cpfs = 0
+            for row in cpf_rows:
+                if row.get("imported_full"):
+                    continue
+                not_imported_cpfs += 1
+                uf_label = str(row.get("uf") or "-").strip().upper() or "-"
+                bucket = not_imported_by_uf_map.setdefault(
+                    uf_label,
+                    {
+                        "uf": uf_label,
+                        "total": 0,
+                        "cadastros": [],
+                    },
+                )
+                bucket["total"] += 1
+                bucket["cadastros"].append(
+                    {
+                        "cpf": row.get("cpf") or "-",
+                        "parte_contraria": row.get("parte_contraria") or "-",
+                        "cnj_count": row.get("cnj_count") or 0,
+                        "imported_count": row.get("imported_count") or 0,
+                        "imported_total": row.get("imported_total") or 0,
+                    }
+                )
+            not_imported_by_uf = [
+                not_imported_by_uf_map[key]
+                for key in sorted(not_imported_by_uf_map.keys())
+            ]
             preview = {
                 "rows": len(parsed),
                 "cpfs": len(cpfs),
@@ -1595,6 +1624,8 @@ def demandas_analise_planilha_view(request):
                 "cpf_rows": cpf_rows,
                 "analysed_cpfs": analysed_cpfs,
                 "imported_cpfs": imported_cpfs,
+                "not_imported_cpfs": not_imported_cpfs,
+                "not_imported_by_uf": not_imported_by_uf,
                 "priority_options_count": len(priority_options),
             }
 
@@ -5486,13 +5517,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return
         entries = self._parse_cnj_entries(entries_payload)
         active_entry = self._get_active_entry(entries, form.cleaned_data.get('cnj_active_index'))
-        if not entries:
-            obj.cnj = ''
-            obj.uf = ''
-            obj.valor_causa = None
-            obj.status = None
-            obj.vara = ''
-            obj.tribunal = ''
         if active_entry:
             obj.cnj = active_entry.get('cnj') or obj.cnj
             obj.uf = active_entry.get('uf') or obj.uf
