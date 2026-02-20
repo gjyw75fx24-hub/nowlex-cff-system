@@ -162,6 +162,10 @@
             inNavigation = false;
             return;
         }
+        if (typeof window.__adminNavigateWithLoading === 'function') {
+            window.__adminNavigateWithLoading(targetUrl);
+            return;
+        }
         window.dispatchEvent(new CustomEvent('admin:navigation-loading:start', {
             detail: { targetUrl, source: 'row_open_choice' },
         }));

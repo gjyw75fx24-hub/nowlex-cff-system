@@ -118,6 +118,23 @@
         return false;
     };
 
+    const navigateWithLoading = (targetUrlRaw) => {
+        let targetUrl;
+        try {
+            targetUrl = new URL(targetUrlRaw, window.location.href);
+        } catch (error) {
+            window.location.href = targetUrlRaw;
+            return;
+        }
+        showLoading();
+        // Pequeno atraso para permitir o repaint do overlay antes da troca de página.
+        window.setTimeout(() => {
+            window.location.href = targetUrl.href;
+        }, 24);
+    };
+
+    window.__adminNavigateWithLoading = navigateWithLoading;
+
     document.addEventListener('click', (event) => {
         if (event.defaultPrevented || event.button !== 0) {
             return;
@@ -148,12 +165,8 @@
             return;
         }
 
-        // Let page handlers cancel navigation first.
-        window.requestAnimationFrame(() => {
-            if (!event.defaultPrevented) {
-                showLoading();
-            }
-        });
+        event.preventDefault();
+        navigateWithLoading(targetUrl.href);
     }, true);
 
     window.addEventListener('admin:navigation-loading:start', (event) => {
