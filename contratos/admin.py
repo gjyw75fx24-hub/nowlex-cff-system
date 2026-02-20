@@ -885,6 +885,60 @@ def _build_compatible_payload_for_target_type(payload: dict, tipo_target: TipoAn
     converted_payload["questoes"] = converted_questions
     return converted_payload
 
+def _sync_pk_sequence_if_needed(model_class):
+    if connection.vendor != "postgresql":
+        return
+
+    pk_field = getattr(model_class._meta, "pk", None)
+    if not pk_field:
+        return
+    if pk_field.get_internal_type() not in {"AutoField", "BigAutoField", "SmallAutoField"}:
+        return
+
+    table_name = model_class._meta.db_table
+    pk_column = pk_field.column
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_get_serial_sequence(%s, %s)", [table_name, pk_column])
+            row = cursor.fetchone() or []
+            sequence_name = row[0] if row else None
+            if not sequence_name:
+                return
+
+            cursor.execute(
+                f'''
+                SELECT setval(
+                    %s,
+                    COALESCE(MAX("{pk_column}"), 1),
+                    MAX("{pk_column}") IS NOT NULL
+                )
+                FROM "{table_name}"
+                ''',
+                [sequence_name],
+            )
+    except (ProgrammingError, OperationalError):
+        logger.exception("Falha ao sincronizar sequence para %s", table_name)
+
+def _is_pk_conflict_error(exc: Exception, model_class) -> bool:
+    message = str(exc).lower()
+    table_name = model_class._meta.db_table.lower()
+    return (
+        "duplicate key value violates unique constraint" in message
+        and f"{table_name}_pkey" in message
+    )
+
+def _create_with_pk_retry(model_class, **kwargs):
+    try:
+        with transaction.atomic():
+            return model_class.objects.create(**kwargs)
+    except IntegrityError as exc:
+        if not _is_pk_conflict_error(exc, model_class):
+            raise
+        _sync_pk_sequence_if_needed(model_class)
+        with transaction.atomic():
+            return model_class.objects.create(**kwargs)
+
 def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: bool = False):
     tipo_data = payload.get("tipo") or {}
     questoes_data = payload.get("questoes") or []
@@ -893,6 +947,10 @@ def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: boo
     nome = (tipo_data.get("nome") or "").strip()
     if not slug or not nome:
         raise ValueError("JSON inválido: tipo.slug e tipo.nome são obrigatórios.")
+
+    _sync_pk_sequence_if_needed(TipoAnaliseObjetiva)
+    _sync_pk_sequence_if_needed(QuestaoAnalise)
+    _sync_pk_sequence_if_needed(OpcaoResposta)
 
     hashtag = (tipo_data.get("hashtag") or "").strip()
     ativo = bool(tipo_data.get("ativo", True))
@@ -943,7 +1001,7 @@ def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: boo
 
         questao = questoes_by_chave.get(chave)
         if questao is None:
-            questao = QuestaoAnalise.objects.create(chave=chave, **defaults)
+            questao = _create_with_pk_retry(QuestaoAnalise, chave=chave, **defaults)
             questoes_by_chave[chave] = questao
             changed = True
         else:
@@ -985,11 +1043,21 @@ def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: boo
             if not texto:
                 continue
             desired_texts.append(texto)
-            opcao, opt_created = OpcaoResposta.objects.get_or_create(
-                questao_origem=questao,
-                texto_resposta=texto,
-                defaults={"ativo": bool(od.get("ativo", True)), "proxima_questao": None},
-            )
+            try:
+                opcao, opt_created = OpcaoResposta.objects.get_or_create(
+                    questao_origem=questao,
+                    texto_resposta=texto,
+                    defaults={"ativo": bool(od.get("ativo", True)), "proxima_questao": None},
+                )
+            except IntegrityError as exc:
+                if not _is_pk_conflict_error(exc, OpcaoResposta):
+                    raise
+                _sync_pk_sequence_if_needed(OpcaoResposta)
+                opcao, opt_created = OpcaoResposta.objects.get_or_create(
+                    questao_origem=questao,
+                    texto_resposta=texto,
+                    defaults={"ativo": bool(od.get("ativo", True)), "proxima_questao": None},
+                )
             if opt_created:
                 changed = True
             else:
