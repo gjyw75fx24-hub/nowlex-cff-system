@@ -162,6 +162,9 @@
             inNavigation = false;
             return;
         }
+        window.dispatchEvent(new CustomEvent('admin:navigation-loading:start', {
+            detail: { targetUrl, source: 'row_open_choice' },
+        }));
         window.location.href = targetUrl;
     };
 

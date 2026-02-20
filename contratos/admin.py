@@ -6855,7 +6855,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         css = {
             'all': (
                 'admin/css/admin_tabs.css',
-                'admin/css/custom_admin_styles.css?v=20260213c',
+                'admin/css/custom_admin_styles.css?v=20260220a',
                 'admin/css/cia_button.css',
                 'admin/css/endereco_widget.css',  # <--- Adicionado
             )
