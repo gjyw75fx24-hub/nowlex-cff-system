@@ -1742,6 +1742,8 @@ window.addEventListener('DOMContentLoaded', () => {
                     <select class="kpi-productivity-period" style="padding:4px 8px;">
                         <option value="1">Hoje</option>
                         <option value="yesterday">Ontem</option>
+                        <option value="month_current">Mês atual</option>
+                        <option value="month_previous">Mês anterior</option>
                         <option value="7">Últimos 7 dias</option>
                         <option value="15">Últimos 15 dias</option>
                         <option value="30" selected>Últimos 30 dias</option>
@@ -1759,6 +1761,35 @@ window.addEventListener('DOMContentLoaded', () => {
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Até:
                     <input type="date" class="kpi-productivity-date-to" style="padding:4px 8px;">
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    <input type="checkbox" class="kpi-productivity-compare-enabled">
+                    Comparar com outro período
+                </label>
+                <label class="kpi-productivity-compare-wrap" style="display:none; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Comparar:
+                    <select class="kpi-productivity-compare-period" style="padding:4px 8px;">
+                        <option value="yesterday">Ontem</option>
+                        <option value="1">Hoje</option>
+                        <option value="month_previous" selected>Mês anterior</option>
+                        <option value="month_current">Mês atual</option>
+                        <option value="7">Últimos 7 dias</option>
+                        <option value="15">Últimos 15 dias</option>
+                        <option value="30">Últimos 30 dias</option>
+                        <option value="60">Últimos 60 dias</option>
+                        <option value="90">Últimos 90 dias</option>
+                        <option value="180">Últimos 180 dias</option>
+                        <option value="365">Últimos 365 dias</option>
+                        <option value="all">Todo o histórico</option>
+                    </select>
+                </label>
+                <label class="kpi-productivity-compare-wrap" style="display:none; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    De (comp.):
+                    <input type="date" class="kpi-productivity-compare-date-from" style="padding:4px 8px;">
+                </label>
+                <label class="kpi-productivity-compare-wrap" style="display:none; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Até (comp.):
+                    <input type="date" class="kpi-productivity-compare-date-to" style="padding:4px 8px;">
                 </label>
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Usuário:
@@ -1791,21 +1822,36 @@ window.addEventListener('DOMContentLoaded', () => {
         const periodSelect = productivitySection.querySelector('.kpi-productivity-period');
         const dateFromInput = productivitySection.querySelector('.kpi-productivity-date-from');
         const dateToInput = productivitySection.querySelector('.kpi-productivity-date-to');
+        const compareEnabledInput = productivitySection.querySelector('.kpi-productivity-compare-enabled');
+        const comparePeriodSelect = productivitySection.querySelector('.kpi-productivity-compare-period');
+        const compareDateFromInput = productivitySection.querySelector('.kpi-productivity-compare-date-from');
+        const compareDateToInput = productivitySection.querySelector('.kpi-productivity-compare-date-to');
+        const compareWrapEls = Array.from(productivitySection.querySelectorAll('.kpi-productivity-compare-wrap'));
         const userSelect = productivitySection.querySelector('.kpi-productivity-user');
         const metricSelect = productivitySection.querySelector('.kpi-productivity-metric');
         const summaryEl = productivitySection.querySelector('.kpi-productivity-summary');
         const tableWrap = productivitySection.querySelector('.kpi-productivity-table-wrap');
         const usersCanvas = document.getElementById('kpiProductivityUsersChart');
         const dailyCanvas = document.getElementById('kpiProductivityDailyChart');
-        if (periodSelect && dateFromInput && dateToInput && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
+        if (periodSelect && dateFromInput && dateToInput && compareEnabledInput && comparePeriodSelect && compareDateFromInput && compareDateToInput && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
             if (productivityDateMin) {
                 dateFromInput.min = productivityDateMin;
                 dateToInput.min = productivityDateMin;
+                compareDateFromInput.min = productivityDateMin;
+                compareDateToInput.min = productivityDateMin;
             }
             if (productivityDateMax) {
                 dateFromInput.max = productivityDateMax;
                 dateToInput.max = productivityDateMax;
+                compareDateFromInput.max = productivityDateMax;
+                compareDateToInput.max = productivityDateMax;
             }
+            const syncCompareVisibility = () => {
+                const enabled = Boolean(compareEnabledInput.checked);
+                compareWrapEls.forEach((el) => {
+                    el.style.display = enabled ? 'inline-flex' : 'none';
+                });
+            };
             const parseDateKey = (value) => {
                 const raw = String(value || '').trim();
                 const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1847,6 +1893,15 @@ window.addEventListener('DOMContentLoaded', () => {
                     yesterday.setDate(yesterday.getDate() - 1);
                     return { start: yesterday, end: yesterday };
                 }
+                if (periodKey === 'month_current') {
+                    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+                    return { start, end: today };
+                }
+                if (periodKey === 'month_previous') {
+                    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+                    return { start, end };
+                }
                 const days = Number(periodKey || 0);
                 if (!Number.isFinite(days) || days <= 0) {
                     return { start: null, end: latestDataDate };
@@ -1856,9 +1911,9 @@ window.addEventListener('DOMContentLoaded', () => {
                 start.setDate(start.getDate() - days + 1);
                 return { start, end };
             };
-            const getCustomBounds = () => {
-                const fromValue = String(dateFromInput.value || '').trim();
-                const toValue = String(dateToInput.value || '').trim();
+            const getCustomBounds = (fromInputEl, toInputEl) => {
+                const fromValue = String(fromInputEl?.value || '').trim();
+                const toValue = String(toInputEl?.value || '').trim();
                 if (!fromValue && !toValue) {
                     return null;
                 }
@@ -1874,8 +1929,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
                 return { start, end };
             };
-            const getActiveBounds = (periodValue) => {
-                const customBounds = getCustomBounds();
+            const getActiveBounds = (periodValue, fromInputEl, toInputEl) => {
+                const customBounds = getCustomBounds(fromInputEl, toInputEl);
                 if (customBounds) {
                     return { ...customBounds, source: 'custom' };
                 }
@@ -1922,18 +1977,76 @@ window.addEventListener('DOMContentLoaded', () => {
 
             let usersChart = null;
             let dailyChart = null;
+            const formatSignedNumber = (value) => {
+                const numeric = Number(value || 0);
+                if (numeric > 0) return `+${numberPt(numeric)}`;
+                return numberPt(numeric);
+            };
+            const formatDeltaPct = (currentValue, referenceValue) => {
+                const current = Number(currentValue || 0);
+                const reference = Number(referenceValue || 0);
+                if (!reference) {
+                    if (!current) return '0,00%';
+                    return 'n/a';
+                }
+                const pct = ((current - reference) / reference) * 100;
+                const absPct = Math.abs(pct).toLocaleString('pt-BR', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                });
+                return `${pct >= 0 ? '+' : '-'}${absPct}%`;
+            };
+            const getDeltaColor = (value) => (Number(value || 0) >= 0 ? '#207544' : '#b64040');
+            const formatBoundsLabel = (bounds, periodValueKey) => {
+                const toLabel = (dateObj) => (dateObj ? dateObj.toLocaleDateString('pt-BR') : '');
+                if (bounds?.source === 'custom') {
+                    const startLabel = bounds.start
+                        ? toLabel(bounds.start)
+                        : (productivityDateMin ? formatDateLabel(productivityDateMin) : 'início');
+                    const endLabel = bounds.end
+                        ? toLabel(bounds.end)
+                        : 'hoje';
+                    return `Período customizado: ${startLabel} até ${endLabel} (com data)`;
+                }
+                if (periodValueKey === 'all') {
+                    return 'Todo o histórico com data';
+                }
+                if (periodValueKey === '1') {
+                    return 'Hoje (com data)';
+                }
+                if (periodValueKey === 'yesterday') {
+                    return 'Ontem (com data)';
+                }
+                if (periodValueKey === 'month_current') {
+                    return 'Mês atual (com data)';
+                }
+                if (periodValueKey === 'month_previous') {
+                    return 'Mês anterior (com data)';
+                }
+                return `Últimos ${Number(periodValueKey)} dias (com data)`;
+            };
 
             const renderProductivity = () => {
+                syncCompareVisibility();
                 const periodValue = String(periodSelect.value || '30');
                 const periodValueKey = periodValue.trim().toLowerCase();
                 const selectedUserKey = String(userSelect.value || 'ALL');
                 const metricValue = String(metricSelect.value || 'total');
-                const bounds = getActiveBounds(periodValue);
+                const bounds = getActiveBounds(periodValue, dateFromInput, dateToInput);
+                const compareEnabled = Boolean(compareEnabledInput.checked);
+                const comparePeriodValue = String(comparePeriodSelect.value || 'month_previous');
+                const comparePeriodValueKey = comparePeriodValue.trim().toLowerCase();
+                const compareBounds = compareEnabled
+                    ? getActiveBounds(comparePeriodValue, compareDateFromInput, compareDateToInput)
+                    : null;
 
                 const rows = sortedUsers.map((user) => {
                     const dailyRows = filterDailyByBounds(user.daily || [], bounds);
                     const period = aggregateDailyRows(dailyRows);
                     const periodTotal = period.analises + period.tarefas + period.prazos;
+                    const compareDailyRows = compareBounds ? filterDailyByBounds(user.daily || [], compareBounds) : [];
+                    const compare = compareBounds ? aggregateDailyRows(compareDailyRows) : { analises: 0, tarefas: 0, prazos: 0 };
+                    const compareTotal = compare.analises + compare.tarefas + compare.prazos;
                     const overallTotals = user.totals || {};
                     const overallTotal = Number(overallTotals.total || sumMetrics(overallTotals));
                     const semDataTotals = user.sem_data || {};
@@ -1960,6 +2073,10 @@ window.addEventListener('DOMContentLoaded', () => {
                         carteira_title: carteiraDetails,
                         period,
                         periodTotal,
+                        compare,
+                        compareTotal,
+                        deltaTotal: periodTotal - compareTotal,
+                        deltaPct: formatDeltaPct(periodTotal, compareTotal),
                         overallTotals,
                         overallTotal,
                         semDataTotals,
@@ -1976,6 +2093,15 @@ window.addEventListener('DOMContentLoaded', () => {
                     return acc;
                 }, { analises: 0, tarefas: 0, prazos: 0 });
                 const periodTotalAll = periodTotals.analises + periodTotals.tarefas + periodTotals.prazos;
+                const compareTotals = compareEnabled
+                    ? rows.reduce((acc, row) => {
+                        acc.analises += Number(row.compare.analises || 0);
+                        acc.tarefas += Number(row.compare.tarefas || 0);
+                        acc.prazos += Number(row.compare.prazos || 0);
+                        return acc;
+                    }, { analises: 0, tarefas: 0, prazos: 0 })
+                    : { analises: 0, tarefas: 0, prazos: 0 };
+                const compareTotalAll = compareTotals.analises + compareTotals.tarefas + compareTotals.prazos;
                 const semDataTotalAll = Number(productivitySemData.total || sumMetrics(productivitySemData || {}));
                 const pendingTotals = selectedUserKey === 'ALL'
                     ? {
@@ -1983,40 +2109,44 @@ window.addEventListener('DOMContentLoaded', () => {
                         prazos: Number(productivityPending.prazos || 0),
                     }
                     : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.pending || { tarefas: 0, prazos: 0 });
-                const formatBoundsLabel = () => {
-                    const toLabel = (dateObj) => (dateObj ? dateObj.toLocaleDateString('pt-BR') : '');
-                    if (bounds.source === 'custom') {
-                        const startLabel = bounds.start
-                            ? toLabel(bounds.start)
-                            : (productivityDateMin ? formatDateLabel(productivityDateMin) : 'início');
-                        const endLabel = bounds.end
-                            ? toLabel(bounds.end)
-                            : 'hoje';
-                        return `Período customizado: ${startLabel} até ${endLabel} (com data)`;
-                    }
-                    if (periodValueKey === 'all') {
-                        return 'Todo o histórico com data';
-                    }
-                    if (periodValueKey === '1') {
-                        return 'Hoje (com data)';
-                    }
-                    if (periodValueKey === 'yesterday') {
-                        return 'Ontem (com data)';
-                    }
-                    return `Últimos ${Number(periodValueKey)} dias (com data)`;
-                };
-                const periodLabel = formatBoundsLabel();
+                const periodLabel = formatBoundsLabel(bounds, periodValueKey);
+                const compareLabel = compareEnabled ? formatBoundsLabel(compareBounds, comparePeriodValueKey) : '';
+                const totalDelta = periodTotalAll - compareTotalAll;
+                const analysesDelta = periodTotals.analises - compareTotals.analises;
+                const tarefasDelta = periodTotals.tarefas - compareTotals.tarefas;
+                const prazosDelta = periodTotals.prazos - compareTotals.prazos;
+                const compareSummary = compareEnabled
+                    ? `
+                        &nbsp;|&nbsp;
+                        <strong>${escapeHtml(compareLabel)}:</strong> ${numberPt(compareTotalAll)}
+                        &nbsp;|&nbsp;
+                        <strong>Delta total:</strong>
+                        <span style="font-weight:600; color:${getDeltaColor(totalDelta)};">${formatSignedNumber(totalDelta)} (${formatDeltaPct(periodTotalAll, compareTotalAll)})</span>
+                        &nbsp;|&nbsp;
+                        <strong>Delta A/T/P:</strong>
+                        <span style="font-weight:600; color:${getDeltaColor(analysesDelta)};">${formatSignedNumber(analysesDelta)}</span> /
+                        <span style="font-weight:600; color:${getDeltaColor(tarefasDelta)};">${formatSignedNumber(tarefasDelta)}</span> /
+                        <span style="font-weight:600; color:${getDeltaColor(prazosDelta)};">${formatSignedNumber(prazosDelta)}</span>
+                    `
+                    : '';
 
                 summaryEl.innerHTML = `
                     <strong>Total geral:</strong> ${numberPt(productivityTotals.total || 0)}
                     &nbsp;|&nbsp;
                     <strong>${escapeHtml(periodLabel)}:</strong> ${numberPt(periodTotalAll)}
+                    ${compareSummary}
                     &nbsp;|&nbsp;
                     <strong>Pendentes atuais (tarefas/prazos):</strong> ${numberPt(pendingTotals.tarefas)} / ${numberPt(pendingTotals.prazos)}
                     &nbsp;|&nbsp;
                     <strong>Sem data de conclusão:</strong> ${numberPt(semDataTotalAll)}
                 `;
 
+                const compareHeader = compareEnabled
+                    ? `
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">comparado</span></th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Delta total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual - comparado</span></th>
+                    `
+                    : '';
                 const tableRows = rows.map((row) => `
                     <tr>
                         <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;" title="${escapeHtml(row.carteira_title || row.carteira_label)}">${escapeHtml(row.carteira_label)}</td>
@@ -2027,6 +2157,8 @@ window.addEventListener('DOMContentLoaded', () => {
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.prazos)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.pending.prazos)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><strong>${numberPt(row.periodTotal)}</strong></td>
+                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.compareTotal)}</td>` : ''}
+                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><span style="font-weight:600; color:${getDeltaColor(row.deltaTotal)};">${formatSignedNumber(row.deltaTotal)} (${row.deltaPct})</span></td>` : ''}
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.overallTotal)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.semDataTotal)}</td>
                     </tr>
@@ -2043,6 +2175,7 @@ window.addEventListener('DOMContentLoaded', () => {
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos concluídos<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos pendentes<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
+                                ${compareHeader}
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (geral)</th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Sem data</th>
                             </tr>
@@ -2210,8 +2343,13 @@ window.addEventListener('DOMContentLoaded', () => {
             periodSelect.addEventListener('change', renderProductivity);
             dateFromInput.addEventListener('change', renderProductivity);
             dateToInput.addEventListener('change', renderProductivity);
+            compareEnabledInput.addEventListener('change', renderProductivity);
+            comparePeriodSelect.addEventListener('change', renderProductivity);
+            compareDateFromInput.addEventListener('change', renderProductivity);
+            compareDateToInput.addEventListener('change', renderProductivity);
             userSelect.addEventListener('change', renderProductivity);
             metricSelect.addEventListener('change', renderProductivity);
+            syncCompareVisibility();
             renderProductivity();
         }
     }
