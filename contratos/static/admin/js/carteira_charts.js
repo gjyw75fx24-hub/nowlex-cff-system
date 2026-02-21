@@ -1976,6 +1976,184 @@ window.addEventListener('DOMContentLoaded', () => {
 
             let usersChart = null;
             let dailyChart = null;
+            const PRODUCTIVITY_COLOR_STORAGE_KEY = 'kpiProductivitySeriesColorsV1';
+            const defaultSeriesColors = {
+                analises: '#3D6D8A',
+                tarefas: '#2E8BC0',
+                prazos: '#4DAA57',
+            };
+            const seriesColors = (() => {
+                try {
+                    const raw = localStorage.getItem(PRODUCTIVITY_COLOR_STORAGE_KEY);
+                    if (!raw) return { ...defaultSeriesColors };
+                    const parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object') return { ...defaultSeriesColors };
+                    return {
+                        analises: normalizeHex(parsed.analises, defaultSeriesColors.analises),
+                        tarefas: normalizeHex(parsed.tarefas, defaultSeriesColors.tarefas),
+                        prazos: normalizeHex(parsed.prazos, defaultSeriesColors.prazos),
+                    };
+                } catch (error) {
+                    return { ...defaultSeriesColors };
+                }
+            })();
+            const saveSeriesColors = () => {
+                try {
+                    localStorage.setItem(PRODUCTIVITY_COLOR_STORAGE_KEY, JSON.stringify(seriesColors));
+                } catch (error) {
+                    // ignore storage failures
+                }
+            };
+            const resolveSeriesColor = (metricKey) => normalizeHex(seriesColors[metricKey], defaultSeriesColors[metricKey] || '#417690');
+            const getDatasetColors = (metricKey, compared = false) => {
+                const baseHex = resolveSeriesColor(metricKey);
+                return {
+                    backgroundColor: hexToRgba(baseHex, compared ? 0.28 : 0.72),
+                    borderColor: hexToRgba(baseHex, compared ? 0.70 : 0.96),
+                };
+            };
+            const pickerSwatches = [
+                '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
+                '#009688', '#4CAF50', '#8BC34A', '#CDDC39', '#FFEB3B', '#FFC107', '#FF9800', '#FF5722',
+                '#795548', '#9E9E9E', '#607D8B', '#000000', '#FFFFFF',
+            ];
+            let legendColorPickr = null;
+            let legendColorPickrHost = null;
+            let legendColorPickrOnSave = null;
+
+            const getPickerClientPoint = (triggerEvent) => {
+                const sourceEvent = triggerEvent?.native || triggerEvent || {};
+                const x = Number(sourceEvent.clientX);
+                const y = Number(sourceEvent.clientY);
+                if (Number.isFinite(x) && Number.isFinite(y)) {
+                    return { x, y };
+                }
+                return {
+                    x: Math.round(window.innerWidth / 2),
+                    y: Math.round(window.innerHeight / 2),
+                };
+            };
+
+            const moveLegendPickrHost = (triggerEvent) => {
+                if (!legendColorPickrHost) return;
+                const point = getPickerClientPoint(triggerEvent);
+                const safeX = Math.max(12, Math.min(window.innerWidth - 12, point.x));
+                const safeY = Math.max(12, Math.min(window.innerHeight - 12, point.y));
+                legendColorPickrHost.style.left = `${safeX}px`;
+                legendColorPickrHost.style.top = `${safeY}px`;
+            };
+
+            const positionLegendPickrApp = (triggerEvent, pickrInstance) => {
+                window.requestAnimationFrame(() => {
+                    const appEl = pickrInstance?.getRoot?.()?.app;
+                    if (!appEl) return;
+                    const point = getPickerClientPoint(triggerEvent);
+                    const rect = appEl.getBoundingClientRect();
+                    const margin = 8;
+                    let left = point.x - 10;
+                    let top = point.y + 12;
+                    if (left + rect.width > window.innerWidth - margin) {
+                        left = window.innerWidth - rect.width - margin;
+                    }
+                    if (left < margin) {
+                        left = margin;
+                    }
+                    if (top + rect.height > window.innerHeight - margin) {
+                        top = point.y - rect.height - 12;
+                    }
+                    if (top < margin) {
+                        top = margin;
+                    }
+                    appEl.style.position = 'fixed';
+                    appEl.style.left = `${Math.round(left)}px`;
+                    appEl.style.top = `${Math.round(top)}px`;
+                });
+            };
+
+            const ensureLegendPickr = () => {
+                if (legendColorPickr) {
+                    return legendColorPickr;
+                }
+                if (!window.Pickr || typeof window.Pickr.create !== 'function') {
+                    return null;
+                }
+                legendColorPickrHost = document.createElement('span');
+                legendColorPickrHost.id = 'productivity-legend-color-picker-host';
+                legendColorPickrHost.style.position = 'fixed';
+                legendColorPickrHost.style.left = '-9999px';
+                legendColorPickrHost.style.top = '-9999px';
+                legendColorPickrHost.style.width = '1px';
+                legendColorPickrHost.style.height = '1px';
+                legendColorPickrHost.style.opacity = '0';
+                legendColorPickrHost.style.pointerEvents = 'none';
+                legendColorPickrHost.style.zIndex = '9999';
+                document.body.appendChild(legendColorPickrHost);
+
+                legendColorPickr = window.Pickr.create({
+                    el: legendColorPickrHost,
+                    theme: 'classic',
+                    default: '#417690',
+                    swatches: pickerSwatches,
+                    components: {
+                        preview: true,
+                        opacity: false,
+                        hue: true,
+                        interaction: {
+                            hex: false,
+                            rgba: false,
+                            hsla: false,
+                            hsva: false,
+                            cmyk: false,
+                            input: true,
+                            clear: false,
+                            save: true,
+                        },
+                    },
+                });
+                legendColorPickr.on('save', (color, instance) => {
+                    const picked = color ? color.toHEXA().toString() : '';
+                    if (picked && typeof legendColorPickrOnSave === 'function') {
+                        legendColorPickrOnSave(picked);
+                    }
+                    legendColorPickrOnSave = null;
+                    instance.hide();
+                });
+                legendColorPickr.on('hide', () => {
+                    legendColorPickrOnSave = null;
+                    if (legendColorPickrHost) {
+                        legendColorPickrHost.style.left = '-9999px';
+                        legendColorPickrHost.style.top = '-9999px';
+                    }
+                });
+                return legendColorPickr;
+            };
+
+            const openColorPicker = (initialHex, onPick, triggerEvent) => {
+                const pickrInstance = ensureLegendPickr();
+                if (pickrInstance) {
+                    legendColorPickrOnSave = onPick;
+                    moveLegendPickrHost(triggerEvent);
+                    pickrInstance.setColor(normalizeHex(initialHex, '#417690'), true);
+                    pickrInstance.show();
+                    positionLegendPickrApp(triggerEvent, pickrInstance);
+                    return;
+                }
+
+                const input = document.createElement('input');
+                input.type = 'color';
+                input.value = normalizeHex(initialHex, '#417690');
+                input.style.position = 'fixed';
+                input.style.left = '-9999px';
+                input.style.top = '0';
+                document.body.appendChild(input);
+                const cleanup = () => input.remove();
+                input.addEventListener('change', () => {
+                    onPick(String(input.value || '').trim());
+                    cleanup();
+                }, { once: true });
+                input.addEventListener('blur', cleanup, { once: true });
+                input.click();
+            };
             const formatSignedNumber = (value) => {
                 const numeric = Number(value || 0);
                 if (numeric > 0) return `+${numberPt(numeric)}`;
@@ -2192,21 +2370,57 @@ window.addEventListener('DOMContentLoaded', () => {
                         .slice(0, 20);
                     const chartDatasets = [
                         {
-                            label: `${selectedMetricLabel} (base)`,
-                            data: topRows.map((row) => Number(row.currentMetric || 0)),
-                            backgroundColor: 'rgba(61, 109, 138, 0.72)',
-                            borderColor: 'rgba(61, 109, 138, 0.96)',
+                            label: 'Análises',
+                            metricKey: 'analises',
+                            compared: false,
+                            data: topRows.map((row) => Number(row.period.analises || 0)),
+                            ...getDatasetColors('analises', false),
+                            borderWidth: 1,
+                        },
+                        {
+                            label: 'Tarefas',
+                            metricKey: 'tarefas',
+                            compared: false,
+                            data: topRows.map((row) => Number(row.period.tarefas || 0)),
+                            ...getDatasetColors('tarefas', false),
+                            borderWidth: 1,
+                        },
+                        {
+                            label: 'Prazos',
+                            metricKey: 'prazos',
+                            compared: false,
+                            data: topRows.map((row) => Number(row.period.prazos || 0)),
+                            ...getDatasetColors('prazos', false),
                             borderWidth: 1,
                         },
                     ];
                     if (compareEnabled) {
-                        chartDatasets.push({
-                            label: `${selectedMetricLabel} (comparado)`,
-                            data: topRows.map((row) => Number(row.compareMetric || 0)),
-                            backgroundColor: 'rgba(125, 143, 165, 0.58)',
-                            borderColor: 'rgba(125, 143, 165, 0.92)',
-                            borderWidth: 1,
-                        });
+                        chartDatasets.push(
+                            {
+                                label: 'Análises (comparado)',
+                                metricKey: 'analises',
+                                compared: true,
+                                data: topRows.map((row) => Number(row.compare.analises || 0)),
+                                ...getDatasetColors('analises', true),
+                                borderWidth: 1,
+                            },
+                            {
+                                label: 'Tarefas (comparado)',
+                                metricKey: 'tarefas',
+                                compared: true,
+                                data: topRows.map((row) => Number(row.compare.tarefas || 0)),
+                                ...getDatasetColors('tarefas', true),
+                                borderWidth: 1,
+                            },
+                            {
+                                label: 'Prazos (comparado)',
+                                metricKey: 'prazos',
+                                compared: true,
+                                data: topRows.map((row) => Number(row.compare.prazos || 0)),
+                                ...getDatasetColors('prazos', true),
+                                borderWidth: 1,
+                            },
+                        );
                     }
                     usersChart = new Chart(usersCtx, {
                         type: 'bar',
@@ -2221,6 +2435,28 @@ window.addEventListener('DOMContentLoaded', () => {
                                 legend: {
                                     position: 'bottom',
                                     labels: { boxWidth: 12, font: { size: 10 } },
+                                    onClick(event, legendItem, legend) {
+                                        const chart = legend?.chart;
+                                        const datasetIndex = Number(legendItem?.datasetIndex);
+                                        const dataset = chart?.data?.datasets?.[datasetIndex];
+                                        const shiftPressed = Boolean(event?.native?.shiftKey || event?.shiftKey);
+                                        if (shiftPressed && dataset && dataset.metricKey) {
+                                            openColorPicker(resolveSeriesColor(dataset.metricKey), (pickedHex) => {
+                                                const nextColor = normalizeHex(pickedHex, resolveSeriesColor(dataset.metricKey));
+                                                seriesColors[dataset.metricKey] = nextColor;
+                                                saveSeriesColors();
+                                                chart.data.datasets.forEach((item) => {
+                                                    if (item?.metricKey !== dataset.metricKey) return;
+                                                    const colors = getDatasetColors(dataset.metricKey, Boolean(item?.compared));
+                                                    item.backgroundColor = colors.backgroundColor;
+                                                    item.borderColor = colors.borderColor;
+                                                });
+                                                chart.update();
+                                            }, event);
+                                            return;
+                                        }
+                                        Chart.defaults.plugins.legend.onClick(event, legendItem, legend);
+                                    },
                                 },
                                 tooltip: {
                                     callbacks: {
