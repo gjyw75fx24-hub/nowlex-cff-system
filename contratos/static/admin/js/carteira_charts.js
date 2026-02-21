@@ -1806,14 +1806,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
             const scopeBadgeHtml = allowScopeSwitch
                 ? `
-                    <label style="position:absolute; top:10px; right:10px; display:inline-flex; align-items:center; margin:0;">
-                        <select class="kpi-priority-scope-switch" style="appearance:none; -webkit-appearance:none; border:1px solid #d9e1ea; border-radius:999px; padding:4px 30px 4px 10px; font-size:11px; font-weight:700; color:#2f435b; background:#f7fafc; cursor:pointer;">
-                            ${priorityScopes.map((scopeItem, index) => `
-                                <option value="${index}" ${index === currentScopeIndex ? 'selected' : ''}>${escapeHtml(scopeItem.carteira_nome)}</option>
-                            `).join('')}
-                        </select>
-                        <span style="margin-left:6px; font-size:9px; color:#8ea0b3; opacity:0.32; user-select:none;">shift</span>
-                        <span style="position:absolute; right:10px; font-size:10px; color:#5d6f83; pointer-events:none;">▼</span>
+                    <label style="position:absolute; top:8px; right:10px; display:flex; flex-direction:column; align-items:flex-end; gap:2px; margin:0;">
+                        <span style="font-size:9px; color:#8ea0b3; opacity:0.34; line-height:1; user-select:none; pointer-events:none; margin-right:8px;">shift</span>
+                        <span style="position:relative; display:inline-flex; align-items:center;">
+                            <select class="kpi-priority-scope-switch" style="appearance:none; -webkit-appearance:none; border:1px solid #d9e1ea; border-radius:999px; padding:4px 30px 4px 10px; font-size:11px; font-weight:700; color:#2f435b; background:#f7fafc; cursor:pointer;">
+                                ${priorityScopes.map((scopeItem, index) => `
+                                    <option value="${index}" ${index === currentScopeIndex ? 'selected' : ''}>${escapeHtml(scopeItem.carteira_nome)}</option>
+                                `).join('')}
+                            </select>
+                            <span style="position:absolute; right:10px; font-size:10px; color:#5d6f83; pointer-events:none;">▼</span>
+                        </span>
                     </label>
                 `
                 : `
