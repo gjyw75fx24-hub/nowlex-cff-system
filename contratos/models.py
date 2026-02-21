@@ -964,6 +964,42 @@ class BuscaAtivaConfig(models.Model):
         return "Configuração de Busca Ativa"
 
 
+class KpiGlobalConfig(models.Model):
+    prioridade_default_carteira = models.ForeignKey(
+        Carteira,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="Carteira padrão (KPI Prioridade)",
+    )
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+    atualizado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="Atualizado por",
+    )
+
+    class Meta:
+        verbose_name = "Configuração Global de KPI"
+        verbose_name_plural = "Configuração Global de KPI"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Configuração Global de KPI"
+
+
 # --- Modelos para o Motor da Árvore de Decisão de Análise ---
 
 class TipoAnaliseObjetiva(models.Model):
