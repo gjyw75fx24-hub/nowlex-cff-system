@@ -139,6 +139,91 @@ window.addEventListener('DOMContentLoaded', () => {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    const getCsrfToken = () => {
+        const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        if (input && input.value) return String(input.value);
+        const cookie = document.cookie || '';
+        const match = cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    };
+    const showPriorityToast = (message, kind = 'info') => {
+        const existing = document.getElementById('kpi-priority-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.id = 'kpi-priority-toast';
+        const palette = {
+            success: { bg: '#eaf7ec', border: '#9dd0a8', text: '#1f5b2a' },
+            error: { bg: '#fdecec', border: '#f0b8b8', text: '#842029' },
+            info: { bg: '#eef4fb', border: '#b8cee8', text: '#1f4b7a' },
+        };
+        const style = palette[kind] || palette.info;
+        toast.style.position = 'fixed';
+        toast.style.top = '16px';
+        toast.style.right = '16px';
+        toast.style.zIndex = '99999';
+        toast.style.maxWidth = '420px';
+        toast.style.padding = '10px 12px';
+        toast.style.border = `1px solid ${style.border}`;
+        toast.style.borderRadius = '8px';
+        toast.style.background = style.bg;
+        toast.style.color = style.text;
+        toast.style.fontSize = '12px';
+        toast.style.fontWeight = '600';
+        toast.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
+        toast.textContent = String(message || '').trim() || 'Operação concluída.';
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            if (toast && toast.parentNode) toast.remove();
+        }, 3500);
+    };
+    const showPriorityConfirmDialog = (title, message) => {
+        return new Promise((resolve) => {
+            const existing = document.getElementById('kpi-priority-confirm-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'kpi-priority-confirm-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.background = 'rgba(10, 20, 35, 0.45)';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '100000';
+            overlay.innerHTML = `
+                <div style="width:min(92vw, 520px); background:#f7f2d6; border:1px solid #e2c972; border-radius:12px; box-shadow:0 14px 34px rgba(0,0,0,0.2); padding:18px;">
+                    <div style="font-size:18px; font-weight:700; color:#3e3521; margin-bottom:8px;">${escapeHtml(title || 'Confirmar')}</div>
+                    <div style="font-size:14px; color:#3e3521; margin-bottom:16px; line-height:1.4;">${escapeHtml(message || '')}</div>
+                    <div style="display:flex; justify-content:flex-end; gap:10px;">
+                        <button type="button" data-action="cancel" style="border:1px solid #d3b35b; border-radius:10px; background:#fff; color:#3e3521; font-weight:700; padding:8px 16px; cursor:pointer;">Cancelar</button>
+                        <button type="button" data-action="ok" style="border:1px solid #d3b35b; border-radius:10px; background:#f1c84b; color:#3e3521; font-weight:700; padding:8px 16px; cursor:pointer;">Definir</button>
+                    </div>
+                </div>
+            `;
+            const finish = (ok) => {
+                if (overlay.parentNode) overlay.remove();
+                resolve(Boolean(ok));
+            };
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) finish(false);
+            });
+            const cancelBtn = overlay.querySelector('button[data-action="cancel"]');
+            const okBtn = overlay.querySelector('button[data-action="ok"]');
+            if (cancelBtn) cancelBtn.addEventListener('click', () => finish(false));
+            if (okBtn) okBtn.addEventListener('click', () => finish(true));
+            document.body.appendChild(overlay);
+        });
+    };
+    let priorityShiftPressed = false;
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'Shift') priorityShiftPressed = true;
+    });
+    window.addEventListener('keyup', (event) => {
+        if (event.key === 'Shift') priorityShiftPressed = false;
+    });
+    window.addEventListener('blur', () => {
+        priorityShiftPressed = false;
+    });
     const sanitizeFileName = (value) => {
         const normalized = String(value || 'kpi')
             .normalize('NFD')
@@ -856,6 +941,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const priorityTotals = (priorityKpi && typeof priorityKpi === 'object' && priorityKpi.totals)
         ? priorityKpi.totals
         : {};
+    let priorityDefaultCarteiraId = Number(priorityKpi.default_carteira_id || 0);
+    const priorityDefaultCanConfigure = Boolean(priorityKpi.can_configure_global_default);
+    const priorityDefaultSetUrl = String(priorityKpi.set_default_url || '').trim();
     const productivityKpi = (kpiData && typeof kpiData === 'object' && kpiData.productivity_kpi)
         ? kpiData.productivity_kpi
         : {};
@@ -1592,6 +1680,14 @@ window.addEventListener('DOMContentLoaded', () => {
         }
 
         let currentScopeIndex = 0;
+        if (priorityDefaultCarteiraId > 0) {
+            const defaultScopeIndex = priorityScopes.findIndex(
+                (scope) => Number(scope?.carteira_id || 0) === priorityDefaultCarteiraId
+            );
+            if (defaultScopeIndex >= 0) {
+                currentScopeIndex = defaultScopeIndex;
+            }
+        }
         let showAllScopes = false;
         const hasMultipleScopes = priorityScopes.length > 1;
         const priorityCharts = [];
@@ -1610,6 +1706,52 @@ window.addEventListener('DOMContentLoaded', () => {
             const url = buildPriorityKpiUrl(tagId, status, ufCode, carteiraId);
             if (!url) return `${numberPt(numericCount)}`;
             return `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${numberPt(numericCount)}</a>`;
+        };
+        const persistPriorityDefaultCarteira = async (scope) => {
+            if (!priorityDefaultCanConfigure || !priorityDefaultSetUrl) {
+                showPriorityToast('Apenas superusuário pode definir carteira padrão global.', 'info');
+                return;
+            }
+            const carteiraId = Number(scope?.carteira_id || 0);
+            const carteiraNome = String(scope?.carteira_nome || '').trim() || 'Carteira';
+            if (carteiraId <= 0) {
+                showPriorityToast('Selecione uma carteira válida para fixar como padrão global.', 'info');
+                return;
+            }
+            const confirmed = await showPriorityConfirmDialog(
+                'Definir carteira padrão global',
+                `Fixar "${carteiraNome}" como carteira nativa do KPI Importados com Prioridade para todos os usuários?`,
+            );
+            if (!confirmed) return;
+
+            const csrfToken = getCsrfToken();
+            if (!csrfToken) {
+                showPriorityToast('Token CSRF não encontrado. Recarregue a página.', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(priorityDefaultSetUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRFToken': csrfToken,
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ carteira_id: carteiraId }),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || !payload?.ok) {
+                    throw new Error(payload?.error || 'Falha ao salvar carteira padrão.');
+                }
+                priorityDefaultCarteiraId = Number(payload?.carteira_id || carteiraId);
+                showPriorityToast(
+                    payload?.message || `Carteira padrão global definida para ${carteiraNome}.`,
+                    'success',
+                );
+            } catch (error) {
+                showPriorityToast(error?.message || 'Não foi possível salvar a carteira padrão global.', 'error');
+            }
         };
 
         const buildScopePanelHtml = (scope, scopeIndex, allowScopeSwitch = false) => {
@@ -1670,6 +1812,7 @@ window.addEventListener('DOMContentLoaded', () => {
                                 <option value="${index}" ${index === currentScopeIndex ? 'selected' : ''}>${escapeHtml(scopeItem.carteira_nome)}</option>
                             `).join('')}
                         </select>
+                        <span style="margin-left:6px; font-size:9px; color:#8ea0b3; opacity:0.32; user-select:none;">shift</span>
                         <span style="position:absolute; right:10px; font-size:10px; color:#5d6f83; pointer-events:none;">▼</span>
                     </label>
                 `
@@ -1870,11 +2013,26 @@ window.addEventListener('DOMContentLoaded', () => {
                 const scopeSwitch = contentWrap.querySelector('.kpi-priority-scope-switch');
                 if (scopeSwitch) {
                     scopeSwitch.value = String(currentScopeIndex);
+                    let shiftSelectionIntent = false;
+                    const captureShiftIntent = (event) => {
+                        shiftSelectionIntent = Boolean(event?.shiftKey) || Boolean(priorityShiftPressed);
+                    };
+                    scopeSwitch.addEventListener('mousedown', captureShiftIntent);
+                    scopeSwitch.addEventListener('pointerdown', captureShiftIntent);
+                    scopeSwitch.addEventListener('click', captureShiftIntent);
                     scopeSwitch.addEventListener('change', () => {
                         const parsedIndex = Number(scopeSwitch.value || 0);
                         if (!Number.isFinite(parsedIndex)) return;
+                        const shouldPersistAsDefault = Boolean(shiftSelectionIntent) || Boolean(priorityShiftPressed);
+                        shiftSelectionIntent = false;
                         currentScopeIndex = Math.max(0, Math.min(priorityScopes.length - 1, parsedIndex));
                         renderPriorityContent();
+                        if (shouldPersistAsDefault) {
+                            const selectedScope = priorityScopes[currentScopeIndex];
+                            if (selectedScope) {
+                                persistPriorityDefaultCarteira(selectedScope);
+                            }
+                        }
                     });
                 }
             }
