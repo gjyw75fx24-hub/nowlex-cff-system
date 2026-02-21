@@ -352,6 +352,8 @@
             if (!hasActiveAnalysisResponses()) {
                 return;
             }
+            syncRenderedProcessCardsBeforePersist();
+            flushPendingSave();
             const stored = storeActiveAnalysisAsProcessCard();
             if (stored) {
                 saveResponses();
@@ -929,6 +931,12 @@
                 if (candidates.length === 0 && Array.isArray(processo.contratos)) {
                     candidates = processo.contratos.map(item => String(item).trim()).filter(Boolean);
                 }
+                if (candidates.length === 0) {
+                    candidates = parseContractsField(userResponses.contratos_para_monitoria || []);
+                }
+                if (candidates.length === 0) {
+                    candidates = getSelectedContractIdsFromInfoCard();
+                }
                 candidates.forEach(id => {
                     if (id) {
                         contractIds.push(String(id));
@@ -1396,6 +1404,37 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const rawCnj = capturedResponses.cnj || $('input[name="cnj"]').val() || '';
             const formattedCnj = rawCnj ? formatCnjDigits(rawCnj) : '';
             const snapshotResponses = deepClone(capturedResponses);
+            const activeCardForFallback =
+                Array.isArray(userResponses.processos_vinculados) && userResponses.processos_vinculados.length
+                    ? userResponses.processos_vinculados[0]
+                    : null;
+            let fallbackNjLabel = String(activeCardForFallback && activeCardForFallback.nj_label ? activeCardForFallback.nj_label : '').trim();
+            let fallbackNjIndex = Number(activeCardForFallback && activeCardForFallback.nj_index);
+            if ((!fallbackNjLabel || !Number.isFinite(fallbackNjIndex) || fallbackNjIndex <= 0) && contractIds.length) {
+                const inferredLabel = inferNjLabelFromNotebookByContracts(
+                    Array.from(new Set([...contractIds, ...getContractNumbersFromIds(contractIds)]))
+                );
+                if (inferredLabel) {
+                    fallbackNjLabel = fallbackNjLabel || inferredLabel;
+                    const inferredIndex = Number.parseInt(inferredLabel.replace(/[^0-9]/g, ''), 10);
+                    if (!(Number.isFinite(fallbackNjIndex) && fallbackNjIndex > 0) && Number.isFinite(inferredIndex) && inferredIndex > 0) {
+                        fallbackNjIndex = inferredIndex;
+                    }
+                }
+            }
+            const fallbackObservation = (() => {
+                const fromCard =
+                    activeCardForFallback && typeof activeCardForFallback.observacoes === 'string'
+                        ? activeCardForFallback.observacoes.trim()
+                        : '';
+                if (fromCard) {
+                    return fromCard;
+                }
+                const fromRoot = typeof userResponses.observacoes_livres === 'string'
+                    ? userResponses.observacoes_livres.trim()
+                    : '';
+                return fromRoot;
+            })();
             const supervisionado = Boolean(snapshotResponses.supervisionado);
             const supervisor_status =
                 snapshotResponses.supervisor_status || 'pendente';
@@ -1417,11 +1456,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 cnj: formattedCnj || 'Não informado',
                 contratos: contractIds,
                 tipo_de_acao_respostas: snapshotResponses,
+                observacoes: fallbackObservation,
                 supervisionado,
                 supervisor_status,
                 awaiting_supervision_confirm,
                 supervision_date,
                 barrado,
+                nj_label: fallbackNjLabel,
+                nj_index: Number.isFinite(fallbackNjIndex) && fallbackNjIndex > 0 ? fallbackNjIndex : null,
                 analysis_author: analysisAuthor
             };
         }
@@ -1453,18 +1495,59 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 ? deepClone(processo.barrado)
                 : { ativo: false, inicio: null, retorno_em: null };
             const supervisionDate = normalizeIsoDateValue(processo.supervision_date);
+            const isNonJudicial = isCardNonJudicialized(processo);
+            let njLabel = String(processo.nj_label || '').trim();
+            const njIndexRaw = Number(processo.nj_index);
+            let njIndex = Number.isFinite(njIndexRaw) && njIndexRaw > 0 ? njIndexRaw : null;
+            const contractLookupTokens = Array.from(
+                new Set([...contractIds, ...getContractNumbersFromIds(contractIds)])
+            );
+            if (isNonJudicial && !njLabel) {
+                const inferredLabel = inferNjLabelFromNotebookByContracts(contractLookupTokens);
+                if (inferredLabel) {
+                    njLabel = inferredLabel;
+                    processo.nj_label = inferredLabel;
+                    const inferredIndex = Number.parseInt(inferredLabel.replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(inferredIndex) && inferredIndex > 0) {
+                        njIndex = inferredIndex;
+                        processo.nj_index = inferredIndex;
+                    }
+                }
+            }
+            const observationMentionType = isNonJudicial ? 'nj' : 'cnj';
+            const observationTarget = isNonJudicial
+                ? (njLabel || cnjFormatted || 'Não informado')
+                : (cnjFormatted || String(processo.cnj || '').trim() || 'Não informado');
+            const notebookObservationEntries = getObservationEntriesForCnj(
+                observationTarget,
+                contractLookupTokens,
+                {
+                    mentionType: observationMentionType,
+                    mentionLabel: njLabel
+                }
+            );
+            const notebookObservationText = notebookObservationEntries
+                .map(entry => String(entry && entry.raw ? entry.raw : '').trim())
+                .filter(Boolean)
+                .join('\n\n');
+            const directObservationText =
+                typeof processo.observacoes === 'string' ? processo.observacoes.trim() : '';
+            const mergedObservationText = directObservationText || notebookObservationText;
             delete responses.processos_vinculados;
             return {
                 cnj: cnjFormatted || 'Não informado',
                 valor_causa: valorCausa,
                 contratos: contractIds,
                 tipo_de_acao_respostas: responses,
+                observacoes: mergedObservationText,
                 analysis_type: processo.analysis_type ? deepClone(processo.analysis_type) : null,
                 supervisionado: Boolean(processo.supervisionado),
                 supervisor_status: processo.supervisor_status || 'pendente',
                 awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
                 supervision_date: supervisionDate,
                 barrado,
+                nj_label: njLabel || (njIndex ? `#NJ${njIndex}` : ''),
+                nj_index: njIndex,
                 analysis_author: resolveCardAnalysisAuthor(processo),
                 general_card_snapshot: false
             };
@@ -1552,6 +1635,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
         function storeActiveAnalysisAsProcessCard() {
             ensureUserResponsesShape();
+            syncRenderedProcessCardsBeforePersist();
             const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
             const editingIndex =
                 Number.isFinite(userResponses._editing_card_index) &&
@@ -1606,6 +1690,16 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     snapshotToUpdate,
                     currentAnalysisAuthor
                 );
+                if (!snapshotToUpdate.nj_label && savedCards[editingIndex].nj_label) {
+                    snapshotToUpdate.nj_label = savedCards[editingIndex].nj_label;
+                }
+                if (
+                    (!Number.isFinite(Number(snapshotToUpdate.nj_index)) || Number(snapshotToUpdate.nj_index) <= 0) &&
+                    Number.isFinite(Number(savedCards[editingIndex].nj_index)) &&
+                    Number(savedCards[editingIndex].nj_index) > 0
+                ) {
+                    snapshotToUpdate.nj_index = Number(savedCards[editingIndex].nj_index);
+                }
                 snapshotToUpdate.general_card_snapshot =
                     savedCards[editingIndex].general_card_snapshot || false;
                 savedCards[editingIndex] = snapshotToUpdate;
@@ -1722,6 +1816,49 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             // Durante edição, mantemos o card ativo em processos_vinculados[0]
             // (evita array esparso que quebra a atualização do snapshot ao concluir).
             userResponses.processos_vinculados = [updatedCard];
+        }
+
+        function syncRenderedProcessCardsBeforePersist() {
+            ensureUserResponsesShape();
+            if (!Array.isArray(userResponses.processos_vinculados) || !userResponses.processos_vinculados.length) {
+                return;
+            }
+            const cards = userResponses.processos_vinculados;
+            $dynamicQuestionsContainer.find('.processo-card').each(function () {
+                const $card = $(this);
+                const cardIndex = Number($card.attr('data-card-index'));
+                if (!Number.isFinite(cardIndex) || cardIndex < 0 || cardIndex >= cards.length) {
+                    return;
+                }
+                const cardData = cards[cardIndex];
+                if (!cardData || typeof cardData !== 'object') {
+                    return;
+                }
+                const $supervisionToggle = $card.find('.supervision-toggle-input').first();
+                if ($supervisionToggle.length) {
+                    cardData.supervisionado = Boolean($supervisionToggle.is(':checked'));
+                }
+                const $supervisionDateInput = $card.find('.supervision-date-input').first();
+                if ($supervisionDateInput.length) {
+                    const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
+                    $supervisionDateInput.val(normalizedDate);
+                    const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                    cardData.supervision_date = clampedDate;
+                } else {
+                    cardData.supervision_date = clampIsoDateToMax(
+                        normalizeIsoDateValue(cardData.supervision_date),
+                        getMaxSupervisionDateForCard(cardData)
+                    );
+                }
+                if (cardData.supervisionado && !SUPERVISION_STATUS_SEQUENCE.includes(cardData.supervisor_status)) {
+                    cardData.supervisor_status = 'pendente';
+                }
+                if (!cardData.supervisionado) {
+                    cardData.awaiting_supervision_confirm = false;
+                }
+                ensureSupervisionFields(cardData);
+                syncEditingCardWithSaved(cardData);
+            });
         }
 
         function showEditModeIndicator(cnj, cardIndex) {
@@ -2979,22 +3116,29 @@ function formatCnjDigits(raw) {
         }
 
         function formatDateDisplay(value) {
-            if (!value) return null;
-            const parsed = new Date(value);
-            if (Number.isNaN(parsed.getTime())) return null;
-            const pad = n => ('0' + n).slice(-2);
-            return `${pad(parsed.getDate())}/${pad(parsed.getMonth() + 1)}/${parsed.getFullYear()}`;
+            const isoValue = normalizeIsoDateValue(value);
+            if (!isoValue) return null;
+            const parts = isoValue.split('-');
+            if (parts.length !== 3) return null;
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
         }
 
         function normalizeIsoDateValue(value) {
             if (value === undefined || value === null) {
                 return '';
             }
+            if (value instanceof Date) {
+                if (Number.isNaN(value.getTime())) {
+                    return '';
+                }
+                const pad = n => (`0${n}`).slice(-2);
+                return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+            }
             const raw = String(value).trim();
             if (!raw) {
                 return '';
             }
-            const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
             if (isoMatch) {
                 return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
             }
@@ -3002,12 +3146,37 @@ function formatCnjDigits(raw) {
             if (brMatch) {
                 return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
             }
+            const brDashMatch = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+            if (brDashMatch) {
+                return `${brDashMatch[3]}-${brDashMatch[2]}-${brDashMatch[1]}`;
+            }
             const parsed = new Date(raw);
             if (Number.isNaN(parsed.getTime())) {
                 return '';
             }
             const pad = n => (`0${n}`).slice(-2);
             return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+        }
+
+        function compareIsoDates(dateA, dateB) {
+            const normalizedA = normalizeIsoDateValue(dateA);
+            const normalizedB = normalizeIsoDateValue(dateB);
+            if (!normalizedA && !normalizedB) return 0;
+            if (!normalizedA) return -1;
+            if (!normalizedB) return 1;
+            if (normalizedA === normalizedB) return 0;
+            return normalizedA > normalizedB ? 1 : -1;
+        }
+
+        function clampIsoDateToMax(value, maxDate) {
+            const normalizedValue = normalizeIsoDateValue(value);
+            const normalizedMax = normalizeIsoDateValue(maxDate);
+            if (!normalizedValue || !normalizedMax) {
+                return normalizedValue;
+            }
+            return compareIsoDates(normalizedValue, normalizedMax) > 0
+                ? normalizedMax
+                : normalizedValue;
         }
 
 
@@ -3050,6 +3219,49 @@ function formatCnjDigits(raw) {
             });
             commitCurrent();
             return segments.map(segment => segment.trim()).filter(Boolean);
+        }
+
+        function inferNjLabelFromNotebookByContracts(relatedContracts = []) {
+            const rawNotes = localStorage.getItem(notebookStorageKey) || '';
+            if (!rawNotes.trim()) {
+                return '';
+            }
+            const entries = splitNotebookEntries(rawNotes);
+            if (!entries.length) {
+                return '';
+            }
+            const normalizedContractTokens = (Array.isArray(relatedContracts) ? relatedContracts : [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean);
+            const normalizedContractDigits = normalizedContractTokens
+                .map(value => value.replace(/\D/g, ''))
+                .filter(value => value.length >= 4);
+            if (!normalizedContractTokens.length && !normalizedContractDigits.length) {
+                return '';
+            }
+
+            const matchesContracts = (rawEntry) => {
+                const raw = String(rawEntry || '');
+                if (!raw) return false;
+                if (normalizedContractTokens.some(token => raw.includes(token))) {
+                    return true;
+                }
+                const rawDigits = raw.replace(/\D/g, '');
+                if (!rawDigits) return false;
+                return normalizedContractDigits.some(digits => rawDigits.includes(digits));
+            };
+
+            for (const entry of entries) {
+                const rawEntry = String(entry || '');
+                if (!rawEntry) continue;
+                const labelMatch = rawEntry.match(/#NJ\s*([0-9]+)/i);
+                if (!labelMatch) continue;
+                if (!matchesContracts(rawEntry)) continue;
+                const index = Number.parseInt(labelMatch[1], 10);
+                if (!Number.isFinite(index) || index <= 0) continue;
+                return `#NJ${index}`;
+            }
+            return '';
         }
 
         function getObservationEntriesForCnj(cnj, relatedContracts, options = {}) {
@@ -3163,6 +3375,25 @@ function formatCnjDigits(raw) {
                         )
                     );
                 }
+            }
+
+            if (!matches.length && mentionType === 'nj' && relatedContracts && relatedContracts.length) {
+                const normalizedContractTokens = relatedContracts
+                    .map(value => String(value || '').trim())
+                    .filter(Boolean);
+                const normalizedContractDigits = normalizedContractTokens
+                    .map(value => value.replace(/\D/g, ''))
+                    .filter(Boolean);
+                return entriesToReview.filter(entry => {
+                    const raw = String(entry && entry.raw ? entry.raw : '');
+                    if (!raw) return false;
+                    if (normalizedContractTokens.some(token => raw.includes(token))) {
+                        return true;
+                    }
+                    const rawDigits = raw.replace(/\D/g, '');
+                    if (!rawDigits) return false;
+                    return normalizedContractDigits.some(digits => rawDigits.includes(digits));
+                });
             }
 
             if (!matches.length && mentionType === 'cnj' && relatedContracts && relatedContracts.length) {
@@ -3577,20 +3808,19 @@ function formatCnjDigits(raw) {
             if (isNonJudicial) {
                 assignNjLabelToCard(processo);
             }
+            let observationMentionLabel = isNonJudicial
+                ? String(processo.nj_label || '').trim()
+                : '';
             const $ulDetalhes = $('<ul></ul>');
             const contratoIds = parseContractsField(processo.contratos);
             const contratoInfos = contratoIds.map(cId => {
-                const cInfo = allAvailableContratos.find(c => String(c.id) === String(cId));
+                const cInfo = resolveContratoInfo(cId);
                 if (cInfo) {
                     return cInfo;
                 }
-                const fallback = fetchContractInfoFromDOM(cId);
-                if (fallback) {
-                    return fallback;
-                }
                 return {
                     id: cId,
-                    numero_contrato: `ID ${cId}`,
+                    numero_contrato: String(cId),
                     valor_total_devido: 0,
                     valor_causa: 0
                 };
@@ -3656,10 +3886,14 @@ function formatCnjDigits(raw) {
                 (acc, c) => acc + (c.valor_causa || 0),
                 0
             );
-            const totalCustas = contratoInfos.reduce(
+            let totalCustas = contratoInfos.reduce(
                 (acc, c) => acc + (c.custas || 0),
                 0
             );
+            const custasCardValue = parseCurrencyValue(processo?.custas_total);
+            if (Number.isFinite(custasCardValue)) {
+                totalCustas = custasCardValue;
+            }
             if (!isPassivasSnapshot) {
                 const contratosCount = contratoInfos.length;
                 const isSummed = contratosCount > 1;
@@ -3825,22 +4059,51 @@ function formatCnjDigits(raw) {
 		                }
 		            }
 
-            const contractsReferenced = Array.from(
-                new Set(contratoInfos.map(c => c.id))
+            const contractIdTokens = Array.from(
+                new Set(
+                    contratoInfos
+                        .map(c => String(c && c.id != null ? c.id : '').trim())
+                        .filter(Boolean)
+                )
             );
+            const contractNumberTokens = Array.from(
+                new Set(
+                    contratoInfos
+                        .map(c => String(c && c.numero_contrato ? c.numero_contrato : '').trim())
+                        .filter(Boolean)
+                )
+            );
+            const resolvedContractNumbers = getContractNumbersFromIds(contratoIds);
+            const contractsReferenced = Array.from(
+                new Set([...contractIdTokens, ...contractNumberTokens, ...resolvedContractNumbers])
+            );
+            if (isNonJudicial && !observationMentionLabel) {
+                const inferredLabel = inferNjLabelFromNotebookByContracts(contractsReferenced);
+                if (inferredLabel) {
+                    observationMentionLabel = inferredLabel;
+                    processo.nj_label = inferredLabel;
+                    const inferredIndex = Number.parseInt(inferredLabel.replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(inferredIndex) && inferredIndex > 0) {
+                        processo.nj_index = inferredIndex;
+                    }
+                }
+            }
             const observationTarget = isNonJudicial
-                ? (processo.nj_label || cnjVinculado)
+                ? (observationMentionLabel || cnjVinculado)
                 : cnjVinculado;
 
             const observationEntries = getObservationEntriesForCnj(
                 observationTarget,
                 contractsReferenced,
-                { mentionType }
+                {
+                    mentionType,
+                    mentionLabel: observationMentionLabel
+                }
             );
             const fallbackText = processo && typeof processo.observacoes === 'string'
                 ? processo.observacoes.trim()
                 : '';
-            const hasRenderableNotebookContent = getRenderableObservationLines(observationEntries).length > 0;
+            const hasRenderableNotebookContent = getRenderableObservationParagraphs(observationEntries).length > 0;
             const effectiveObservationEntries =
                 hasRenderableNotebookContent
                     ? observationEntries
@@ -3849,10 +4112,12 @@ function formatCnjDigits(raw) {
             return {
                 cnj: cnjVinculado,
                 contratoInfos,
-                contractIds: contractsReferenced,
+                contractIds: contractIdTokens,
+                contractLookupTokens: contractsReferenced,
                 $detailsList: $ulDetalhes,
                 observationEntries: effectiveObservationEntries,
                 observationTarget,
+                observationMentionLabel,
                 observationFallbackText: fallbackText
             };
         }
@@ -3866,32 +4131,59 @@ function formatCnjDigits(raw) {
             $textarea.css('height', `${scrollHeight}px`);
         }
 
-        function getRenderableObservationLines(observationEntries) {
+        function getRenderableObservationParagraphs(observationEntries) {
             if (!Array.isArray(observationEntries) || !observationEntries.length) {
                 return [];
             }
             const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
-            const lines = [];
+            const extractTailFromMentionLine = (line) => {
+                const raw = String(line || '').trim();
+                if (!raw) return '';
+                const contratosMatch = raw.match(/\bcontratos?\s*:\s*([0-9.,\-\s/]+)(.*)$/i);
+                if (contratosMatch) {
+                    const tail = String(contratosMatch[2] || '').replace(/^[\s\-–—:;,]+/, '').trim();
+                    return tail;
+                }
+                const cnjMatch = raw.match(/\bcnj\b\s*[:\-]?\s*([0-9./\-]+)(.*)$/i);
+                if (cnjMatch) {
+                    const tail = String(cnjMatch[2] || '').replace(/^[\s\-–—:;,]+/, '').trim();
+                    return tail;
+                }
+                return '';
+            };
+            const paragraphs = [];
+            const appendParagraph = (value) => {
+                const normalized = String(value || '').replace(/\r/g, '').trim();
+                if (!normalized) {
+                    return;
+                }
+                paragraphs.push(normalized);
+            };
             observationEntries.forEach(entry => {
                 const rawLines = String(entry && entry.raw ? entry.raw : '')
                     .split('\n')
-                    .map(line => line.trim())
-                    .filter(Boolean);
-                if (rawLines.length) {
+                    .map(line => String(line || '').trim());
+                if (rawLines.some(Boolean)) {
                     rawLines.forEach(line => {
+                        if (!line) {
+                            return;
+                        }
                         if (!mentionLineRegex.test(line)) {
-                            lines.push(line);
+                            appendParagraph(line);
+                            return;
+                        }
+                        const tail = extractTailFromMentionLine(line);
+                        if (tail) {
+                            appendParagraph(tail);
                         }
                     });
                     return;
                 }
                 const contentLines = Array.isArray(entry && entry.contentLines) ? entry.contentLines : [];
                 contentLines
-                    .map(line => String(line || '').trim())
-                    .filter(Boolean)
-                    .forEach(line => lines.push(line));
+                    .forEach(line => appendParagraph(line));
             });
-            return lines;
+            return paragraphs;
         }
 
         function createObservationNoteElement(observationEntries) {
@@ -3909,14 +4201,17 @@ function formatCnjDigits(raw) {
             $note.append('<span class="analise-observation-pin" aria-hidden="true"></span>');
             const $noteContent = $('<div class="analise-observation-content"></div>');
             $noteContent.append('<strong>Observações</strong>');
-            const $noteTextarea = $('<textarea class="analise-observation-textarea" readonly></textarea>');
-            const allLines = getRenderableObservationLines(populatedEntries);
-            if (!allLines.length) {
+            const allParagraphs = getRenderableObservationParagraphs(populatedEntries);
+            if (!allParagraphs.length) {
                 return null;
             }
-            $noteTextarea.val(allLines.join('\n'));
-            $noteContent.append($noteTextarea);
-            adjustObservationTextareaHeight($noteTextarea);
+            const $noteList = $('<ul class="analise-observation-list"></ul>');
+            allParagraphs.forEach(paragraph => {
+                const $item = $('<li class="analise-observation-item"></li>');
+                $item.text(paragraph);
+                $noteList.append($item);
+            });
+            $noteContent.append($noteList);
             const $refreshButton = $('<button type="button" class="analise-observation-refresh" title="Atualizar observações">A</button>');
             $refreshButton.on('click', () => {
                 const updatedText = getNotebookText();
@@ -3929,10 +4224,14 @@ function formatCnjDigits(raw) {
 
         function appendNotesColumn($detailsRow, noteElements, options = {}) {
             const notes = (noteElements || []).filter(Boolean);
-            if (!notes.length) {
+            const hasObservationAnchor = Boolean(options.observationTarget);
+            if (!notes.length && !hasObservationAnchor) {
                 return;
             }
             const $notesColumn = $('<div class="analise-card-notes-column"></div>');
+            if (!notes.length) {
+                $notesColumn.addClass('analise-card-notes-column--empty');
+            }
             notes.forEach(note => {
                 $notesColumn.append(note);
             });
@@ -3977,6 +4276,7 @@ function formatCnjDigits(raw) {
 
             const currentText = processo.supervisor_observacoes || '';
             $textArea.val(currentText);
+
             if (!editable) {
                 return $note;
             }
@@ -4304,34 +4604,41 @@ function formatCnjDigits(raw) {
 	                    const tipoAnaliseHashtag = processo && processo.analysis_type && processo.analysis_type.hashtag
 	                        ? String(processo.analysis_type.hashtag).trim()
 	                        : '';
-	                    const mentionContractNumbers = (() => {
-	                        const fromSnapshotInfos = Array.isArray(snapshot.contratoInfos)
-	                            ? snapshot.contratoInfos
-	                                .map(c => String(c && c.numero_contrato ? c.numero_contrato : '').trim())
-	                                .filter(Boolean)
+		                    const mentionContractNumbers = (() => {
+		                        const fromSnapshotInfos = Array.isArray(snapshot.contratoInfos)
+		                            ? snapshot.contratoInfos
+		                                .map(c => String(c && c.numero_contrato ? c.numero_contrato : '').trim())
+		                                .filter(Boolean)
 	                            : [];
 	                        if (fromSnapshotInfos.length) {
 	                            return Array.from(new Set(fromSnapshotInfos));
 	                        }
-	                        const fromContractIds = Array.isArray(snapshot.contractIds)
-	                            ? snapshot.contractIds
-	                                .map(id => String(getContractLabelForId(id) || '').trim())
-	                                .filter(Boolean)
-	                            : [];
-	                        return Array.from(new Set(fromContractIds));
-	                    })();
-	                    if (tipoAnaliseHashtag) {
-	                        const $postit = $(
-	                            `<button type="button" class="analise-hashtag-postit" title="Mencionar no caderno">${tipoAnaliseHashtag}</button>`
-	                        );
-	                        $postit.on('click', function (event) {
-	                            event.stopPropagation();
-	                            const contratosLine = mentionContractNumbers.length
-	                                ? `Contratos: ${mentionContractNumbers.join(', ')}`
-	                                : '';
-	                            const mention = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
-	                                .filter(Boolean)
-	                                .join('\n');
+		                        const fromContractIds = Array.isArray(snapshot.contractIds)
+		                            ? snapshot.contractIds
+		                                .map(id => String(getContractLabelForId(id) || '').trim())
+		                                .filter(Boolean)
+		                            : [];
+		                        return Array.from(new Set(fromContractIds));
+		                    })();
+		                    const mentionNjLabel = (() => {
+		                        if (!isCardNonJudicialized(processo)) {
+		                            return '';
+		                        }
+		                        assignNjLabelToCard(processo);
+		                        return String(processo && processo.nj_label ? processo.nj_label : '').trim();
+		                    })();
+		                    if (tipoAnaliseHashtag) {
+		                        const $postit = $(
+		                            `<button type="button" class="analise-hashtag-postit" title="Mencionar no caderno">${tipoAnaliseHashtag}</button>`
+		                        );
+		                        $postit.on('click', function (event) {
+		                            event.stopPropagation();
+		                            const contratosLine = mentionContractNumbers.length
+		                                ? `Contratos: ${mentionContractNumbers.join(', ')}`
+		                                : '';
+		                            const mention = [tipoAnaliseHashtag, mentionNjLabel, `CNJ: ${snapshot.cnj}`, contratosLine]
+		                                .filter(Boolean)
+		                                .join('\n');
                             if (typeof window.openNotebookWithMention === 'function') {
                                 window.openNotebookWithMention(mention);
                                 return;
@@ -4359,6 +4666,18 @@ function formatCnjDigits(raw) {
                     const summaryStatus = buildSummaryStatusMetadata(processo, {
                         showAlways: Boolean(processo.supervisionado)
                     });
+                    const $statusMeta = $('<div class="analise-summary-supervision-meta"></div>');
+                    const supervisionDateDisplay = formatDateDisplay(
+                        clampIsoDateToMax(
+                            processo && processo.supervision_date,
+                            getMaxSupervisionDateFromContractInfos(snapshot.contratoInfos)
+                        )
+                    );
+                    if (supervisionDateDisplay) {
+                        const $supervisionDate = $('<small class="analise-summary-supervision-date"></small>');
+                        $supervisionDate.text(`Data S: ${supervisionDateDisplay}`);
+                        $statusMeta.append($supervisionDate);
+                    }
                     const $statusBadge = $('<span class="supervisor-status-badge"></span>');
                     $statusBadge.text(summaryStatus.label);
                     summaryStatus.classes.forEach(cls => $statusBadge.addClass(cls));
@@ -4366,7 +4685,10 @@ function formatCnjDigits(raw) {
                         $statusBadge.attr('title', summaryStatus.tooltip);
                     }
                     if (summaryStatus.show) {
-                        $headerVinculado.append($statusBadge);
+                        $statusMeta.append($statusBadge);
+                    }
+                    if ($statusMeta.children().length) {
+                        $headerVinculado.append($statusMeta);
                     }
                     const $toggleBtnVinculado = $('<button type="button" class="analise-toggle-btn"> + </button>');
                     $headerVinculado.append($toggleBtnVinculado);
@@ -4387,16 +4709,16 @@ function formatCnjDigits(raw) {
                     $editBtn.attr('data-saved-index', savedIndexAttr);
 	                    $editBtn.attr('data-cnj', snapshot.cnj || '');
 	                    $editBtn.attr('data-visual-index', String(cardIndex));
-                    $editBtn.attr('data-active-index', activeIndexAttr);
-                    $editBtn.attr('data-card-source', sourceAttr || 'saved');
-	                    $copyBtn.on('click', function (event) {
-	                        event.stopPropagation();
-	                        const contratosLine = mentionContractNumbers.length
-	                            ? `Contratos: ${mentionContractNumbers.join(', ')}`
-	                            : '';
-	                        const text = [tipoAnaliseHashtag, `CNJ: ${snapshot.cnj}`, contratosLine]
-	                            .filter(Boolean)
-	                            .join('\n');
+		                    $editBtn.attr('data-active-index', activeIndexAttr);
+		                    $editBtn.attr('data-card-source', sourceAttr || 'saved');
+		                    $copyBtn.on('click', function (event) {
+		                        event.stopPropagation();
+		                        const contratosLine = mentionContractNumbers.length
+		                            ? `Contratos: ${mentionContractNumbers.join(', ')}`
+		                            : '';
+		                        const text = [tipoAnaliseHashtag, mentionNjLabel, `CNJ: ${snapshot.cnj}`, contratosLine]
+		                            .filter(Boolean)
+		                            .join('\n');
                         const finish = () => showCffSystemDialog('Referência copiada para colar no caderno.', 'success');
                         if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
                             navigator.clipboard.writeText(text).then(finish).catch(() => {
@@ -4556,6 +4878,12 @@ function formatCnjDigits(raw) {
                     if (contractCandidates.length === 0 && Array.isArray(processo.contratos)) {
                         contractCandidates = processo.contratos.map(String);
                     }
+                    if (contractCandidates.length === 0) {
+                        contractCandidates = parseContractsField(userResponses.contratos_para_monitoria || []);
+                    }
+                    if (contractCandidates.length === 0) {
+                        contractCandidates = getSelectedContractIdsFromInfoCard();
+                    }
                     const canSelectForMonitoria =
                         processo &&
                         contractCandidates.length > 0;
@@ -4603,9 +4931,9 @@ function formatCnjDigits(raw) {
                         [$noteElement, $supervisorNoteElement],
                         {
                             observationTarget: snapshot.observationTarget,
-                            contracts: snapshot.contractIds,
+                            contracts: snapshot.contractLookupTokens || snapshot.contractIds,
                             mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
-                            mentionLabel: snapshot.observationTarget,
+                            mentionLabel: snapshot.observationMentionLabel || snapshot.observationTarget,
                             observationFallbackText: snapshot.observationFallbackText
                         }
                     );
@@ -4844,6 +5172,18 @@ function formatCnjDigits(raw) {
             $headerTitle.append('Processo CNJ: ');
             $headerTitle.append($('<strong></strong>').text(headerLabel));
             $headerTitleColumn.append($headerTitle);
+            const $statusMeta = $('<div class="analise-summary-supervision-meta"></div>');
+            const supervisionDateDisplay = formatDateDisplay(
+                clampIsoDateToMax(
+                    processo && processo.supervision_date,
+                    getMaxSupervisionDateFromContractInfos(snapshot.contratoInfos)
+                )
+            );
+            if (supervisionDateDisplay) {
+                const $supervisionDate = $('<small class="analise-summary-supervision-date"></small>');
+                $supervisionDate.text(`Data S: ${supervisionDateDisplay}`);
+                $statusMeta.append($supervisionDate);
+            }
             const $statusBadge = $('<span class="analise-supervision-status-badge"></span>');
 
             const updateStatusBadge = (status) => {
@@ -4854,7 +5194,8 @@ function formatCnjDigits(raw) {
             };
 
             $header.append($headerTitleColumn);
-            $header.append($statusBadge);
+            $statusMeta.append($statusBadge);
+            $header.append($statusMeta);
             $card.append($header);
 
             const $body = $('<div class="analise-supervision-card-body"></div>');
@@ -4864,9 +5205,9 @@ function formatCnjDigits(raw) {
             const $supervisorNoteElement = createSupervisorNoteElement(processo);
             appendNotesColumn($detailsRow, [$noteElement, $supervisorNoteElement], {
                 observationTarget: snapshot.observationTarget,
-                contracts: snapshot.contractIds,
+                contracts: snapshot.contractLookupTokens || snapshot.contractIds,
                 mentionType: isCardNonJudicialized(processo) ? 'nj' : 'cnj',
-                mentionLabel: snapshot.observationTarget,
+                mentionLabel: snapshot.observationMentionLabel || snapshot.observationTarget,
                 observationFallbackText: snapshot.observationFallbackText
             });
             $body.append($detailsRow);
@@ -4878,16 +5219,68 @@ function formatCnjDigits(raw) {
             return $card;
         }
 
+        function getSupervisionCardIdentity(processo, fallbackIndex = 0, fallbackSource = 'unknown') {
+            if (!processo || typeof processo !== 'object') {
+                return `${fallbackSource}:${fallbackIndex}`;
+            }
+            if (processo.processo_id !== undefined && processo.processo_id !== null && String(processo.processo_id).trim()) {
+                return `processo:${String(processo.processo_id).trim()}`;
+            }
+            const normalized = normalizeProcessCardForSummary(processo) || processo;
+            const summaryIdentity = getSummaryCardIdentity(normalized, fallbackIndex, fallbackSource);
+            if (summaryIdentity && !String(summaryIdentity).startsWith(`${fallbackSource}:`)) {
+                return `supervision:${summaryIdentity}`;
+            }
+            const njLabel = String(normalized.nj_label || '').trim().toUpperCase();
+            if (njLabel) {
+                return `supervision:nj:${njLabel}`;
+            }
+            return `supervision:${fallbackSource}:${fallbackIndex}`;
+        }
+
+        function getProcessCardsForSupervisionPanel() {
+            const savedProcessos = getSavedProcessCards();
+            const activeProcessos = Array.isArray(userResponses.processos_vinculados)
+                ? userResponses.processos_vinculados
+                : [];
+            const deduped = [];
+            const identityToIndex = new Map();
+
+            const appendFrom = (processos, source, preferOnDuplicate = false) => {
+                if (!Array.isArray(processos)) {
+                    return;
+                }
+                processos.forEach((processo, index) => {
+                    if (!processo || typeof processo !== 'object') {
+                        return;
+                    }
+                    ensureSupervisionFields(processo);
+                    if (!processo.supervisionado) {
+                        return;
+                    }
+                    const identity = getSupervisionCardIdentity(processo, index, source);
+                    if (identityToIndex.has(identity)) {
+                        if (preferOnDuplicate) {
+                            const existingIndex = identityToIndex.get(identity);
+                            deduped[existingIndex] = processo;
+                        }
+                        return;
+                    }
+                    identityToIndex.set(identity, deduped.length);
+                    deduped.push(processo);
+                });
+            };
+
+            appendFrom(savedProcessos, 'saved', false);
+            appendFrom(activeProcessos, 'active', true);
+            return deduped;
+        }
+
         function renderSupervisionPanel() {
             if (!isSupervisorUser || !$supervisionPanelContent) {
                 return;
             }
-            const activeProcessos =
-                Array.isArray(userResponses.processos_vinculados) ? userResponses.processos_vinculados : [];
-            const processos = [...getSavedProcessCards(), ...activeProcessos].filter(processo => {
-                ensureSupervisionFields(processo);
-                return Boolean(processo.supervisionado);
-            });
+            const processos = getProcessCardsForSupervisionPanel();
             if (processos.length === 0) {
                 $supervisionPanelContent.html(
                     '<p>Nenhum processo está aguardando supervisão.</p>'
@@ -4904,8 +5297,19 @@ function formatCnjDigits(raw) {
         }
 
         function refreshObservationNotes(event) {
-            if (event && typeof event.detail === 'string') {
-                localStorage.setItem(notebookStorageKey, event.detail);
+            const incomingPayload = (() => {
+                if (!event) return { hasValue: false, text: '' };
+                if (typeof event.detail === 'string') {
+                    return { hasValue: true, text: event.detail };
+                }
+                if (event.detail && typeof event.detail.text === 'string') {
+                    return { hasValue: true, text: event.detail.text };
+                }
+                return { hasValue: false, text: '' };
+            })();
+            if (incomingPayload.hasValue) {
+                const incomingText = incomingPayload.text;
+                localStorage.setItem(notebookStorageKey, incomingText);
             }
             $('[data-analise-cnj]').each(function () {
                 const $column = $(this);
@@ -4926,7 +5330,7 @@ function formatCnjDigits(raw) {
                 });
                 const fallbackText = String($column.data('analiseObservationFallback') || '').trim();
                 const entries =
-                    getRenderableObservationLines(notebookEntries).length > 0
+                    getRenderableObservationParagraphs(notebookEntries).length > 0
                         ? notebookEntries
                         : (fallbackText ? [{ raw: fallbackText, mentionLines: [], contentLines: [fallbackText], summary: fallbackText }] : []);
                 const $newObservation = createObservationNoteElement(entries);
@@ -4939,10 +5343,14 @@ function formatCnjDigits(raw) {
                         $column.append($newObservation);
                     }
                 }
+                const hasObservation = $column.find('.analise-observation-note').length > 0;
+                const hasSupervisor = $column.find('.analise-supervisor-note').length > 0;
+                $column.toggleClass('analise-card-notes-column--empty', !(hasObservation || hasSupervisor));
             });
         }
 
         window.addEventListener('analiseObservacoesSalvas', refreshObservationNotes);
+        window.addEventListener('analiseObservacoesDigitando', refreshObservationNotes);
 
         /* =========================================================
          * Utilidades de contratos
@@ -4953,6 +5361,24 @@ function formatCnjDigits(raw) {
             return Object.values(status).some(
                 st => st && st.selecionado && st.quitado
             );
+        }
+
+        function extractContractPrescricaoIso($wrapper) {
+            if (!$wrapper || !$wrapper.length) {
+                return '';
+            }
+            const rawAttr = normalizeIsoDateValue($wrapper.attr('data-prescricao'));
+            if (rawAttr) {
+                return rawAttr;
+            }
+            const titleText = String(
+                $wrapper.find('.prescrito-p, .prescrito-np').first().attr('title') || ''
+            ).trim();
+            const dateMatch = titleText.match(/(\d{2}\/\d{2}\/\d{4})/);
+            if (dateMatch) {
+                return normalizeIsoDateValue(dateMatch[1]);
+            }
+            return '';
         }
 
         function fetchContractInfoFromDOM(contractId) {
@@ -4989,6 +5415,7 @@ function formatCnjDigits(raw) {
                 const valorTotalRaw = $element.attr('data-valor-total');
                 const valorCausaRaw = $element.attr('data-valor-causa');
                 const custasRaw = $element.attr('data-custas');
+                const dataPrescricaoRaw = extractContractPrescricaoIso($element);
                 return {
                     id: resolvedId || candidate,
                     numero_contrato: numeroContrato || (resolvedId || candidate),
@@ -4996,7 +5423,8 @@ function formatCnjDigits(raw) {
                     is_quitado: String($element.attr('data-is-quitado') || '').toLowerCase() === 'true',
                     valor_total_devido: parseDecimalValue(valorTotalRaw),
                     valor_causa: parseDecimalValue(valorCausaRaw),
-                    custas: parseDecimalValue(custasRaw)
+                    custas: parseDecimalValue(custasRaw),
+                    data_prescricao: dataPrescricaoRaw
                 };
             }
 
@@ -5013,7 +5441,8 @@ function formatCnjDigits(raw) {
                     is_quitado: false,
                     valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
                     valor_causa: parseDecimalValue($row.find('input[name$="-valor_causa"]').val()),
-                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val())
+                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val()),
+                    data_prescricao: normalizeIsoDateValue($row.find('input[name$="-data_prescricao"]').val())
                 };
             }
 
@@ -5054,7 +5483,10 @@ function formatCnjDigits(raw) {
                         : (existing.valor_causa != null ? existing.valor_causa : null),
                     custas: raw.custas != null
                         ? raw.custas
-                        : (existing.custas != null ? existing.custas : null)
+                        : (existing.custas != null ? existing.custas : null),
+                    data_prescricao: raw.data_prescricao
+                        ? normalizeIsoDateValue(raw.data_prescricao)
+                        : normalizeIsoDateValue(existing.data_prescricao)
                 });
             };
 
@@ -5078,7 +5510,8 @@ function formatCnjDigits(raw) {
                     is_quitado: String($wrapper.attr('data-is-quitado') || '').toLowerCase() === 'true',
                     valor_total_devido: parseDecimalValue($wrapper.attr('data-valor-total')),
                     valor_causa: parseDecimalValue($wrapper.attr('data-valor-causa')),
-                    custas: parseDecimalValue($wrapper.attr('data-custas'))
+                    custas: parseDecimalValue($wrapper.attr('data-custas')),
+                    data_prescricao: extractContractPrescricaoIso($wrapper)
                 });
             });
 
@@ -5093,7 +5526,8 @@ function formatCnjDigits(raw) {
                     numero_contrato: String($row.find('input[name$="-numero_contrato"]').val() || '').trim(),
                     valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
                     valor_causa: parseDecimalValue($row.find('input[name$="-valor_causa"]').val()),
-                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val())
+                    custas: parseDecimalValue($row.find('input[name$="-custas"]').val()),
+                    data_prescricao: normalizeIsoDateValue($row.find('input[name$="-data_prescricao"]').val())
                 });
             });
 
@@ -5818,9 +6252,9 @@ function formatCnjDigits(raw) {
                         $heading,
                         currentResponses,
                         cardIndex,
-                        () => refreshMonitoriaHashtag($hashtagBtn, currentResponses)
+                        () => refreshMonitoriaHashtag($hashtagBtn, currentResponses, cardIndex)
                     );
-                    refreshMonitoriaHashtag($hashtagBtn, currentResponses);
+                    refreshMonitoriaHashtag($hashtagBtn, currentResponses, cardIndex);
                     return;
 
                 case 'TEXTO':
@@ -6231,7 +6665,10 @@ function formatCnjDigits(raw) {
             }
             cardData.supervisionado = Boolean(cardData.supervisionado);
             cardData.supervisor_status = cardData.supervisor_status || 'pendente';
-            cardData.supervision_date = normalizeIsoDateValue(cardData.supervision_date);
+            cardData.supervision_date = clampIsoDateToMax(
+                normalizeIsoDateValue(cardData.supervision_date),
+                getMaxSupervisionDateForCard(cardData)
+            );
             cardData.barrado = cardData.barrado || {};
             cardData.barrado.ativo = Boolean(cardData.barrado.ativo);
             cardData.barrado.inicio = cardData.barrado.inicio || null;
@@ -6443,7 +6880,13 @@ function formatCnjDigits(raw) {
             const $supervisionDateInput = $(
                 `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
             );
-            $supervisionDateInput.val(cardData.supervision_date || '');
+            const initialSupervisionDate = clampIsoDateToMax(
+                normalizeIsoDateValue(cardData.supervision_date),
+                getMaxSupervisionDateForCard(cardData)
+            );
+            cardData.supervision_date = initialSupervisionDate;
+            $supervisionDateInput.val(initialSupervisionDate || '');
+            applySupervisionDateLimit($supervisionDateInput, cardData);
             $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
 
             $supervisionWrapper.append($supervisionToggle);
@@ -6452,15 +6895,17 @@ function formatCnjDigits(raw) {
 
             const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
             $supervisionInput.prop('checked', cardData.supervisionado);
-            $supervisionDateInput.on('change', function () {
-                const normalizedDate = normalizeIsoDateValue($(this).val());
-                $(this).val(normalizedDate);
-                cardData.supervision_date = normalizedDate;
+            const syncSupervisionDateFromInput = () => {
+                const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
+                $supervisionDateInput.val(normalizedDate);
+                const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                cardData.supervision_date = clampedDate;
                 syncEditingCardWithSaved(cardData);
                 userResponses.processos_vinculados = [cardData];
                 saveResponses();
                 renderSupervisionPanel();
-            });
+            };
+            $supervisionDateInput.on('change input blur', syncSupervisionDateFromInput);
             $supervisionInput.on('change', function (e) {
                 console.log('═══════════════════════════════════════════════════');
                 console.log('🔄 TOGGLE SUPERVISIONAR MUDOU');
@@ -6548,6 +6993,9 @@ function formatCnjDigits(raw) {
                 return null;
             }
             if (card.nj_index && Number.isFinite(card.nj_index)) {
+                if (!card.nj_label) {
+                    card.nj_label = `#NJ${card.nj_index}`;
+                }
                 return card.nj_index;
             }
             const nextIndex = getNextAvailableNjIndex();
@@ -6623,7 +7071,7 @@ function formatCnjDigits(raw) {
             return contractNames.length > 0 ? contractNames.join(', ') : 'Nenhum contrato selecionado';
         }
 
-        function resolveContratoCandidate(rawId) {
+        function resolveContratoInfo(rawId) {
             const candidate = String(rawId || '').trim();
             if (!candidate) {
                 return null;
@@ -6632,7 +7080,96 @@ function formatCnjDigits(raw) {
             const byNumber = allAvailableContratos.find(
                 c => String(c.numero_contrato || '').trim() === candidate
             );
-            const contratoInfo = byId || byNumber;
+            const contratoInfo = byId || byNumber || fetchContractInfoFromDOM(candidate);
+            if (!contratoInfo) {
+                return null;
+            }
+            return contratoInfo;
+        }
+
+        function getMaxSupervisionDateForContractRefs(contractRefs) {
+            if (!Array.isArray(contractRefs) || !contractRefs.length) {
+                return '';
+            }
+            let maxDate = '';
+            contractRefs.forEach(rawId => {
+                const contratoInfo = resolveContratoInfo(rawId);
+                const prescricaoIso = normalizeIsoDateValue(
+                    contratoInfo && contratoInfo.data_prescricao
+                );
+                if (!prescricaoIso) {
+                    return;
+                }
+                if (!maxDate || compareIsoDates(prescricaoIso, maxDate) < 0) {
+                    maxDate = prescricaoIso;
+                }
+            });
+            return maxDate;
+        }
+
+        function getMaxSupervisionDateFromContractInfos(contractInfos) {
+            if (!Array.isArray(contractInfos) || !contractInfos.length) {
+                return '';
+            }
+            let maxDate = '';
+            contractInfos.forEach(contratoInfo => {
+                const prescricaoIso = normalizeIsoDateValue(
+                    contratoInfo && contratoInfo.data_prescricao
+                );
+                if (!prescricaoIso) {
+                    return;
+                }
+                if (!maxDate || compareIsoDates(prescricaoIso, maxDate) < 0) {
+                    maxDate = prescricaoIso;
+                }
+            });
+            return maxDate;
+        }
+
+        function getCardContractRefsForSupervision(cardData) {
+            if (!cardData || typeof cardData !== 'object') {
+                return [];
+            }
+            const primaryContracts = parseContractsField(cardData.contratos);
+            if (primaryContracts.length) {
+                return primaryContracts;
+            }
+            const monitoriaContracts = parseContractsField(
+                cardData.tipo_de_acao_respostas &&
+                cardData.tipo_de_acao_respostas.contratos_para_monitoria
+                    ? cardData.tipo_de_acao_respostas.contratos_para_monitoria
+                    : []
+            );
+            return monitoriaContracts;
+        }
+
+        function getMaxSupervisionDateForCard(cardData) {
+            return getMaxSupervisionDateForContractRefs(
+                getCardContractRefsForSupervision(cardData)
+            );
+        }
+
+        function applySupervisionDateLimit($dateInput, cardData) {
+            const maxDate = getMaxSupervisionDateForCard(cardData);
+            if ($dateInput && $dateInput.length) {
+                if (maxDate) {
+                    $dateInput.attr('max', maxDate);
+                } else {
+                    $dateInput.removeAttr('max');
+                }
+            }
+            const normalizedValue = normalizeIsoDateValue(
+                $dateInput && $dateInput.length ? $dateInput.val() : ''
+            );
+            const clampedValue = clampIsoDateToMax(normalizedValue, maxDate);
+            if ($dateInput && $dateInput.length && clampedValue !== normalizedValue) {
+                $dateInput.val(clampedValue);
+            }
+            return clampedValue;
+        }
+
+        function resolveContratoCandidate(rawId) {
+            const contratoInfo = resolveContratoInfo(rawId);
             if (!contratoInfo) {
                 return null;
             }
@@ -6640,7 +7177,8 @@ function formatCnjDigits(raw) {
                 id: String(contratoInfo.id),
                 numero_contrato: String(contratoInfo.numero_contrato || contratoInfo.id),
                 is_prescrito: Boolean(contratoInfo.is_prescrito),
-                is_quitado: Boolean(contratoInfo.is_quitado)
+                is_quitado: Boolean(contratoInfo.is_quitado),
+                data_prescricao: normalizeIsoDateValue(contratoInfo.data_prescricao)
             };
         }
 
@@ -6667,19 +7205,40 @@ function formatCnjDigits(raw) {
             return Array.from(selected);
         }
 
-        function refreshMonitoriaHashtag($button, currentResponses) {
+        function refreshMonitoriaHashtag($button, currentResponses, cardIndex = null) {
             if (!$button || !$button.length) {
-                return;
-            }
-            if (!isNaoJudicializadoActive()) {
-                $button.hide();
                 return;
             }
             const selection = Array.isArray(currentResponses.contratos_para_monitoria)
                 ? currentResponses.contratos_para_monitoria
                 : [];
-            const contractsText = buildContractsLabel(selection);
-            const label = `#NJ${getNaoJudSequence()}`;
+            let label = '';
+            let contractsSource = selection;
+
+            if (
+                Number.isFinite(cardIndex) &&
+                cardIndex >= 0 &&
+                Array.isArray(userResponses.processos_vinculados)
+            ) {
+                const card = userResponses.processos_vinculados[cardIndex] || null;
+                if (card && isCardNonJudicialized(card)) {
+                    assignNjLabelToCard(card);
+                    label = String(card.nj_label || '').trim();
+                    if (Array.isArray(card.contratos) && card.contratos.length) {
+                        contractsSource = card.contratos;
+                    }
+                }
+            }
+
+            if (!label) {
+                if (!isNaoJudicializadoActive()) {
+                    $button.hide();
+                    return;
+                }
+                label = `#NJ${getNaoJudSequence()}`;
+            }
+
+            const contractsText = buildContractsLabel(contractsSource);
             $button.text(label);
             $button.off('click').on('click', () => {
                 mentionNaoJudInNotas(`${label} — Contratos: ${contractsText}`);
@@ -6809,9 +7368,19 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     p => p && typeof p === 'object' && String(p.cnj || '').trim().toLowerCase() === 'não judicializado'
                 )
                 : null;
-            const initialSupervisionDate = normalizeIsoDateValue(
+            const resolveNaoJudSupervisionMaxDate = () => {
+                const refsFromSelection = parseContractsField(userResponses.contratos_para_monitoria || []);
+                if (refsFromSelection.length) {
+                    return getMaxSupervisionDateForContractRefs(refsFromSelection);
+                }
+                return getMaxSupervisionDateForCard(existingNaoJudCard || {});
+            };
+            const initialSupervisionDate = clampIsoDateToMax(
+                normalizeIsoDateValue(
                 userResponses.supervision_date_nao_judicializado ||
                 (existingNaoJudCard && existingNaoJudCard.supervision_date)
+                ),
+                resolveNaoJudSupervisionMaxDate()
             );
             userResponses.supervision_date_nao_judicializado = initialSupervisionDate;
 
@@ -6832,6 +7401,12 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 `<input type="date" id="${naoJudDateInputId}" class="supervision-date-input supervision-date-input--compact">`
             );
             $dateInput.val(initialSupervisionDate);
+            const initialMaxDate = resolveNaoJudSupervisionMaxDate();
+            if (initialMaxDate) {
+                $dateInput.attr('max', initialMaxDate);
+            } else {
+                $dateInput.removeAttr('max');
+            }
             $dateWrap.append($dateLabel).append($dateInput);
             const $input = $toggle.find('.supervision-toggle-input');
             $input.prop(
@@ -6840,12 +7415,19 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             );
             $dateInput.on('change', function () {
                 const normalizedDate = normalizeIsoDateValue($(this).val());
-                $(this).val(normalizedDate);
-                userResponses.supervision_date_nao_judicializado = normalizedDate;
+                const maxDate = resolveNaoJudSupervisionMaxDate();
+                if (maxDate) {
+                    $(this).attr('max', maxDate);
+                } else {
+                    $(this).removeAttr('max');
+                }
+                const clampedDate = clampIsoDateToMax(normalizedDate, maxDate);
+                $(this).val(clampedDate);
+                userResponses.supervision_date_nao_judicializado = clampedDate;
                 if (Array.isArray(userResponses.processos_vinculados)) {
                     userResponses.processos_vinculados.forEach(card => {
                         if (card && typeof card === 'object' && String(card.cnj || '').trim().toLowerCase() === 'não judicializado') {
-                            card.supervision_date = normalizedDate;
+                            card.supervision_date = clampedDate;
                         }
                     });
                 }
@@ -6867,7 +7449,10 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                             },
                             supervisionado: true,
                             supervisor_status: 'pendente',
-                            supervision_date: normalizeIsoDateValue(userResponses.supervision_date_nao_judicializado),
+                            supervision_date: clampIsoDateToMax(
+                                normalizeIsoDateValue(userResponses.supervision_date_nao_judicializado),
+                                resolveNaoJudSupervisionMaxDate()
+                            ),
                             analysis_author: getCurrentAnalysisAuthorName(),
                             barrado: { ativo: false, inicio: null, retorno_em: null },
                             awaiting_supervision_confirm: false,

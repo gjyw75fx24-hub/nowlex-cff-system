@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let addButton = null;
     let deleteButton = null;
     let inlineCnjObserver = null;
+    let agendaObservationParagraphResolver = null;
+    let agendaObservationOpenHandler = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -1238,6 +1240,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
+    const AGENDA_SUPERVISION_CUSTAS_URL = '/api/agenda/supervision/custas/';
     const AGENDA_CONCLUIR_URL = '/api/agenda/concluir/';
     let agendaLoadMoreButton = null;
     const isAgendaDebugEnabled = () => {
@@ -1745,9 +1748,9 @@ document.addEventListener('DOMContentLoaded', function() {
             currency: 'BRL',
         });
     };
-    const fetchContractInfoFromDOM = (contractId) => {
-        if (!contractId) return null;
-        const idStr = String(contractId).trim();
+    const findContractWrapper = (contractRef) => {
+        if (!contractRef) return null;
+        const idStr = String(contractRef).trim();
         if (!idStr) return null;
         let wrapper = document.querySelector(`.contrato-item-wrapper[data-contrato-id="${idStr}"]`);
         if (!wrapper) {
@@ -1759,11 +1762,128 @@ document.addEventListener('DOMContentLoaded', function() {
                 return norm && numText.replace(/\D/g, '') === norm;
             });
         }
+        return wrapper;
+    };
+    const findContractInlineRow = (contractRef) => {
+        if (!contractRef) return null;
+        const candidate = String(contractRef).trim();
+        if (!candidate) return null;
+        const directIdInput = document.querySelector(`.dynamic-contratos input[name$="-id"][value="${candidate}"]`);
+        if (directIdInput) {
+            return directIdInput.closest('.dynamic-contratos');
+        }
+        const normalized = candidate.replace(/\D/g, '');
+        const rows = Array.from(document.querySelectorAll('.dynamic-contratos'));
+        for (const row of rows) {
+            if (row.classList.contains('empty-form')) continue;
+            const rowId = String(row.querySelector('input[name$="-id"]')?.value || '').trim();
+            const rowNumero = String(row.querySelector('input[name$="-numero_contrato"]')?.value || '').trim();
+            if (rowId && rowId === candidate) {
+                return row;
+            }
+            if (rowNumero && (rowNumero === candidate || rowNumero.replace(/\D/g, '') === normalized)) {
+                return row;
+            }
+        }
+        return null;
+    };
+    const getContractSaldoAtualizadoValue = (contractRef) => {
+        const row = findContractInlineRow(contractRef);
+        const wrapper = findContractWrapper(contractRef);
+        if (row) {
+            const valorTotalInput = row.querySelector('input[name$="-valor_total_devido"]');
+            const valorCausaInput = row.querySelector('input[name$="-valor_causa"]');
+            const causaFromInput = normalizeNumericCurrency(valorCausaInput?.value || '');
+            if (Number.isFinite(causaFromInput) && causaFromInput > 0) {
+                return causaFromInput;
+            }
+        }
+        if (wrapper) {
+            const causaFromData = normalizeNumericCurrency(wrapper.getAttribute('data-valor-causa') || wrapper.dataset.valorCausa || '');
+            if (Number.isFinite(causaFromData) && causaFromData > 0) {
+                return causaFromData;
+            }
+        }
+        if (row) {
+            const valorTotalInput = row.querySelector('input[name$="-valor_total_devido"]');
+            const totalFromInput = normalizeNumericCurrency(valorTotalInput?.value || '');
+            if (Number.isFinite(totalFromInput) && totalFromInput > 0) {
+                return totalFromInput;
+            }
+        }
+        if (wrapper) {
+            const totalFromData = normalizeNumericCurrency(wrapper.getAttribute('data-valor-total') || wrapper.dataset.valorTotal || '');
+            if (Number.isFinite(totalFromData) && totalFromData > 0) {
+                return totalFromData;
+            }
+        }
+        return null;
+    };
+    const setContractCustasValue = (contractRef, numericValue) => {
+        const wrapper = findContractWrapper(contractRef);
+        const row = findContractInlineRow(contractRef);
+        if (wrapper) {
+            wrapper.setAttribute('data-custas', numericValue != null ? String(numericValue) : '');
+        }
+        const custasInput = row?.querySelector('input[name$="-custas"]');
+        if (!custasInput) return false;
+        const formatted = numericValue == null ? '' : formatCurrencyBrl(numericValue);
+        custasInput.value = formatted;
+        custasInput.dispatchEvent(new Event('input', { bubbles: true }));
+        custasInput.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+    };
+    const calculateAndApplyCustas2Percent = (contractRefs, fallbackSaldo = null) => {
+        const refs = Array.isArray(contractRefs) ? contractRefs.filter(Boolean) : [];
+        let total = 0;
+        let calculatedContracts = 0;
+        let updatedContracts = 0;
+        refs.forEach((ref) => {
+            const saldo = getContractSaldoAtualizadoValue(ref);
+            if (!Number.isFinite(saldo) || saldo <= 0) return;
+            const custas = Math.round((saldo * 0.02) * 100) / 100;
+            total += custas;
+            calculatedContracts += 1;
+            if (setContractCustasValue(ref, custas)) {
+                updatedContracts += 1;
+            }
+        });
+        if (calculatedContracts > 0) {
+            return {
+                total: Math.round(total * 100) / 100,
+                calculatedContracts,
+                updatedContracts,
+                usedFallback: false,
+            };
+        }
+        const fallbackValue = normalizeNumericCurrency(fallbackSaldo);
+        if (!Number.isFinite(fallbackValue) || fallbackValue <= 0) {
+            return {
+                total: null,
+                calculatedContracts: 0,
+                updatedContracts: 0,
+                usedFallback: false,
+            };
+        }
+        const totalFallback = Math.round((fallbackValue * 0.02) * 100) / 100;
+        return {
+            total: totalFallback,
+            calculatedContracts: 0,
+            updatedContracts: 0,
+            usedFallback: true,
+        };
+    };
+    const fetchContractInfoFromDOM = (contractId) => {
+        if (!contractId) return null;
+        const idStr = String(contractId).trim();
+        if (!idStr) return null;
+        const wrapper = findContractWrapper(idStr);
         if (!wrapper) return null;
+        const inlineRow = findContractInlineRow(idStr);
         const numeroEl = wrapper.querySelector('.contrato-numero');
         const numero = (numeroEl?.textContent || '').trim().split('\n')[0].trim();
         let custasRaw = wrapper.getAttribute('data-custas') || wrapper.dataset.custas || '';
-        const custasInput = wrapper.querySelector('input[name$="-custas"]');
+        const custasInput = inlineRow?.querySelector('input[name$="-custas"]');
         if (custasInput && custasInput.value) {
             custasRaw = custasInput.value;
         }
@@ -1771,6 +1891,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return {
             numero_contrato: numero || idStr,
             custas: Number.isFinite(custasValue) ? custasValue : 0,
+            wrapper,
+            inlineRow,
         };
     };
     const getCustasFromContracts = (contractNumbers) => {
@@ -2065,7 +2187,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const targetDate = new Date(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
         const limitDate = new Date(limit.year, limit.monthIndex, limit.day);
-        return targetDate < limitDate;
+        return targetDate <= limitDate;
     };
 
     const showSupervisionLimitViolation = (entry) => {
@@ -2323,15 +2445,29 @@ document.addEventListener('DOMContentLoaded', function() {
             || item.usuario
             || item.user
             || null;
+        const analystRaw = item.analyst
+            || item.analista
+            || item.analisado_por
+            || item.analisadoPor
+            || null;
         const responsavelId = item.responsavel_id
             || item.responsavelId
             || item.responsavel_usuario_id
             || item.usuario_id
             || item.user_id
             || resolveResponsavelId(responsavelRaw);
+        const analystId = item.analyst_id
+            || item.analystId
+            || item.analista_id
+            || item.analisado_por_id
+            || resolveResponsavelId(analystRaw);
         const responsavelObj = responsavelRaw && typeof responsavelRaw === 'object'
             ? responsavelRaw
             : (responsavelId ? { id: Number(responsavelId) } : null);
+        const analystObj = analystRaw && typeof analystRaw === 'object'
+            ? analystRaw
+            : (analystId ? { id: Number(analystId) } : null);
+        const normalizedCustasTotal = normalizeNumericCurrency(item.custas_total ?? item.custasTotal);
         const entry = {
             type,
             id: `${type.toLowerCase()}-${item.id || `${parsed.day}`}`,
@@ -2362,9 +2498,13 @@ document.addEventListener('DOMContentLoaded', function() {
             processo_id: item.processo_id,
             responsavel: responsavelObj,
             responsavel_id: responsavelId || null,
+            analyst: analystObj,
+            analyst_id: analystId || null,
             contract_numbers: Array.isArray(item.contract_numbers)
                 ? item.contract_numbers.filter(Boolean)
                 : [],
+            custas_total: Number.isFinite(normalizedCustasTotal) ? normalizedCustasTotal : null,
+            uf: (item.uf || '').toString().trim().toUpperCase(),
             valor_causa: item.valor_causa ?? null,
             status_label: item.status_label || '',
             viabilidade: item.viabilidade || '',
@@ -2389,6 +2529,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? item.card_index
                 : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
             supervisor_status: item.supervisor_status || item.supervisorStatus || '',
+            analysis_hashtag: (item.analysis_hashtag || item.analysisHashtag || '').toString().trim(),
+            observation_target: (item.observation_target || item.observationTarget || '').toString().trim(),
+            observation_mention_type: (item.observation_mention_type || item.observationMentionType || '').toString().trim().toLowerCase(),
+            observation_mention_label: (item.observation_mention_label || item.observationMentionLabel || '').toString().trim(),
+            observation_fallback_text: String(item.observation_fallback_text || item.observationFallbackText || item.observacoes || '').trim(),
         };
         hydrateEntryProcessMeta(entry);
         const hasApiOrigin = Boolean(originalRaw);
@@ -2614,6 +2759,45 @@ document.addEventListener('DOMContentLoaded', function() {
             target.click();
             target.scrollIntoView({ block: 'nearest' });
         };
+        const persistSupervisionCustas = async (entryData, numericValue) => {
+            if (!entryData || entryData.type !== 'S') {
+                return null;
+            }
+            const roundedValue = Number.isFinite(numericValue)
+                ? Math.round(numericValue * 100) / 100
+                : null;
+            const payload = {
+                analise_id: entryData.analise_id,
+                source: entryData.card_source,
+                index: entryData.card_index,
+                custas_total: roundedValue,
+            };
+            entryData.custas_total = roundedValue;
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null) {
+                return roundedValue;
+            }
+            try {
+                const response = await fetch(AGENDA_SUPERVISION_CUSTAS_URL, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken,
+                    },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    throw new Error('Falha ao salvar custas');
+                }
+                const data = await response.json();
+                const persistedValue = normalizeNumericCurrency(data?.custas_total);
+                entryData.custas_total = Number.isFinite(persistedValue) ? persistedValue : null;
+                return entryData.custas_total;
+            } catch (error) {
+                createSystemAlert('Agenda Geral', 'Não foi possível salvar as custas desta supervisão.');
+                return roundedValue;
+            }
+        };
         entries.forEach(entryData => {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
@@ -2677,7 +2861,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 label.textContent = entryData.label;
                 entry.appendChild(label);
             }
-            console.log('entryData S', entryData.id, entryData.nome, entryData.cpf);
             const titleRow = buildEntryTitleRow(entryData);
             if (titleRow) {
                 entry.appendChild(titleRow);
@@ -2705,14 +2888,66 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.append(labelEl, valueEl);
                     meta.appendChild(row);
                 };
+                const renderCustasCalcRow = (saldoAtualizadoValue) => {
+                    const custasSummary = getCustasFromContracts(entryData.contract_numbers);
+                    const row = document.createElement('div');
+                    row.className = 'agenda-panel__details-item-meta-row agenda-panel__details-item-meta-row--custas';
+                    const labelEl = document.createElement('span');
+                    labelEl.className = 'agenda-panel__details-item-meta-label';
+                    labelEl.textContent = 'Custas:';
+                    const valueWrap = document.createElement('span');
+                    valueWrap.className = 'agenda-panel__details-item-meta-value agenda-panel__details-item-meta-value--custas';
+                    const custasInput = document.createElement('input');
+                    custasInput.type = 'text';
+                    custasInput.className = 'agenda-panel__details-custas-input';
+                    const savedCustas = normalizeNumericCurrency(entryData.custas_total);
+                    if (Number.isFinite(savedCustas)) {
+                        custasInput.value = formatCurrencyBrl(savedCustas);
+                    } else if (custasSummary.items.length) {
+                        custasInput.value = formatCurrencyBrl(custasSummary.total);
+                    }
+                    custasInput.addEventListener('blur', async () => {
+                        const parsed = normalizeNumericCurrency(custasInput.value);
+                        const roundedValue = Number.isFinite(parsed)
+                            ? Math.round(parsed * 100) / 100
+                            : null;
+                        custasInput.value = Number.isFinite(roundedValue) ? formatCurrencyBrl(roundedValue) : '';
+                        await persistSupervisionCustas(entryData, roundedValue);
+                    });
+                    const calcButton = document.createElement('button');
+                    calcButton.type = 'button';
+                    calcButton.className = 'agenda-panel__details-custas-calc-btn';
+                    calcButton.textContent = 'Calc 2%';
+                    calcButton.title = 'Calcular 2% do saldo atualizado';
+                    calcButton.addEventListener('click', async (event) => {
+                        event.stopPropagation();
+                        if (calcButton.disabled) return;
+                        const originalLabel = calcButton.textContent;
+                        calcButton.disabled = true;
+                        calcButton.textContent = 'Calc...';
+                        const result = calculateAndApplyCustas2Percent(entryData.contract_numbers, saldoAtualizadoValue);
+                        if (Number.isFinite(result.total)) {
+                            const roundedTotal = Math.round(result.total * 100) / 100;
+                            custasInput.value = formatCurrencyBrl(roundedTotal);
+                            custasInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            custasInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            await persistSupervisionCustas(entryData, roundedTotal);
+                        } else {
+                            createSystemAlert('Agenda Geral', 'Não foi possível calcular custas: saldo atualizado indisponível.');
+                        }
+                        calcButton.disabled = false;
+                        calcButton.textContent = originalLabel;
+                    });
+                    valueWrap.append(custasInput, calcButton);
+                    row.append(labelEl, valueWrap);
+                    meta.appendChild(row);
+                };
                 if (entryData.contract_numbers && entryData.contract_numbers.length) {
                     renderMetaRow('Contratos', entryData.contract_numbers.join(', '));
                 }
-                renderMetaRow('Saldo atualizado', formatCurrencyBrl(entryData.valor_causa));
-                const custasSummary = getCustasFromContracts(entryData.contract_numbers);
-                if (custasSummary.items.length) {
-                    renderMetaRow('Custas', formatCurrencyBrl(custasSummary.total));
-                }
+                const saldoAtualizadoValue = normalizeNumericCurrency(entryData.valor_causa);
+                renderMetaRow('Saldo atualizado', formatCurrencyBrl(saldoAtualizadoValue));
+                renderCustasCalcRow(saldoAtualizadoValue);
                 renderMetaRow('Prescrição', formatDateLabel(entryData.prescricao_date));
                 if (entryData.status_label) {
                     renderMetaRow('Status', entryData.status_label);
@@ -2742,6 +2977,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 actions.appendChild(checagemButton);
                 footerGroup.appendChild(actions);
                 footerGroup.appendChild(label);
+                const obsButton = document.createElement('button');
+                obsButton.type = 'button';
+                obsButton.className = 'agenda-panel__details-item-obs-btn';
+                obsButton.textContent = 'Obs';
+                const resolveObservationParagraphs = () => {
+                    if (typeof agendaObservationParagraphResolver === 'function') {
+                        const resolved = agendaObservationParagraphResolver(entryData);
+                        return Array.isArray(resolved) ? resolved : [];
+                    }
+                    const fallbackText = String(entryData?.observation_fallback_text || '').trim();
+                    return fallbackText ? [fallbackText] : [];
+                };
+                const hasObservationContent = resolveObservationParagraphs().length > 0;
+                obsButton.disabled = !hasObservationContent;
+                obsButton.classList.toggle('agenda-panel__details-item-obs-btn--disabled', !hasObservationContent);
+                obsButton.title = hasObservationContent
+                    ? 'Abrir observações da análise'
+                    : 'Sem observações para esta análise';
+                if (hasObservationContent) {
+                    obsButton.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        if (typeof agendaObservationOpenHandler === 'function') {
+                            agendaObservationOpenHandler(entryData);
+                            return;
+                        }
+                        const fallbackParagraphs = resolveObservationParagraphs();
+                        if (fallbackParagraphs.length) {
+                            createSystemAlert('Agenda Geral', fallbackParagraphs.join('\n\n'));
+                        } else {
+                            createSystemAlert('Agenda Geral', 'Sem observações para esta análise.');
+                        }
+                    });
+                }
+                footerGroup.appendChild(obsButton);
+                const ufCode = (entryData.uf || '').toString().trim().toUpperCase();
+                if (ufCode) {
+                    const ufLabel = document.createElement('span');
+                    ufLabel.className = 'agenda-panel__details-item-label agenda-panel__details-item-label--uf';
+                    ufLabel.textContent = `UF ${ufCode}`;
+                    footerGroup.appendChild(ufLabel);
+                }
                 footer.appendChild(footerGroup);
                 entry.appendChild(footer);
             }
@@ -2802,7 +3078,7 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
             entryElements.push(entry);
-            const canDragDetailEntry = !isCompletedMode && !(type === 'S' && entryData.expired);
+            const canDragDetailEntry = !isCompletedMode;
             entry.draggable = Boolean(canDragDetailEntry);
             if (canDragDetailEntry) {
                 entry.addEventListener('dragstart', (event) => {
@@ -2933,7 +3209,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const tag = document.createElement('span');
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
-                const draggableEntries = entries.filter(entry => !(type === 'S' && entry.expired));
+                const draggableEntries = entries;
                 tag.draggable = !isCompletedMode && Boolean(draggableEntries.length);
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
@@ -3358,6 +3634,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.classList.add('agenda-panel-open');
         const closeButton = overlay.querySelector('.agenda-panel__close');
         const refreshButton = overlay.querySelector('.agenda-panel__refresh-btn');
+        const headerActionsEl = overlay.querySelector('.agenda-panel__header-actions');
         const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
         const modeButton = overlay.querySelector('.agenda-panel__cycle-mode');
         const prevNavBtn = overlay.querySelector('[data-direction="prev"]');
@@ -3529,7 +3806,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 detailAnalystText.style.display = 'none';
                 return;
             }
-            const name = formatResponsavelName(entryData.responsavel);
+            const name = formatResponsavelName(entryData.analyst || entryData.responsavel);
             if (!name) {
                 detailAnalystText.textContent = '';
                 detailAnalystText.style.display = 'none';
@@ -3537,6 +3814,330 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             detailAnalystText.textContent = `Analisado por: ${name}`;
             detailAnalystText.style.display = 'inline-flex';
+        };
+
+        const buildAnalysisNotebookReferenceText = (entryData) => {
+            if (!entryData) return '';
+            const hashtag = String(entryData.analysis_hashtag || '').trim();
+            const cnj = String(entryData.cnj_label || '').trim();
+            const contracts = Array.isArray(entryData.contract_numbers)
+                ? entryData.contract_numbers.filter(Boolean).map(value => String(value).trim()).filter(Boolean)
+                : [];
+            const lines = [];
+            if (hashtag) {
+                lines.push(hashtag);
+            }
+            if (cnj) {
+                lines.push(`CNJ: ${cnj}`);
+            }
+            if (contracts.length) {
+                lines.push(`Contratos: ${contracts.join(', ')}`);
+            }
+            if (!lines.length && entryData.analise_id) {
+                lines.push(`#analise-${entryData.analise_id}`);
+            }
+            return lines.filter(Boolean).join('\n');
+        };
+
+        const getStoredNotebookText = () => {
+            const textareaValue = String(document.querySelector('.notebook-textarea')?.value || '').trim();
+            if (textareaValue) return textareaValue;
+            try {
+                const noteKey = `observacoes_livres_${window.location.pathname}`;
+                return String(localStorage.getItem(noteKey) || '').trim();
+            } catch (error) {
+                return '';
+            }
+        };
+
+        const extractAgendaCnjDigits = (text) => {
+            const raw = String(text || '').trim();
+            if (!raw) return '';
+            return raw.replace(/\D/g, '');
+        };
+
+        const splitAgendaNotebookEntries = (rawNotes) => {
+            const raw = String(rawNotes || '');
+            if (!raw.trim()) return [];
+            const lines = raw.split(/\r?\n/);
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
+            const segments = [];
+            let current = [];
+            const commitCurrent = () => {
+                if (current.some(line => String(line || '').trim())) {
+                    segments.push(current.join('\n').trim());
+                }
+                current = [];
+            };
+            lines.forEach(line => {
+                const trimmed = String(line || '').trim();
+                const isMention = Boolean(trimmed) && mentionLineRegex.test(trimmed);
+                if (isMention && current.some(entryLine => String(entryLine || '').trim())) {
+                    commitCurrent();
+                }
+                current.push(line);
+            });
+            commitCurrent();
+            return segments.filter(Boolean);
+        };
+
+        const parseAgendaNotebookEntry = (entryRaw) => {
+            const raw = String(entryRaw || '').trim();
+            const lines = raw
+                .split('\n')
+                .map(line => String(line || '').trim());
+            const mentionLines = lines.filter(line =>
+                /cnj/i.test(line) ||
+                /contratos?\s*:/i.test(line) ||
+                /#nj\d+/i.test(line)
+            );
+            const contentLines = lines.filter(line => line && !mentionLines.includes(line));
+            return {
+                raw,
+                mentionLines,
+                contentLines,
+                cnjDigits: extractAgendaCnjDigits(raw),
+            };
+        };
+
+        const resolveAgendaObservationEntries = (entryData) => {
+            const notebookText = getStoredNotebookText();
+            if (!notebookText) return [];
+            const entries = splitAgendaNotebookEntries(notebookText)
+                .map(parseAgendaNotebookEntry)
+                .filter(entry => entry && entry.raw);
+            if (!entries.length) return [];
+
+            const mentionType = (entryData?.observation_mention_type || '').toLowerCase() === 'nj'
+                ? 'nj'
+                : 'cnj';
+            const targetRaw = String(entryData?.observation_target || entryData?.cnj_label || '').trim();
+            const targetLower = targetRaw.toLowerCase();
+            const targetDigits = mentionType === 'cnj' ? extractAgendaCnjDigits(targetRaw) : '';
+            const mentionLabel = String(entryData?.observation_mention_label || '').trim().toLowerCase();
+            const hashtagToken = String(entryData?.analysis_hashtag || '').trim().toLowerCase();
+
+            let matches = [];
+            if (mentionType === 'nj') {
+                const njTokens = [mentionLabel, targetLower, hashtagToken].filter(Boolean);
+                if (njTokens.length) {
+                    matches = entries.filter(entry =>
+                        (entry.mentionLines || []).some(line => {
+                            const normalized = String(line || '').toLowerCase();
+                            return njTokens.some(token => normalized.includes(token));
+                        })
+                    );
+                }
+            } else if (targetDigits || targetLower) {
+                matches = entries.filter(entry => {
+                    const raw = String(entry.raw || '');
+                    if (!raw) return false;
+                    if (targetDigits) {
+                        const rawDigits = extractAgendaCnjDigits(raw);
+                        return rawDigits.includes(targetDigits);
+                    }
+                    return raw.toLowerCase().includes(targetLower);
+                });
+            }
+
+            if (matches.length) {
+                return matches;
+            }
+
+            const contractTokens = Array.isArray(entryData?.contract_numbers)
+                ? entryData.contract_numbers.map(value => String(value || '').trim()).filter(Boolean)
+                : [];
+            if (!contractTokens.length) {
+                return [];
+            }
+            const contractDigits = contractTokens
+                .map(token => token.replace(/\D/g, ''))
+                .filter(Boolean);
+
+            return entries.filter(entry => {
+                const raw = String(entry.raw || '');
+                if (!raw) return false;
+                if (contractTokens.some(token => raw.includes(token))) {
+                    return true;
+                }
+                const rawDigits = raw.replace(/\D/g, '');
+                if (!rawDigits) return false;
+                return contractDigits.some(token => rawDigits.includes(token));
+            });
+        };
+
+        const extractAgendaObservationTail = (line) => {
+            const raw = String(line || '').trim();
+            if (!raw) return '';
+            const contratosMatch = raw.match(/\bcontratos?\s*:\s*([0-9.,\-\s/]+)(.*)$/i);
+            if (contratosMatch) {
+                return String(contratosMatch[2] || '').replace(/^[\s\-–—:;,]+/, '').trim();
+            }
+            const cnjMatch = raw.match(/\bcnj\b\s*[:\-]?\s*([0-9./\-]+)(.*)$/i);
+            if (cnjMatch) {
+                return String(cnjMatch[2] || '').replace(/^[\s\-–—:;,]+/, '').trim();
+            }
+            return '';
+        };
+
+        const renderAgendaObservationParagraphs = (entries) => {
+            if (!Array.isArray(entries) || !entries.length) return [];
+            const mentionLineRegex = /(#[nN][jJ]\d+)|\bcnj\b|\bcontratos?\b\s*:/i;
+            const seen = new Set();
+            const paragraphs = [];
+            const appendParagraph = (value) => {
+                const normalized = String(value || '').replace(/\r/g, '').trim();
+                if (!normalized) return;
+                const dedupeKey = normalized.toLowerCase();
+                if (seen.has(dedupeKey)) return;
+                seen.add(dedupeKey);
+                paragraphs.push(normalized);
+            };
+            entries.forEach(entry => {
+                const rawLines = String(entry?.raw || '')
+                    .split('\n')
+                    .map(line => String(line || '').trim());
+                rawLines.forEach(line => {
+                    if (!line) return;
+                    if (!mentionLineRegex.test(line)) {
+                        appendParagraph(line);
+                        return;
+                    }
+                    const tail = extractAgendaObservationTail(line);
+                    if (tail) {
+                        appendParagraph(tail);
+                    }
+                });
+            });
+            return paragraphs;
+        };
+
+        const closeAgendaObservationPostit = () => {
+            const existing = document.getElementById('agenda-observation-postit');
+            if (existing) {
+                existing.remove();
+            }
+        };
+
+        const showAgendaObservationPostit = (entryData, paragraphs) => {
+            closeAgendaObservationPostit();
+            const overlay = document.createElement('div');
+            overlay.id = 'agenda-observation-postit';
+            overlay.className = 'agenda-observation-postit-overlay';
+            const card = document.createElement('div');
+            card.className = 'agenda-observation-postit';
+            card.setAttribute('role', 'dialog');
+            card.setAttribute('aria-modal', 'true');
+            card.setAttribute('aria-label', 'Observações da análise');
+
+            const header = document.createElement('div');
+            header.className = 'agenda-observation-postit__header';
+            const title = document.createElement('strong');
+            title.textContent = 'Observações';
+            const closeButton = document.createElement('button');
+            closeButton.type = 'button';
+            closeButton.className = 'agenda-observation-postit__close';
+            closeButton.setAttribute('aria-label', 'Fechar');
+            closeButton.textContent = '×';
+            header.append(title, closeButton);
+
+            const body = document.createElement('div');
+            body.className = 'agenda-observation-postit__body';
+
+            const referenceText = buildAnalysisNotebookReferenceText(entryData);
+            if (referenceText) {
+                const reference = document.createElement('div');
+                reference.className = 'agenda-observation-postit__reference';
+                referenceText.split('\n').forEach(line => {
+                    const normalized = String(line || '').trim();
+                    if (!normalized) return;
+                    const block = document.createElement('div');
+                    block.textContent = normalized;
+                    reference.appendChild(block);
+                });
+                if (reference.childElementCount) {
+                    body.appendChild(reference);
+                }
+            }
+
+            if (Array.isArray(paragraphs) && paragraphs.length) {
+                const list = document.createElement('ul');
+                list.className = 'agenda-observation-postit__list';
+                paragraphs.forEach(paragraph => {
+                    const item = document.createElement('li');
+                    item.textContent = paragraph;
+                    list.appendChild(item);
+                });
+                body.appendChild(list);
+            } else {
+                const empty = document.createElement('p');
+                empty.className = 'agenda-observation-postit__empty';
+                empty.textContent = 'Sem observações registradas para esta análise.';
+                body.appendChild(empty);
+            }
+
+            const footer = document.createElement('div');
+            footer.className = 'agenda-observation-postit__footer';
+            const okButton = document.createElement('button');
+            okButton.type = 'button';
+            okButton.className = 'agenda-observation-postit__ok';
+            okButton.textContent = 'OK';
+            footer.appendChild(okButton);
+
+            const closeModal = () => {
+                document.removeEventListener('keydown', onKeydownClose, true);
+                overlay.remove();
+            };
+            const onKeydownClose = (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeModal();
+                }
+            };
+            document.addEventListener('keydown', onKeydownClose, true);
+
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) {
+                    closeModal();
+                }
+            });
+            closeButton.addEventListener('click', closeModal);
+            okButton.addEventListener('click', closeModal);
+
+            card.append(header, body, footer);
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+            okButton.focus();
+        };
+
+        agendaObservationParagraphResolver = (entryData) => {
+            if (!entryData) return [];
+            const notebookEntries = resolveAgendaObservationEntries(entryData);
+            let paragraphs = renderAgendaObservationParagraphs(notebookEntries);
+            if (!paragraphs.length) {
+                const fallbackText = String(entryData.observation_fallback_text || '').trim();
+                if (fallbackText) {
+                    paragraphs = renderAgendaObservationParagraphs([
+                        {
+                            raw: fallbackText,
+                        },
+                    ]);
+                }
+            }
+            return paragraphs;
+        };
+
+        agendaObservationOpenHandler = (entryData) => {
+            if (!entryData) {
+                createSystemAlert('Agenda Geral', 'Não foi possível abrir observações deste card.');
+                return;
+            }
+            const paragraphs = agendaObservationParagraphResolver(entryData);
+            if (!paragraphs.length) {
+                createSystemAlert('Agenda Geral', 'Sem observações para esta análise.');
+                return;
+            }
+            showAgendaObservationPostit(entryData, paragraphs);
         };
 
         const updateDetailMetaStatusRow = (entryId, label) => {
@@ -3779,13 +4380,14 @@ document.addEventListener('DOMContentLoaded', function() {
             focusToggle.className = 'agenda-panel__focus-toggle';
             focusToggle.textContent = 'Agenda Focada';
             focusToggle.title = 'Mostrar apenas itens deste processo';
-            subtitleEl.parentNode.insertBefore(focusToggle, subtitleEl.nextSibling);
+            if (headerActionsEl) {
+                headerActionsEl.insertBefore(focusToggle, refreshButton || null);
+            } else {
+                subtitleEl.parentNode.insertBefore(focusToggle, subtitleEl.nextSibling);
+            }
         }
         const summaryBar = document.createElement('div');
         summaryBar.className = 'agenda-panel__summary';
-        summaryBar.style.fontSize = '12px';
-        summaryBar.style.color = '#4b5563';
-        summaryBar.style.marginTop = '2px';
         subtitleEl.parentNode.insertBefore(summaryBar, subtitleEl.nextSibling);
         const footer = overlay.querySelector('.agenda-panel__footer');
         const historyButton = document.createElement('button');
@@ -3859,6 +4461,11 @@ document.addEventListener('DOMContentLoaded', function() {
             agendaPageSize: AGENDA_PAGE_SIZE,
             agendaHasMore: false,
             agendaTotalEntries: null,
+            summaryEntries: {
+                pending: [],
+                completed: [],
+            },
+            summaryFetchToken: 0,
         };
         const syncSelectedConcludeEntries = () => {
             const availableKeys = new Set(
@@ -3883,6 +4490,72 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshAgendaLoadMoreButton(calendarState);
         updateConcludeButtonState();
         const getInlineEntries = () => dedupeEntries(hydrateAgendaFromInlineData());
+        const filterAgendaEntriesForCurrentState = (entries = []) => {
+            let filtered = Array.isArray(entries) ? entries : [];
+            const activeUserId = calendarState.activeUser?.id;
+            if (activeUserId) {
+                filtered = filtered.filter(entry => shouldIncludeEntryForActiveUser(entry, activeUserId));
+            }
+            if (calendarState.focused && currentProcessId) {
+                filtered = filtered.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
+            }
+            return filtered;
+        };
+        const fetchAgendaEntriesForStatus = (statusParam) => {
+            const apiPageSize = Math.max(calendarState?.agendaPageSize || AGENDA_PAGE_SIZE, 500);
+            const maxPages = 20;
+            const activeUserId = calendarState?.activeUser?.id;
+            const userParam = activeUserId ? `&user_id=${encodeURIComponent(activeUserId)}` : '';
+            const fetchPage = (page, acc) => {
+                const url = `/api/agenda/geral/?format=json&status=${statusParam}&page=${page}&page_size=${apiPageSize}${userParam}`;
+                return fetch(url, {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: { 'Accept': 'application/json' },
+                }).then((response) => {
+                    if (!response.ok) throw new Error('Resposta inválida da agenda geral');
+                    return response.json();
+                }).then((data) => {
+                    const rawEntries = Array.isArray(data.entries)
+                        ? data.entries
+                        : (Array.isArray(data) ? data : []);
+                    const normalized = rawEntries.map(normalizeApiEntry).filter(Boolean);
+                    const nextAcc = acc.concat(normalized);
+                    const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
+                    const hasMoreByTotal = totalEntries !== null && page * apiPageSize < totalEntries;
+                    const hasMoreBySize = totalEntries === null && normalized.length === apiPageSize;
+                    const hasMore = (hasMoreByTotal || hasMoreBySize) && page < maxPages;
+                    if (!hasMore) return nextAcc;
+                    return fetchPage(page + 1, nextAcc);
+                });
+            };
+            return fetchPage(1, []);
+        };
+        const refreshSummaryOppositeStatus = () => {
+            const fetchToken = (calendarState.summaryFetchToken || 0) + 1;
+            calendarState.summaryFetchToken = fetchToken;
+            Promise.allSettled([
+                fetchAgendaEntriesForStatus('pending'),
+                fetchAgendaEntriesForStatus('completed'),
+            ])
+                .then(([pendingResult, completedResult]) => {
+                    if (calendarState.summaryFetchToken !== fetchToken) return;
+                    const pendingApiEntries = pendingResult?.status === 'fulfilled' ? pendingResult.value : [];
+                    const completedApiEntries = completedResult?.status === 'fulfilled' ? completedResult.value : [];
+                    const pendingMerged = currentProcessId
+                        ? mergeEntriesByBackend(pendingApiEntries, getInlineEntries())
+                        : pendingApiEntries;
+                    calendarState.summaryEntries.pending = filterAgendaEntriesForCurrentState(pendingMerged);
+                    calendarState.summaryEntries.completed = filterAgendaEntriesForCurrentState(completedApiEntries);
+                    renderSummaryBar();
+                })
+                .catch(() => {
+                    if (calendarState.summaryFetchToken !== fetchToken) return;
+                    calendarState.summaryEntries.pending = [];
+                    calendarState.summaryEntries.completed = [];
+                    renderSummaryBar();
+                });
+        };
         let agendaEntries = getInlineEntries();
         const loadMoreAgendaPage = () => {
             if (!agendaLoadMoreButton || calendarState.agendaHasMore !== true) {
@@ -3988,23 +4661,119 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
         };
-        const renderSummaryBar = (entries = []) => {
+        const renderSummaryBar = () => {
             if (!summaryBar) return;
             const counters = {
-                T: { month: 0, total: 0 },
-                P: { month: 0, total: 0 },
+                T: { month: { pending: 0, completed: 0 }, year: { pending: 0, completed: 0 } },
+                P: { month: { pending: 0, completed: 0 }, year: { pending: 0, completed: 0 } },
+                S: { month: { pending: 0, completed: 0 }, year: { pending: 0, completed: 0 } },
+            };
+            const metricTypes = ['T', 'P', 'S'];
+            const metricTypeLabels = {
+                T: 'Tarefas',
+                P: 'Prazos',
+                S: 'Supervisões',
             };
             const monthIdx = calendarState.monthIndex;
             const year = calendarState.year;
-            entries.forEach((entry) => {
-                const type = entry.type === 'P' ? 'P' : 'T';
-                counters[type].total += 1;
-                if (entry.monthIndex === monthIdx && entry.year === year) {
-                    counters[type].month += 1;
-                }
-            });
-            const modeLabel = calendarState.showCompleted ? 'Concluídos' : 'Pendentes';
-            summaryBar.textContent = `${modeLabel} — Mês: T ${counters.T.month} · P ${counters.P.month} | Total: T ${counters.T.total} · P ${counters.P.total}`;
+            const accumulateEntries = (entries, statusKey) => {
+                entries.forEach((entry) => {
+                    const type = `${entry?.type || ''}`.toUpperCase();
+                    if (!counters[type]) return;
+                    if (entry.year !== year) return;
+                    counters[type].year[statusKey] += 1;
+                    if (entry.monthIndex === monthIdx) {
+                        counters[type].month[statusKey] += 1;
+                    }
+                });
+            };
+            accumulateEntries(calendarState.summaryEntries?.pending || [], 'pending');
+            accumulateEntries(calendarState.summaryEntries?.completed || [], 'completed');
+            summaryBar.innerHTML = '';
+            const appendMetric = (container, type, values) => {
+                const completedValue = Number(values?.completed || 0);
+                const pendingValue = Number(values?.pending || 0);
+                const metricEl = document.createElement('div');
+                metricEl.className = `agenda-panel__summary-metric agenda-panel__summary-metric--${type.toLowerCase()}`;
+
+                const typeEl = document.createElement('span');
+                typeEl.className = 'agenda-panel__summary-metric-type';
+                typeEl.textContent = metricTypeLabels[type] || type;
+                metricEl.appendChild(typeEl);
+
+                const completedEl = document.createElement('span');
+                completedEl.className = 'agenda-panel__summary-metric-value agenda-panel__summary-metric-value--completed';
+                completedEl.textContent = `${completedValue}`;
+                metricEl.appendChild(completedEl);
+
+                const pendingEl = document.createElement('span');
+                pendingEl.className = 'agenda-panel__summary-metric-value agenda-panel__summary-metric-value--pending';
+                pendingEl.textContent = `${pendingValue}`;
+                metricEl.appendChild(pendingEl);
+
+                const typeLabel = metricTypeLabels[type] || type;
+                metricEl.title = `${typeLabel}: ${completedValue} concluídos e ${pendingValue} pendentes`;
+
+                const barEl = document.createElement('span');
+                barEl.className = 'agenda-panel__summary-bar';
+                const totalValue = completedValue + pendingValue;
+                const completedFillEl = document.createElement('span');
+                completedFillEl.className = 'agenda-panel__summary-bar-fill agenda-panel__summary-bar-fill--completed';
+                const pendingFillEl = document.createElement('span');
+                pendingFillEl.className = 'agenda-panel__summary-bar-fill agenda-panel__summary-bar-fill--pending';
+                const completedPct = totalValue > 0 ? Math.round((completedValue / totalValue) * 100) : 0;
+                const pendingPct = totalValue > 0 ? 100 - completedPct : 0;
+                completedFillEl.style.width = `${Math.max(0, Math.min(completedPct, 100))}%`;
+                pendingFillEl.style.width = `${Math.max(0, Math.min(pendingPct, 100))}%`;
+                barEl.append(completedFillEl, pendingFillEl);
+                metricEl.appendChild(barEl);
+
+                container.appendChild(metricEl);
+            };
+            const createScopeSection = (label, scopeKey) => {
+                const sectionEl = document.createElement('span');
+                sectionEl.className = 'agenda-panel__summary-section';
+
+                const sectionLabelEl = document.createElement('span');
+                sectionLabelEl.className = 'agenda-panel__summary-section-label';
+                sectionLabelEl.textContent = `${label}:`;
+                sectionEl.appendChild(sectionLabelEl);
+
+                const metricsListEl = document.createElement('span');
+                metricsListEl.className = 'agenda-panel__summary-metrics';
+                sectionEl.appendChild(metricsListEl);
+
+                const headerRow = document.createElement('div');
+                headerRow.className = 'agenda-panel__summary-metrics-head';
+                const headType = document.createElement('span');
+                headType.className = 'agenda-panel__summary-head-type';
+                headType.textContent = 'Tipo';
+                const headCompleted = document.createElement('span');
+                headCompleted.className = 'agenda-panel__summary-head-label';
+                headCompleted.textContent = 'Concluídos';
+                const headPending = document.createElement('span');
+                headPending.className = 'agenda-panel__summary-head-label';
+                headPending.textContent = 'Pendentes';
+                const headBar = document.createElement('span');
+                headBar.className = 'agenda-panel__summary-head-bar';
+                headerRow.append(headType, headCompleted, headPending, headBar);
+                metricsListEl.appendChild(headerRow);
+
+                metricTypes.forEach((type) => {
+                    appendMetric(metricsListEl, type, counters[type][scopeKey]);
+                });
+                return sectionEl;
+            };
+
+            const monthSection = createScopeSection('Mês', 'month');
+            const separatorEl = document.createElement('span');
+            separatorEl.className = 'agenda-panel__summary-separator';
+            separatorEl.textContent = '|';
+            const yearSection = createScopeSection('Ano', 'year');
+
+            summaryBar.appendChild(monthSection);
+            summaryBar.appendChild(separatorEl);
+            summaryBar.appendChild(yearSection);
         };
     const applyAgendaEntriesToState = () => {
         resetCalendarMonths();
@@ -4013,19 +4782,11 @@ document.addEventListener('DOMContentLoaded', function() {
             entriesToApply = calendarState.lastApiEntries;
         }
         agendaDebug({ appliedEntries: entriesToApply.length });
-        const activeUserId = calendarState.activeUser?.id;
-        if (activeUserId) {
-            entriesToApply = entriesToApply.filter(entry =>
-                shouldIncludeEntryForActiveUser(entry, activeUserId)
-            );
-        }
-        if (calendarState.focused && currentProcessId) {
-            entriesToApply = entriesToApply.filter(
-                entry => `${entry.processo_id || ''}` === `${currentProcessId}`
-            );
-        }
+        entriesToApply = filterAgendaEntriesForCurrentState(entriesToApply);
         applyEntriesToCalendar(entriesToApply);
         calendarState.lastAppliedEntries = entriesToApply;
+        const statusKey = calendarState.showCompleted ? 'completed' : 'pending';
+        calendarState.summaryEntries[statusKey] = entriesToApply.slice();
         syncSelectedConcludeEntries();
         if (!calendarState.preserveView) {
             if (entriesToApply.length) {
@@ -4189,30 +4950,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderedTags: overlay.querySelectorAll('.agenda-panel__day-tag').length,
                 renderedCards: overlay.querySelectorAll('.agenda-panel__day-card').length,
             });
-            renderSummaryBar(calendarState.lastAppliedEntries || []);
+            renderSummaryBar();
             updateConcludeButtonState();
         };
         if (focusToggle) {
             focusToggle.addEventListener('click', () => {
                 calendarState.focused = !calendarState.focused;
                 focusToggle.classList.toggle('agenda-panel__focus-toggle--active', calendarState.focused);
-                applyAgendaEntriesToState();
-                renderCalendar();
+                refreshAgendaData(true);
             });
         }
         const refreshAgendaData = (forceApiOnly = false) => {
             if (refreshButton) {
                 refreshButton.disabled = true;
             }
+            const currentStatus = calendarState.showCompleted ? 'completed' : 'pending';
+            const oppositeStatus = currentStatus === 'completed' ? 'pending' : 'completed';
+            calendarState.summaryEntries[oppositeStatus] = [];
+            calendarState.summaryFetchToken = (calendarState.summaryFetchToken || 0) + 1;
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
             const preferApiOnly = forceApiOnly || calendarState.showCompleted || !currentProcessId;
-        hydrateAgendaFromApi(inline, calendarState, () => {
-            applyAgendaEntriesToState();
-            renderCalendar();
-            restoreActiveDetailControls();
-            if (refreshButton) {
-                refreshButton.disabled = false;
-            }
+            hydrateAgendaFromApi(inline, calendarState, () => {
+                applyAgendaEntriesToState();
+                renderCalendar();
+                restoreActiveDetailControls();
+                refreshSummaryOppositeStatus();
+                if (refreshButton) {
+                    refreshButton.disabled = false;
+                }
             }, (combined) => {
                 agendaEntries = combined;
             }, preferApiOnly);
@@ -4320,6 +5085,7 @@ document.addEventListener('DOMContentLoaded', function() {
         hydrateAgendaFromApi(agendaEntries, calendarState, () => {
             applyAgendaEntriesToState();
             renderCalendar();
+            refreshSummaryOppositeStatus();
         }, (combined) => {
             agendaEntries = combined;
         });

@@ -579,12 +579,23 @@ class AgendaGeralAPIView(APIView):
                         tipo_respostas = card.get('tipo_de_acao_respostas') or {}
                         if isinstance(tipo_respostas, dict):
                             contract_values = tipo_respostas.get('contratos_para_monitoria') or []
+                    if not contract_values:
+                        root_contract_values = respostas.get('contratos_para_monitoria')
+                        if isinstance(root_contract_values, (list, tuple)):
+                            contract_values = root_contract_values
                     parsed_ids = set()
                     parsed_numbers = set()
                     for raw_contract in contract_values or []:
                         extracted_ids, extracted_numbers = _extract_contract_refs(raw_contract)
                         parsed_ids.update(extracted_ids)
                         parsed_numbers.update(extracted_numbers)
+                    if not parsed_ids and not parsed_numbers and analise.processo_judicial_id:
+                        fallback_contracts = list(
+                            analise.processo_judicial.contratos.all().only('id', 'numero_contrato')
+                        )
+                        for contract in fallback_contracts:
+                            parsed_ids.add(contract.id)
+                            parsed_numbers.update(_build_contract_lookup_keys(contract.numero_contrato))
                     if not parsed_ids and not parsed_numbers:
                         continue
                     card_key_id = f"{analise.pk}-{source}-{idx}"
@@ -675,10 +686,22 @@ class AgendaGeralAPIView(APIView):
                 else None
             )
             agenda_date = custom_supervision_date or prescricao_date
+            if prescricao_date and agenda_date and agenda_date > prescricao_date:
+                # Segurança: supervisão nunca pode ultrapassar a menor prescrição
+                # dos contratos vinculados ao card.
+                agenda_date = prescricao_date
             if not agenda_date:
                 continue
             analise = card_info['analise']
             processo = analise.processo_judicial
+            raw_cnj = str(card.get('cnj') or '').strip()
+            raw_nj_label = str(card.get('nj_label') or '').strip()
+            normalized_cnj_digits = re.sub(r'\D', '', raw_cnj)
+            observation_mention_type = 'nj' if raw_nj_label and not normalized_cnj_digits else 'cnj'
+            observation_target = raw_nj_label if observation_mention_type == 'nj' else (
+                raw_cnj or (processo.cnj if processo else '') or ''
+            )
+            observation_fallback_text = str(card.get('observacoes') or '').strip()
             cnj_label = (
                 card_info['card'].get('cnj') or
                 (processo.cnj if processo else '') or
@@ -700,10 +723,14 @@ class AgendaGeralAPIView(APIView):
             # Supervisão é fila do supervisor (não do analista que atualizou o card).
             responsavel_user = agenda_supervisor_user
             responsavel = self._serialize_user(responsavel_user)
+            analyst = self._serialize_user(analise.updated_by)
             active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
             viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
+            analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
+            analysis_hashtag = str(analysis_type.get('hashtag') or '').strip()
+            custas_total_decimal = _parse_decimal_value(card.get('custas_total'))
             entries.append({
                 'type': 'S',
                 'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
@@ -715,6 +742,7 @@ class AgendaGeralAPIView(APIView):
                 'prescricao_date': prescricao_date.isoformat() if prescricao_date else None,
                 'contract_numbers': contrato_labels,
                 'valor_causa': valor_total_causa,
+                'custas_total': float(custas_total_decimal) if custas_total_decimal is not None else None,
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
@@ -723,19 +751,26 @@ class AgendaGeralAPIView(APIView):
                 'analysis_lines': self._build_analysis_result_lines(card_info, contract_map),
                 'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
                 'processo_id': processo.pk if processo else None,
+                'uf': (processo.uf or '').strip().upper() if processo else '',
                 'responsavel': responsavel,
+                'analyst': analyst,
                 'expired': not active,
                 'active': active,
                 'analise_id': analise.pk,
                 'card_source': card_info['source'],
                 'card_index': card_info['index'],
                 'supervisor_status': card_info['status'],
+                'analysis_hashtag': analysis_hashtag,
                 'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
                 'nome': parte_nome,
                 'parte_nome': parte_nome,
                 'cpf': parte_documento,
                 'parte_cpf': parte_documento,
                 'documento': parte_documento,
+                'observation_target': observation_target,
+                'observation_mention_type': observation_mention_type,
+                'observation_mention_label': raw_nj_label,
+                'observation_fallback_text': observation_fallback_text,
             })
 
         return entries
@@ -842,6 +877,59 @@ class AgendaSupervisionBarradoAPIView(APIView):
         analise.updated_by = request.user
         analise.save(update_fields=['respostas', 'updated_by'])
         return Response({'barrado': barrado})
+
+
+class AgendaSupervisionCustasAPIView(APIView):
+    """
+    Persiste o valor de custas do card de supervisão diretamente pela Agenda Geral.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        data = request.data or {}
+        analise_id = data.get('analise_id')
+        source = data.get('source')
+        index = data.get('index')
+        if not analise_id or not source or index is None:
+            return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            analise = AnaliseProcesso.objects.get(pk=analise_id)
+        except AnaliseProcesso.DoesNotExist:
+            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        respostas = analise.respostas or {}
+        cards = respostas.get(source)
+        try:
+            entry_index = int(index)
+        except (TypeError, ValueError):
+            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        card = cards[entry_index]
+        if not isinstance(card, dict):
+            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_custas = data.get('custas_total')
+        if raw_custas in (None, ''):
+            custas_decimal = None
+        else:
+            custas_decimal = _parse_decimal_value(raw_custas)
+            if custas_decimal is None:
+                return Response({'detail': 'custas_total inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            if custas_decimal < 0:
+                return Response({'detail': 'custas_total não pode ser negativo.'}, status=status.HTTP_400_BAD_REQUEST)
+            custas_decimal = custas_decimal.quantize(Decimal('0.01'))
+
+        card['custas_total'] = float(custas_decimal) if custas_decimal is not None else None
+        analise.respostas = respostas
+        analise.updated_by = request.user
+        analise.save(update_fields=['respostas', 'updated_by'])
+
+        return Response({'custas_total': card.get('custas_total')})
 
 
 class TarefaComentarioListCreateAPIView(APIView):
