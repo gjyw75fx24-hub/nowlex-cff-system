@@ -5490,8 +5490,28 @@ class CarteiraAdmin(admin.ModelAdmin):
         priority_rows_map = {}
         priority_by_priority_map = {}
         priority_by_uf_map = {}
+        priority_by_carteira_map = {}
         priority_process_count = 0
         priority_process_analisados = 0
+
+        def _get_priority_carteira_bucket(carteira_id_value):
+            carteira_id_int = int(carteira_id_value or 0)
+            carteira_nome_value = (
+                carteira_lookup.get(carteira_id_int, f"Carteira {carteira_id_int}")
+                if carteira_id_int
+                else "Sem carteira"
+            )
+            return priority_by_carteira_map.setdefault(
+                carteira_id_int,
+                {
+                    "carteira_id": carteira_id_int,
+                    "carteira_nome": carteira_nome_value,
+                    "totals": {"processos": 0, "analisados": 0, "pendentes": 0},
+                    "rows": {},
+                    "by_priority": {},
+                    "by_uf": {},
+                },
+            )
 
         if priority_tag_ids:
             processos_com_prioridade = (
@@ -5515,6 +5535,14 @@ class CarteiraAdmin(admin.ModelAdmin):
                 if processo_analisado:
                     priority_process_analisados += 1
 
+                processo_carteira_ids = sorted(
+                    int(carteira_id)
+                    for carteira_id in (processo_carteiras.get(int(processo.id), set()) or set())
+                    if carteira_id
+                )
+                if not processo_carteira_ids:
+                    processo_carteira_ids = [0]
+
                 uf_bucket = priority_by_uf_map.setdefault(
                     uf_code,
                     {"uf": uf_code, "total": 0, "analisados": 0, "pendentes": 0},
@@ -5524,6 +5552,25 @@ class CarteiraAdmin(admin.ModelAdmin):
                     uf_bucket["analisados"] += 1
                 else:
                     uf_bucket["pendentes"] += 1
+
+                for carteira_id in processo_carteira_ids:
+                    carteira_bucket = _get_priority_carteira_bucket(carteira_id)
+                    carteira_totals = carteira_bucket["totals"]
+                    carteira_totals["processos"] += 1
+                    if processo_analisado:
+                        carteira_totals["analisados"] += 1
+                    else:
+                        carteira_totals["pendentes"] += 1
+
+                    carteira_uf_bucket = carteira_bucket["by_uf"].setdefault(
+                        uf_code,
+                        {"uf": uf_code, "total": 0, "analisados": 0, "pendentes": 0},
+                    )
+                    carteira_uf_bucket["total"] += 1
+                    if processo_analisado:
+                        carteira_uf_bucket["analisados"] += 1
+                    else:
+                        carteira_uf_bucket["pendentes"] += 1
 
                 process_priority_ids = set()
                 for tag in processo.etiquetas.all():
@@ -5567,6 +5614,45 @@ class CarteiraAdmin(admin.ModelAdmin):
                     else:
                         priority_bucket["pendentes"] += 1
 
+                    for carteira_id in processo_carteira_ids:
+                        carteira_bucket = _get_priority_carteira_bucket(carteira_id)
+                        carteira_rows_map = carteira_bucket["rows"]
+                        carteira_priority_map = carteira_bucket["by_priority"]
+
+                        carteira_row_key = (uf_code, tag_id)
+                        carteira_row_bucket = carteira_rows_map.setdefault(
+                            carteira_row_key,
+                            {
+                                "uf": uf_code,
+                                "prioridade_id": tag_id,
+                                "prioridade_nome": tag_nome,
+                                "total": 0,
+                                "analisados": 0,
+                                "pendentes": 0,
+                            },
+                        )
+                        carteira_row_bucket["total"] += 1
+                        if processo_analisado:
+                            carteira_row_bucket["analisados"] += 1
+                        else:
+                            carteira_row_bucket["pendentes"] += 1
+
+                        carteira_priority_bucket = carteira_priority_map.setdefault(
+                            tag_id,
+                            {
+                                "prioridade_id": tag_id,
+                                "prioridade_nome": tag_nome,
+                                "total": 0,
+                                "analisados": 0,
+                                "pendentes": 0,
+                            },
+                        )
+                        carteira_priority_bucket["total"] += 1
+                        if processo_analisado:
+                            carteira_priority_bucket["analisados"] += 1
+                        else:
+                            carteira_priority_bucket["pendentes"] += 1
+
         serialized_priority_rows = sorted(
             priority_rows_map.values(),
             key=lambda item: ((item.get("prioridade_nome") or "").upper(), item.get("uf") or ""),
@@ -5579,6 +5665,41 @@ class CarteiraAdmin(admin.ModelAdmin):
             priority_by_uf_map.values(),
             key=lambda item: item.get("uf") or "",
         )
+        serialized_priority_by_carteira = []
+        for carteira_bucket in sorted(
+            priority_by_carteira_map.values(),
+            key=lambda item: ((item.get("carteira_nome") or "").upper(), int(item.get("carteira_id") or 0)),
+        ):
+            carteira_rows = sorted(
+                (carteira_bucket.get("rows") or {}).values(),
+                key=lambda item: ((item.get("prioridade_nome") or "").upper(), item.get("uf") or ""),
+            )
+            carteira_by_priority = sorted(
+                (carteira_bucket.get("by_priority") or {}).values(),
+                key=lambda item: ((item.get("prioridade_nome") or "").upper(), int(item.get("prioridade_id") or 0)),
+            )
+            carteira_by_uf = sorted(
+                (carteira_bucket.get("by_uf") or {}).values(),
+                key=lambda item: item.get("uf") or "",
+            )
+            carteira_totals = carteira_bucket.get("totals") or {}
+            processos_count = int(carteira_totals.get("processos") or 0)
+            if processos_count <= 0:
+                continue
+            serialized_priority_by_carteira.append(
+                {
+                    "carteira_id": int(carteira_bucket.get("carteira_id") or 0),
+                    "carteira_nome": _clean_text(carteira_bucket.get("carteira_nome")) or "Sem carteira",
+                    "totals": {
+                        "processos": processos_count,
+                        "analisados": int(carteira_totals.get("analisados") or 0),
+                        "pendentes": int(carteira_totals.get("pendentes") or 0),
+                    },
+                    "rows": carteira_rows,
+                    "by_priority": carteira_by_priority,
+                    "by_uf": carteira_by_uf,
+                }
+            )
         serialized_priority_tags = [
             {"id": tag_id, "nome": priority_lookup.get(tag_id) or f"Prioridade {tag_id}"}
             for tag_id in priority_tag_ids
@@ -5594,6 +5715,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "rows": serialized_priority_rows,
             "by_priority": serialized_priority_by_priority,
             "by_uf": serialized_priority_by_uf,
+            "by_carteira": serialized_priority_by_carteira,
         }
 
         tarefas_concluidas = (
@@ -5873,7 +5995,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260219a',
+            'admin/js/carteira_charts.js?v=20260221b',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):

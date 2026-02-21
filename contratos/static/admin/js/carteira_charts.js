@@ -852,6 +852,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const priorityRows = Array.isArray(priorityKpi.rows) ? priorityKpi.rows : [];
     const priorityByPriority = Array.isArray(priorityKpi.by_priority) ? priorityKpi.by_priority : [];
     const priorityByUf = Array.isArray(priorityKpi.by_uf) ? priorityKpi.by_uf : [];
+    const priorityByCarteira = Array.isArray(priorityKpi.by_carteira) ? priorityKpi.by_carteira : [];
     const priorityTotals = (priorityKpi && typeof priorityKpi === 'object' && priorityKpi.totals)
         ? priorityKpi.totals
         : {};
@@ -982,7 +983,7 @@ window.addEventListener('DOMContentLoaded', () => {
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
 
-    const buildPriorityKpiUrl = (tagId, status, ufCode) => {
+    const buildPriorityKpiUrl = (tagId, status, ufCode, carteiraId = null) => {
         if (!kpiProcessChangelistUrl) return '';
         const parsedTagId = Number(tagId || 0);
         if (!parsedTagId) return '';
@@ -995,6 +996,10 @@ window.addEventListener('DOMContentLoaded', () => {
         const ufValue = String(ufCode || '').trim().toUpperCase();
         if (ufValue && ufValue !== 'ALL') {
             params.set('priority_kpi_uf', ufValue);
+        }
+        const carteiraParsed = Number(carteiraId || 0);
+        if (carteiraParsed > 0) {
+            params.set('carteira', String(carteiraParsed));
         }
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
@@ -1501,7 +1506,14 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    if (priorityRows.length) {
+    const priorityHasData = Boolean(
+        priorityRows.length
+        || priorityByPriority.length
+        || priorityByUf.length
+        || priorityByCarteira.length
+        || Number(priorityTotals.processos || 0) > 0
+    );
+    if (priorityHasData) {
         const prioritySection = document.createElement('section');
         prioritySection.style.marginTop = '16px';
         prioritySection.style.padding = '14px';
@@ -1511,26 +1523,62 @@ window.addEventListener('DOMContentLoaded', () => {
         prioritySection.innerHTML = `
             <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
                 <h3 style="margin:0;">Importados com Prioridade</h3>
-                <div style="font-size:12px; color:#5d6f83;">Clique nos números ou barras para abrir a lista filtrada.</div>
+                <div style="font-size:12px; color:#5d6f83; margin-left:auto;">Clique nos números ou barras para abrir a lista filtrada.</div>
             </div>
             <div class="carteira-kpi-priority-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
-            <div class="carteira-kpi-priority-by-priority" style="margin-bottom:10px;"></div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px; margin-bottom:10px;">
-                <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
-                    <canvas id="kpiPriorityUfChart"></canvas>
-                </div>
-                <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
-                    <canvas id="kpiPriorityStatusChart"></canvas>
-                </div>
-            </div>
-            <div class="carteira-kpi-priority-table-wrap" style="overflow:auto;"></div>
+            <div class="carteira-kpi-priority-controls" style="display:none; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+            <div class="carteira-kpi-priority-content"></div>
         `;
         chartContainer.appendChild(prioritySection);
         attachPrintButtonToPanel(prioritySection, 'Importados com Prioridade');
 
         const summaryEl = prioritySection.querySelector('.carteira-kpi-priority-summary');
-        const byPriorityWrap = prioritySection.querySelector('.carteira-kpi-priority-by-priority');
-        const tableWrap = prioritySection.querySelector('.carteira-kpi-priority-table-wrap');
+        const controlsWrap = prioritySection.querySelector('.carteira-kpi-priority-controls');
+        const contentWrap = prioritySection.querySelector('.carteira-kpi-priority-content');
+
+        const normalizePriorityScope = (scope, fallbackName = 'Todas as carteiras') => {
+            const totalsObj = (scope && typeof scope === 'object' && scope.totals) ? scope.totals : {};
+            const fallbackTotalsObj = (scope && typeof scope === 'object') ? scope : {};
+            const carteiraId = Number(scope?.carteira_id || 0);
+            const carteiraNomeRaw = String(scope?.carteira_nome || '').trim();
+            const carteiraNome = carteiraNomeRaw
+                || (carteiraId > 0 ? `Carteira ${carteiraId}` : fallbackName);
+            return {
+                carteira_id: carteiraId,
+                carteira_nome: carteiraNome,
+                totals: {
+                    processos: Number(totalsObj.processos ?? fallbackTotalsObj.processos ?? 0),
+                    analisados: Number(totalsObj.analisados ?? fallbackTotalsObj.analisados ?? 0),
+                    pendentes: Number(totalsObj.pendentes ?? fallbackTotalsObj.pendentes ?? 0),
+                },
+                rows: Array.isArray(scope?.rows) ? scope.rows : [],
+                by_priority: Array.isArray(scope?.by_priority) ? scope.by_priority : [],
+                by_uf: Array.isArray(scope?.by_uf) ? scope.by_uf : [],
+            };
+        };
+
+        const fallbackPriorityScope = normalizePriorityScope({
+            carteira_id: 0,
+            carteira_nome: 'Todas as carteiras',
+            totals: priorityTotals,
+            rows: priorityRows,
+            by_priority: priorityByPriority,
+            by_uf: priorityByUf,
+        });
+
+        const priorityScopes = (
+            priorityByCarteira.length
+                ? priorityByCarteira.map((item) => normalizePriorityScope(item, 'Sem carteira'))
+                : [fallbackPriorityScope]
+        ).filter((scope) => (
+            Number(scope?.totals?.processos || 0) > 0
+            || (Array.isArray(scope?.rows) && scope.rows.length > 0)
+            || (Array.isArray(scope?.by_priority) && scope.by_priority.length > 0)
+        ));
+        if (!priorityScopes.length) {
+            priorityScopes.push(fallbackPriorityScope);
+        }
+
         if (summaryEl) {
             summaryEl.innerHTML = `
                 <strong>Cadastros com prioridade:</strong> ${numberPt(priorityTotals.processos || 0)}
@@ -1538,190 +1586,311 @@ window.addEventListener('DOMContentLoaded', () => {
                 <strong>Analisados:</strong> ${numberPt(priorityTotals.analisados || 0)}
                 &nbsp;|&nbsp;
                 <strong>Pendentes:</strong> ${numberPt(priorityTotals.pendentes || 0)}
+                &nbsp;|&nbsp;
+                <strong>Carteiras ativas:</strong> ${numberPt(priorityScopes.length)}
             `;
         }
 
-        const makeCountLink = (count, tagId, status, ufCode) => {
+        let currentScopeIndex = 0;
+        let showAllScopes = false;
+        const hasMultipleScopes = priorityScopes.length > 1;
+        const priorityCharts = [];
+        const destroyPriorityCharts = () => {
+            while (priorityCharts.length) {
+                const chart = priorityCharts.pop();
+                if (chart && typeof chart.destroy === 'function') {
+                    chart.destroy();
+                }
+            }
+        };
+
+        const makeCountLink = (count, tagId, status, ufCode, carteiraId) => {
             const numericCount = Number(count || 0);
             if (numericCount <= 0) return `${numberPt(numericCount)}`;
-            const url = buildPriorityKpiUrl(tagId, status, ufCode);
+            const url = buildPriorityKpiUrl(tagId, status, ufCode, carteiraId);
             if (!url) return `${numberPt(numericCount)}`;
             return `<a href="${escapeHtml(url)}" style="font-weight:600; color:#1f5f9e;">${numberPt(numericCount)}</a>`;
         };
 
-        if (byPriorityWrap && priorityByPriority.length) {
-            const cardsHtml = priorityByPriority.map((item) => {
-                const tagId = Number(item.prioridade_id || 0);
-                const tagName = escapeHtml(item.prioridade_nome || `Prioridade ${tagId || ''}`);
-                return `
-                    <div style="border:1px solid #d8e1ea; border-radius:8px; padding:8px 10px; background:#fbfdff; min-width:220px;">
-                        <div style="font-size:12px; color:#2d3e50; font-weight:700; margin-bottom:6px;">${tagName}</div>
-                        <div style="font-size:12px; color:#46576b; line-height:1.6;">
-                            <div><strong>Importados:</strong> ${makeCountLink(item.total, tagId, 'all', '')}</div>
-                            <div><strong>Analisados:</strong> ${makeCountLink(item.analisados, tagId, 'analisado', '')}</div>
-                            <div><strong>Pendentes:</strong> ${makeCountLink(item.pendentes, tagId, 'pendente', '')}</div>
+        const buildScopePanelHtml = (scope, scopeIndex, allowScopeSwitch = false) => {
+            const panelId = `kpi-priority-scope-${scopeIndex}`;
+            const ufCanvasId = `kpiPriorityUfChart-${scopeIndex}`;
+            const statusCanvasId = `kpiPriorityStatusChart-${scopeIndex}`;
+            const byPriorityItems = Array.isArray(scope.by_priority) ? scope.by_priority : [];
+            const rows = Array.isArray(scope.rows) ? scope.rows : [];
+            const cardsHtml = byPriorityItems.length
+                ? byPriorityItems.map((item) => {
+                    const tagId = Number(item.prioridade_id || 0);
+                    const tagName = escapeHtml(item.prioridade_nome || `Prioridade ${tagId || ''}`);
+                    return `
+                        <div style="border:1px solid #d8e1ea; border-radius:8px; padding:8px 10px; background:#fbfdff; min-width:220px;">
+                            <div style="font-size:12px; color:#2d3e50; font-weight:700; margin-bottom:6px;">${tagName}</div>
+                            <div style="font-size:12px; color:#46576b; line-height:1.6;">
+                                <div><strong>Importados:</strong> ${makeCountLink(item.total, tagId, 'all', '', scope.carteira_id)}</div>
+                                <div><strong>Analisados:</strong> ${makeCountLink(item.analisados, tagId, 'analisado', '', scope.carteira_id)}</div>
+                                <div><strong>Pendentes:</strong> ${makeCountLink(item.pendentes, tagId, 'pendente', '', scope.carteira_id)}</div>
+                            </div>
                         </div>
-                    </div>
-                `;
-            }).join('');
-            byPriorityWrap.innerHTML = `
-                <div style="font-size:12px; color:#46576b; margin-bottom:6px;"><strong>Totais por tipo de prioridade</strong></div>
-                <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                    ${cardsHtml}
-                </div>
-            `;
-        }
+                    `;
+                }).join('')
+                : '<div style="font-size:12px; color:#617486;">Sem prioridades neste recorte.</div>';
 
-        if (tableWrap) {
-            const rowsHtml = priorityRows.map((row) => `
+            const rowsHtml = rows.map((row) => `
                 <tr>
                     <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.uf || 'SEM_UF')}</td>
                     <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.prioridade_nome || `Prioridade ${row.prioridade_id || ''}`)}</td>
-                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.total, row.prioridade_id, 'all', row.uf)}</td>
-                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.analisados, row.prioridade_id, 'analisado', row.uf)}</td>
-                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.pendentes, row.prioridade_id, 'pendente', row.uf)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.total, row.prioridade_id, 'all', row.uf, scope.carteira_id)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.analisados, row.prioridade_id, 'analisado', row.uf, scope.carteira_id)}</td>
+                    <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${makeCountLink(row.pendentes, row.prioridade_id, 'pendente', row.uf, scope.carteira_id)}</td>
                 </tr>
             `).join('');
-            tableWrap.innerHTML = `
-                <table style="width:100%; border-collapse:collapse; font-size:12px;">
-                    <thead>
-                        <tr style="background:#eef3f8;">
-                            <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">UF</th>
-                            <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Prioridade</th>
-                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total</th>
-                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Analisados</th>
-                            <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Pendentes</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rowsHtml}</tbody>
-                </table>
+
+            const tableHtml = rows.length
+                ? `
+                    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                        <thead>
+                            <tr style="background:#eef3f8;">
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">UF</th>
+                                <th style="text-align:left; padding:6px; border:1px solid #d8e1ea;">Prioridade</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Analisados</th>
+                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Pendentes</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                `
+                : '<div style="font-size:12px; color:#617486;">Sem dados por UF neste recorte.</div>';
+
+            const scopeBadgeHtml = allowScopeSwitch
+                ? `
+                    <label style="position:absolute; top:10px; right:10px; display:inline-flex; align-items:center; margin:0;">
+                        <select class="kpi-priority-scope-switch" style="appearance:none; -webkit-appearance:none; border:1px solid #d9e1ea; border-radius:999px; padding:4px 30px 4px 10px; font-size:11px; font-weight:700; color:#2f435b; background:#f7fafc; cursor:pointer;">
+                            ${priorityScopes.map((scopeItem, index) => `
+                                <option value="${index}" ${index === currentScopeIndex ? 'selected' : ''}>${escapeHtml(scopeItem.carteira_nome)}</option>
+                            `).join('')}
+                        </select>
+                        <span style="position:absolute; right:10px; font-size:10px; color:#5d6f83; pointer-events:none;">▼</span>
+                    </label>
+                `
+                : `
+                    <span style="position:absolute; top:10px; right:10px; display:inline-flex; align-items:center; border:1px solid #d9e1ea; border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700; color:#2f435b; background:#f7fafc;">
+                        ${escapeHtml(scope.carteira_nome)}
+                    </span>
+                `;
+
+            return `
+                <section id="${panelId}" class="carteira-kpi-priority-scope-panel" style="position:relative; border:1px solid #d8e1ea; border-radius:10px; padding:12px; background:#fff;">
+                    ${scopeBadgeHtml}
+                    <div style="font-size:12px; color:#46576b; margin-bottom:8px;">
+                        <strong>Cadastros com prioridade:</strong> ${numberPt(scope.totals.processos)}
+                        &nbsp;|&nbsp;
+                        <strong>Analisados:</strong> ${numberPt(scope.totals.analisados)}
+                        &nbsp;|&nbsp;
+                        <strong>Pendentes:</strong> ${numberPt(scope.totals.pendentes)}
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:12px; color:#46576b; margin-bottom:6px;"><strong>Totais por tipo de prioridade</strong></div>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                            ${cardsHtml}
+                        </div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px; margin-bottom:10px;">
+                        <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                            <canvas id="${ufCanvasId}"></canvas>
+                        </div>
+                        <div style="height:250px; border:1px solid #e4ebf3; border-radius:8px; padding:8px;">
+                            <canvas id="${statusCanvasId}"></canvas>
+                        </div>
+                    </div>
+                    <div style="overflow:auto;">
+                        ${tableHtml}
+                    </div>
+                </section>
             `;
-        }
+        };
 
-        const priorityUfCanvas = document.getElementById('kpiPriorityUfChart');
-        const priorityUfCtx = priorityUfCanvas ? priorityUfCanvas.getContext('2d') : null;
-        if (priorityUfCtx && priorityByUf.length && priorityByPriority.length) {
-            const ufLabels = priorityByUf.map((item) => String(item.uf || 'SEM_UF'));
-            const datasets = priorityByPriority.map((priorityItem, idx) => {
-                const tagId = Number(priorityItem.prioridade_id || 0);
-                return {
-                    label: String(priorityItem.prioridade_nome || `Prioridade ${tagId || idx + 1}`),
-                    data: ufLabels.map((ufCode) => {
-                        const match = priorityRows.find((row) =>
-                            String(row.uf || '') === ufCode
-                            && Number(row.prioridade_id || 0) === tagId
-                        );
-                        return Number(match?.total || 0);
-                    }),
-                    backgroundColor: paletteColor(idx, 0.68),
-                    borderColor: paletteColor(idx, 0.96),
-                    borderWidth: 1,
-                };
-            });
-
-            new Chart(priorityUfCtx, {
-                type: 'bar',
-                data: {
-                    labels: ufLabels,
-                    datasets,
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { boxWidth: 12, font: { size: 10 } },
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+        const renderScopeCharts = (scope, scopeIndex) => {
+            const ufCanvas = document.getElementById(`kpiPriorityUfChart-${scopeIndex}`);
+            const ufCtx = ufCanvas ? ufCanvas.getContext('2d') : null;
+            const scopedByUf = Array.isArray(scope.by_uf) ? scope.by_uf : [];
+            const scopedByPriority = Array.isArray(scope.by_priority) ? scope.by_priority : [];
+            const scopedRows = Array.isArray(scope.rows) ? scope.rows : [];
+            if (ufCtx && scopedByUf.length && scopedByPriority.length) {
+                const ufLabels = scopedByUf.map((item) => String(item.uf || 'SEM_UF'));
+                const datasets = scopedByPriority.map((priorityItem, idx) => {
+                    const tagId = Number(priorityItem.prioridade_id || 0);
+                    return {
+                        label: String(priorityItem.prioridade_nome || `Prioridade ${tagId || idx + 1}`),
+                        data: ufLabels.map((ufCode) => {
+                            const match = scopedRows.find((row) =>
+                                String(row.uf || '') === ufCode
+                                && Number(row.prioridade_id || 0) === tagId
+                            );
+                            return Number(match?.total || 0);
+                        }),
+                        backgroundColor: paletteColor(idx, 0.68),
+                        borderColor: paletteColor(idx, 0.96),
+                        borderWidth: 1,
+                    };
+                });
+                const chart = new Chart(ufCtx, {
+                    type: 'bar',
+                    data: { labels: ufLabels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+                                },
                             },
                         },
+                        scales: {
+                            x: { stacked: true, ticks: { font: { size: 10 } }, grid: { display: false } },
+                            y: { stacked: true, beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                        },
+                        onClick(event, elements) {
+                            if (!elements || !elements.length) return;
+                            const first = elements[0];
+                            const datasetIndex = Number(first.datasetIndex);
+                            const dataIndex = Number(first.index);
+                            const priorityItem = scopedByPriority[datasetIndex];
+                            const ufCode = ufLabels[dataIndex];
+                            const tagId = Number(priorityItem?.prioridade_id || 0);
+                            const url = buildPriorityKpiUrl(tagId, 'all', ufCode, scope.carteira_id);
+                            if (url) {
+                                window.location.href = url;
+                            }
+                        },
                     },
-                    scales: {
-                        x: { stacked: true, ticks: { font: { size: 10 } }, grid: { display: false } },
-                        y: { stacked: true, beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
-                    },
-                    onClick(event, elements) {
-                        if (!elements || !elements.length) return;
-                        const first = elements[0];
-                        const datasetIndex = Number(first.datasetIndex);
-                        const dataIndex = Number(first.index);
-                        const priorityItem = priorityByPriority[datasetIndex];
-                        const ufCode = ufLabels[dataIndex];
-                        const tagId = Number(priorityItem?.prioridade_id || 0);
-                        const url = buildPriorityKpiUrl(tagId, 'all', ufCode);
-                        if (url) {
-                            window.location.href = url;
-                        }
-                    },
-                },
-            });
-        }
+                });
+                priorityCharts.push(chart);
+            }
 
-        const priorityStatusCanvas = document.getElementById('kpiPriorityStatusChart');
-        const priorityStatusCtx = priorityStatusCanvas ? priorityStatusCanvas.getContext('2d') : null;
-        if (priorityStatusCtx && priorityByPriority.length) {
-            const labels = priorityByPriority.map((item) => String(item.prioridade_nome || `Prioridade ${item.prioridade_id || ''}`));
-            const analyzedData = priorityByPriority.map((item) => Number(item.analisados || 0));
-            const pendingData = priorityByPriority.map((item) => Number(item.pendentes || 0));
-
-            new Chart(priorityStatusCtx, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [
-                        {
-                            label: 'Analisados',
-                            data: analyzedData,
-                            backgroundColor: 'rgba(61, 109, 138, 0.72)',
-                            borderColor: 'rgba(61, 109, 138, 0.96)',
-                            borderWidth: 1,
-                        },
-                        {
-                            label: 'Pendentes',
-                            data: pendingData,
-                            backgroundColor: 'rgba(212, 106, 74, 0.72)',
-                            borderColor: 'rgba(212, 106, 74, 0.96)',
-                            borderWidth: 1,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { boxWidth: 12, font: { size: 10 } },
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+            const statusCanvas = document.getElementById(`kpiPriorityStatusChart-${scopeIndex}`);
+            const statusCtx = statusCanvas ? statusCanvas.getContext('2d') : null;
+            if (statusCtx && scopedByPriority.length) {
+                const labels = scopedByPriority.map((item) => String(item.prioridade_nome || `Prioridade ${item.prioridade_id || ''}`));
+                const analyzedData = scopedByPriority.map((item) => Number(item.analisados || 0));
+                const pendingData = scopedByPriority.map((item) => Number(item.pendentes || 0));
+                const chart = new Chart(statusCtx, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Analisados',
+                                data: analyzedData,
+                                backgroundColor: 'rgba(61, 109, 138, 0.72)',
+                                borderColor: 'rgba(61, 109, 138, 0.96)',
+                                borderWidth: 1,
+                            },
+                            {
+                                label: 'Pendentes',
+                                data: pendingData,
+                                backgroundColor: 'rgba(212, 106, 74, 0.72)',
+                                borderColor: 'rgba(212, 106, 74, 0.96)',
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => `${context.dataset.label}: ${numberPt(context.parsed.y || 0)} cadastro(s)`,
+                                },
                             },
                         },
+                        scales: {
+                            x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                        },
+                        onClick(event, elements) {
+                            if (!elements || !elements.length) return;
+                            const first = elements[0];
+                            const datasetIndex = Number(first.datasetIndex);
+                            const dataIndex = Number(first.index);
+                            const priorityItem = scopedByPriority[dataIndex];
+                            const tagId = Number(priorityItem?.prioridade_id || 0);
+                            const status = datasetIndex === 0 ? 'analisado' : 'pendente';
+                            const url = buildPriorityKpiUrl(tagId, status, '', scope.carteira_id);
+                            if (url) {
+                                window.location.href = url;
+                            }
+                        },
                     },
-                    scales: {
-                        x: { ticks: { font: { size: 10 } }, grid: { display: false } },
-                        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
-                    },
-                    onClick(event, elements) {
-                        if (!elements || !elements.length) return;
-                        const first = elements[0];
-                        const datasetIndex = Number(first.datasetIndex);
-                        const dataIndex = Number(first.index);
-                        const priorityItem = priorityByPriority[dataIndex];
-                        const tagId = Number(priorityItem?.prioridade_id || 0);
-                        const status = datasetIndex === 0 ? 'analisado' : 'pendente';
-                        const url = buildPriorityKpiUrl(tagId, status, '');
-                        if (url) {
-                            window.location.href = url;
-                        }
-                    },
-                },
+                });
+                priorityCharts.push(chart);
+            }
+        };
+
+        controlsWrap.innerHTML = hasMultipleScopes
+            ? `
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    <input type="checkbox" class="kpi-priority-show-all">
+                    Mostrar todas ativas
+                </label>
+            `
+            : '';
+        controlsWrap.style.display = hasMultipleScopes ? 'flex' : 'none';
+
+        const showAllCheckbox = controlsWrap.querySelector('.kpi-priority-show-all');
+
+        const renderPriorityContent = () => {
+            destroyPriorityCharts();
+            currentScopeIndex = Math.max(0, Math.min(priorityScopes.length - 1, currentScopeIndex));
+            const activeScope = priorityScopes[currentScopeIndex] || priorityScopes[0];
+
+            if (showAllScopes && hasMultipleScopes) {
+                contentWrap.innerHTML = `
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(420px, 1fr)); gap:10px;">
+                        ${priorityScopes.map((scope, index) => buildScopePanelHtml(scope, index)).join('')}
+                    </div>
+                `;
+                priorityScopes.forEach((scope, index) => {
+                    renderScopeCharts(scope, index);
+                });
+            } else {
+                contentWrap.innerHTML = activeScope
+                    ? buildScopePanelHtml(activeScope, currentScopeIndex, hasMultipleScopes)
+                    : '';
+                if (activeScope) {
+                    renderScopeCharts(activeScope, currentScopeIndex);
+                }
+            }
+
+            if (!showAllScopes && hasMultipleScopes) {
+                const scopeSwitch = contentWrap.querySelector('.kpi-priority-scope-switch');
+                if (scopeSwitch) {
+                    scopeSwitch.value = String(currentScopeIndex);
+                    scopeSwitch.addEventListener('change', () => {
+                        const parsedIndex = Number(scopeSwitch.value || 0);
+                        if (!Number.isFinite(parsedIndex)) return;
+                        currentScopeIndex = Math.max(0, Math.min(priorityScopes.length - 1, parsedIndex));
+                        renderPriorityContent();
+                    });
+                }
+            }
+            if (hasMultipleScopes && showAllCheckbox) {
+                showAllCheckbox.checked = showAllScopes;
+            }
+        };
+
+        if (hasMultipleScopes && showAllCheckbox) {
+            showAllCheckbox.addEventListener('change', () => {
+                showAllScopes = Boolean(showAllCheckbox.checked);
+                renderPriorityContent();
             });
         }
+
+        renderPriorityContent();
     }
 
     if (productivityUsers.length || Number(productivityTotals.total || 0) > 0) {
