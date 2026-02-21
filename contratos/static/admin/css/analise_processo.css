@@ -363,6 +363,31 @@
     margin-bottom: 8px;
 }
 
+.analise-observation-list {
+    margin: 0;
+    padding-left: 18px;
+    list-style: disc;
+}
+
+.analise-summary-card-body .analise-observation-list {
+    list-style: disc;
+    padding-left: 18px;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.analise-observation-item {
+    color: #533809;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    white-space: pre-line;
+    margin-bottom: 6px;
+}
+
+.analise-observation-item:last-child {
+    margin-bottom: 0;
+}
+
 .analise-observation-textarea {
     width: 100%;
     box-sizing: border-box;
@@ -414,6 +439,10 @@
     gap: 12px;
     flex-shrink: 0;
     align-self: flex-start;
+}
+
+.analise-card-notes-column--empty {
+    display: none;
 }
 
 .analise-supervisor-note {

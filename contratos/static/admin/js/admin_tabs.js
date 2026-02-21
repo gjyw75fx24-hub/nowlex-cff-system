@@ -94,9 +94,9 @@ window.addEventListener('load', function() {
 	        let notebookOverlay = null;
 	        let notebookTextarea = null;
 	        let notebookMentionSaver = null;
+	        let notebookSyncTimeout = null;
 	        const normalizeNotebookText = (value) => String(value || '')
-	            .replace(/\r\n?/g, '\n')
-	            .trim();
+	            .replace(/\r\n?/g, '\n');
 
 	        const safeJsonParse = (raw) => {
 	            if (!raw || typeof raw !== 'string') return null;
@@ -156,15 +156,192 @@ window.addEventListener('load', function() {
 	            const cards = Array.isArray(responses.saved_processos_vinculados)
 	                ? responses.saved_processos_vinculados
 	                : [];
-	            const targetIndex = (activeIndex >= 0 && activeIndex < cards.length)
-	                ? activeIndex
-	                : (cards.length === 1 ? 0 : -1);
-
-	            if (targetIndex !== -1) {
-	                const card = cards[targetIndex];
-	                if (card && typeof card === 'object') {
-	                    card.observacoes = normalized;
+	            const editingIndexRaw = Number(responses._editing_card_index);
+	            const editingIndex = Number.isFinite(editingIndexRaw) ? editingIndexRaw : -1;
+	            const extractLatestNotebookBlock = (value) => {
+	                const source = String(value || '');
+	                if (!source.trim()) return '';
+	                const lines = source.split(/\r?\n/);
+	                const mentionRegex = /(#[nN][jJ]\d+)|\bCNJ\b|\bcontratos?\s*:/i;
+	                const blocks = [];
+	                let current = [];
+	                const commit = () => {
+	                    if (current.some(line => String(line || '').trim())) {
+	                        blocks.push(current.join('\n'));
+	                    }
+	                    current = [];
+	                };
+	                lines.forEach(line => {
+	                    const trimmed = String(line || '').trim();
+	                    const isMentionLine = Boolean(trimmed) && mentionRegex.test(trimmed);
+	                    if (isMentionLine && current.some(existing => String(existing || '').trim())) {
+	                        commit();
+	                    }
+	                    current.push(line);
+	                });
+	                commit();
+	                if (!blocks.length) {
+	                    return source;
 	                }
+	                return blocks[blocks.length - 1];
+	            };
+	            const latestNotebookBlock = extractLatestNotebookBlock(normalized);
+	            const njMatches = Array.from(String(latestNotebookBlock || '').matchAll(/#NJ(\d+)/ig));
+	            const njMatch = njMatches.length ? njMatches[njMatches.length - 1] : null;
+	            const mentionedNjLabel = njMatch ? `#NJ${njMatch[1]}`.toUpperCase() : '';
+	            const mentionedNjIndex = mentionedNjLabel
+	                ? Number.parseInt(mentionedNjLabel.replace(/[^0-9]/g, ''), 10)
+	                : NaN;
+	            const cnjMatches = Array.from(String(latestNotebookBlock || '').matchAll(/\bCNJ\b\s*[:\-]?\s*([0-9./-]+)/ig));
+	            const cnjMatch = cnjMatches.length ? cnjMatches[cnjMatches.length - 1] : null;
+	            const mentionedCnjDigits = cnjMatch ? String(cnjMatch[1] || '').replace(/\D/g, '') : '';
+	            const parseContractsFromNotebook = (value) => {
+	                const source = String(value || '');
+	                if (!source.trim()) return [];
+	                const tokens = [];
+	                const regex = /\bcontratos?\s*:\s*([^\n]+)/ig;
+	                let match;
+	                while ((match = regex.exec(source)) !== null) {
+	                    const listText = String(match[1] || '');
+	                    listText
+	                        .split(/[;,]/)
+	                        .map(item => String(item || '').trim())
+	                        .filter(Boolean)
+	                        .forEach(item => tokens.push(item));
+	                }
+	                return Array.from(new Set(tokens));
+	            };
+	            const notebookContractTokens = parseContractsFromNotebook(latestNotebookBlock || normalized);
+	            const notebookContractDigits = notebookContractTokens
+	                .map(value => String(value || '').replace(/\D/g, ''))
+	                .filter(value => value.length >= 4);
+	            const isNonJudicialCard = (card) => {
+	                if (!card || typeof card !== 'object') return false;
+	                const status = String(card?.tipo_de_acao_respostas?.judicializado_pela_massa || '')
+	                    .trim()
+	                    .toUpperCase();
+	                if (status === 'NÃO' || status === 'NAO') return true;
+	                const cnj = String(card.cnj || '').trim().toLowerCase();
+	                return !cnj || cnj.includes('não') || cnj.includes('nao');
+	            };
+	            const getCardContractTokens = (card) => {
+	                if (!card || typeof card !== 'object') return [];
+	                const collected = [];
+	                if (Array.isArray(card.contratos)) {
+	                    card.contratos.forEach(item => collected.push(item));
+	                }
+	                if (Array.isArray(card?.tipo_de_acao_respostas?.contratos_para_monitoria)) {
+	                    card.tipo_de_acao_respostas.contratos_para_monitoria.forEach(item => collected.push(item));
+	                }
+	                return Array.from(new Set(
+	                    collected
+	                        .map(item => String(item == null ? '' : item).trim())
+	                        .filter(Boolean)
+	                ));
+	            };
+	            const findCardIndexByNjLabel = (list, label) => {
+	                if (!Array.isArray(list) || !label) return -1;
+	                return list.findIndex(card =>
+	                    card &&
+	                    typeof card === 'object' &&
+	                    String(card.nj_label || '').trim().toUpperCase() === label
+	                );
+	            };
+	            const findCardIndexByContracts = (list) => {
+	                if (!Array.isArray(list) || (!notebookContractTokens.length && !notebookContractDigits.length)) {
+	                    return -1;
+	                }
+	                return list.findIndex(card => {
+	                    if (!card || typeof card !== 'object') return false;
+	                    const cardTokens = getCardContractTokens(card);
+	                    if (!cardTokens.length) return false;
+	                    if (notebookContractTokens.some(token => cardTokens.includes(token))) {
+	                        return true;
+	                    }
+	                    const cardDigits = cardTokens
+	                        .map(value => String(value || '').replace(/\D/g, ''))
+	                        .filter(value => value.length >= 4);
+	                    if (!cardDigits.length || !notebookContractDigits.length) {
+	                        return false;
+	                    }
+	                    return cardDigits.some(value => notebookContractDigits.includes(value));
+	                });
+	            };
+	            const findCardIndexByCnj = (list) => {
+	                if (!Array.isArray(list) || !mentionedCnjDigits) return -1;
+	                return list.findIndex(card => {
+	                    if (!card || typeof card !== 'object') return false;
+	                    const digits = String(card.cnj || '').replace(/\D/g, '');
+	                    return Boolean(digits) && digits === mentionedCnjDigits;
+	                });
+	            };
+	            const stampNjLabelIntoCard = (card) => {
+	                if (!card || typeof card !== 'object' || !mentionedNjLabel || !isNonJudicialCard(card)) {
+	                    return;
+	                }
+	                if (!card.nj_label || !String(card.nj_label).trim()) {
+	                    card.nj_label = mentionedNjLabel;
+	                }
+	                if (Number.isFinite(mentionedNjIndex) && mentionedNjIndex > 0) {
+	                    const currentIndex = Number(card.nj_index);
+	                    if (!(Number.isFinite(currentIndex) && currentIndex > 0)) {
+	                        card.nj_index = mentionedNjIndex;
+	                    }
+	                }
+	            };
+	            const tryApplyObservationToCard = (list, idx) => {
+	                if (!Array.isArray(list) || idx < 0 || idx >= list.length) {
+	                    return false;
+	                }
+	                const card = list[idx];
+	                if (!card || typeof card !== 'object') {
+	                    return false;
+	                }
+	                stampNjLabelIntoCard(card);
+	                card.observacoes = normalized;
+	                return true;
+	            };
+	            const resolveTargetIndex = (list, options = {}) => {
+	                if (!Array.isArray(list) || !list.length) {
+	                    return -1;
+	                }
+	                if (activeIndex >= 0 && activeIndex < list.length) {
+	                    return activeIndex;
+	                }
+	                if (options.allowEditingIndex && editingIndex >= 0 && editingIndex < list.length) {
+	                    return editingIndex;
+	                }
+	                if (mentionedNjLabel) {
+	                    const byLabel = findCardIndexByNjLabel(list, mentionedNjLabel);
+	                    if (byLabel > -1) {
+	                        return byLabel;
+	                    }
+	                }
+	                const byContracts = findCardIndexByContracts(list);
+	                if (byContracts > -1) {
+	                    return byContracts;
+	                }
+	                const byCnj = findCardIndexByCnj(list);
+	                if (byCnj > -1) {
+	                    return byCnj;
+	                }
+	                if (list.length === 1) {
+	                    return 0;
+	                }
+	                return -1;
+	            };
+
+	            const targetIndex = resolveTargetIndex(cards, { allowEditingIndex: true });
+	            if (targetIndex !== -1) {
+	                tryApplyObservationToCard(cards, targetIndex);
+	            }
+
+	            const activeCards = Array.isArray(responses.processos_vinculados)
+	                ? responses.processos_vinculados
+	                : [];
+	            const activeTargetIndex = resolveTargetIndex(activeCards, { allowEditingIndex: false });
+	            if (activeTargetIndex !== -1) {
+	                tryApplyObservationToCard(activeCards, activeTargetIndex);
 	            }
 
 	            field.value = JSON.stringify(responses);
@@ -180,15 +357,16 @@ window.addEventListener('load', function() {
             const blocks = [];
             const appendBlock = (value) => {
                 const normalized = normalizeNotebookText(value);
-                if (!normalized) {
+                const canonical = normalized.trim();
+                if (!canonical) {
                     return;
                 }
-                const signature = normalized.toLowerCase();
+                const signature = canonical.toLowerCase();
                 if (seen.has(signature)) {
                     return;
                 }
                 seen.add(signature);
-                blocks.push(normalized);
+                blocks.push(canonical);
             };
 
 	            ['saved_processos_vinculados', 'processos_vinculados'].forEach((sourceKey) => {
@@ -225,7 +403,7 @@ window.addEventListener('load', function() {
             return merged;
         };
 
-        const hydrateNotebookText = (baseText = null) => {
+	        const hydrateNotebookText = (baseText = null) => {
             const current = (typeof baseText === 'string')
                 ? baseText
                 : (notebookTextarea ? notebookTextarea.value : (localStorage.getItem(noteKey) || ''));
@@ -234,8 +412,24 @@ window.addEventListener('load', function() {
                 notebookTextarea.value = merged;
             }
             localStorage.setItem(noteKey, merged);
-            return merged;
-        };
+	            return merged;
+	        };
+
+	        const dispatchNotebookObservationUpdate = (text) => {
+	            const value = String(text || '');
+	            window.dispatchEvent(new CustomEvent('analiseObservacoesDigitando', {
+	                detail: { text: value }
+	            }));
+	        };
+
+	        const scheduleNotebookObservationUpdate = (text) => {
+	            if (notebookSyncTimeout) {
+	                clearTimeout(notebookSyncTimeout);
+	            }
+	            notebookSyncTimeout = setTimeout(() => {
+	                dispatchNotebookObservationUpdate(text);
+	            }, 180);
+	        };
 
         const ensureNotebook = () => {
             if (notebookOverlay) return;
@@ -262,8 +456,13 @@ window.addEventListener('load', function() {
             const saved = localStorage.getItem(noteKey) || '';
             notebookTextarea.value = saved;
             hydrateNotebookText(saved);
-            const save = () => localStorage.setItem(noteKey, notebookTextarea.value);
-            notebookTextarea.addEventListener('input', save);
+	            const save = () => {
+	                const value = notebookTextarea.value;
+	                localStorage.setItem(noteKey, value);
+	                persistNotebookToAnaliseResponses(value);
+	                scheduleNotebookObservationUpdate(value);
+	            };
+	            notebookTextarea.addEventListener('input', save);
             const ensureBlankLineBeforeMention = (text, cursorPos) => {
                 const prefixSegment = typeof cursorPos === 'number'
                     ? text.slice(0, cursorPos)
@@ -305,6 +504,26 @@ window.addEventListener('load', function() {
                 const cursor = before.length + value.length;
                 textarea.selectionStart = textarea.selectionEnd = cursor;
             };
+
+	            notebookTextarea.addEventListener('keydown', (event) => {
+	                if (!notebookOverlay || !notebookOverlay.classList.contains('open')) {
+	                    return;
+	                }
+	                if (event.isComposing) {
+	                    return;
+	                }
+	                const isEnterKey = event.key === 'Enter';
+	                const isSpaceKey = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space';
+	                if (isEnterKey || isSpaceKey) {
+	                    event.preventDefault();
+	                    event.stopPropagation();
+	                    if (typeof event.stopImmediatePropagation === 'function') {
+	                        event.stopImmediatePropagation();
+	                    }
+	                    insertAtCursor(notebookTextarea, isEnterKey ? '\n' : ' ');
+	                    save();
+	                }
+	            });
 
             notebookMentionSaver = (text) => {
                 if (!text || !notebookTextarea) {

@@ -550,7 +550,7 @@
                 </div>
                 <div class="info-card-body">
                     {% for contrato in original.contratos.all %}
-                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}">
+                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}" data-prescricao="{{ contrato.data_prescricao|date:'Y-m-d'|default_if_none:'' }}">
                             <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
                             <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
                             <span class="contrato-numero">
