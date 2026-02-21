@@ -1798,8 +1798,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Série diária:
                     <select class="kpi-productivity-metric" style="padding:4px 8px;">
-                        <option value="total" selected>Total</option>
-                        <option value="analises">Análises</option>
+                        <option value="analises" selected>Análises</option>
                         <option value="tarefas">Tarefas</option>
                         <option value="prazos">Prazos</option>
                     </select>
@@ -2039,16 +2038,19 @@ window.addEventListener('DOMContentLoaded', () => {
                 const compareBounds = compareEnabled
                     ? getActiveBounds(comparePeriodValue, compareDateFromInput, compareDateToInput)
                     : null;
+                const metricLabels = {
+                    analises: 'Análises',
+                    tarefas: 'Tarefas',
+                    prazos: 'Prazos',
+                };
+                const selectedMetricKey = ['analises', 'tarefas', 'prazos'].includes(metricValue) ? metricValue : 'analises';
+                const selectedMetricLabel = metricLabels[selectedMetricKey];
 
                 const rows = sortedUsers.map((user) => {
                     const dailyRows = filterDailyByBounds(user.daily || [], bounds);
                     const period = aggregateDailyRows(dailyRows);
-                    const periodTotal = period.analises + period.tarefas + period.prazos;
                     const compareDailyRows = compareBounds ? filterDailyByBounds(user.daily || [], compareBounds) : [];
                     const compare = compareBounds ? aggregateDailyRows(compareDailyRows) : { analises: 0, tarefas: 0, prazos: 0 };
-                    const compareTotal = compare.analises + compare.tarefas + compare.prazos;
-                    const overallTotals = user.totals || {};
-                    const overallTotal = Number(overallTotals.total || sumMetrics(overallTotals));
                     const semDataTotals = user.sem_data || {};
                     const semDataTotal = Number(semDataTotals.total || sumMetrics(semDataTotals));
                     const pendingTotals = user.pending || {};
@@ -2066,19 +2068,20 @@ window.addEventListener('DOMContentLoaded', () => {
                         tarefas: Number(pendingTotals.tarefas || 0),
                         prazos: Number(pendingTotals.prazos || 0),
                     };
+                    const currentMetric = Number(period[selectedMetricKey] || 0);
+                    const compareMetric = Number(compare[selectedMetricKey] || 0);
+                    const deltaMetric = currentMetric - compareMetric;
                     return {
                         user_key: user.user_key,
                         user_label: user.user_label || 'Sem usuário',
                         carteira_label: String(user.carteira_label || '').trim() || 'Sem carteira',
                         carteira_title: carteiraDetails,
                         period,
-                        periodTotal,
                         compare,
-                        compareTotal,
-                        deltaTotal: periodTotal - compareTotal,
-                        deltaPct: formatDeltaPct(periodTotal, compareTotal),
-                        overallTotals,
-                        overallTotal,
+                        currentMetric,
+                        compareMetric,
+                        deltaMetric,
+                        deltaPctMetric: formatDeltaPct(currentMetric, compareMetric),
                         semDataTotals,
                         semDataTotal,
                         pending,
@@ -2092,7 +2095,6 @@ window.addEventListener('DOMContentLoaded', () => {
                     acc.prazos += Number(row.period.prazos || 0);
                     return acc;
                 }, { analises: 0, tarefas: 0, prazos: 0 });
-                const periodTotalAll = periodTotals.analises + periodTotals.tarefas + periodTotals.prazos;
                 const compareTotals = compareEnabled
                     ? rows.reduce((acc, row) => {
                         acc.analises += Number(row.compare.analises || 0);
@@ -2101,7 +2103,9 @@ window.addEventListener('DOMContentLoaded', () => {
                         return acc;
                     }, { analises: 0, tarefas: 0, prazos: 0 })
                     : { analises: 0, tarefas: 0, prazos: 0 };
-                const compareTotalAll = compareTotals.analises + compareTotals.tarefas + compareTotals.prazos;
+                const metricCurrentTeam = Number(periodTotals[selectedMetricKey] || 0);
+                const metricCompareTeam = Number(compareTotals[selectedMetricKey] || 0);
+                const metricDeltaTeam = metricCurrentTeam - metricCompareTeam;
                 const semDataTotalAll = Number(productivitySemData.total || sumMetrics(productivitySemData || {}));
                 const pendingTotals = selectedUserKey === 'ALL'
                     ? {
@@ -2111,40 +2115,39 @@ window.addEventListener('DOMContentLoaded', () => {
                     : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.pending || { tarefas: 0, prazos: 0 });
                 const periodLabel = formatBoundsLabel(bounds, periodValueKey);
                 const compareLabel = compareEnabled ? formatBoundsLabel(compareBounds, comparePeriodValueKey) : '';
-                const totalDelta = periodTotalAll - compareTotalAll;
-                const analysesDelta = periodTotals.analises - compareTotals.analises;
-                const tarefasDelta = periodTotals.tarefas - compareTotals.tarefas;
-                const prazosDelta = periodTotals.prazos - compareTotals.prazos;
-                const compareSummary = compareEnabled
-                    ? `
-                        &nbsp;|&nbsp;
-                        <strong>${escapeHtml(compareLabel)}:</strong> ${numberPt(compareTotalAll)}
-                        &nbsp;|&nbsp;
-                        <strong>Delta total:</strong>
-                        <span style="font-weight:600; color:${getDeltaColor(totalDelta)};">${formatSignedNumber(totalDelta)} (${formatDeltaPct(periodTotalAll, compareTotalAll)})</span>
-                        &nbsp;|&nbsp;
-                        <strong>Delta A/T/P:</strong>
-                        <span style="font-weight:600; color:${getDeltaColor(analysesDelta)};">${formatSignedNumber(analysesDelta)}</span> /
-                        <span style="font-weight:600; color:${getDeltaColor(tarefasDelta)};">${formatSignedNumber(tarefasDelta)}</span> /
-                        <span style="font-weight:600; color:${getDeltaColor(prazosDelta)};">${formatSignedNumber(prazosDelta)}</span>
-                    `
-                    : '';
+                const carteiraNames = Array.from(new Set(rows.map((row) => String(row.carteira_label || '').trim()).filter(Boolean)));
+                const carteiraScopeLabel = carteiraNames.length === 1 ? carteiraNames[0] : 'recorte atual';
+                const trendWord = metricDeltaTeam > 0 ? 'maior' : (metricDeltaTeam < 0 ? 'menor' : 'igual');
+                const teamSentence = compareEnabled
+                    ? `Equipe da carteira ${carteiraScopeLabel}: produtividade de ${selectedMetricLabel.toLowerCase()} ${trendWord} em ${formatDeltaPct(metricCurrentTeam, metricCompareTeam)} (${numberPt(metricCurrentTeam)} vs ${numberPt(metricCompareTeam)}).`
+                    : `Equipe da carteira ${carteiraScopeLabel}: ${numberPt(metricCurrentTeam)} ${selectedMetricLabel.toLowerCase()} concluídas.`;
+                const selectedUserRow = rows.find((row) => String(row.user_key || '') === selectedUserKey) || null;
+                const candidateRows = rows.filter((row) => (Number(row.currentMetric || 0) > 0 || Number(row.compareMetric || 0) > 0));
+                const highlightedRow = selectedUserRow
+                    || (candidateRows.length
+                        ? candidateRows.slice().sort((a, b) => Number(b.deltaMetric || 0) - Number(a.deltaMetric || 0))[0]
+                        : null);
+                const userSentence = (() => {
+                    if (!highlightedRow) return 'Individualmente, sem produção registrada para o recorte selecionado.';
+                    if (!compareEnabled) {
+                        return `Individualmente, ${highlightedRow.user_label} concluiu ${numberPt(highlightedRow.currentMetric)} ${selectedMetricLabel.toLowerCase()}.`;
+                    }
+                    const userTrend = Number(highlightedRow.deltaMetric || 0) > 0 ? 'mais' : (Number(highlightedRow.deltaMetric || 0) < 0 ? 'menos' : 'o mesmo');
+                    return `Individualmente, ${highlightedRow.user_label} produziu ${userTrend} ${selectedMetricLabel.toLowerCase()}: ${formatDeltaPct(highlightedRow.currentMetric, highlightedRow.compareMetric)} (${numberPt(highlightedRow.currentMetric)} vs ${numberPt(highlightedRow.compareMetric)}).`;
+                })();
 
                 summaryEl.innerHTML = `
-                    <strong>Total geral:</strong> ${numberPt(productivityTotals.total || 0)}
-                    &nbsp;|&nbsp;
-                    <strong>${escapeHtml(periodLabel)}:</strong> ${numberPt(periodTotalAll)}
-                    ${compareSummary}
-                    &nbsp;|&nbsp;
-                    <strong>Pendentes atuais (tarefas/prazos):</strong> ${numberPt(pendingTotals.tarefas)} / ${numberPt(pendingTotals.prazos)}
-                    &nbsp;|&nbsp;
-                    <strong>Sem data de conclusão:</strong> ${numberPt(semDataTotalAll)}
+                    <div><strong>Período informado:</strong> ${escapeHtml(periodLabel)}${compareEnabled ? ` &nbsp;|&nbsp; <strong>Comparação:</strong> ${escapeHtml(compareLabel)}` : ''}</div>
+                    <div><strong>Base (A/T/P):</strong> ${numberPt(periodTotals.analises)} / ${numberPt(periodTotals.tarefas)} / ${numberPt(periodTotals.prazos)}${compareEnabled ? ` &nbsp;|&nbsp; <strong>Comparado (A/T/P):</strong> ${numberPt(compareTotals.analises)} / ${numberPt(compareTotals.tarefas)} / ${numberPt(compareTotals.prazos)}` : ''}</div>
+                    <div style="margin-top:4px;"><strong>${escapeHtml(teamSentence)}</strong></div>
+                    <div style="margin-top:2px;">${escapeHtml(userSentence)}</div>
+                    <div style="margin-top:4px;"><strong>Pendentes atuais (tarefas/prazos):</strong> ${numberPt(pendingTotals.tarefas)} / ${numberPt(pendingTotals.prazos)} &nbsp;|&nbsp; <strong>Sem data de conclusão:</strong> ${numberPt(semDataTotalAll)}</div>
                 `;
 
                 const compareHeader = compareEnabled
                     ? `
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">comparado</span></th>
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Delta total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual - comparado</span></th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(selectedMetricLabel)}<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">comparado</span></th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Delta ${escapeHtml(selectedMetricLabel.toLowerCase())}<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual - comparado</span></th>
                     `
                     : '';
                 const tableRows = rows.map((row) => `
@@ -2156,10 +2159,8 @@ window.addEventListener('DOMContentLoaded', () => {
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.pending.tarefas)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.period.prazos)}</td>
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.pending.prazos)}</td>
-                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><strong>${numberPt(row.periodTotal)}</strong></td>
-                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.compareTotal)}</td>` : ''}
-                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><span style="font-weight:600; color:${getDeltaColor(row.deltaTotal)};">${formatSignedNumber(row.deltaTotal)} (${row.deltaPct})</span></td>` : ''}
-                        <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.overallTotal)}</td>
+                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.compareMetric)}</td>` : ''}
+                        ${compareEnabled ? `<td style="text-align:right; padding:6px; border:1px solid #d8e1ea;"><span style="font-weight:600; color:${getDeltaColor(row.deltaMetric)};">${formatSignedNumber(row.deltaMetric)} (${row.deltaPctMetric})</span></td>` : ''}
                         <td style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${numberPt(row.semDataTotal)}</td>
                     </tr>
                 `).join('');
@@ -2174,9 +2175,7 @@ window.addEventListener('DOMContentLoaded', () => {
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Tarefas pendentes<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos concluídos<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Prazos pendentes<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual</span></th>
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">por período</span></th>
                                 ${compareHeader}
-                                <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Total (geral)</th>
                                 <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Sem data</th>
                             </tr>
                         </thead>
@@ -2189,35 +2188,31 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (usersCtx) {
                     const topRows = rows
                         .slice()
-                        .sort((a, b) => b.periodTotal - a.periodTotal)
+                        .sort((a, b) => Number(b.currentMetric || 0) - Number(a.currentMetric || 0))
                         .slice(0, 20);
+                    const chartDatasets = [
+                        {
+                            label: `${selectedMetricLabel} (base)`,
+                            data: topRows.map((row) => Number(row.currentMetric || 0)),
+                            backgroundColor: 'rgba(61, 109, 138, 0.72)',
+                            borderColor: 'rgba(61, 109, 138, 0.96)',
+                            borderWidth: 1,
+                        },
+                    ];
+                    if (compareEnabled) {
+                        chartDatasets.push({
+                            label: `${selectedMetricLabel} (comparado)`,
+                            data: topRows.map((row) => Number(row.compareMetric || 0)),
+                            backgroundColor: 'rgba(125, 143, 165, 0.58)',
+                            borderColor: 'rgba(125, 143, 165, 0.92)',
+                            borderWidth: 1,
+                        });
+                    }
                     usersChart = new Chart(usersCtx, {
                         type: 'bar',
                         data: {
                             labels: topRows.map((row) => truncateLabel(row.user_label, 24)),
-                            datasets: [
-                                {
-                                    label: 'Análises',
-                                    data: topRows.map((row) => Number(row.period.analises || 0)),
-                                    backgroundColor: 'rgba(61, 109, 138, 0.72)',
-                                    borderColor: 'rgba(61, 109, 138, 0.96)',
-                                    borderWidth: 1,
-                                },
-                                {
-                                    label: 'Tarefas',
-                                    data: topRows.map((row) => Number(row.period.tarefas || 0)),
-                                    backgroundColor: 'rgba(46, 139, 192, 0.72)',
-                                    borderColor: 'rgba(46, 139, 192, 0.96)',
-                                    borderWidth: 1,
-                                },
-                                {
-                                    label: 'Prazos',
-                                    data: topRows.map((row) => Number(row.period.prazos || 0)),
-                                    backgroundColor: 'rgba(77, 170, 87, 0.72)',
-                                    borderColor: 'rgba(77, 170, 87, 0.96)',
-                                    borderWidth: 1,
-                                },
-                            ],
+                            datasets: chartDatasets,
                         },
                         options: {
                             responsive: true,
@@ -2235,12 +2230,10 @@ window.addEventListener('DOMContentLoaded', () => {
                             },
                             scales: {
                                 x: {
-                                    stacked: true,
                                     ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true },
                                     grid: { display: false },
                                 },
                                 y: {
-                                    stacked: true,
                                     beginAtZero: true,
                                     ticks: { precision: 0, font: { size: 10 } },
                                 },
@@ -2276,23 +2269,20 @@ window.addEventListener('DOMContentLoaded', () => {
                     });
                 }
 
-                const metricResolver = (row, key) => {
+                const metricResolver = (row) => {
                     if (!row) return 0;
-                    if (key === 'total') return Number(row.total || sumMetrics(row));
-                    return Number(row[key] || 0);
+                    return Number(row[selectedMetricKey] || 0);
                 };
-                const dailyValues = dateLabels.map((dateKey) => metricResolver(sourceDailyMap[dateKey], metricValue));
+                const dailyValues = dateLabels.map((dateKey) => metricResolver(sourceDailyMap[dateKey]));
 
                 if (dailyChart) dailyChart.destroy();
                 const dailyCtx = dailyCanvas.getContext('2d');
                 if (dailyCtx) {
-                    const labelBase = metricValue === 'total'
-                        ? 'Total diário'
-                        : metricValue === 'analises'
-                            ? 'Análises/dia'
-                            : metricValue === 'tarefas'
-                                ? 'Tarefas/dia'
-                                : 'Prazos/dia';
+                    const labelBase = selectedMetricKey === 'analises'
+                        ? 'Análises/dia'
+                        : selectedMetricKey === 'tarefas'
+                            ? 'Tarefas/dia'
+                            : 'Prazos/dia';
                     const labelUser = selectedUserKey === 'ALL'
                         ? 'Todos os usuários'
                         : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.user_label || 'Usuário');
