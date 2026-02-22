@@ -458,9 +458,9 @@ class AdvogadoPassivo(models.Model):
         blank=True,
         verbose_name="Responsável pelo contato"
     )
-    nome = models.CharField(max_length=255, verbose_name="Nome completo")
-    uf_oab = models.CharField(max_length=2, choices=UF_CHOICES, verbose_name="UF da OAB")
-    oab_numero = models.CharField(max_length=10, verbose_name="Número da OAB")
+    nome = models.CharField(max_length=255, blank=True, null=True, verbose_name="Nome completo")
+    uf_oab = models.CharField(max_length=2, choices=UF_CHOICES, blank=True, null=True, verbose_name="UF da OAB")
+    oab_numero = models.CharField(max_length=10, blank=True, null=True, verbose_name="Número da OAB")
     email = models.EmailField(blank=True, null=True, verbose_name="E-mail")
     telefone = models.CharField(max_length=20, blank=True, null=True, verbose_name="Telefone")
     acordo_status = models.CharField(
@@ -486,7 +486,11 @@ class AdvogadoPassivo(models.Model):
         ordering = ['nome']
 
     def __str__(self):
-        return self.nome
+        nome = (self.nome or '').strip()
+        if nome:
+            return nome
+        processo_id = getattr(self, 'processo_id', None)
+        return f"Acordo do processo {processo_id or '-'}"
 
 class Contrato(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='contratos')

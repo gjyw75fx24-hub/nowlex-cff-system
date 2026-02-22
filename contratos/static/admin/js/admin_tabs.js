@@ -6,18 +6,16 @@ window.addEventListener('load', function() {
         return;
     }
 
-    const isAdvPassivo = group => {
+    const isAdvPassivo = (group) => {
         const title = (group.querySelector('h2')?.textContent || '').toLowerCase();
-        return group.classList.contains('advogado-passivo-inline') || title.includes('advogado') && title.includes('passiva');
+        return group.classList.contains('advogado-passivo-inline')
+            || (title.includes('advogado') && title.includes('passiva'));
     };
 
-    const advPassivoGroup = allInlineGroups.find(isAdvPassivo);
-    const inlineGroups = allInlineGroups.filter(group => !isAdvPassivo(group));
+    const inlineGroups = allInlineGroups;
     if (inlineGroups.length === 0) {
         return;
     }
-
-    const partesGroup = inlineGroups.find(group => (group.id && group.id.includes('partes_processuais')) || group.classList.contains('dynamic-partes'));
 
     const tabsContainer = document.createElement('div');
     tabsContainer.className = 'inline-group-tabs';
@@ -32,6 +30,9 @@ window.addEventListener('load', function() {
         const baseTitle = header ? header.textContent.trim() : 'Untitled';
         const normalizedId = (group.id || '').toLowerCase();
         const normalizedTitle = baseTitle.toLowerCase();
+        if (isAdvPassivo(group)) {
+            return 'Acordo';
+        }
         const isTarefa = normalizedId.includes('tarefa') || normalizedTitle.includes('tarefa');
         const isPrazo = normalizedId.includes('prazo') || normalizedTitle.includes('prazo');
         if (isTarefa || isPrazo) {
@@ -695,7 +696,6 @@ window.addEventListener('load', function() {
 
         entry.button.classList.add('active');
         entry.groups.forEach(grp => grp.classList.add('active'));
-        syncAdvogadoPassivo();
         dispatchTabActivated(entry);
         // Restaura a rolagem após o reflow das abas
         window.requestAnimationFrame(() => {
@@ -730,19 +730,6 @@ window.addEventListener('load', function() {
     if (tabButtons.length > 0) {
         activateTab(tabButtons[activeTabIndex], 0);
     }
-
-    function syncAdvogadoPassivo() {
-        if (!advPassivoGroup || !partesGroup) {
-            return;
-        }
-        if (partesGroup.classList.contains('active')) {
-            advPassivoGroup.classList.add('active');
-        } else {
-            advPassivoGroup.classList.remove('active');
-        }
-    }
-
-    syncAdvogadoPassivo();
 
     window.__openInlineTab = function(tabTitle) {
         if (!tabTitle) return false;

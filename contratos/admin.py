@@ -3908,21 +3908,29 @@ class ParteInline(NoRelatedLinksMixin, admin.StackedInline):
 class AdvogadoPassivoInline(NoRelatedLinksMixin, admin.StackedInline):
     model = AdvogadoPassivo
     fk_name = "processo"
-    extra = 0
+    extra = 1
+    max_num = 1
+    can_delete = False
     autocomplete_fields = ('responsavel',)
     classes = ('advogado-passivo-inline',)
-    verbose_name_plural = "Advogado Parte Passiva"
+    verbose_name = "Acordo"
+    verbose_name_plural = "Acordo"
     fieldsets = (
         (
             None,
             {"fields": (
-                ("nome", "responsavel"),
-                ("uf_oab", "oab_numero"),
-                ("email", "telefone"),
                 "acordo_status",
                 "valor_acordado",
                 "observacao",
                 ("agendar_ligacao_em", "lembrete_enviado"),
+            )},
+        ),
+        (
+            "Advogado da Parte Passiva",
+            {"fields": (
+                ("nome", "responsavel"),
+                ("uf_oab", "oab_numero"),
+                ("email", "telefone"),
             )},
         ),
     )

@@ -58,6 +58,33 @@
     background-color: #fff4c2;
 }
 
+/* Aba Acordo: exibir como formulário direto (sem caixa de "item inline") */
+.inline-group.advogado-passivo-inline .inline-related h3,
+.inline-group.advogado-passivo-inline h3,
+.advogado-passivo-inline .inline-related h3,
+.advogado-passivo-inline h3,
+#advogados_passivos-group .inline-related h3,
+#advogados_passivos-group h3,
+[id*="advogadopassivo"] .inline-related h3,
+[id*="advogadopassivo"] h3 {
+    display: none !important;
+}
+
+.inline-group.advogado-passivo-inline .inline-related {
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.inline-group.advogado-passivo-inline .inline-related fieldset.module {
+    border: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+}
+
 .notebook-overlay {
     position: fixed;
     inset: 0;
