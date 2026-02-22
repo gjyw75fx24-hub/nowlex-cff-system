@@ -3829,10 +3829,7 @@ document.addEventListener('DOMContentLoaded', function() {
             },
         };
         const setFullscreenState = (enabled) => {
-            if (!fullscreenButton) return;
-            overlay.classList.toggle('agenda-panel-overlay--fullscreen', enabled);
-            fullscreenButton.textContent = enabled ? 'Sair da tela cheia' : 'Abrir em tela cheia';
-            fullscreenButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            setAgendaOverlayFullscreen(overlay, enabled);
         };
         fullscreenButton?.addEventListener('click', () => {
             const isFullscreen = overlay.classList.contains('agenda-panel-overlay--fullscreen');
@@ -5335,9 +5332,107 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!overlay) {
             return;
         }
+        const exitConfirm = document.getElementById('agenda-panel-exit-confirm');
+        if (exitConfirm) {
+            exitConfirm.remove();
+        }
         closeChecagemModal();
         overlay.remove();
         document.body.classList.remove('agenda-panel-open');
+    };
+
+    const setAgendaOverlayFullscreen = (overlay, enabled) => {
+        if (!overlay) return;
+        overlay.classList.toggle('agenda-panel-overlay--fullscreen', Boolean(enabled));
+        const fullscreenButton = overlay.querySelector('.agenda-panel__split');
+        if (fullscreenButton) {
+            const isFullscreen = overlay.classList.contains('agenda-panel-overlay--fullscreen');
+            fullscreenButton.textContent = isFullscreen ? 'Sair da tela cheia' : 'Abrir em tela cheia';
+            fullscreenButton.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+        }
+    };
+
+    const isAgendaTypingContext = (target) => {
+        if (!target || !(target instanceof Element)) return false;
+        if (target.isContentEditable) return true;
+        return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+    };
+
+    const closeAgendaExitConfirm = () => {
+        const existing = document.getElementById('agenda-panel-exit-confirm');
+        if (existing) {
+            existing.remove();
+        }
+    };
+
+    const showAgendaExitConfirm = () => {
+        const existing = document.getElementById('agenda-panel-exit-confirm');
+        if (existing) {
+            const cancelBtn = existing.querySelector('[data-agenda-exit-cancel]');
+            cancelBtn?.focus();
+            return;
+        }
+        const overlay = document.createElement('div');
+        overlay.id = 'agenda-panel-exit-confirm';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.background = 'rgba(12, 22, 38, 0.35)';
+        overlay.style.zIndex = '3400';
+        overlay.innerHTML = `
+            <div style="
+                width:min(460px, 92vw);
+                background:#fff;
+                border:1px solid #d8dee9;
+                border-radius:12px;
+                box-shadow:0 18px 46px rgba(9, 20, 38, 0.22);
+                padding:18px 18px 16px;
+            ">
+                <div style="font-size:26px; font-weight:700; color:#2f3f5f; line-height:1; margin:0 0 12px;">Agenda Geral</div>
+                <div style="font-size:17px; color:#33435f; margin:0 0 14px;">Deseja sair da Agenda Geral?</div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" data-agenda-exit-cancel style="
+                        border:1px solid #b8c7db;
+                        background:#f4f7fc;
+                        color:#2a3a58;
+                        border-radius:10px;
+                        padding:9px 14px;
+                        font-weight:700;
+                        cursor:pointer;
+                    ">Cancelar</button>
+                    <button type="button" data-agenda-exit-confirm style="
+                        border:1px solid #0f5ecf;
+                        background:#1b7cff;
+                        color:#fff;
+                        border-radius:10px;
+                        padding:9px 14px;
+                        font-weight:700;
+                        cursor:pointer;
+                    ">Sair da Agenda Geral</button>
+                </div>
+            </div>
+        `;
+
+        const cancelButton = overlay.querySelector('[data-agenda-exit-cancel]');
+        const confirmButton = overlay.querySelector('[data-agenda-exit-confirm]');
+
+        cancelButton?.addEventListener('click', () => {
+            closeAgendaExitConfirm();
+        });
+        confirmButton?.addEventListener('click', () => {
+            closeAgendaExitConfirm();
+            closeAgendaPanel();
+        });
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) {
+                closeAgendaExitConfirm();
+            }
+        });
+
+        document.body.appendChild(overlay);
+        cancelButton?.focus();
     };
 
     const handleAgendaPanelEscape = (event) => {
@@ -5345,14 +5440,72 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!isEscape) {
             return;
         }
+        const agendaOverlay = document.querySelector('.agenda-panel-overlay');
+        if (!agendaOverlay) {
+            return;
+        }
+        const exitConfirm = document.getElementById('agenda-panel-exit-confirm');
+        if (exitConfirm) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeAgendaExitConfirm();
+            return;
+        }
+        const openAgendaFormModal = document.querySelector('.agenda-form-modal');
+        if (openAgendaFormModal) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            openAgendaFormModal.remove();
+            return;
+        }
         const checagemOverlay = document.getElementById('checagem-modal-overlay');
         if (checagemOverlay && checagemOverlay.getAttribute('aria-hidden') === 'false') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
             closeChecagemModal();
             return;
         }
-        closeAgendaPanel();
+        if (agendaOverlay.classList.contains('agenda-panel-overlay--fullscreen')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setAgendaOverlayFullscreen(agendaOverlay, false);
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        showAgendaExitConfirm();
     };
     document.addEventListener('keydown', handleAgendaPanelEscape);
+
+    const handleAgendaPanelFullscreenShortcut = (event) => {
+        const agendaOverlay = document.querySelector('.agenda-panel-overlay');
+        if (!agendaOverlay) return;
+        if (isAgendaTypingContext(event.target)) return;
+
+        const key = event.key || '';
+        const code = event.code || '';
+        const wantsFullscreen =
+            (event.shiftKey && (key === '+' || key === '=' || code === 'Equal')) ||
+            code === 'NumpadAdd';
+        const wantsWindowed =
+            (event.shiftKey && (key === '-' || key === '_' || code === 'Minus')) ||
+            code === 'NumpadSubtract';
+
+        if (!wantsFullscreen && !wantsWindowed) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        if (wantsFullscreen) {
+            setAgendaOverlayFullscreen(agendaOverlay, true);
+            return;
+        }
+        setAgendaOverlayFullscreen(agendaOverlay, false);
+    };
+    document.addEventListener('keydown', handleAgendaPanelFullscreenShortcut, true);
+
     document.addEventListener('click', (event) => {
         const closeTrigger = event.target.closest('.agenda-panel__close');
         if (!closeTrigger) {
