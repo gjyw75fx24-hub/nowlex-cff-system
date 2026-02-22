@@ -5049,6 +5049,138 @@ a.historylink {
     --prazo-datetime-gap: 8px;
 }
 
+.agenda-form-modal--panel-compact.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos:not(.empty-form) {
+    padding-right: 280px;
+    row-gap: 10px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos:not(.empty-form) {
+    padding-right: 0;
+    row-gap: 8px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-panel {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    height: 220px !important;
+    min-height: 220px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 12px !important;
+    gap: 8px !important;
+    margin-top: 2px !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-titulo .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-responsavel .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes .fieldBox {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-data_limite .fieldBox {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-titulo .fieldBox > input,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-responsavel .fieldBox > select,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes .fieldBox > textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes textarea {
+    min-height: 92px !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-prazo-comentarios {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    grid-column: 1 / -1 !important;
+    grid-row: 7 !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-concluido,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.delete {
+    grid-row: 8 !important;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-header {
+    gap: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-avatar {
+    width: 28px;
+    height: 28px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-name {
+    font-size: 0.8rem;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-time {
+    font-size: 0.7rem;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-history {
+    font-size: 0.8rem;
+    margin-top: 6px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-input-row {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 6px 4px;
+    background: transparent;
+    position: static;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-input {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    gap: 6px;
+    padding: 5px 8px;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-input input {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 100%;
+    font-size: 0.84rem;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-icon {
+    font-size: 0.86rem;
+}
+
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #prazos-group .tarefa-comments-send {
+    align-self: flex-end;
+    padding: 6px 10px;
+    min-width: 92px;
+    font-size: 0.73rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    border-radius: 9px;
+    box-shadow: none;
+}
+
 .agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes {
     width: min(100%, calc(var(--prazo-datetime-input-width) * 2 + var(--prazo-datetime-gap)));
     max-width: calc(var(--prazo-datetime-input-width) * 2 + var(--prazo-datetime-gap));
