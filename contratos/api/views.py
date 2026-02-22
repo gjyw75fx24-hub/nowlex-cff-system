@@ -551,6 +551,47 @@ class AgendaGeralAPIView(APIView):
 
             return ids, numbers
 
+        analyst_cache_by_username = {}
+
+        def _serialize_analyst_from_name(name):
+            normalized_name = str(name or '').strip()
+            if not normalized_name:
+                return None
+            cache_key = normalized_name.lower()
+            if cache_key in analyst_cache_by_username:
+                return analyst_cache_by_username[cache_key]
+            user_obj = (
+                User.objects
+                .filter(username__iexact=normalized_name)
+                .only('id', 'username', 'first_name', 'last_name')
+                .first()
+            )
+            if user_obj:
+                serialized = self._serialize_user(user_obj)
+            else:
+                serialized = {
+                    'id': None,
+                    'username': normalized_name,
+                    'first_name': '',
+                    'last_name': '',
+                    'pending_tasks': 0,
+                    'pending_prazos': 0,
+                    'completed_tasks': 0,
+                    'completed_prazos': 0,
+                }
+            analyst_cache_by_username[cache_key] = serialized
+            return serialized
+
+        def _resolve_card_analyst(card_data, fallback_user):
+            if isinstance(card_data, dict):
+                for key in ('analysis_author', 'analise_autor', 'updated_by', 'supervisor_observacoes_autor'):
+                    candidate = str(card_data.get(key) or '').strip()
+                    if candidate:
+                        resolved = _serialize_analyst_from_name(candidate)
+                        if resolved:
+                            return resolved
+            return self._serialize_user(fallback_user)
+
         cards_by_identity = {}
 
         for analise in AnaliseProcesso.objects.select_related('processo_judicial', 'updated_by'):
@@ -749,7 +790,7 @@ class AgendaGeralAPIView(APIView):
             # Supervisão é fila do supervisor (não do analista que atualizou o card).
             responsavel_user = agenda_supervisor_user
             responsavel = self._serialize_user(responsavel_user)
-            analyst = self._serialize_user(analise.updated_by)
+            analyst = _resolve_card_analyst(card, analise.updated_by)
             active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
