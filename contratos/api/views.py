@@ -551,10 +551,7 @@ class AgendaGeralAPIView(APIView):
 
             return ids, numbers
 
-        cards_data = []
-        contract_ids = set()
-        contract_numbers = set()
-        seen_keys = set()
+        cards_by_identity = {}
 
         for analise in AnaliseProcesso.objects.select_related('processo_judicial', 'updated_by'):
             respostas = analise.respostas or {}
@@ -599,19 +596,8 @@ class AgendaGeralAPIView(APIView):
                     if not parsed_ids and not parsed_numbers:
                         continue
                     card_key_id = f"{analise.pk}-{source}-{idx}"
-                    key = (
-                        analise.pk,
-                        source,
-                        idx,
-                        status,
-                        card_key_id,
-                    )
-                    if key in seen_keys:
-                        continue
-                    seen_keys.add(key)
-                    contract_ids.update(parsed_ids)
-                    contract_numbers.update(parsed_numbers)
-                    cards_data.append({
+                    identity_key = (analise.pk, idx)
+                    candidate = {
                         'analise': analise,
                         'card': card,
                         'contract_ids': parsed_ids,
@@ -620,7 +606,36 @@ class AgendaGeralAPIView(APIView):
                         'index': idx,
                         'status': status,
                         'card_key_id': card_key_id,
-                    })
+                    }
+                    existing = cards_by_identity.get(identity_key)
+                    if existing:
+                        existing_card = existing.get('card') if isinstance(existing.get('card'), dict) else {}
+                        existing_custom_date = _parse_optional_date(existing_card.get('supervision_date'))
+                        candidate_custom_date = _parse_optional_date(card.get('supervision_date'))
+                        should_replace = False
+                        if (
+                            existing.get('source') != 'saved_processos_vinculados'
+                            and source == 'saved_processos_vinculados'
+                        ):
+                            should_replace = True
+                        elif not existing_custom_date and candidate_custom_date:
+                            should_replace = True
+                        elif (
+                            not existing.get('contract_ids')
+                            and not existing.get('contract_numbers')
+                            and (parsed_ids or parsed_numbers)
+                        ):
+                            should_replace = True
+                        if not should_replace:
+                            continue
+                    cards_by_identity[identity_key] = candidate
+
+        cards_data = list(cards_by_identity.values())
+        contract_ids = set()
+        contract_numbers = set()
+        for card_info in cards_data:
+            contract_ids.update(card_info.get('contract_ids') or set())
+            contract_numbers.update(card_info.get('contract_numbers') or set())
 
         if not cards_data:
             return []
@@ -685,11 +700,21 @@ class AgendaGeralAPIView(APIView):
                 if contracts_with_prescricao
                 else None
             )
-            agenda_date = custom_supervision_date or prescricao_date
-            if prescricao_date and agenda_date and agenda_date > prescricao_date:
+            if prescricao_date and custom_supervision_date and custom_supervision_date > prescricao_date:
                 # Segurança: supervisão nunca pode ultrapassar a menor prescrição
                 # dos contratos vinculados ao card.
+                custom_supervision_date = prescricao_date
+
+            # Regra da agenda:
+            # 1) Se houver data customizada de S e ela ainda estiver vigente, renderiza nessa data.
+            # 2) Se a data customizada venceu, usa a data de prescrição do contrato.
+            # 3) Sem prescrição disponível, mantém a data customizada (quando existir).
+            if custom_supervision_date and custom_supervision_date >= today:
+                agenda_date = custom_supervision_date
+            elif prescricao_date:
                 agenda_date = prescricao_date
+            else:
+                agenda_date = custom_supervision_date
             if not agenda_date:
                 continue
             analise = card_info['analise']
@@ -717,6 +742,7 @@ class AgendaGeralAPIView(APIView):
                 c.numero_contrato or f"ID {c.pk}"
                 for c in valid_contracts
             ]
+            contract_pk_ids = tuple(sorted(c.pk for c in valid_contracts))
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = float(valor_total_causa)
@@ -741,12 +767,14 @@ class AgendaGeralAPIView(APIView):
                 'original_date': agenda_date.isoformat(),
                 'prescricao_date': prescricao_date.isoformat() if prescricao_date else None,
                 'contract_numbers': contrato_labels,
+                'contract_ids': contract_pk_ids,
                 'valor_causa': valor_total_causa,
                 'custas_total': float(custas_total_decimal) if custas_total_decimal is not None else None,
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
                 'cnj_label': cnj_label,
+                'custom_supervision_date': custom_supervision_date.isoformat() if custom_supervision_date else None,
                 'cardId': card_info.get('card_key_id') or f"supervision-{analise.pk}-{card_info['source']}-{card_info['index']}",
                 'analysis_lines': self._build_analysis_result_lines(card_info, contract_map),
                 'admin_url': (reverse('admin:contratos_processojudicial_change', args=[processo.pk]) + '?tab=supervisionar') if processo else '',
@@ -773,7 +801,60 @@ class AgendaGeralAPIView(APIView):
                 'observation_fallback_text': observation_fallback_text,
             })
 
-        return entries
+        def _normalize_contract_labels(values):
+            normalized = []
+            for value in values or []:
+                text = str(value or '').strip()
+                if text:
+                    normalized.append(text)
+            return tuple(sorted(normalized))
+
+        def _build_supervision_semantic_key(entry):
+            analise_id = entry.get('analise_id')
+            processo_id = entry.get('processo_id')
+            hashtag = str(entry.get('analysis_hashtag') or '').strip().lower()
+            contract_ids = tuple(sorted(int(cid) for cid in (entry.get('contract_ids') or []) if str(cid).strip()))
+            if contract_ids:
+                # Identificador mais estável do card na agenda:
+                # mesma análise + mesmo processo + mesmo conjunto de contratos.
+                return (analise_id, processo_id, 'contract_ids', contract_ids)
+            normalized_contracts = _normalize_contract_labels(entry.get('contract_numbers'))
+            if normalized_contracts:
+                return (analise_id, processo_id, 'contract_numbers', normalized_contracts)
+            nj_label = str(entry.get('observation_mention_label') or '').strip().upper()
+            if nj_label:
+                return (analise_id, processo_id, 'nj', nj_label)
+            cnj_digits = re.sub(r'\D', '', str(entry.get('cnj_label') or ''))
+            mention_target = str(entry.get('observation_target') or '').strip().lower()
+            if cnj_digits:
+                return (analise_id, processo_id, 'cnj', cnj_digits)
+            if mention_target:
+                return (analise_id, processo_id, 'target', mention_target)
+            return (analise_id, processo_id, 'fallback', hashtag)
+
+        def _supervision_entry_rank(entry):
+            custom_date = _parse_optional_date(entry.get('custom_supervision_date'))
+            agenda_date = _parse_optional_date(entry.get('date'))
+            custom_is_active = bool(custom_date and custom_date >= today)
+            active_custom_order = -custom_date.toordinal() if custom_is_active else -1
+            return (
+                1 if custom_is_active else 0,
+                active_custom_order,
+                1 if custom_date else 0,
+                1 if entry.get('card_source') == 'saved_processos_vinculados' else 0,
+                agenda_date or date_cls.min,
+                1 if entry.get('observation_fallback_text') else 0,
+                1 if entry.get('analysis_lines') else 0,
+            )
+
+        deduped_entries_by_key = {}
+        for entry in entries:
+            semantic_key = _build_supervision_semantic_key(entry)
+            current = deduped_entries_by_key.get(semantic_key)
+            if current is None or _supervision_entry_rank(entry) > _supervision_entry_rank(current):
+                deduped_entries_by_key[semantic_key] = entry
+
+        return list(deduped_entries_by_key.values())
 
 
 class AgendaSupervisionStatusAPIView(APIView):

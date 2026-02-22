@@ -4414,6 +4414,75 @@ document.addEventListener('DOMContentLoaded', function() {
         const firstActionBtn = concludeButton || footer.querySelector('.agenda-panel__form-btn');
         footer.insertBefore(completedButton, firstActionBtn);
         footer.insertBefore(historyButton, completedButton);
+        const normalizeAgendaProcessId = (value) => {
+            const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                return null;
+            }
+            return parsed;
+        };
+        const resolveAgendaFooterProcessIds = () => {
+            if (activeSupervisionEntry) {
+                const processId = normalizeAgendaProcessId(
+                    activeSupervisionEntry.processo_id ?? activeSupervisionEntry.processoId,
+                );
+                if (!processId) {
+                    createSystemAlert(
+                        'Agenda Geral',
+                        'O card S ativo não possui processo/cadastro identificado para vincular tarefa/prazo.',
+                    );
+                    return null;
+                }
+                return [processId];
+            }
+            return getSelectedProcessIds();
+        };
+        const openAgendaFooterFormModal = (type) => {
+            if (type !== 'tarefas' && type !== 'prazos') {
+                return;
+            }
+            const processIds = resolveAgendaFooterProcessIds();
+            if (processIds === null) {
+                return;
+            }
+            const modal = createAgendaFormModal(type, processIds, {
+                compactWithinPanel: true,
+                compactPanelOverlay: overlay,
+            });
+            if (!modal) {
+                createSystemAlert('Agenda Geral', 'Não foi possível abrir o formulário solicitado.');
+                return;
+            }
+        };
+        const handleAgendaFooterFormClick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const button = event.currentTarget;
+            if (!button) return;
+            const type = button.getAttribute('data-form');
+            openAgendaFooterFormModal(type);
+        };
+        footer.querySelectorAll('.agenda-panel__form-btn').forEach((button) => {
+            if (button.dataset.formBound === '1') {
+                return;
+            }
+            button.dataset.formBound = '1';
+            button.addEventListener('click', handleAgendaFooterFormClick);
+        });
+        // Fallback por delegação para cliques em elementos internos do botão.
+        if (!overlay.dataset.footerFormDelegationBound) {
+            overlay.dataset.footerFormDelegationBound = '1';
+            overlay.addEventListener('click', (event) => {
+                const button = event.target.closest('.agenda-panel__form-btn');
+                if (!button || !overlay.contains(button)) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const type = button.getAttribute('data-form');
+                openAgendaFooterFormModal(type);
+            });
+        }
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
         const capitalizeLabel = (value) => {
             if (!value) return '';
@@ -5337,7 +5406,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
                         <span class="tarefa-comments-icon">@</span>
                     </div>
-                    <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
+                    <button type="button" class="tarefa-comments-send" disabled>Comentar</button>
                 </div>
             </div>
         `;
@@ -5606,6 +5675,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const fillAgendaBulkSelects = (modal, type) => {
         if (!modal) return;
+        const reinitTaskSelect2 = () => {
+            if (type !== 'tarefas' || typeof initTarefasSelect2 !== 'function') {
+                return;
+            }
+            const group = modal.querySelector('#tarefas-group');
+            if (!group) return;
+            initTarefasSelect2(group);
+        };
         const responsavelSelect = modal.querySelector('[data-field="responsavel"]');
         if (responsavelSelect) {
             fetchAgendaUsersList().then((users) => {
@@ -5619,6 +5696,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     option.textContent = label;
                     responsavelSelect.appendChild(option);
                 });
+                reinitTaskSelect2();
             });
         }
         if (type === 'tarefas') {
@@ -5632,11 +5710,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         option.textContent = item.nome;
                         listaSelect.appendChild(option);
                     });
+                    reinitTaskSelect2();
                 });
             }
             const prioridadeSelect = modal.querySelector('[data-field="prioridade"]');
-            if (prioridadeSelect && typeof initTarefasSelect2 === 'function') {
-                initTarefasSelect2(modal.querySelector('#tarefas-group'));
+            if (prioridadeSelect) {
+                reinitTaskSelect2();
             }
         }
     };
@@ -6030,7 +6109,49 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    const createAgendaFormModal = (type, processIds) => {
+    const applyAgendaCompactFormLayout = (modal, panelOverlay) => {
+        if (!modal || !panelOverlay) return;
+        const panel = panelOverlay.querySelector('.agenda-panel');
+        const calendarWrapper = panelOverlay.querySelector('.agenda-panel__calendar-grid-wrapper');
+        if (!panel || !calendarWrapper) {
+            return;
+        }
+        const isFullscreen = panelOverlay.classList.contains('agenda-panel-overlay--fullscreen');
+        const panelRect = panel.getBoundingClientRect();
+        const calendarRect = calendarWrapper.getBoundingClientRect();
+        const left = Math.max(calendarRect.left + 8, panelRect.left + 8);
+        const top = Math.max(calendarRect.top + 8, panelRect.top + 8);
+        const rightLimit = Math.min(calendarRect.right - 8, panelRect.right - 8);
+        const bottomLimit = Math.min(calendarRect.bottom - 8, panelRect.bottom - 8);
+        const width = Math.max(360, rightLimit - left);
+        const height = Math.max(320, bottomLimit - top);
+        modal.classList.add('agenda-form-modal--panel-compact');
+        modal.classList.toggle('agenda-form-modal--panel-compact-default', !isFullscreen);
+        modal.classList.toggle('agenda-form-modal--panel-compact-fullscreen', isFullscreen);
+        modal.classList.remove('agenda-form-modal--panel-compact-standard');
+        modal.style.position = 'fixed';
+        modal.style.inset = 'auto';
+        modal.style.left = `${left}px`;
+        modal.style.top = `${top}px`;
+        modal.style.width = `${width}px`;
+        modal.style.height = `${height}px`;
+        modal.style.padding = '8px';
+        modal.style.alignItems = 'stretch';
+        modal.style.justifyContent = 'stretch';
+        modal.style.background = 'rgba(15, 35, 65, 0.16)';
+        modal.style.borderRadius = '12px';
+        modal.style.zIndex = '2300';
+        const card = modal.querySelector('.agenda-form-modal__card');
+        if (card) {
+            card.style.width = '100%';
+            card.style.maxWidth = '100%';
+            card.style.height = '100%';
+            card.style.maxHeight = '100%';
+            card.style.margin = '0';
+        }
+    };
+
+    const createAgendaFormModal = (type, processIds, options = {}) => {
         const existing = document.querySelector(`.agenda-form-modal[data-form="${type}"]`);
         if (existing) {
             existing.remove();
@@ -6063,6 +6184,9 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         modal._processIds = Array.isArray(processIds) ? processIds : [];
         document.body.appendChild(modal);
+        if (options?.compactWithinPanel && options?.compactPanelOverlay) {
+            applyAgendaCompactFormLayout(modal, options.compactPanelOverlay);
+        }
         modal.addEventListener('click', (event) => {
             if (event.target === modal) {
                 modal.remove();
@@ -7742,12 +7866,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!hasData) {
                 const isPrioridade = /-prioridade$/.test(this.id || '');
                 const selectClass = isPrioridade ? 'tarefas-select--prioridade' : 'tarefas-select--lista';
+                const dropdownRoot = this.closest('.agenda-form-modal')
+                    || this.closest('.agenda-panel-overlay')
+                    || document.body;
                 $el.select2({
                     width: '100%',
                     theme: 'admin-autocomplete',
                     containerCssClass: `tarefas-select ${selectClass}`,
                     dropdownCssClass: `tarefas-select-dropdown ${selectClass}-dropdown`,
-                    dropdownParent: document.body,
+                    dropdownParent: $(dropdownRoot),
                     minimumResultsForSearch: 0,
                     allowClear: !isPrioridade,
                     placeholder: !isPrioridade ? ($el.find('option:first').text() || '---------') : undefined,

@@ -4585,6 +4585,66 @@ a.historylink {
     padding: 32px;
     z-index: 2100;
 }
+.agenda-form-modal--panel-compact {
+    border-radius: 12px;
+    backdrop-filter: blur(1px);
+}
+.agenda-form-modal--panel-compact .agenda-form-modal__card {
+    border-radius: 12px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
+}
+.agenda-form-modal--panel-compact .agenda-form-modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__card {
+    padding: 14px;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__header {
+    margin-bottom: 10px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__header strong {
+    font-size: 1.05rem;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__header-actions {
+    gap: 6px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__history {
+    padding: 3px 8px;
+    font-size: 0.68rem;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__close {
+    width: 28px;
+    height: 28px;
+    font-size: 16px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__body label {
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__body input,
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__body textarea {
+    padding: 5px 8px;
+    margin-top: 3px;
+    font-size: 13px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__body textarea {
+    min-height: 68px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__row {
+    gap: 8px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__footer {
+    margin-top: 10px;
+    gap: 8px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__submit,
+.agenda-form-modal--panel-compact-standard .agenda-form-modal__cancel {
+    padding: 6px 12px;
+    font-size: 0.86rem;
+}
 
 .agenda-form-modal__card {
     background: #fff;
@@ -4663,7 +4723,7 @@ a.historylink {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    z-index: 2205;
+    z-index: 2405;
 }
 .agenda-bulk-history__card {
     background: #ffffff;
@@ -4787,12 +4847,24 @@ a.historylink {
     width: min(1100px, 96vw);
     max-height: 90vh;
 }
+.agenda-form-modal--panel-compact.agenda-form-modal--bulk .agenda-form-modal__card {
+    width: 100%;
+    max-height: 100%;
+}
 
 .agenda-form-modal--bulk .agenda-form-modal__body {
     max-height: calc(90vh - 160px);
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
+}
+.agenda-form-modal--panel-compact.agenda-form-modal--bulk .agenda-form-modal__body {
+    max-height: none;
+    height: auto;
+    overflow-y: auto;
+}
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk .agenda-form-modal__body {
+    padding-right: 2px;
 }
 
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas:not(.empty-form) {
@@ -4806,6 +4878,17 @@ a.historylink {
     justify-items: stretch;
     position: relative;
     box-sizing: border-box;
+}
+.agenda-form-modal--panel-compact.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas:not(.empty-form) {
+    padding-right: 280px;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas:not(.empty-form) {
+    gap: 10px;
+    padding-right: 252px;
+}
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas:not(.empty-form) {
+    gap: 8px;
+    padding-right: 258px;
 }
 
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td:not(.field-tarefa-comentarios) {
@@ -4836,6 +4919,106 @@ a.historylink {
     height: auto !important;
     margin: 0 !important;
 }
+.agenda-form-modal--panel-compact.agenda-form-modal--bulk #tarefas-group .tarefa-comments-panel {
+    width: 260px !important;
+    max-width: 260px !important;
+    min-width: 260px !important;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-panel {
+    top: 14px !important;
+    right: 14px !important;
+    bottom: auto !important;
+    height: 70% !important;
+    min-height: 210px !important;
+    width: 236px !important;
+    max-width: 236px !important;
+    min-width: 236px !important;
+    padding: 12px !important;
+    gap: 8px !important;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-descricao .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-lista .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-responsavel .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-prioridade .fieldBox,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-observacoes .fieldBox {
+    width: 169% !important;
+    max-width: 169% !important;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-data .fieldBox {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-descricao .fieldBox > input,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-lista .fieldBox > select,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-responsavel .fieldBox > select,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-prioridade .fieldBox > select,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-observacoes .fieldBox > textarea,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-lista .fieldBox > .select2-container,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-responsavel .fieldBox > .select2-container,
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-prioridade .fieldBox > .select2-container {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-header {
+    gap: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-avatar {
+    width: 28px;
+    height: 28px;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-name {
+    font-size: 0.8rem;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-time {
+    font-size: 0.7rem;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-history {
+    font-size: 0.8rem;
+    margin-top: 6px;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-input-row {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 6px 4px;
+    background: transparent;
+    position: static;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-input {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    gap: 6px;
+    padding: 5px 8px;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-input input {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 100%;
+    font-size: 0.84rem;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-icon {
+    font-size: 0.86rem;
+}
+.agenda-form-modal--panel-compact-default.agenda-form-modal--bulk #tarefas-group .tarefa-comments-send {
+    align-self: flex-end;
+    padding: 6px 10px;
+    min-width: 92px;
+    font-size: 0.73rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    border-radius: 9px;
+    box-shadow: none;
+}
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #tarefas-group .tarefa-comments-panel {
+    top: 12px !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    width: 244px !important;
+    max-width: 244px !important;
+    min-width: 244px !important;
+}
 
 .agenda-form-modal--bulk #prazos-group tr.dynamic-prazos:not(.empty-form)::before {
     grid-column: 1 / 3;
@@ -4861,6 +5044,10 @@ a.historylink {
     --prazo-datetime-input-width: 140px;
     --prazo-datetime-gap: 12px;
 }
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #prazos-group {
+    --prazo-datetime-input-width: 126px;
+    --prazo-datetime-gap: 8px;
+}
 
 .agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-observacoes {
     width: min(100%, calc(var(--prazo-datetime-input-width) * 2 + var(--prazo-datetime-gap)));
@@ -4885,6 +5072,11 @@ a.historylink {
     padding: 6px 10px;
     margin-top: 4px;
     box-sizing: border-box;
+}
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-alerta_valor input,
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-alerta_unidade select {
+    height: 34px;
+    padding: 5px 8px;
 }
 
 .agenda-form-modal--bulk #prazos-group tr.dynamic-prazos td.field-alerta_valor {
@@ -4924,6 +5116,9 @@ a.historylink {
 .agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-observacoes textarea {
     min-height: 135px !important;
 }
+.agenda-form-modal--panel-compact-standard.agenda-form-modal--bulk #tarefas-group tr.dynamic-tarefas td.field-observacoes textarea {
+    min-height: 92px !important;
+}
 
 .agenda-bulk-info {
     display: flex;
@@ -4933,6 +5128,10 @@ a.historylink {
     margin-bottom: 12px;
     font-size: 0.95rem;
     color: #415169;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-info {
+    margin-bottom: 8px;
+    font-size: 0.84rem;
 }
 
 .agenda-bulk-info__count {
@@ -4947,6 +5146,9 @@ a.historylink {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0 10px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-table {
+    border-spacing: 0 6px;
 }
 .agenda-panel__day--history::after {
     content: '';
@@ -5311,6 +5513,12 @@ body.agenda-panel-open {
 .tarefas-select-dropdown .select2-results__option--highlighted[aria-selected] {
     background: #7aaec8ff !important;
     color: #ffffff !important;
+}
+.agenda-form-modal .select2-container--open {
+    z-index: 5000 !important;
+}
+.agenda-form-modal .select2-dropdown {
+    z-index: 5001 !important;
 }
 
 #tarefas-group tr.dynamic-tarefas td.field-concluida .tarefas-actions {
