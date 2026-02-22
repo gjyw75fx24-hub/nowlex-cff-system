@@ -1054,6 +1054,52 @@ class AgendaSupervisionCustasAPIView(APIView):
         return Response({'custas_total': card.get('custas_total')})
 
 
+class AgendaSupervisionDateAPIView(APIView):
+    """
+    Persiste a data de supervisão do card diretamente pela Agenda Geral.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        data = request.data or {}
+        analise_id = data.get('analise_id')
+        source = data.get('source')
+        index = data.get('index')
+        if not analise_id or not source or index is None:
+            return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            analise = AnaliseProcesso.objects.get(pk=analise_id)
+        except AnaliseProcesso.DoesNotExist:
+            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        respostas = analise.respostas or {}
+        cards = respostas.get(source)
+        try:
+            entry_index = int(index)
+        except (TypeError, ValueError):
+            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        card = cards[entry_index]
+        if not isinstance(card, dict):
+            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        supervision_date = _parse_optional_date(data.get('date'))
+        if supervision_date is None:
+            return Response({'detail': 'date inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        card['supervision_date'] = supervision_date.isoformat()
+        analise.respostas = respostas
+        analise.updated_by = request.user
+        analise.save(update_fields=['respostas', 'updated_by'])
+
+        return Response({'date': card.get('supervision_date')})
+
+
 class TarefaComentarioListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 

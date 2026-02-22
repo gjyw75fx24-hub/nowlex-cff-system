@@ -1241,8 +1241,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
     const AGENDA_SUPERVISION_CUSTAS_URL = '/api/agenda/supervision/custas/';
+    const AGENDA_SUPERVISION_DATE_URL = '/api/agenda/supervision/date/';
     const AGENDA_CONCLUIR_URL = '/api/agenda/concluir/';
     let agendaLoadMoreButton = null;
+    const agendaPendingDateOverrides = new Map();
     const isAgendaDebugEnabled = () => {
         try {
             return window.localStorage?.getItem('agenda_debug') === '1';
@@ -2356,10 +2358,81 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         return rebuilt;
     };
+    const buildAgendaBackendKey = (entryType, backendId) => {
+        const normalizedType = String(entryType || '').trim().toUpperCase();
+        const normalizedId = `${backendId ?? ''}`.trim();
+        if (!normalizedId || !['T', 'P', 'S'].includes(normalizedType)) return '';
+        return `${normalizedType}:${normalizedId}`;
+    };
+
+    const rememberAgendaPendingDateOverride = (entryType, backendId, targetDayInfo) => {
+        const key = buildAgendaBackendKey(entryType, backendId);
+        if (!key || !targetDayInfo) return;
+        agendaPendingDateOverrides.set(
+            key,
+            formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day),
+        );
+    };
+
+    const applyAgendaPendingDateOverrides = (entries = []) => {
+        if (!agendaPendingDateOverrides.size || !Array.isArray(entries) || !entries.length) {
+            return entries;
+        }
+        return entries.map((entry) => {
+            const key = buildAgendaBackendKey(entry?.type, entry?.backendId);
+            if (!key) return entry;
+            const overrideDate = agendaPendingDateOverrides.get(key);
+            if (!overrideDate) return entry;
+            const parsed = parseDateInputValue(overrideDate);
+            if (!parsed) {
+                agendaPendingDateOverrides.delete(key);
+                return entry;
+            }
+            const isAlreadyApplied = (
+                entry.day === parsed.day
+                && entry.monthIndex === parsed.monthIndex
+                && entry.year === parsed.year
+            );
+            if (isAlreadyApplied) {
+                agendaPendingDateOverrides.delete(key);
+                return entry;
+            }
+            return {
+                ...entry,
+                day: parsed.day,
+                monthIndex: parsed.monthIndex,
+                year: parsed.year,
+            };
+        });
+    };
+
     const persistEntryDate = (entryData, targetDayInfo) => {
         if (!entryData?.backendId || !targetDayInfo) return;
-        if (entryData.type === 'S') return;
         const payloadDate = formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
+        rememberAgendaPendingDateOverride(entryData.type, entryData.backendId, targetDayInfo);
+
+        if (entryData.type === 'S') {
+            const cardSource = `${entryData.card_source || ''}`.trim();
+            const cardIndex = Number.parseInt(`${entryData.card_index ?? ''}`, 10);
+            if (!entryData.analise_id || !cardSource || !Number.isFinite(cardIndex)) {
+                return;
+            }
+            fetch(AGENDA_SUPERVISION_DATE_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken || '',
+                },
+                body: JSON.stringify({
+                    analise_id: entryData.analise_id,
+                    source: cardSource,
+                    index: cardIndex,
+                    date: payloadDate,
+                }),
+            }).catch(() => {});
+            return;
+        }
+
         const isTask = entryData.type === 'T';
         const url = isTask
             ? `/api/agenda/tarefa/${entryData.backendId}/update-date/`
@@ -2637,7 +2710,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const rawEntries = Array.isArray(data.entries)
                         ? data.entries
                         : (Array.isArray(data) ? data : []);
-                    const apiEntries = rawEntries.map(normalizeApiEntry).filter(Boolean);
+                    const apiEntries = applyAgendaPendingDateOverrides(
+                        rawEntries.map(normalizeApiEntry).filter(Boolean)
+                    );
                     agendaDebug({
                         fetchedUrl: url,
                         rawEntries: rawEntries.length,
@@ -2664,15 +2739,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         filtered = combined.filter(entry => `${entry.processo_id || ''}` === `${currentProcessId}`);
                     }
                     applyEntriesToCalendar(filtered);
-                    if (calendarStateRef && filtered.length) {
-                        const first = filtered
-                            .slice()
-                            .sort((a, b) => new Date(a.year, a.monthIndex, a.day) - new Date(b.year, b.monthIndex, b.day))[0];
-                        if (first) {
-                            calendarStateRef.monthIndex = first.monthIndex;
-                            calendarStateRef.year = first.year;
-                        }
-                    }
                     if (calendarStateRef) {
                         const totalEntries = typeof data.total_entries === 'number' ? data.total_entries : null;
                         calendarStateRef.agendaTotalEntries = totalEntries;
@@ -3335,6 +3401,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const card = document.createElement('button');
                     card.type = 'button';
                     card.className = `agenda-panel__day-card agenda-panel__day-card--${type.toLowerCase()}`;
+                    card.draggable = !isCompletedMode;
                     if (type === 'S' && entry.expired) {
                         card.classList.add('agenda-panel__day-card--expired');
                     }
@@ -3376,6 +3443,41 @@ document.addEventListener('DOMContentLoaded', function() {
                         card.title = labelText;
                     }
                     card.append(typeEl, textEl);
+                    if (!isCompletedMode) {
+                        card.addEventListener('dragstart', (event) => {
+                            const payloadEntry = {
+                                id: entry.id,
+                                backendId: entry.backendId,
+                                type: entry.type || type,
+                                prescricao_date: entry.prescricao_date || null,
+                                day: entry.day,
+                                monthIndex: entry.monthIndex,
+                                year: entry.year,
+                            };
+                            const payload = {
+                                source: 'detail',
+                                day: dayInfo.day,
+                                monthIndex: dayInfo.monthIndex,
+                                year: dayInfo.year,
+                                type,
+                                entry: payloadEntry,
+                            };
+                            const clone = card.cloneNode(true);
+                            clone.style.position = 'absolute';
+                            clone.style.top = '-999px';
+                            clone.style.left = '-999px';
+                            document.body.appendChild(clone);
+                            const rect = clone.getBoundingClientRect();
+                            event.dataTransfer.setDragImage(clone, rect.width / 2, rect.height / 2);
+                            event.dataTransfer.setData('text/plain', JSON.stringify(payload));
+                            event.dataTransfer.effectAllowed = 'move';
+                            setTimeout(() => {
+                                if (clone.parentNode) {
+                                    clone.parentNode.removeChild(clone);
+                                }
+                            }, 0);
+                        });
+                    }
                     card.addEventListener('click', (event) => {
                         event.stopPropagation();
                         resetDetailCardBody();
@@ -3474,25 +3576,25 @@ document.addEventListener('DOMContentLoaded', function() {
                             return;
                         }
                         const movedEntries = [];
-                        const validPayload = [];
                         entriesPayload.forEach(payloadEntry => {
                             const index = sourceDay[typeKey].findIndex(entry => entry.id === payloadEntry.id);
                             if (index === -1) return;
                             const [removed] = sourceDay[typeKey].splice(index, 1);
                             movedEntries.push(removed);
-                            validPayload.push(payloadEntry);
                         });
                         if (!movedEntries.length) return;
                         dayInfo[typeKey].push(...movedEntries);
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        validPayload.forEach(entry => persistEntryDate(entry, dayInfo));
-                        moveAgendaEntries(validPayload, dayInfo);
+                        movedEntries.forEach(entry => persistEntryDate(entry, dayInfo));
+                        moveAgendaEntries(movedEntries, dayInfo);
                     }
                     agendaEntries = dedupeEntries(rebuildAgendaEntriesFromCalendar());
                     if (state) {
                         state.activeDay = { day: dayInfo.day, monthIndex: dayInfo.monthIndex, year: dayInfo.year };
                         state.activeType = parsed.type;
+                        // Keep the current month/year view after drag-and-drop.
+                        state.preserveView = true;
                     }
                     rerender && rerender();
                 };
@@ -3551,43 +3653,40 @@ document.addEventListener('DOMContentLoaded', function() {
                         <button type="button" class="agenda-panel__close" aria-label="Fechar agenda">×</button>
                     </div>
                 </div>
-                <div class="agenda-panel__controls">
-                    <div class="agenda-panel__controls-left">
-                        <button type="button" class="agenda-panel__cycle-btn" data-months="1">1 Calendário</button>
-                        <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
-                        <button type="button" class="agenda-panel__users-toggle" data-view="users" aria-pressed="false">Usuários</button>
-                    </div>
-                    <div class="agenda-panel__controls-right">
-                        <div class="agenda-panel__month-heading">
-                            <strong class="agenda-panel__month-title">Janeiro 2025</strong>
-                        </div>
-                        <div class="agenda-panel__month-switches">
-                            <button type="button">Jan</button>
-                            <button type="button">Fev</button>
-                            <button type="button">Mar</button>
-                            <button type="button">Abr</button>
-                            <button type="button">Mai</button>
-                            <button type="button">Jun</button>
-                            <button type="button">Jul</button>
-                            <button type="button">Ago</button>
-                            <button type="button">Set</button>
-                            <button type="button">Out</button>
-                            <button type="button">Nov</button>
-                            <button type="button">Dez</button>
-                        </div>
-                    </div>
-                </div>
                 <div class="agenda-panel__body">
                     <div class="agenda-panel__calendar-wrapper">
                         <div class="agenda-panel__calendar-inner">
-                            <div class="agenda-panel__calendar-grid-wrapper">
-                                <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--prev" data-direction="prev" aria-label="Voltar">
-                                    ‹
-                                </button>
-                                <div class="agenda-panel__calendar-grid" data-calendar-placeholder></div>
-                                <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--next" data-direction="next" aria-label="Avançar">
-                                    ›
-                                </button>
+                            <div class="agenda-panel__calendar-column">
+                                <div class="agenda-panel__controls">
+                                    <div class="agenda-panel__controls-left">
+                                        <button type="button" class="agenda-panel__cycle-mode" data-mode="monthly">Mensal</button>
+                                        <button type="button" class="agenda-panel__users-toggle" data-view="users" aria-pressed="false">Usuários</button>
+                                        <strong class="agenda-panel__month-title" style="display:none;"></strong>
+                                        <div class="agenda-panel__month-switches">
+                                            <button type="button">Jan</button>
+                                            <button type="button">Fev</button>
+                                            <button type="button">Mar</button>
+                                            <button type="button">Abr</button>
+                                            <button type="button">Mai</button>
+                                            <button type="button">Jun</button>
+                                            <button type="button">Jul</button>
+                                            <button type="button">Ago</button>
+                                            <button type="button">Set</button>
+                                            <button type="button">Out</button>
+                                            <button type="button">Nov</button>
+                                            <button type="button">Dez</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="agenda-panel__calendar-grid-wrapper">
+                                    <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--prev" data-direction="prev" aria-label="Voltar">
+                                        ‹
+                                    </button>
+                                    <div class="agenda-panel__calendar-grid" data-calendar-placeholder></div>
+                                    <button type="button" class="agenda-panel__calendar-nav agenda-panel__calendar-nav--next" data-direction="next" aria-label="Avançar">
+                                        ›
+                                    </button>
+                                </div>
                             </div>
                         <div class="agenda-panel__details">
                             <div class="agenda-panel__details-list">
@@ -3635,7 +3734,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const closeButton = overlay.querySelector('.agenda-panel__close');
         const refreshButton = overlay.querySelector('.agenda-panel__refresh-btn');
         const headerActionsEl = overlay.querySelector('.agenda-panel__header-actions');
-        const cycleBtn = overlay.querySelector('.agenda-panel__cycle-btn');
         const modeButton = overlay.querySelector('.agenda-panel__cycle-mode');
         const prevNavBtn = overlay.querySelector('[data-direction="prev"]');
         const nextNavBtn = overlay.querySelector('[data-direction="next"]');
@@ -4633,7 +4731,6 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.agendaPage = (calendarState.agendaPage || 1) + 1;
             agendaLoadMoreButton.disabled = true;
             hydrateAgendaFromApi([], calendarState, () => {
-                applyAgendaEntriesToState();
                 renderCalendar();
                 restoreActiveDetailControls();
             }, (combined) => {
@@ -4882,19 +4979,14 @@ document.addEventListener('DOMContentLoaded', function() {
         calendarState.preserveView = false;
     };
         const updateMonthTitle = () => {
-            if (!monthTitleEl) return;
             const yearText = `${calendarState.year || new Date().getFullYear()}`;
-            if (calendarState.view === 'users') {
-                monthTitleEl.textContent = 'Usuários';
-                monthTitleEl.style.display = '';
-                monthYearEl?.classList.remove('agenda-panel__year-label--visible');
-            } else {
+            if (monthTitleEl) {
                 monthTitleEl.textContent = '';
                 monthTitleEl.style.display = 'none';
-                monthYearEl?.classList.add('agenda-panel__year-label--visible');
             }
             if (monthYearEl) {
                 monthYearEl.textContent = yearText;
+                monthYearEl.classList.add('agenda-panel__year-label--visible');
             }
         };
         const renderUserSelectionGrid = () => {
@@ -4988,9 +5080,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const renderCalendar = () => {
             resetCalendarMonths();
-            updateMonthTitle();
             updateSubtitleText();
-            setActiveMonthButton(calendarState.monthIndex);
             overlay.classList.toggle('agenda-panel--weekly', calendarState.mode === 'weekly');
             overlay.classList.toggle('agenda-panel--history', calendarState.showHistory);
             const isUserView = calendarState.view === 'users';
@@ -4998,6 +5088,8 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarGridEl.classList.toggle('agenda-panel__users-grid--active', isUserView);
             usersToggle?.setAttribute('aria-pressed', `${isUserView}`);
             if (isUserView) {
+                updateMonthTitle();
+                setActiveMonthButton(calendarState.monthIndex);
                 selectedConcludeEntries.clear();
                 activeConcludableEntry = null;
                 updateConcludeButtonState();
@@ -5005,6 +5097,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             applyAgendaEntriesToState();
+            updateMonthTitle();
+            setActiveMonthButton(calendarState.monthIndex);
             renderCalendarDays(
                 calendarGridEl,
                 detailList,
@@ -5033,6 +5127,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (refreshButton) {
                 refreshButton.disabled = true;
             }
+            calendarState.preserveView = true;
             const currentStatus = calendarState.showCompleted ? 'completed' : 'pending';
             const oppositeStatus = currentStatus === 'completed' ? 'pending' : 'completed';
             calendarState.summaryEntries[oppositeStatus] = [];
@@ -5040,7 +5135,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
             const preferApiOnly = forceApiOnly || calendarState.showCompleted || !currentProcessId;
             hydrateAgendaFromApi(inline, calendarState, () => {
-                applyAgendaEntriesToState();
                 renderCalendar();
                 restoreActiveDetailControls();
                 refreshSummaryOppositeStatus();
@@ -5152,7 +5246,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
         hydrateAgendaFromApi(agendaEntries, calendarState, () => {
-            applyAgendaEntriesToState();
             renderCalendar();
             refreshSummaryOppositeStatus();
         }, (combined) => {
@@ -5181,16 +5274,6 @@ document.addEventListener('DOMContentLoaded', function() {
             renderCalendar();
         };
         closeButton.addEventListener('click', () => closeAgendaPanel());
-        cycleBtn.addEventListener('click', () => {
-            const current = Number(cycleBtn.dataset.months) || 1;
-            const next = current === 3 ? 1 : current + 1;
-            cycleBtn.dataset.months = next;
-            cycleBtn.textContent = `${next} Calendário${next === 1 ? '' : 's'}`;
-            if (modeButton.dataset.mode !== 'monthly' && next !== 1) {
-                modeButton.dataset.mode = 'monthly';
-                modeButton.textContent = 'Mensal';
-            }
-        });
         modeButton.addEventListener('click', () => {
             const sequence = ['monthly', 'weekly'];
             const labels = {
@@ -5207,10 +5290,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset, calendarState);
             } else {
                 calendarState.weekOffset = 0;
-            }
-            if (next !== 'monthly') {
-                cycleBtn.dataset.months = 1;
-                cycleBtn.textContent = '1 Calendário';
             }
             renderCalendar();
         });
