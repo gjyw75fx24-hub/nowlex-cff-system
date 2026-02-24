@@ -6242,10 +6242,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs, use_distinct = super().get_search_results(request, queryset, search_term)
         if not search_term:
             return qs, use_distinct
-        # Busca por campos relacionados (partes/números CNJ/contratos) pode
-        # gerar linhas repetidas do mesmo processo no changelist.
-        # Forçamos DISTINCT sempre que houver termo de busca.
-        use_distinct = True
+        # A busca padrão em campos relacionados pode retornar múltiplas linhas
+        # do mesmo processo (joins 1-N). Consolidamos por PK para garantir que
+        # cada processo apareça uma única vez no changelist.
+        matched_ids = set(qs.values_list('pk', flat=True))
         sanitized_digits = re.sub(r'\D', '', search_term)
         if sanitized_digits:
             escaped_digits = ''.join(re.escape(d) for d in sanitized_digits)
@@ -6257,8 +6257,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 | Q(numeros_cnj__cnj__iregex=rf'.*{digit_pattern}')
             )
             extra = queryset.filter(filters)
-            qs = (qs | extra).distinct()
-        return qs, use_distinct
+            matched_ids.update(extra.values_list('pk', flat=True))
+        if matched_ids:
+            qs = queryset.filter(pk__in=matched_ids)
+        else:
+            qs = queryset.none()
+        return qs, False
     fieldsets = (
         ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "carteiras_vinculadas", "vara", "tribunal", "busca_ativa")}),
     )
