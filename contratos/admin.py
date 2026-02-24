@@ -6263,6 +6263,55 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         else:
             qs = queryset.none()
         return qs, False
+
+    def _build_parte_dedupe_key(self, parte):
+        documento = re.sub(r"\D", "", str(getattr(parte, "documento", "") or ""))
+        nome = re.sub(r"\s+", " ", str(getattr(parte, "nome", "") or "").strip()).lower()
+        if documento or nome:
+            return f"{documento}|{nome}"
+        return f"id:{getattr(parte, 'pk', '')}"
+
+    def _parte_card_score(self, parte):
+        values = (
+            getattr(parte, "nome", None),
+            getattr(parte, "documento", None),
+            getattr(parte, "endereco", None),
+            getattr(parte, "advogados_info", None),
+            getattr(parte, "data_nascimento", None),
+            getattr(parte, "obito_data", None),
+            getattr(parte, "obito_cidade", None),
+            getattr(parte, "obito_uf", None),
+            getattr(parte, "numero_cnj_id", None),
+        )
+        score = sum(1 for value in values if value not in (None, ""))
+        if getattr(parte, "obito", False):
+            score += 1
+        return score
+
+    def _build_passivo_info_cards(self, processo):
+        if not processo:
+            return []
+        partes = list(
+            processo.partes_processuais.filter(tipo_polo="PASSIVO").order_by("id")
+        )
+        if len(partes) <= 1:
+            return partes
+
+        grouped = {}
+        key_order = []
+        for parte in partes:
+            key = self._build_parte_dedupe_key(parte)
+            if key not in grouped:
+                grouped[key] = parte
+                key_order.append(key)
+                continue
+            current = grouped[key]
+            candidate_rank = (self._parte_card_score(parte), -(parte.pk or 0))
+            current_rank = (self._parte_card_score(current), -(current.pk or 0))
+            if candidate_rank > current_rank:
+                grouped[key] = parte
+        return [grouped[key] for key in key_order]
+
     fieldsets = (
         ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "carteiras_vinculadas", "vara", "tribunal", "busca_ativa")}),
     )
@@ -7363,6 +7412,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         online_presence_config = {"enabled": False}
         if obj:
             extra_context['valuation_display'] = self.valor_causa_display(obj)
+            extra_context['passivo_info_cards'] = self._build_passivo_info_cards(obj)
             cnj_entries = self._build_cnj_entries_context(obj)
             extra_context['cnj_entries_json'] = mark_safe(json.dumps(cnj_entries))
             extra_context['cnj_active_index'] = self._determine_active_index(cnj_entries, obj)
@@ -7395,6 +7445,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cnj_active_index'] = 0
             extra_context['cnj_active_display'] = ''
             extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps([]))
+            extra_context['passivo_info_cards'] = []
         extra_context['online_presence_config_json'] = mark_safe(json.dumps(online_presence_config))
         
         # Preserva os filtros da changelist para a navegação:
