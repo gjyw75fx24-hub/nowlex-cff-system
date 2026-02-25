@@ -2488,6 +2488,19 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/[-]+/g, ' ')
             .trim();
         if (!normalized) return '';
+        const normalizedUpper = normalized.toUpperCase();
+        if (
+            (/ESTEIRA/.test(normalizedUpper) && /(?:^|\s)0*3(?:\s|$)/.test(normalizedUpper)) ||
+            /\bE3\b/.test(normalizedUpper)
+        ) {
+            return 'E3';
+        }
+        if (
+            (/MONITOR/.test(normalizedUpper) && /NOVA/.test(normalizedUpper)) ||
+            /\bNM\b/.test(normalizedUpper)
+        ) {
+            return 'NM';
+        }
         const tokens = normalized.split(/\s+/).filter(Boolean);
         if (!tokens.length) return '';
         const parts = [];
@@ -2505,7 +2518,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             parts.push(upper[0]);
         });
-        return parts.join('').slice(0, 4).toUpperCase();
+        const short = parts.join('').slice(0, 4).toUpperCase();
+        if (short === 'N') return 'NM';
+        if (short === 'E' && /ESTEIRA/.test(normalizedUpper)) return 'E3';
+        return short;
     };
 
     const resolveEntryAnalysisTypeShort = (entryData) => {

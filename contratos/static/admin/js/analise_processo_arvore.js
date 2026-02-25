@@ -946,6 +946,33 @@
             return contractIds;
         }
 
+        function isMonitoriaLikeAnalysisType() {
+            const typeHints = [
+                activeAnalysisType && activeAnalysisType.slug,
+                activeAnalysisType && activeAnalysisType.nome,
+                activeAnalysisType && activeAnalysisType.hashtag
+            ]
+                .map(value => normalizeDecisionText(value))
+                .filter(Boolean);
+            if (typeHints.some(value => value.includes('MONITOR'))) {
+                return true;
+            }
+            const config = treeConfig && typeof treeConfig === 'object' ? treeConfig : {};
+            if (
+                Object.prototype.hasOwnProperty.call(config, 'propor_monitoria') ||
+                Object.prototype.hasOwnProperty.call(config, 'repropor_monitoria') ||
+                Object.prototype.hasOwnProperty.call(config, 'selecionar_contratos_monitoria')
+            ) {
+                return true;
+            }
+            return Object.values(config).some(question => {
+                if (!question || typeof question !== 'object') {
+                    return false;
+                }
+                return question.tipo_campo === 'CONTRATOS_MONITORIA';
+            });
+        }
+
         function getContractLabelForId(contractIdOrNumber) {
             if (contractIdOrNumber === undefined || contractIdOrNumber === null) {
                 return '';
@@ -1589,7 +1616,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             // Esta sincronização é específica do fluxo de "Não Judicializado" em Monitórias.
             // Em outros tipos (ex.: Passivas), não deve sobrescrever campos do card (como supervisão).
-            const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+            const isMonitoria = isMonitoriaLikeAnalysisType();
             if (!isMonitoria || !isCardNonJudicialized(card)) {
                 return card;
             }
@@ -2430,7 +2457,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     });
                     cardData.tipo_de_acao_respostas = deepClone(savedResponses);
                 }
-                const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+                const isMonitoria = isMonitoriaLikeAnalysisType();
 
                 if (isMonitoria) {
                     console.log('🔍 Verificando primeira pergunta...');
@@ -7351,7 +7378,17 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 saveResponses();
             });
 
-            if (cardIndex === null && normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO') {
+            const proporMonitoriaSelecionada = normalizeResponse(
+                currentResponses.propor_monitoria || userResponses.propor_monitoria
+            ) === 'SIM';
+            if (
+                cardIndex === null &&
+                isMonitoriaLikeAnalysisType() &&
+                (
+                    normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO' ||
+                    proporMonitoriaSelecionada
+                )
+            ) {
                 ensureNaoJudicializadoSupervisionToggle($selectorDiv);
             }
 
@@ -7595,7 +7632,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 		                            analysisTypeSelectionInProgress = false;
 		                            analysisHasStarted = true;
 		                            updateActionButtons();
-		                            const isMonitoria = activeAnalysisType && activeAnalysisType.slug === 'novas-monitorias';
+		                            const isMonitoria = isMonitoriaLikeAnalysisType();
 		                            startNewAnalysis({ skipGeneralSnapshot: !isMonitoria, suppressSummary: true });
 		                        });
 		                })
