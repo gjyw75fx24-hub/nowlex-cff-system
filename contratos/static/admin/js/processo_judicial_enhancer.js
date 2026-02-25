@@ -2477,6 +2477,57 @@ document.addEventListener('DOMContentLoaded', function() {
         return entries;
     };
 
+    const normalizeAnalysisTypeShort = (rawValue) => {
+        const raw = String(rawValue || '').trim();
+        if (!raw) return '';
+        const withoutHash = raw.replace(/^#/, '');
+        const normalized = (typeof withoutHash.normalize === 'function'
+            ? withoutHash.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            : withoutHash)
+            .replace(/[_/]+/g, ' ')
+            .replace(/[-]+/g, ' ')
+            .trim();
+        if (!normalized) return '';
+        const tokens = normalized.split(/\s+/).filter(Boolean);
+        if (!tokens.length) return '';
+        const parts = [];
+        tokens.forEach((token) => {
+            const cleaned = token.replace(/[^a-zA-Z0-9]/g, '');
+            if (!cleaned) return;
+            if (/^\d+$/.test(cleaned)) {
+                parts.push(cleaned);
+                return;
+            }
+            const upper = cleaned.toUpperCase();
+            if (upper.length > 1 && /[A-Z]/.test(upper[0]) && /^\d+$/.test(upper.slice(1))) {
+                parts.push(upper);
+                return;
+            }
+            parts.push(upper[0]);
+        });
+        return parts.join('').slice(0, 4).toUpperCase();
+    };
+
+    const resolveEntryAnalysisTypeShort = (entryData) => {
+        if (!entryData || typeof entryData !== 'object') return '';
+        const candidates = [
+            entryData.analysis_type_nome,
+            entryData.analysisTypeNome,
+            entryData.analysis_hashtag,
+            entryData.analysisHashtag,
+            entryData.analysis_type_short,
+            entryData.analysisTypeShort,
+        ];
+        let fallback = '';
+        for (const raw of candidates) {
+            const short = normalizeAnalysisTypeShort(raw);
+            if (!short) continue;
+            if (short.length >= 2) return short;
+            if (!fallback) fallback = short;
+        }
+        return fallback;
+    };
+
     const normalizeApiEntry = (item) => {
         if (!item) return null;
         const type = item.type === 'P'
@@ -2603,6 +2654,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
             supervisor_status: item.supervisor_status || item.supervisorStatus || '',
             analysis_hashtag: (item.analysis_hashtag || item.analysisHashtag || '').toString().trim(),
+            analysis_type_nome: (item.analysis_type_nome || item.analysisTypeNome || '').toString().trim(),
+            analysis_type_short: normalizeAnalysisTypeShort(item.analysis_type_short || item.analysisTypeShort || item.analysis_type_nome || item.analysisTypeNome || item.analysis_hashtag || item.analysisHashtag || ''),
             observation_target: (item.observation_target || item.observationTarget || '').toString().trim(),
             observation_mention_type: (item.observation_mention_type || item.observationMentionType || '').toString().trim().toLowerCase(),
             observation_mention_label: (item.observation_mention_label || item.observationMentionLabel || '').toString().trim(),
@@ -2939,6 +2992,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 entry.appendChild(text);
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
+                const analysisTypeShort = resolveEntryAnalysisTypeShort(entryData);
+                if (analysisTypeShort) {
+                    const analysisTypeBadge = document.createElement('span');
+                    analysisTypeBadge.className = 'agenda-panel__details-item-analysis-type';
+                    analysisTypeBadge.textContent = analysisTypeShort;
+                    const analysisTypeName = String(
+                        entryData.analysis_type_nome
+                        || entryData.analysisTypeNome
+                        || entryData.analysis_hashtag
+                        || ''
+                    ).trim();
+                    if (analysisTypeName) {
+                        analysisTypeBadge.title = analysisTypeName;
+                    }
+                    entry.appendChild(analysisTypeBadge);
+                }
                 const meta = document.createElement('div');
                 meta.className = 'agenda-panel__details-item-meta';
                 const renderMetaRow = (labelText, valueText) => {
@@ -3280,6 +3349,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
+                if (type === 'S') {
+                    const uniqueShorts = Array.from(new Set(
+                        entries
+                            .map(entryItem => resolveEntryAnalysisTypeShort(entryItem))
+                            .filter(Boolean)
+                    ));
+                    if (uniqueShorts.length) {
+                        const shortBadge = document.createElement('span');
+                        shortBadge.className = 'agenda-panel__day-tag-analysis-short';
+                        shortBadge.textContent = uniqueShorts.length > 1
+                            ? `${uniqueShorts[0]}+`
+                            : uniqueShorts[0];
+                        shortBadge.title = uniqueShorts.length > 1
+                            ? `Tipos: ${uniqueShorts.join(', ')}`
+                            : `Tipo: ${uniqueShorts[0]}`;
+                        tag.appendChild(shortBadge);
+                    }
+                }
                 const count = document.createElement('span');
                 count.className = 'agenda-panel__day-tag-count';
                 count.textContent = entries.length;
@@ -4824,6 +4911,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
             });
         };
+        let navigateToSummarySupervisionEntry = null;
         const renderSummaryBar = () => {
             if (!summaryBar) return;
             const counters = {
@@ -4937,6 +5025,81 @@ document.addEventListener('DOMContentLoaded', function() {
             summaryBar.appendChild(monthSection);
             summaryBar.appendChild(separatorEl);
             summaryBar.appendChild(yearSection);
+
+            const pendingSupervisions = (calendarState.summaryEntries?.pending || [])
+                .filter(entry => `${entry?.type || ''}`.toUpperCase() === 'S');
+            const outsideYearSupervisions = pendingSupervisions
+                .filter(entry => Number(entry?.year) !== Number(year))
+                .slice()
+                .sort((a, b) => {
+                    const da = new Date(a.year || 0, a.monthIndex || 0, a.day || 1).getTime();
+                    const db = new Date(b.year || 0, b.monthIndex || 0, b.day || 1).getTime();
+                    return da - db;
+                });
+            if (!outsideYearSupervisions.length) {
+                return;
+            }
+
+            const helper = document.createElement('details');
+            helper.className = 'agenda-panel__summary-s-helper';
+            const helperSummary = document.createElement('summary');
+            helperSummary.className = 'agenda-panel__summary-s-helper-toggle';
+            helperSummary.textContent = `+S ${outsideYearSupervisions.length}`;
+            helperSummary.title = `Existe(m) ${outsideYearSupervisions.length} supervisão(ões) fora do ano exibido no mini KPI.`;
+            helper.appendChild(helperSummary);
+
+            const helperPanel = document.createElement('div');
+            helperPanel.className = 'agenda-panel__summary-s-helper-panel';
+
+            const helperTitle = document.createElement('p');
+            helperTitle.className = 'agenda-panel__summary-s-helper-title';
+            helperTitle.textContent = `S fora do ano (${outsideYearSupervisions.length})`;
+            helperPanel.appendChild(helperTitle);
+
+            const helperList = document.createElement('ul');
+            helperList.className = 'agenda-panel__summary-s-helper-list';
+            outsideYearSupervisions.forEach((entry) => {
+                const listItem = document.createElement('li');
+                listItem.className = 'agenda-panel__summary-s-helper-item';
+
+                const dateLabel = document.createElement('span');
+                dateLabel.className = 'agenda-panel__summary-s-helper-date';
+                dateLabel.textContent = formatDateLabel(
+                    formatDateIso(
+                        entry.year || year,
+                        Number.isFinite(entry.monthIndex) ? entry.monthIndex : monthIdx,
+                        entry.day || 1,
+                    ),
+                );
+
+                const nameLabel = document.createElement('span');
+                nameLabel.className = 'agenda-panel__summary-s-helper-name';
+                nameLabel.textContent = String(
+                    entry.nome
+                    || entry.parte_nome
+                    || entry.cnj_label
+                    || (Array.isArray(entry.contract_numbers) ? entry.contract_numbers.join(', ') : '')
+                    || 'Supervisão'
+                ).trim();
+
+                const goButton = document.createElement('button');
+                goButton.type = 'button';
+                goButton.className = 'agenda-panel__summary-s-helper-go';
+                goButton.textContent = 'Ir';
+                goButton.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (typeof navigateToSummarySupervisionEntry === 'function') {
+                        navigateToSummarySupervisionEntry(entry);
+                    }
+                });
+
+                listItem.append(dateLabel, nameLabel, goButton);
+                helperList.appendChild(listItem);
+            });
+            helperPanel.appendChild(helperList);
+            helper.appendChild(helperPanel);
+            summaryBar.appendChild(helper);
         };
     const applyAgendaEntriesToState = () => {
         resetCalendarMonths();
@@ -5112,6 +5275,28 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             renderSummaryBar();
             updateConcludeButtonState();
+        };
+        navigateToSummarySupervisionEntry = (entry) => {
+            if (!entry) return;
+            const targetMonthIndex = Number.isFinite(Number(entry.monthIndex))
+                ? Number(entry.monthIndex)
+                : calendarState.monthIndex;
+            const targetYear = Number.isFinite(Number(entry.year))
+                ? Number(entry.year)
+                : calendarState.year;
+            const targetDay = Number.isFinite(Number(entry.day))
+                ? Number(entry.day)
+                : null;
+            if (!Number.isFinite(targetMonthIndex) || !Number.isFinite(targetYear) || !targetDay) {
+                return;
+            }
+            calendarState.monthIndex = targetMonthIndex;
+            calendarState.year = targetYear;
+            calendarState.activeDay = { day: targetDay, monthIndex: targetMonthIndex, year: targetYear };
+            calendarState.activeType = 'S';
+            calendarState.preserveView = true;
+            renderCalendar();
+            restoreActiveDetailControls();
         };
         if (focusToggle) {
             focusToggle.addEventListener('click', () => {

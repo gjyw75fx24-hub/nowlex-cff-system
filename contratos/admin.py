@@ -6207,7 +6207,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return ProcessoJudicialChangeList
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
-    list_display = ("uf", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
+    list_display = ("uf", "proxima_prescricao_lista", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
                     "cnj_with_navigation", "classe_processual", "carteira_com_indicador", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
     BASE_LIST_FILTERS = [
@@ -6575,6 +6575,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_peticao_kpi_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
+        today = timezone.localdate()
+        qs = qs.annotate(
+            proxima_prescricao_futura=models.Min(
+                'contratos__data_prescricao',
+                filter=Q(contratos__data_prescricao__gte=today),
+            )
+        )
         order_filter = request.GET.get('ord_ultima_edicao')
         if order_filter not in {'recente', 'antigo'}:
             return qs
@@ -6588,6 +6595,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             last_edit_time=Subquery(last_logs.values('action_time')[:1]),
             last_edit_user_id=Subquery(last_logs.values('user_id')[:1]),
         )
+
+    @admin.display(description="Prescrição", ordering="proxima_prescricao_futura")
+    def proxima_prescricao_lista(self, obj):
+        data = getattr(obj, 'proxima_prescricao_futura', None)
+        if not data:
+            return "-"
+        return data.strftime("%d/%m/%Y")
 
     @admin.display(description="Carteira", ordering="carteira__nome")
     def carteira_com_indicador(self, obj):

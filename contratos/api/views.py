@@ -107,6 +107,59 @@ def _parse_optional_date(value):
             continue
     return None
 
+
+def _build_analysis_type_short(analysis_type):
+    if not isinstance(analysis_type, dict):
+        return ''
+
+    def _short_from_raw(raw_value):
+        normalized = str(raw_value or '').strip().lstrip('#')
+        if not normalized:
+            return ''
+        normalized = (
+            normalized
+            .replace('_', ' ')
+            .replace('-', ' ')
+            .replace('/', ' ')
+        )
+        tokens = [t for t in normalized.split() if t]
+        if not tokens:
+            return ''
+        parts = []
+        for token in tokens:
+            cleaned = ''.join(ch for ch in token if ch.isalnum())
+            if not cleaned:
+                continue
+            if cleaned.isdigit():
+                parts.append(cleaned)
+                continue
+            upper = cleaned.upper()
+            if len(upper) > 1 and upper[0].isalpha() and upper[1:].isdigit():
+                parts.append(upper)
+                continue
+            parts.append(upper[0])
+        return ''.join(parts)[:4].upper()
+
+    # Prioriza formar a sigla pelo nome/hashtag/slug (iniciais),
+    # caindo para short/sigla apenas se necessário.
+    candidates = [
+        analysis_type.get('nome'),
+        analysis_type.get('hashtag'),
+        analysis_type.get('slug'),
+        analysis_type.get('short'),
+        analysis_type.get('sigla'),
+    ]
+    fallback = ''
+    for raw in candidates:
+        short = _short_from_raw(raw)
+        if not short:
+            continue
+        if len(short) >= 2:
+            return short
+        if not fallback:
+            fallback = short
+    return fallback
+
 def get_next_supervision_status(current_status):
     normalized = (current_status or 'pendente').lower()
     if normalized not in SUPERVISION_STATUS_SEQUENCE:
@@ -797,6 +850,8 @@ class AgendaGeralAPIView(APIView):
             viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
             analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
             analysis_hashtag = str(analysis_type.get('hashtag') or '').strip()
+            analysis_type_nome = str(analysis_type.get('nome') or '').strip()
+            analysis_type_short = _build_analysis_type_short(analysis_type)
             custas_total_decimal = _parse_decimal_value(card.get('custas_total'))
             entries.append({
                 'type': 'S',
@@ -830,6 +885,8 @@ class AgendaGeralAPIView(APIView):
                 'card_index': card_info['index'],
                 'supervisor_status': card_info['status'],
                 'analysis_hashtag': analysis_hashtag,
+                'analysis_type_nome': analysis_type_nome,
+                'analysis_type_short': analysis_type_short,
                 'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
                 'nome': parte_nome,
                 'parte_nome': parte_nome,
