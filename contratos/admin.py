@@ -4306,6 +4306,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'intersection_carteira_b',
         'show_counts',
         'tab',
+        'prescricao_mes',
         'kpi_carteira_id',
         'kpi_tipo_id',
         'kpi_question',
@@ -6584,6 +6585,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 filter=Q(contratos__data_prescricao__gte=today),
             )
         )
+        prescricao_mes = self._safe_positive_int(request.GET.get('prescricao_mes'))
+        if prescricao_mes and 1 <= prescricao_mes <= 12:
+            qs = qs.filter(proxima_prescricao_futura__month=prescricao_mes)
         order_filter = request.GET.get('ord_ultima_edicao')
         if order_filter not in {'recente', 'antigo'}:
             return qs
@@ -8053,6 +8057,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def delegate_bulk_view(self, request):
         if request.method != 'POST':
             return JsonResponse({'error': 'Método não permitido'}, status=405)
+        if not self.has_change_permission(request):
+            return JsonResponse({'error': 'Permissão negada'}, status=403)
         ids = request.POST.get('ids', '')
         user_id = request.POST.get('user_id')
         if not ids:
@@ -8392,16 +8398,26 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def delegar_inline_view(self, request, object_id):
         processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
         if request.method == 'POST':
             user_id = request.POST.get('delegado_para')
             if user_id:
                 user = User.objects.filter(pk=user_id).first()
+                if not user:
+                    if is_ajax:
+                        return JsonResponse({'error': 'Usuário inválido.'}, status=400)
+                    self.message_user(request, "Usuário inválido para delegação.", messages.ERROR)
+                    return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
                 processo.delegado_para = user
             else:
                 processo.delegado_para = None
-            processo.save()
+            processo.save(update_fields=['delegado_para'])
             user_name = (processo.delegado_para.get_full_name() or processo.delegado_para.username) if processo.delegado_para else "Ninguém"
+            if is_ajax:
+                return JsonResponse({'status': 'ok', 'delegado_para_id': processo.delegado_para_id, 'user_name': user_name})
             self.message_user(request, f"Processo delegado para {user_name}.", messages.SUCCESS)
+        elif is_ajax:
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
         return HttpResponseRedirect(reverse('admin:contratos_processojudicial_change', args=[object_id]))
 
     def obito_info_view(self, request, parte_id):

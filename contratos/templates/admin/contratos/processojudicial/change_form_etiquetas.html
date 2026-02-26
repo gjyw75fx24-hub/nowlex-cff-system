@@ -796,18 +796,35 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.addEventListener('click', function(ev) {
                 ev.preventDefault();
                 ev.stopPropagation();
+                const clickedButton = this;
+                clickedButton.disabled = true;
                 hiddenInput.value = this.dataset.userId;
                 const formData = new FormData(form);
                 fetch(form.action, {
                     method: 'POST',
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': formData.get('csrfmiddlewaretoken') || '',
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
                     body: formData,
-                }).then(() => {
+                }).then(async (response) => {
+                    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                    if (!contentType.includes('application/json')) {
+                        throw new Error('Não foi possível confirmar a delegação. Atualize a página e tente novamente.');
+                    }
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        throw new Error(data.error || 'Não foi possível salvar a delegação.');
+                    }
                     closeDropdown();
                     window.location.reload();
-                }).catch(() => {
+                }).catch((error) => {
                     closeDropdown();
-                    window.location.reload();
+                    alert(error?.message || 'Não foi possível salvar a delegação.');
+                }).finally(() => {
+                    clickedButton.disabled = false;
                 });
             });
         });
