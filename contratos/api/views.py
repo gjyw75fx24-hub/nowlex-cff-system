@@ -34,6 +34,7 @@ from ..models import (
     ProcessoJudicial,
     Prazo,
     PrazoMensagem,
+    QuestaoAnalise,
     Tarefa,
     TarefaLote,
     TarefaMensagem,
@@ -428,6 +429,29 @@ class AgendaGeralAPIView(APIView):
             'ativar_botao_monitoria',
         ]
 
+        label_cache = getattr(self, '_questao_label_cache', None)
+        label_cache_norm = getattr(self, '_questao_label_cache_norm', None)
+        if label_cache is None or label_cache_norm is None:
+            label_cache = {}
+            label_cache_norm = {}
+            questoes = (
+                QuestaoAnalise.objects
+                .exclude(chave__isnull=True)
+                .exclude(chave='')
+                .values_list('chave', 'texto_pergunta')
+            )
+            for chave, texto in questoes:
+                chave_text = str(chave or '').strip()
+                texto_label = str(texto or '').strip()
+                if not chave_text:
+                    continue
+                label_cache[chave_text] = texto_label or chave_text
+                normalized_key = re.sub(r'[^a-z0-9]', '', chave_text.lower())
+                if normalized_key and normalized_key not in label_cache_norm:
+                    label_cache_norm[normalized_key] = texto_label or chave_text
+            self._questao_label_cache = label_cache
+            self._questao_label_cache_norm = label_cache_norm
+
         def value_is_empty(value):
             if value is None or value == '':
                 return True
@@ -495,8 +519,24 @@ class AgendaGeralAPIView(APIView):
                 return ', '.join(formatted_items) if formatted_items else None
             return format_simple_value(value)
 
+        def resolve_question_label(key):
+            if not key:
+                return None
+            raw_key = str(key).strip()
+            if not raw_key:
+                return None
+            if raw_key in label_cache:
+                return label_cache[raw_key]
+            raw_key_lower = raw_key.lower()
+            if raw_key_lower in label_cache:
+                return label_cache[raw_key_lower]
+            normalized_key = re.sub(r'[^a-z0-9]', '', raw_key_lower)
+            if normalized_key and normalized_key in label_cache_norm:
+                return label_cache_norm[normalized_key]
+            return None
+
         def humanize_label(key):
-            parts = key.split('_') if key else []
+            parts = re.split(r'[_-]+', key) if key else []
             return ' '.join(part.capitalize() for part in parts if part)
 
         processed_keys = set()
@@ -510,7 +550,12 @@ class AgendaGeralAPIView(APIView):
             formatted = format_value(key, value)
             if not formatted:
                 return
-            label_text = label or response_labels.get(key) or humanize_label(key)
+            label_text = (
+                label
+                or response_labels.get(key)
+                or resolve_question_label(key)
+                or humanize_label(key)
+            )
             lines.append(f"{label_text}: {formatted}")
             processed_keys.add(key)
 
