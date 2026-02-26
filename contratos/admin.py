@@ -6213,6 +6213,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     list_display = ("uf", "proxima_prescricao_lista", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
                     "cnj_with_navigation", "classe_processual", "carteira_com_indicador", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
+    list_per_page = 25
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
         EquipeDelegadoFilter,
