@@ -1083,6 +1083,11 @@ class QuestaoAnalise(models.Model):
         verbose_name="É a primeira questão da análise?",
         help_text="Marque apenas uma questão como a primeira. Será o ponto de partida da árvore."
     )
+    habilita_supervisao = models.BooleanField(
+        default=False,
+        verbose_name="Habilita Supervisionar",
+        help_text="Quando marcado, o botão Supervisionar passa a ser exibido a partir desta questão."
+    )
     ordem = models.PositiveIntegerField(default=10, verbose_name="Ordem de Exibição")
     ativo = models.BooleanField(default=True, verbose_name="Ativo")
 

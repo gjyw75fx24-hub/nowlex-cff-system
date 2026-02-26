@@ -1338,6 +1338,7 @@ def get_decision_tree_data(request):
             'chave': questao_db.chave,
             'tipo_campo': questao_db.tipo_campo,
             'is_primeira_questao': questao_db.is_primeira_questao,
+            'habilita_supervisao': bool(questao_db.habilita_supervisao),
             'ordem': questao_db.ordem,
             'opcoes': []
         }
@@ -1383,6 +1384,7 @@ def get_decision_tree_data(request):
                 'texto_pergunta': q_data['texto_pergunta'],
                 'tipo_campo': q_data['tipo_campo'],
                 'is_primeira_questao': q_data['is_primeira_questao'],
+                'habilita_supervisao': q_data['habilita_supervisao'],
                 'ordem': q_data['ordem'],
             })
             if q_data.get('proxima_questao_chave'):

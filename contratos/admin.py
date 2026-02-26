@@ -751,6 +751,7 @@ def configuracao_analise_tipo_objetiva_export_view(request, tipo_id: int):
                 "ordem": int(questao.ordem or 0),
                 "ativo": bool(questao.ativo),
                 "is_primeira_questao": bool(questao.is_primeira_questao),
+                "habilita_supervisao": bool(questao.habilita_supervisao),
                 "opcoes": [
                     {
                         "texto_resposta": opcao.texto_resposta,
@@ -998,6 +999,7 @@ def _sync_tipo_objetiva_from_payload(payload: dict, user=None, bump_version: boo
             "ordem": int(qd.get("ordem") or 0),
             "ativo": bool(qd.get("ativo", True)),
             "is_primeira_questao": bool(qd.get("is_primeira_questao", False)),
+            "habilita_supervisao": bool(qd.get("habilita_supervisao", False)),
         }
 
         questao = questoes_by_chave.get(chave)
@@ -8566,15 +8568,24 @@ class TipoAnaliseObjetivaAdmin(admin.ModelAdmin):
 
 @admin.register(QuestaoAnalise) # Referência por string
 class QuestaoAnaliseAdmin(admin.ModelAdmin):
-    list_display = ('texto_pergunta', 'chave', 'tipo_analise', 'tipo_campo', 'ativo', 'is_primeira_questao', 'ordem')
-    list_filter = ('tipo_analise', 'tipo_campo', 'ativo', 'is_primeira_questao')
+    list_display = (
+        'texto_pergunta',
+        'chave',
+        'tipo_analise',
+        'tipo_campo',
+        'ativo',
+        'habilita_supervisao',
+        'is_primeira_questao',
+        'ordem',
+    )
+    list_filter = ('tipo_analise', 'tipo_campo', 'ativo', 'habilita_supervisao', 'is_primeira_questao')
     search_fields = ('texto_pergunta', 'chave', 'tipo_analise__nome')
-    list_editable = ('ativo', 'is_primeira_questao', 'ordem')
+    list_editable = ('ativo', 'habilita_supervisao', 'is_primeira_questao', 'ordem')
     inlines = [OpcaoRespostaInline]
     
     fieldsets = (
         (None, {
-            "fields": ('tipo_analise', 'texto_pergunta', 'chave', 'tipo_campo', 'ordem', 'ativo')
+            "fields": ('tipo_analise', 'texto_pergunta', 'chave', 'tipo_campo', 'ordem', ('ativo', 'habilita_supervisao'))
         }),
         ("Ponto de Partida", {
             "classes": ('collapse',),

@@ -1758,9 +1758,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             if (!contractIds.length) {
                 return false;
             }
-            const judicializado = normalizeResponse(userResponses.judicializado_pela_massa);
-            const proporMonitoria = normalizeResponse(userResponses.propor_monitoria);
-            return judicializado === 'NÃO' && proporMonitoria === 'SIM';
+            const judicializado = getJudicializadoPelaMassaValue(userResponses);
+            const proporMonitoria = getProporMonitoriaValue(userResponses);
+            return isNoResponse(judicializado) && isYesResponse(proporMonitoria);
         }
 
         function isGeneralMonitoriaEligible() {
@@ -5828,6 +5828,167 @@ function formatCnjDigits(raw) {
             });
         }
 
+        function findJudicializadoPelaMassaQuestionKey() {
+            if (treeConfig && treeConfig['judicializado_pela_massa']) {
+                return 'judicializado_pela_massa';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('judicializ') && label.includes('massa');
+            });
+            if (foundByLabel) {
+                return foundByLabel;
+            }
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const normalized = normalizeDecisionText(k);
+                    return normalized.includes('JUDICIALIZ') && normalized.includes('MASS');
+                }) || null
+            );
+        }
+
+        function findProporMonitoriaQuestionKey() {
+            if (treeConfig && treeConfig['propor_monitoria']) {
+                return 'propor_monitoria';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('propor') && label.includes('monitor') && !label.includes('repropor');
+            });
+            if (foundByLabel) {
+                return foundByLabel;
+            }
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const normalized = normalizeDecisionText(k);
+                    return normalized.includes('PROPOR') && normalized.includes('MONITOR') && !normalized.includes('REPROPOR');
+                }) || null
+            );
+        }
+
+        function getResponseBySemanticKey(responses, canonicalKey, keyFinder) {
+            if (!responses || typeof responses !== 'object') {
+                return '';
+            }
+            const direct = responses[canonicalKey];
+            if (typeof direct === 'string' && direct.trim()) {
+                return direct;
+            }
+            const inferredKey = typeof keyFinder === 'function' ? keyFinder() : null;
+            if (inferredKey && typeof responses[inferredKey] === 'string' && responses[inferredKey].trim()) {
+                return responses[inferredKey];
+            }
+            return '';
+        }
+
+        function getJudicializadoPelaMassaValue(responses) {
+            return getResponseBySemanticKey(
+                responses || userResponses,
+                'judicializado_pela_massa',
+                findJudicializadoPelaMassaQuestionKey
+            );
+        }
+
+        function getProporMonitoriaValue(responses) {
+            return getResponseBySemanticKey(
+                responses || userResponses,
+                'propor_monitoria',
+                findProporMonitoriaQuestionKey
+            );
+        }
+
+        function isYesResponse(value) {
+            const normalized = normalizeDecisionText(value);
+            return normalized === 'SIM' || normalized.startsWith('SIM ');
+        }
+
+        function isNoResponse(value) {
+            const normalized = normalizeDecisionText(value);
+            return normalized === 'NAO' || normalized.startsWith('NAO ');
+        }
+
+        function getSupervisionTriggerQuestionKeys() {
+            const config = treeConfig && typeof treeConfig === 'object' ? treeConfig : {};
+            return Object.keys(config).filter(key => {
+                const question = config[key];
+                return Boolean(question && question.habilita_supervisao);
+            });
+        }
+
+        function isSupervisionTriggerQuestionAnswered(question, responses) {
+            if (!question || typeof question !== 'object' || !responses || typeof responses !== 'object') {
+                return false;
+            }
+
+            const responseKey = question.chave || null;
+            const rawValue = responseKey ? responses[responseKey] : null;
+
+            if (question.tipo_campo === 'CONTRATOS_MONITORIA') {
+                if (Array.isArray(rawValue) && rawValue.length > 0) {
+                    return true;
+                }
+                const monitoriaContracts = responses.contratos_para_monitoria;
+                return Array.isArray(monitoriaContracts) && monitoriaContracts.length > 0;
+            }
+
+            if (question.tipo_campo === 'PROCESSO_VINCULADO') {
+                return Array.isArray(rawValue) && rawValue.length > 0;
+            }
+
+            if (Array.isArray(rawValue)) {
+                return rawValue.length > 0;
+            }
+            if (typeof rawValue === 'number') {
+                return Number.isFinite(rawValue);
+            }
+            if (typeof rawValue === 'boolean') {
+                return rawValue;
+            }
+            return String(rawValue || '').trim() !== '';
+        }
+
+        function hasReachedSupervisionTrigger(responses) {
+            const triggerKeys = getSupervisionTriggerQuestionKeys();
+            if (!triggerKeys.length) {
+                return null;
+            }
+            return triggerKeys.some(key => {
+                const question = treeConfig && treeConfig[key];
+                return isSupervisionTriggerQuestionAnswered(question, responses);
+            });
+        }
+
+        function shouldShowGeneralSupervisionToggle(responses) {
+            const reachedByConfig = hasReachedSupervisionTrigger(responses);
+            if (reachedByConfig !== null) {
+                return reachedByConfig;
+            }
+
+            const proporMonitoriaSelecionada = isYesResponse(
+                getProporMonitoriaValue(responses) || getProporMonitoriaValue(userResponses)
+            );
+            return (
+                isMonitoriaLikeAnalysisType() &&
+                (
+                    isNoResponse(
+                        getJudicializadoPelaMassaValue(responses) ||
+                        getJudicializadoPelaMassaValue(userResponses)
+                    ) ||
+                    proporMonitoriaSelecionada
+                )
+            );
+        }
+
+        function shouldShowCardSupervisionToggle(cardResponses, cardData) {
+            const reachedByConfig = hasReachedSupervisionTrigger(cardResponses || {});
+            if (reachedByConfig !== null) {
+                return reachedByConfig || Boolean(cardData && cardData.supervisionado);
+            }
+            return true;
+        }
+
         function isIniciarCsOptionEl(optEl) {
             const value = normalizeDecisionText(optEl?.value || '');
             const text = normalizeDecisionText(optEl?.textContent || '');
@@ -6891,90 +7052,73 @@ function formatCnjDigits(raw) {
                 );
             }
 
-            const $supervisionWrapper = $('<div class="field-supervision"></div>');
-            const $supervisionToggle = $(`
-                <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
-                    <input type="checkbox" class="supervision-toggle-input">
-                    <span class="supervision-switch" aria-hidden="true"></span>
-                    <span class="supervision-label-text">Supervisionar</span>
-                </label>
-            `);
-            const supervisionDateInputId = `supervision_date_${cardIndex}`;
-            const $supervisionDateWrapper = $('<div class="supervision-date-wrapper"></div>');
-            const $supervisionDateLabel = $(
-                `<label class="supervision-date-label" for="${supervisionDateInputId}">Data S</label>`
+            const shouldRenderSupervision = shouldShowCardSupervisionToggle(
+                cardData.tipo_de_acao_respostas,
+                cardData
             );
-            const $supervisionDateInput = $(
-                `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
-            );
-            const initialSupervisionDate = clampIsoDateToMax(
-                normalizeIsoDateValue(cardData.supervision_date),
-                getMaxSupervisionDateForCard(cardData)
-            );
-            cardData.supervision_date = initialSupervisionDate;
-            $supervisionDateInput.val(initialSupervisionDate || '');
-            applySupervisionDateLimit($supervisionDateInput, cardData);
-            $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
+            if (shouldRenderSupervision) {
+                const $supervisionWrapper = $('<div class="field-supervision"></div>');
+                const $supervisionToggle = $(`
+                    <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
+                        <input type="checkbox" class="supervision-toggle-input">
+                        <span class="supervision-switch" aria-hidden="true"></span>
+                        <span class="supervision-label-text">Supervisionar</span>
+                    </label>
+                `);
+                const supervisionDateInputId = `supervision_date_${cardIndex}`;
+                const $supervisionDateWrapper = $('<div class="supervision-date-wrapper"></div>');
+                const $supervisionDateLabel = $(
+                    `<label class="supervision-date-label" for="${supervisionDateInputId}">Data S</label>`
+                );
+                const $supervisionDateInput = $(
+                    `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
+                );
+                const initialSupervisionDate = clampIsoDateToMax(
+                    normalizeIsoDateValue(cardData.supervision_date),
+                    getMaxSupervisionDateForCard(cardData)
+                );
+                cardData.supervision_date = initialSupervisionDate;
+                $supervisionDateInput.val(initialSupervisionDate || '');
+                applySupervisionDateLimit($supervisionDateInput, cardData);
+                $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
 
-            $supervisionWrapper.append($supervisionToggle);
-            $supervisionWrapper.append($supervisionDateWrapper);
-            $body.append($supervisionWrapper);
+                $supervisionWrapper.append($supervisionToggle);
+                $supervisionWrapper.append($supervisionDateWrapper);
+                $body.append($supervisionWrapper);
 
-            const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
-            $supervisionInput.prop('checked', cardData.supervisionado);
-            const syncSupervisionDateFromInput = () => {
-                const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
-                $supervisionDateInput.val(normalizedDate);
-                const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
-                cardData.supervision_date = clampedDate;
-                syncEditingCardWithSaved(cardData);
-                userResponses.processos_vinculados = [cardData];
-                saveResponses();
-                renderSupervisionPanel();
-            };
-            $supervisionDateInput.on('change input blur', syncSupervisionDateFromInput);
-            $supervisionInput.on('change', function (e) {
-                console.log('═══════════════════════════════════════════════════');
-                console.log('🔄 TOGGLE SUPERVISIONAR MUDOU');
-                console.log('═══════════════════════════════════════════════════');
+                const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
+                $supervisionInput.prop('checked', cardData.supervisionado);
+                const syncSupervisionDateFromInput = () => {
+                    const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
+                    $supervisionDateInput.val(normalizedDate);
+                    const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                    cardData.supervision_date = clampedDate;
+                    syncEditingCardWithSaved(cardData);
+                    userResponses.processos_vinculados = [cardData];
+                    saveResponses();
+                    renderSupervisionPanel();
+                };
+                $supervisionDateInput.on('change input blur', syncSupervisionDateFromInput);
+                $supervisionInput.on('change', function () {
+                    const checked = $(this).is(':checked');
+                    cardData.supervisionado = checked;
 
-                const checked = $(this).is(':checked');
-                console.log('   Checked:', checked ? 'ATIVADO ✅' : 'DESATIVADO ❌');
-                console.log('   cardData ANTES:', JSON.parse(JSON.stringify(cardData)));
+                    if (checked) {
+                        cardData.supervisor_status = 'pendente';
+                        cardData.awaiting_supervision_confirm = false;
+                    } else {
+                        cardData.awaiting_supervision_confirm = false;
+                    }
 
-                cardData.supervisionado = checked;
+                    syncEditingCardWithSaved(cardData);
 
-                if (checked) {
-                    cardData.supervisor_status = 'pendente';
-                    cardData.awaiting_supervision_confirm = false;
-                    console.log('   ✅ ATIVADO → Status mudou para: pendente');
-                } else {
-                    cardData.awaiting_supervision_confirm = false;
-                    console.log('   ⬇️ DESATIVADO → Mantém status:', cardData.supervisor_status);
-                }
-
-                console.log('   cardData DEPOIS:', JSON.parse(JSON.stringify(cardData)));
-
-                console.log('───────────────────────────────────────────────────');
-                console.log('1️⃣ Sincronizando card com saved...');
-                syncEditingCardWithSaved(cardData);
-
-                // Mantém o card ativo sempre em processos_vinculados[0]
-                // (evita array esparso que impede atualizar o snapshot ao concluir).
-                userResponses.processos_vinculados = [cardData];
-
-                console.log('───────────────────────────────────────────────────');
-                console.log('2️⃣ Salvando respostas...');
-                saveResponses();
-
-                console.log('───────────────────────────────────────────────────');
-                console.log('3️⃣ Renderizando painel de supervisão (atualiza badge)...');
-                renderSupervisionPanel();
-
-                console.log('═══════════════════════════════════════════════════');
-                console.log('✅ TOGGLE PROCESSADO COM SUCESSO!');
-                console.log('═══════════════════════════════════════════════════');
-            });
+                    // Mantém o card ativo sempre em processos_vinculados[0]
+                    // (evita array esparso que impede atualizar o snapshot ao concluir).
+                    userResponses.processos_vinculados = [cardData];
+                    saveResponses();
+                    renderSupervisionPanel();
+                });
+            }
 
             $card.append($body);
             $cardsContainer.append($card);
@@ -7086,7 +7230,7 @@ function formatCnjDigits(raw) {
         }
 
         function isNaoJudicializadoActive() {
-            return normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO';
+            return isNoResponse(getJudicializadoPelaMassaValue(userResponses));
         }
 
         function getNaoJudSequence() {
@@ -7378,18 +7522,12 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 saveResponses();
             });
 
-            const proporMonitoriaSelecionada = normalizeResponse(
-                currentResponses.propor_monitoria || userResponses.propor_monitoria
-            ) === 'SIM';
-            if (
-                cardIndex === null &&
-                isMonitoriaLikeAnalysisType() &&
-                (
-                    normalizeResponse(userResponses.judicializado_pela_massa) === 'NÃO' ||
-                    proporMonitoriaSelecionada
-                )
-            ) {
-                ensureNaoJudicializadoSupervisionToggle($selectorDiv);
+            if (cardIndex === null) {
+                if (shouldShowGeneralSupervisionToggle(currentResponses || userResponses)) {
+                    ensureNaoJudicializadoSupervisionToggle($selectorDiv);
+                } else {
+                    $selectorDiv.find('.nao-judicializado-supervisionize').remove();
+                }
             }
 
             $container.append($selectorDiv);
