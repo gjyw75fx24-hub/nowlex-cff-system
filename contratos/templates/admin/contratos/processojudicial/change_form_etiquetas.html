@@ -12,6 +12,55 @@
         font-size: 14px;
         color: #333;
     }
+    .info-cards-shell {
+        display: block;
+    }
+    .info-cards-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        margin: 0 0 8px;
+    }
+    .info-cards-toolbar[hidden] {
+        display: none !important;
+    }
+    .info-cards-nav-btn,
+    .info-cards-expand-btn {
+        border: 1px solid #c7d3e6;
+        background: #f5f8fd;
+        color: #1f3f68;
+        border-radius: 999px;
+        cursor: pointer;
+        font-weight: 700;
+        line-height: 1;
+    }
+    .info-cards-nav-btn {
+        width: 28px;
+        height: 28px;
+        font-size: 18px;
+        padding: 0;
+    }
+    .info-cards-expand-btn {
+        min-width: 28px;
+        height: 28px;
+        font-size: 18px;
+        padding: 0 8px;
+    }
+    .info-cards-nav-btn:disabled {
+        opacity: 0.45;
+        cursor: default;
+    }
+    .info-cards-counter {
+        min-width: 42px;
+        text-align: center;
+        color: #314a6a;
+        font-weight: 700;
+        font-size: 12px;
+    }
+    .info-card[hidden] {
+        display: none !important;
+    }
     .info-card-header {
         display: flex;
         justify-content: space-between;
@@ -216,6 +265,10 @@
     .info-card-body .contrato-item-wrapper {
         display: inline-block;
         vertical-align: middle;
+    }
+    .info-card-body .contrato-item-empty {
+        color: #6b778c;
+        font-style: italic;
     }
     .field-viabilidade {
         display: none;
@@ -515,9 +568,17 @@
 
 {% if original %}
     {% with partes_cards=passivo_info_cards|default:original.partes_processuais.all %}
+    <div class="info-cards-shell"
+         data-info-cards-mode="{{ passivo_info_cards_mode|default:'passivo' }}">
+        <div class="info-cards-toolbar" {% if partes_cards|length <= 1 %}hidden{% endif %}>
+            <button type="button" class="info-cards-nav-btn" data-info-cards-prev aria-label="Card anterior">‹</button>
+            <span class="info-cards-counter" data-info-cards-counter>1/1</span>
+            <button type="button" class="info-cards-nav-btn" data-info-cards-next aria-label="Próximo card">›</button>
+            <button type="button" class="info-cards-expand-btn" data-info-cards-expand aria-pressed="false" title="Mostrar todos">+</button>
+        </div>
+        <div class="info-cards-list">
     {% for parte in partes_cards %}
-        {% if parte.tipo_polo == 'PASSIVO' %}
-            <div class="info-card" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-numero-cnj-id="{{ parte.numero_cnj_id|default_if_none:'' }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}" data-obito-idade="{{ parte.obito_idade|default_if_none:'' }}">
+            <div class="info-card" data-card-index="{{ forloop.counter0 }}" data-parte-id="{{ parte.id }}" data-processo-id="{{ original.pk }}" data-numero-cnj-id="{{ parte.numero_cnj_id|default_if_none:'' }}" data-obito="{{ parte.obito|yesno:'1,0' }}" data-parte-cpf="{{ parte.documento }}" data-heranca-valor="{{ parte.processo.heranca_valor|default_if_none:'' }}" data-heranca-descricao="{{ parte.processo.heranca_descricao|default:'' }}" data-obito-data="{{ parte.obito_data|date:'Y-m-d' }}" data-obito-cidade="{{ parte.obito_cidade|default:'' }}" data-obito-uf="{{ parte.obito_uf|default:'' }}" data-obito-idade="{{ parte.obito_idade|default_if_none:'' }}">
                 <div class="info-card-header">
                     <div class="info-card-header-left">
                         <div class="info-card-name-row">
@@ -550,31 +611,38 @@
                     </div>
                 </div>
                 <div class="info-card-body">
-                    {% for contrato in original.contratos.all %}
-                        <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}" data-prescricao="{{ contrato.data_prescricao|date:'Y-m-d'|default_if_none:'' }}">
-                            <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
-                            <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
-                            <span class="contrato-numero">
-                                {{ contrato.numero_contrato }}
-                                {% if contrato.valor_total_devido %}
-                                    (R$ {{ contrato.valor_total_devido|brl }})
-                                {% elif contrato.valor_causa %}
-                                    (R$ {{ contrato.valor_causa|brl }})
-                                {% endif %}
-                            </span>
-                            {% if contrato.data_prescricao %}
-                                {% if contrato.is_prescrito %}
-                                    <span class="prescrito-p" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">P</span>
-                                {% else %}
-                                    <span class="prescrito-np" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">NP</span>
-                                {% endif %}
-                            {% endif %}
-                        </span>{% if not forloop.last %} - {% endif %}
-                    {% endfor %}
+                    {% with contratos_card=parte.info_card_contratos %}
+                        {% if contratos_card %}
+                            {% for contrato in contratos_card %}
+                                <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}" data-prescricao="{{ contrato.data_prescricao|date:'Y-m-d'|default_if_none:'' }}" data-documento-titular="{{ contrato.documento_titular|default:'' }}">
+                                    <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
+                                    <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
+                                    <span class="contrato-numero">
+                                        {{ contrato.numero_contrato }}
+                                        {% if contrato.valor_total_devido %}
+                                            (R$ {{ contrato.valor_total_devido|brl }})
+                                        {% elif contrato.valor_causa %}
+                                            (R$ {{ contrato.valor_causa|brl }})
+                                        {% endif %}
+                                    </span>
+                                    {% if contrato.data_prescricao %}
+                                        {% if contrato.is_prescrito %}
+                                            <span class="prescrito-p" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">P</span>
+                                        {% else %}
+                                            <span class="prescrito-np" title="Data de prescrição: {{ contrato.data_prescricao|date:'d/m/Y' }}">NP</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </span>{% if not forloop.last %} - {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span class="contrato-item-empty">Sem contratos vinculados a este CPF/CNPJ.</span>
+                        {% endif %}
+                    {% endwith %}
                 </div>
             </div>
-        {% endif %}
     {% endfor %}
+        </div>
+    </div>
     {% endwith %}
 {% endif %}
 
@@ -749,6 +817,72 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const shell = document.querySelector('.info-cards-shell');
+    if (shell) {
+        const cards = Array.from(shell.querySelectorAll('.info-card'));
+        const toolbar = shell.querySelector('.info-cards-toolbar');
+        const prevBtn = shell.querySelector('[data-info-cards-prev]');
+        const nextBtn = shell.querySelector('[data-info-cards-next]');
+        const expandBtn = shell.querySelector('[data-info-cards-expand]');
+        const counterEl = shell.querySelector('[data-info-cards-counter]');
+        let currentIndex = 0;
+        let expanded = false;
+
+        const hasMultipleCards = cards.length > 1;
+        if (!hasMultipleCards && toolbar) {
+            toolbar.hidden = true;
+        }
+
+        const clampIndex = () => {
+            if (!cards.length) {
+                currentIndex = 0;
+                return;
+            }
+            if (currentIndex < 0) currentIndex = 0;
+            if (currentIndex > cards.length - 1) currentIndex = cards.length - 1;
+        };
+
+        const renderCards = () => {
+            clampIndex();
+            cards.forEach((card, index) => {
+                card.hidden = !(expanded || index === currentIndex);
+            });
+            if (counterEl) {
+                const total = cards.length || 1;
+                const current = cards.length ? currentIndex + 1 : 1;
+                counterEl.textContent = `${current}/${total}`;
+            }
+            if (prevBtn) {
+                prevBtn.disabled = !hasMultipleCards || expanded || currentIndex <= 0;
+            }
+            if (nextBtn) {
+                nextBtn.disabled = !hasMultipleCards || expanded || currentIndex >= cards.length - 1;
+            }
+            if (expandBtn) {
+                expandBtn.textContent = expanded ? '−' : '+';
+                expandBtn.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+                expandBtn.title = expanded ? 'Mostrar um por vez' : 'Mostrar todos';
+            }
+        };
+
+        prevBtn?.addEventListener('click', () => {
+            if (expanded) return;
+            currentIndex -= 1;
+            renderCards();
+        });
+        nextBtn?.addEventListener('click', () => {
+            if (expanded) return;
+            currentIndex += 1;
+            renderCards();
+        });
+        expandBtn?.addEventListener('click', () => {
+            expanded = !expanded;
+            renderCards();
+        });
+
+        renderCards();
+    }
+
     const toggle = document.getElementById('delegar-toggle');
     const form = document.getElementById('delegar-form');
     const hiddenInput = document.getElementById('delegado-para-hidden');

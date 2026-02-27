@@ -596,6 +596,16 @@ def _get_total_contrato_value(contratos, processo):
     return total
 
 
+def _get_total_valor_causa(contratos, processo):
+    total = Decimal('0')
+    for contrato in contratos:
+        if contrato.valor_causa is not None:
+            total += _to_decimal(contrato.valor_causa)
+    if total == Decimal('0'):
+        total = _to_decimal(processo.valor_causa)
+    return total
+
+
 def _build_cobranca_base_filename(polo_passivo, contratos):
     label = _formatar_lista_contratos(contratos) or 'contratos'
     nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
@@ -904,42 +914,134 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
 
     endereco_parts = parse_endereco(polo_passivo.endereco)
     for key in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
-        dados[key] = endereco_parts.get(key, '') or ''
+        dados[key] = _format_address_component(endereco_parts.get(key, '') or '')
 
     dados['E_FORO'] = processo.vara or ''
-    dados['H_FORO'] = processo.uf or ''
-    dados['UF'] = processo.uf or ''
+    dados['H_FORO'] = (processo.uf or '').upper()
+    dados['UF'] = (processo.uf or '').upper()
     dados['CONTRATO'] = _formatar_lista_contratos(contratos)
 
     total_valor = _get_total_contrato_value(contratos, processo)
+    total_valor_causa = _get_total_valor_causa(contratos, processo)
+
     dados['VALOR'] = _format_currency_brl(total_valor)
-    valor_extenso = number_to_words_pt_br(total_valor)
-    dados['VALOR POR EXTENSO'] = valor_extenso
-    dados['VALOR DA CAUSA'] = dados['VALOR']
-    dados['VALOR DA CAUSA POR EXTENSO'] = valor_extenso
+    dados['VALOR POR EXTENSO'] = number_to_words_pt_br(total_valor)
+
+    dados['VALOR DA CAUSA'] = _format_currency_brl(total_valor_causa)
+    dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
+
+    custas_iniciais_2 = (total_valor_causa * Decimal('0.02')).quantize(
+        Decimal('0.01'),
+        rounding=ROUND_HALF_UP
+    )
+    custas_iniciais_25 = (total_valor_causa * Decimal('0.025')).quantize(
+        Decimal('0.01'),
+        rounding=ROUND_HALF_UP
+    )
+    custas_extenso_2 = number_to_words_pt_br(custas_iniciais_2)
+    custas_extenso_25 = number_to_words_pt_br(custas_iniciais_25)
+    custas_formatadas_2 = _format_currency_brl(custas_iniciais_2)
+    custas_formatadas_25 = _format_currency_brl(custas_iniciais_25)
+
+    # Aliases genéricos seguem a regra corrente da peça (2,5%).
+    custas_aliases = [
+        'CUSTAS',
+        'CUSTAS INICIAIS',
+        'VALOR CUSTAS',
+        'VALOR DAS CUSTAS',
+    ]
+    for alias in custas_aliases:
+        dados[alias] = custas_formatadas_25
+
+    custas_extenso_aliases = [
+        'CUSTAS POR EXTENSO',
+        'VALOR DAS CUSTAS POR EXTENSO',
+    ]
+    for alias in custas_extenso_aliases:
+        dados[alias] = custas_extenso_25
+
+    # Compatibilidade com templates legados (2%) e novos (2,5%).
+    custas_2_aliases = [
+        '2% DO VALOR DA CAUSA',
+        '2 % DO VALOR DA CAUSA',
+        '2,0% DO VALOR DA CAUSA',
+        '2,0 % DO VALOR DA CAUSA',
+        '2.0% DO VALOR DA CAUSA',
+        '2.0 % DO VALOR DA CAUSA',
+        'CUSTAS (2% DO VALOR DA CAUSA)',
+        'CUSTAS (2 % DO VALOR DA CAUSA)',
+    ]
+    for alias in custas_2_aliases:
+        dados[alias] = custas_formatadas_2
+
+    custas_2_extenso_aliases = [
+        '2% DO VALOR DA CAUSA POR EXTENSO',
+        '2 % DO VALOR DA CAUSA POR EXTENSO',
+        '2,0% DO VALOR DA CAUSA POR EXTENSO',
+        '2,0 % DO VALOR DA CAUSA POR EXTENSO',
+        '2.0% DO VALOR DA CAUSA POR EXTENSO',
+        '2.0 % DO VALOR DA CAUSA POR EXTENSO',
+    ]
+    for alias in custas_2_extenso_aliases:
+        dados[alias] = custas_extenso_2
+
+    custas_25_aliases = [
+        '2,5% DO VALOR DA CAUSA',
+        '2,5 % DO VALOR DA CAUSA',
+        '2.5% DO VALOR DA CAUSA',
+        '2.5 % DO VALOR DA CAUSA',
+        'CUSTAS (2,5% DO VALOR DA CAUSA)',
+        'CUSTAS (2,5 % DO VALOR DA CAUSA)',
+        'CUSTAS (2.5% DO VALOR DA CAUSA)',
+        'CUSTAS (2.5 % DO VALOR DA CAUSA)',
+    ]
+    for alias in custas_25_aliases:
+        dados[alias] = custas_formatadas_25
+
+    custas_25_extenso_aliases = [
+        '2,5% DO VALOR DA CAUSA POR EXTENSO',
+        '2,5 % DO VALOR DA CAUSA POR EXTENSO',
+        '2.5% DO VALOR DA CAUSA POR EXTENSO',
+        '2.5 % DO VALOR DA CAUSA POR EXTENSO',
+    ]
+    for alias in custas_25_extenso_aliases:
+        dados[alias] = custas_extenso_25
+
+    parcelas_custas = _calculate_monitoria_installments(custas_iniciais_25)
+    dados['X PARCELAS'] = str(parcelas_custas)
+    dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(
+        parcelas_custas,
+        feminine=True,
+        include_currency=False,
+        capitalize_first=False
+    )
+
     dados['DATA DE HOJE'] = datetime.now().strftime("%d/%m/%Y")
 
     document = _load_template_document(DocumentoModelo.SlugChoices.COBRANCA_JUDICIAL, None)
+    show_parcelamento = custas_iniciais_25 >= Decimal('1000')
+
     for section in document.sections:
         try:
             section.footer_distance = Cm(1.5)
         except Exception:
             pass
 
-    for p in document.paragraphs:
-        for key, value in dados.items():
-            if key == 'E_FORO' and '[E]/[H]' in p.text:
-                p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-            p.text = p.text.replace(f'[{key}]', str(value))
+    if not show_parcelamento:
+        for marker in (
+            "II. DAS CUSTAS",
+            "Seja deferido o parcelamento das custas iniciais",
+            "Considerando que a ora Exequente está assumindo a posição em milhares de",
+            "O art. 98, §6",
+            "Para fins de transparência e controle",
+            "A requerente requer o parcelamento em 10 (dez) parcelas mensais e",
+        ):
+            _remove_paragraphs_containing(document, marker)
 
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in cell.paragraphs:
-                    for key, value in dados.items():
-                        if key == 'E_FORO' and '[E]/[H]' in p.text:
-                            p.text = p.text.replace('[E]/[H]', f"{dados.get('E_FORO', '')}/{dados.get('H_FORO', '')}")
-                        p.text = p.text.replace(f'[{key}]', str(value))
+    _replace_placeholders_in_container(document, dados)
+    for section in document.sections:
+        _replace_placeholders_in_container(section.header, dados)
+        _replace_placeholders_in_container(section.footer, dados)
 
     _apply_placeholder_styles(document)
     _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])

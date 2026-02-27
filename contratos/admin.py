@@ -25,6 +25,7 @@ from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
 from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
+from django.db.models.query import prefetch_related_objects
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
 from django.db.utils import IntegrityError, OperationalError, ProgrammingError
@@ -44,7 +45,7 @@ from .models import (
     AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     KpiGlobalConfig,
-    Parte, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
+    Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
 )
@@ -393,6 +394,48 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             'fields': ('atualizado_em',),
         }),
     )
+
+    def save_model(self, request, obj, form, change):
+        slug = (obj.slug or '').strip()
+
+        def _upsert_existing(existing_obj):
+            existing_obj.nome = obj.nome
+            existing_obj.descricao = obj.descricao
+            arquivo = form.cleaned_data.get('arquivo')
+            if arquivo:
+                existing_obj.arquivo = arquivo
+            existing_obj.save()
+            obj.pk = existing_obj.pk
+            obj._updated_existing_by_slug = True
+
+        if not change and slug:
+            existing = DocumentoModelo.objects.filter(slug=slug).first()
+            if existing:
+                _upsert_existing(existing)
+                return
+
+        try:
+            super().save_model(request, obj, form, change)
+        except IntegrityError as exc:
+            # Evita 500 em duplo-clique/race condition na criação com slug único.
+            if slug and 'contratos_documentomodelo_slug_key' in str(exc):
+                existing = DocumentoModelo.objects.filter(slug=slug).first()
+                if existing:
+                    _upsert_existing(existing)
+                    return
+            raise
+
+    def response_add(self, request, obj, post_url_continue=None):
+        if getattr(obj, '_updated_existing_by_slug', False):
+            self.message_user(
+                request,
+                "Já existia um modelo com esta chave. O registro existente foi atualizado.",
+                level=messages.WARNING,
+            )
+            return HttpResponseRedirect(
+                reverse('admin:contratos_documentomodelo_change', args=[obj.pk])
+            )
+        return super().response_add(request, obj, post_url_continue=post_url_continue)
 
     class Media:
         css = {'all': ('admin/css/documento_modelo_peticoes.css',)}
@@ -3992,6 +4035,9 @@ class ContratoForm(forms.ModelForm):
             'valor_total_devido': 'Salvo em aberto',
             'valor_causa': 'Saldo atualizado',
         }
+        widgets = {
+            'documento_titular': forms.HiddenInput(),
+        }
 
     valor_total_devido = MoneyDecimalField(
         required=False,
@@ -4028,6 +4074,10 @@ class ContratoForm(forms.ModelForm):
             formatted = format_decimal_brl(value)
             if formatted:
                 self.initial[field_name] = formatted
+
+        documento_field = self.fields.get('documento_titular')
+        if documento_field:
+            documento_field.required = False
 
     def _clean_decimal(self, field_name):
         raw = self.data.get(self.add_prefix(field_name), '')
@@ -6214,6 +6264,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     "cnj_with_navigation", "classe_processual", "carteira_com_indicador", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
     list_per_page = 25
+    list_select_related = ("carteira", "status")
+    show_full_result_count = False
     BASE_LIST_FILTERS = [
         LastEditOrderFilter,
         EquipeDelegadoFilter,
@@ -6292,13 +6344,50 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             score += 1
         return score
 
-    def _build_passivo_info_cards(self, processo):
+    def _is_passivas_context_for_info_cards(self, request, processo):
+        if not processo:
+            return False
+
+        carteira_id = self._get_effective_carteira_id_for_prescricao(request)
+        if not carteira_id:
+            raw_filters = request.GET.get('_changelist_filters')
+            if raw_filters:
+                parsed_filters = QueryDict(unquote(str(raw_filters)), mutable=False)
+                carteira_id = self._get_effective_carteira_id_for_prescricao_from_params(
+                    parsed_filters,
+                    user=request.user,
+                )
+        if carteira_id and self._is_passivas_carteira(carteira_id):
+            return True
+
+        linked_ids = set()
+        if processo.carteira_id:
+            linked_ids.add(int(processo.carteira_id))
+        linked_ids.update(
+            processo.carteiras_vinculadas.values_list('id', flat=True)
+        )
+        if not linked_ids:
+            return False
+        return Carteira.objects.filter(
+            id__in=linked_ids,
+            nome__iexact='Passivas',
+        ).exists()
+
+    def _build_passivo_info_cards(self, processo, use_ativo_polo=False):
         if not processo:
             return []
+        alvo_polo = "ATIVO" if use_ativo_polo else "PASSIVO"
         partes = list(
-            processo.partes_processuais.filter(tipo_polo="PASSIVO").order_by("id")
+            processo.partes_processuais.filter(tipo_polo=alvo_polo).order_by("id")
         )
+        if use_ativo_polo and not partes:
+            partes = list(
+                processo.partes_processuais.filter(tipo_polo="PASSIVO").order_by("id")
+            )
+        contratos = list(processo.contratos.all().order_by("id"))
         if len(partes) <= 1:
+            for parte in partes:
+                parte.info_card_contratos = list(contratos)
             return partes
 
         grouped = {}
@@ -6314,7 +6403,39 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             current_rank = (self._parte_card_score(current), -(current.pk or 0))
             if candidate_rank > current_rank:
                 grouped[key] = parte
-        return [grouped[key] for key in key_order]
+        cards = [grouped[key] for key in key_order]
+
+        def _digits(value):
+            return re.sub(r"\D", "", str(value or ""))
+
+        mapped_by_doc = {}
+        unmapped = []
+        for contrato in contratos:
+            doc = _digits(getattr(contrato, "documento_titular", ""))
+            if doc:
+                mapped_by_doc.setdefault(doc, []).append(contrato)
+            else:
+                unmapped.append(contrato)
+
+        has_mapping = bool(mapped_by_doc)
+        for index, parte in enumerate(cards):
+            if not has_mapping:
+                parte.info_card_contratos = contratos if index == 0 else []
+                continue
+            doc = _digits(getattr(parte, "documento", ""))
+            parte.info_card_contratos = list(mapped_by_doc.get(doc, []))
+
+        if has_mapping and unmapped and cards:
+            base = list(getattr(cards[0], "info_card_contratos", []))
+            seen_ids = {item.pk for item in base}
+            for contrato in unmapped:
+                if contrato.pk in seen_ids:
+                    continue
+                base.append(contrato)
+                seen_ids.add(contrato.pk)
+            cards[0].info_card_contratos = base
+
+        return cards
 
     fieldsets = (
         ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "carteiras_vinculadas", "vara", "tribunal", "busca_ativa")}),
@@ -6578,7 +6699,19 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_kpi_response_filter(qs, request)
         qs = self._apply_peticao_kpi_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
-        qs = qs.select_related('carteira').prefetch_related('carteiras_vinculadas')
+        qs = qs.select_related('carteira').prefetch_related(
+            'carteiras_vinculadas',
+            Prefetch(
+                'partes_processuais',
+                queryset=Parte.objects.only('id', 'processo_id', 'tipo_polo', 'nome', 'documento').order_by('id'),
+                to_attr='_prefetched_partes_processuais',
+            ),
+            Prefetch(
+                'numeros_cnj',
+                queryset=ProcessoJudicialNumeroCnj.objects.only('id', 'processo_id', 'cnj', 'criado_em').order_by('-criado_em'),
+                to_attr='_prefetched_numeros_cnj',
+            ),
+        )
         today = timezone.localdate()
         qs = qs.annotate(
             proxima_prescricao_futura=models.Min(
@@ -7368,7 +7501,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     @admin.display(description="Número CNJ", ordering="cnj")
     def cnj_with_navigation(self, obj):
         cnj_values = []
-        for entry in obj.numeros_cnj.order_by('-criado_em'):
+        entries = getattr(obj, '_prefetched_numeros_cnj', None)
+        if entries is None:
+            entries = obj.numeros_cnj.order_by('-criado_em')
+        for entry in entries:
             if entry.cnj:
                 cnj_values.append(entry.cnj)
         if obj.cnj and obj.cnj not in cnj_values:
@@ -7407,7 +7543,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     @admin.display(description="CPF Passivo")
     def cpf_passivo(self, obj):
-        parte = obj.partes_processuais.filter(tipo_polo='PASSIVO').first()
+        partes = getattr(obj, '_prefetched_partes_processuais', None)
+        if partes is None:
+            parte = obj.partes_processuais.filter(tipo_polo='PASSIVO').first()
+        else:
+            parte = next((item for item in partes if item.tipo_polo == 'PASSIVO'), None)
         if parte and parte.documento:
             return _format_cpf(parte.documento)
         return "-"
@@ -7432,8 +7572,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         obj = self.get_object(request, object_id)
         online_presence_config = {"enabled": False}
         if obj:
+            passivas_info_cards = self._is_passivas_context_for_info_cards(request, obj)
             extra_context['valuation_display'] = self.valor_causa_display(obj)
-            extra_context['passivo_info_cards'] = self._build_passivo_info_cards(obj)
+            extra_context['passivo_info_cards'] = self._build_passivo_info_cards(
+                obj,
+                use_ativo_polo=passivas_info_cards,
+            )
+            extra_context['passivo_info_cards_mode'] = 'ativo' if passivas_info_cards else 'passivo'
             cnj_entries = self._build_cnj_entries_context(obj)
             extra_context['cnj_entries_json'] = mark_safe(json.dumps(cnj_entries))
             extra_context['cnj_active_index'] = self._determine_active_index(cnj_entries, obj)
@@ -7467,6 +7612,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cnj_active_display'] = ''
             extra_context['carteiras_vinculadas_ids_json'] = mark_safe(json.dumps([]))
             extra_context['passivo_info_cards'] = []
+            extra_context['passivo_info_cards_mode'] = 'passivo'
         extra_context['online_presence_config_json'] = mark_safe(json.dumps(online_presence_config))
         
         # Preserva os filtros da changelist para a navegação:
@@ -7882,22 +8028,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if passivas_redirect:
             return passivas_redirect
         extra_context = extra_context or {}
-        changelist = self.get_changelist_instance(request)
-        result_list = changelist.result_list
-        if hasattr(result_list, 'prefetch_related'):
-            result_list = result_list.prefetch_related(
-                Prefetch('etiquetas', queryset=Etiqueta.objects.order_by('ordem', 'nome'))
-            )
-
-        etiquetas_data = {}
-        for processo in result_list:
-            etiquetas = [
-                {'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}
-                for etiqueta in processo.etiquetas.all()
-            ]
-            etiquetas_data[processo.pk] = etiquetas
-
-        extra_context['etiquetas_data_json'] = json.dumps(etiquetas_data)
         extra_context['delegar_users'] = User.objects.order_by('username')
         badge = self._build_changelist_context_badge(request)
         extra_context['changelist_context_badge'] = badge
@@ -7907,8 +8037,35 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             )
         else:
             extra_context['changelist_carteira_options'] = []
+        response = super().changelist_view(request, extra_context=extra_context)
+        context_data = getattr(response, 'context_data', None)
+        if not context_data:
+            return response
 
-        return super().changelist_view(request, extra_context=extra_context)
+        changelist = context_data.get('cl')
+        if not changelist:
+            context_data['etiquetas_data_json'] = json.dumps({})
+            return response
+
+        result_list = list(changelist.result_list)
+        if result_list:
+            prefetch_related_objects(
+                result_list,
+                Prefetch(
+                    'etiquetas',
+                    queryset=Etiqueta.objects.only('nome', 'cor_fundo', 'cor_fonte').order_by('ordem', 'nome'),
+                ),
+            )
+
+        etiquetas_data = {}
+        for processo in result_list:
+            etiquetas_data[processo.pk] = [
+                {'nome': etiqueta.nome, 'cor_fundo': etiqueta.cor_fundo, 'cor_fonte': etiqueta.cor_fonte}
+                for etiqueta in processo.etiquetas.all()
+            ]
+
+        context_data['etiquetas_data_json'] = json.dumps(etiquetas_data)
+        return response
 
     class Media:
         css = {
@@ -7922,7 +8079,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         js = (
             'admin/js/vendor/jquery/jquery.min.js',
             'admin/js/jquery.init.js',
-            'admin/js/processo_judicial_enhancer.js?v=20260217c',
             'admin/js/processo_online_presence.js?v=20260218a',
             'admin/js/admin_tabs.js',
             'admin/js/processo_judicial_lazy_loader.js?v=20260217c',
@@ -8342,16 +8498,29 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     @admin.display(description="X")
     def get_x_separator(self, obj):
-        return mark_safe('<span title="Mais de dois polos">⚠️</span>') if obj.partes_processuais.count() > 2 else "x"
+        partes = getattr(obj, '_prefetched_partes_processuais', None)
+        if partes is None:
+            has_many = obj.partes_processuais.count() > 2
+        else:
+            has_many = len(partes) > 2
+        return mark_safe('<span title="Mais de dois polos">⚠️</span>') if has_many else "x"
 
     @admin.display(description="Polo Ativo")
     def get_polo_ativo(self, obj):
-        nome = getattr(obj.partes_processuais.filter(tipo_polo="ATIVO").first(), 'nome', '')
+        partes = getattr(obj, '_prefetched_partes_processuais', None)
+        if partes is None:
+            nome = getattr(obj.partes_processuais.filter(tipo_polo="ATIVO").first(), 'nome', '')
+        else:
+            nome = next((item.nome for item in partes if item.tipo_polo == "ATIVO"), '')
         return format_polo_name(nome)
 
     @admin.display(description="Polo Passivo")
     def get_polo_passivo(self, obj):
-        nome = getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '')
+        partes = getattr(obj, '_prefetched_partes_processuais', None)
+        if partes is None:
+            nome = getattr(obj.partes_processuais.filter(tipo_polo="PASSIVO").first(), 'nome', '')
+        else:
+            nome = next((item.nome for item in partes if item.tipo_polo == "PASSIVO"), '')
         return format_polo_name(nome)
 
     @admin.display(description="Classe Processual", ordering="status")
@@ -8483,6 +8652,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'obito_uf': parte.obito_uf or '',
             'obito_idade': parte.obito_idade if parte.obito_idade is not None else '',
         })
+
+
+@admin.register(Pessoa)
+class PessoaAdmin(admin.ModelAdmin):
+    list_display = ("nome", "tipo_pessoa", "documento", "documento_normalizado")
+    list_filter = ("tipo_pessoa",)
+    search_fields = ("nome", "documento", "documento_normalizado")
+    ordering = ("nome", "id")
+
+
 @admin.register(BuscaAtivaConfig)
 class BuscaAtivaConfigAdmin(admin.ModelAdmin):
     list_display = ("horario", "habilitado", "ultima_execucao")

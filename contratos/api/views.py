@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
@@ -63,6 +64,20 @@ SUPERVISION_STATUS_LABELS = {
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
+
+
+def _resolve_demandas_alias(carteira_id):
+    alias = DemandasImportService.SOURCE_ALIAS
+    carteira = None
+    if not carteira_id:
+        return alias, carteira
+    carteira = Carteira.objects.filter(pk=carteira_id).first()
+    if not carteira:
+        return alias, carteira
+    candidate = (carteira.fonte_alias or '').strip()
+    if candidate and candidate in settings.DATABASES:
+        alias = candidate
+    return alias, carteira
 
 def _normalize_decimal_string(value):
     if value is None:
@@ -2244,11 +2259,7 @@ class BuscarDadosDemandasCpfView(View):
             return JsonResponse({'error': 'CPF inválido.'}, status=400)
 
         carteira_id = request.GET.get('carteira_id')
-        alias = DemandasImportService.SOURCE_ALIAS
-        if carteira_id:
-            carteira = Carteira.objects.filter(pk=carteira_id).first()
-            if carteira and carteira.fonte_alias:
-                alias = carteira.fonte_alias
+        alias, _ = _resolve_demandas_alias(carteira_id)
 
         service = DemandasImportService(db_alias=alias)
         try:
@@ -2278,12 +2289,7 @@ class DemandasCpfPreviewView(View):
             return JsonResponse({'error': 'Informe ao menos um CPF.'}, status=400)
 
         carteira_id = payload.get('carteira_id')
-        alias = DemandasImportService.SOURCE_ALIAS
-        carteira = None
-        if carteira_id:
-            carteira = Carteira.objects.filter(pk=carteira_id).first()
-            if carteira and carteira.fonte_alias:
-                alias = carteira.fonte_alias
+        alias, carteira = _resolve_demandas_alias(carteira_id)
 
         service = DemandasImportService(db_alias=alias)
         try:
@@ -2318,12 +2324,7 @@ class DemandasCpfImportView(View):
         if not etiqueta_nome:
             return JsonResponse({'error': 'Informe um nome para o Lote/Etiqueta.'}, status=400)
 
-        alias = DemandasImportService.SOURCE_ALIAS
-        carteira = None
-        if carteira_id:
-            carteira = Carteira.objects.filter(pk=carteira_id).first()
-            if carteira and carteira.fonte_alias:
-                alias = carteira.fonte_alias
+        alias, carteira = _resolve_demandas_alias(carteira_id)
 
         service = DemandasImportService(db_alias=alias)
         try:

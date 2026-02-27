@@ -17,6 +17,10 @@ from django.core.exceptions import ValidationError
 import datetime
 
 
+def _normalize_documento_digits(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
 class Etiqueta(models.Model):
     nome = models.CharField(max_length=50, unique=True, verbose_name="Nome")
     cor_fundo = models.CharField(max_length=7, default="#417690", verbose_name="Cor de Fundo")
@@ -343,6 +347,46 @@ class ProcessoArquivo(models.Model):
         return self.nome or f"Arquivo #{self.pk}"
 
 
+class Pessoa(models.Model):
+    TIPO_PESSOA_CHOICES = [('PF', 'Pessoa Física'), ('PJ', 'Pessoa Jurídica')]
+
+    nome = models.CharField(max_length=255, blank=True, verbose_name="Nome / Razão Social")
+    tipo_pessoa = models.CharField(
+        max_length=2,
+        choices=TIPO_PESSOA_CHOICES,
+        blank=True,
+        verbose_name="Tipo de Pessoa",
+    )
+    documento = models.CharField(max_length=20, blank=True, verbose_name="CPF / CNPJ")
+    documento_normalizado = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        editable=False,
+        verbose_name="CPF / CNPJ (normalizado)",
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
+
+    class Meta:
+        verbose_name = "Pessoa"
+        verbose_name_plural = "Pessoas"
+        ordering = ["nome", "id"]
+
+    def __str__(self):
+        nome = (self.nome or "").strip()
+        if nome:
+            return nome
+        return self.documento or f"Pessoa #{self.pk}"
+
+    def save(self, *args, **kwargs):
+        self.documento = (self.documento or "").strip()
+        self.documento_normalizado = _normalize_documento_digits(self.documento) or None
+        super().save(*args, **kwargs)
+
+
 class Parte(models.Model):
     TIPO_POLO_CHOICES = [('ATIVO', 'Polo Ativo'), ('PASSIVO', 'Polo Passivo')]
     TIPO_PESSOA_CHOICES = [('PF', 'Pessoa Física'), ('PJ', 'Pessoa Jurídica')]
@@ -357,6 +401,14 @@ class Parte(models.Model):
         verbose_name="Número CNJ",
     )
     tipo_polo = models.CharField(max_length=7, choices=TIPO_POLO_CHOICES, verbose_name="Tipo de Polo")
+    pessoa = models.ForeignKey(
+        Pessoa,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='partes_processuais',
+        verbose_name="Pessoa",
+    )
     nome = models.CharField(max_length=255, verbose_name="Nome / Razão Social")
     tipo_pessoa = models.CharField(max_length=2, choices=TIPO_PESSOA_CHOICES, verbose_name="Tipo de Pessoa")
     documento = models.CharField(max_length=20, verbose_name="CPF / CNPJ")
@@ -395,6 +447,44 @@ class Parte(models.Model):
 
     def __str__(self):
         return self.nome
+
+    def _sync_pessoa(self):
+        documento = (self.documento or "").strip()
+        documento_normalizado = _normalize_documento_digits(documento)
+        if not documento_normalizado:
+            return
+
+        defaults = {
+            "documento": documento,
+            "nome": (self.nome or "").strip(),
+            "tipo_pessoa": (self.tipo_pessoa or "").strip(),
+        }
+        pessoa, created = Pessoa.objects.get_or_create(
+            documento_normalizado=documento_normalizado,
+            defaults=defaults,
+        )
+
+        if not created:
+            update_fields = []
+            nome = defaults["nome"]
+            if nome and nome != pessoa.nome:
+                pessoa.nome = nome
+                update_fields.append("nome")
+            tipo_pessoa = defaults["tipo_pessoa"]
+            if tipo_pessoa and tipo_pessoa != pessoa.tipo_pessoa:
+                pessoa.tipo_pessoa = tipo_pessoa
+                update_fields.append("tipo_pessoa")
+            if documento and documento != pessoa.documento:
+                pessoa.documento = documento
+                update_fields.append("documento")
+            if update_fields:
+                pessoa.save(update_fields=update_fields)
+
+        self.pessoa = pessoa
+
+    def save(self, *args, **kwargs):
+        self._sync_pessoa()
+        super().save(*args, **kwargs)
 
     class Meta:
         ordering = ['tipo_polo', 'id']
@@ -494,6 +584,12 @@ class AdvogadoPassivo(models.Model):
 
 class Contrato(models.Model):
     processo = models.ForeignKey(ProcessoJudicial, on_delete=models.CASCADE, related_name='contratos')
+    documento_titular = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="CPF/CNPJ titular",
+        help_text="Preenchido automaticamente para vincular o contrato à pessoa no card.",
+    )
     numero_contrato = models.CharField(max_length=50, verbose_name="Número do Contrato", blank=True, null=True)
     valor_total_devido = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Valor Total Devido", blank=True, null=True)
     valor_causa = models.DecimalField("Valor da Causa", max_digits=14, decimal_places=2, null=True, blank=True)

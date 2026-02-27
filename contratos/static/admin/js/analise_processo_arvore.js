@@ -1416,11 +1416,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         const id = String(ct).trim();
                         if (id) contractIdsSet.add(id);
                     });
-                    const fallbackContracts =
+                    const fallbackContracts = parseContractsField(
                         proc.tipo_de_acao_respostas &&
-                            Array.isArray(proc.tipo_de_acao_respostas.contratos_para_monitoria)
+                        proc.tipo_de_acao_respostas.contratos_para_monitoria
                             ? proc.tipo_de_acao_respostas.contratos_para_monitoria
-                            : [];
+                            : []
+                    );
                     fallbackContracts.forEach(ct => {
                         const id = String(ct).trim();
                         if (id) contractIdsSet.add(id);
@@ -1499,12 +1500,13 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             if (!processo || typeof processo !== 'object') {
                 return null;
             }
-            const contratoArray = Array.isArray(processo.contratos) ? processo.contratos : [];
-            const respostaContratos =
+            const contratoArray = parseContractsField(processo.contratos);
+            const respostaContratos = parseContractsField(
                 processo.tipo_de_acao_respostas &&
-                Array.isArray(processo.tipo_de_acao_respostas.contratos_para_monitoria)
+                processo.tipo_de_acao_respostas.contratos_para_monitoria
                     ? processo.tipo_de_acao_respostas.contratos_para_monitoria
-                    : [];
+                    : []
+            );
             const contractIds = Array.from(
                 new Set(
                     [...contratoArray, ...respostaContratos]
@@ -3840,7 +3842,15 @@ function formatCnjDigits(raw) {
                 : '';
             const $ulDetalhes = $('<ul></ul>');
             const contratoIds = parseContractsField(processo.contratos);
-            const contratoInfos = contratoIds.map(cId => {
+            const monitoriaIds = parseContractsField(
+                processo.tipo_de_acao_respostas &&
+                processo.tipo_de_acao_respostas.contratos_para_monitoria
+                    ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                    : []
+            );
+            // Para cálculos/saldos no resumo, prioriza os contratos selecionados para monitória.
+            const contratoIdsEfetivos = monitoriaIds.length ? monitoriaIds : contratoIds;
+            const contratoInfos = contratoIdsEfetivos.map(cId => {
                 const cInfo = resolveContratoInfo(cId);
                 if (cInfo) {
                     return cInfo;
@@ -3852,12 +3862,6 @@ function formatCnjDigits(raw) {
                     valor_causa: 0
                 };
             });
-            const monitoriaIds = parseContractsField(
-                processo.tipo_de_acao_respostas &&
-                processo.tipo_de_acao_respostas.contratos_para_monitoria
-                    ? processo.tipo_de_acao_respostas.contratos_para_monitoria
-                    : []
-            );
             const monitoriaInfos = monitoriaIds.map(cId => {
                 const prioritized = contratoInfos.find(
                     c =>

@@ -5471,7 +5471,7 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.preserveView = true;
             renderCalendar();
         };
-        closeButton.addEventListener('click', () => closeAgendaPanel());
+        closeButton.addEventListener('click', () => showAgendaExitConfirm());
         modeButton.addEventListener('click', () => {
             const sequence = ['monthly', 'weekly'];
             const labels = {
@@ -5712,7 +5712,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!closeTrigger) {
             return;
         }
-        closeAgendaPanel();
+        showAgendaExitConfirm();
     });
 
     const agendaBulkCache = {
@@ -9768,8 +9768,29 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(data => {
                 if (data.status === 'success') {
-                    setFeedback(data.message, 'success');
+                    const successMessage = data.message || 'Dados preenchidos com sucesso.';
+                    setFeedback(successMessage, 'success');
                     fillFormFields(data.processo, data.partes, data.andamentos);
+                    syncDemandasContractsFromEscavador(data.partes || [])
+                        .then((summary) => {
+                            if (!summary || !summary.cpfs_consultados) return;
+                            const detalhes = [`CPFs consultados: ${summary.cpfs_consultados}`];
+                            if (summary.cpfs_sem_cadastro) {
+                                detalhes.push(`sem cadastro: ${summary.cpfs_sem_cadastro}`);
+                            }
+                            if (summary.cpfs_com_falha) {
+                                detalhes.push(`falhas: ${summary.cpfs_com_falha}`);
+                            }
+                            const sufixo = detalhes.length ? ` (${detalhes.join(', ')})` : '';
+                            if (summary.contratos_novos > 0) {
+                                setFeedback(`${successMessage} Contratos adicionados automaticamente: ${summary.contratos_novos}${sufixo}.`, 'success');
+                            } else if (summary.cpfs_encontrados > 0 || summary.cpfs_sem_cadastro > 0 || summary.cpfs_com_falha > 0) {
+                                setFeedback(`${successMessage} Nenhum contrato novo foi adicionado${sufixo}.`, 'loading');
+                            }
+                        })
+                        .catch((error) => {
+                            console.warn('[Escavador] Não foi possível sincronizar contratos por CPF automaticamente.', error);
+                        });
                 } else {
                     throw new Error(data.message);
                 }
@@ -10018,11 +10039,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    const appendContratosFromDemandas = (contratos = []) => {
+    const normalizeDocumentDigits = (value) => String(value || '').replace(/\D/g, '');
+
+    const setContratoTitularDocumento = (row, documentoDigits = '') => {
+        if (!row) return;
+        const input = row.querySelector('input[id$="-documento_titular"]');
+        if (!input) return;
+        input.value = normalizeDocumentDigits(documentoDigits);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    const findContratoRowByNumero = (numeroContrato = '') => {
+        const numero = String(numeroContrato || '').trim();
+        if (!numero) return null;
+        const normalized = numero.replace(/\D/g, '');
+        const rows = Array.from(document.querySelectorAll('#contratos-group .dynamic-contratos'))
+            .filter((row) => !row.classList.contains('empty-form'));
+        return rows.find((row) => {
+            const current = String(row.querySelector('input[id$="-numero_contrato"]')?.value || '').trim();
+            if (!current) return false;
+            return current === numero || current.replace(/\D/g, '') === normalized;
+        }) || null;
+    };
+
+    const appendContratosFromDemandas = (contratos = [], documentoTitular = '') => {
         if (!contratos.length) return;
+        const titularDigits = normalizeDocumentDigits(documentoTitular);
         const addButton = document.querySelector('#contratos-group .add-row a');
         const existing = getExistingContratoNumbers();
         const pendentes = contratos.filter(contract => contract.numero_contrato && !existing.has(contract.numero_contrato));
+
+        if (titularDigits) {
+            contratos.forEach((contract) => {
+                const existingRow = findContratoRowByNumero(contract?.numero_contrato);
+                if (existingRow) {
+                    setContratoTitularDocumento(existingRow, titularDigits);
+                }
+            });
+        }
+
         if (!pendentes.length) return;
         pendentes.forEach(contract => {
             let row = findEmptyContratoRow();
@@ -10034,6 +10090,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (row) {
                 fillContratoRow(row, contract);
+                if (titularDigits) {
+                    setContratoTitularDocumento(row, titularDigits);
+                }
             }
         });
     };
@@ -10067,7 +10126,8 @@ document.addEventListener('DOMContentLoaded', function() {
             enderecoInput.dispatchEvent(new Event('input', { bubbles: true }));
             enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        appendContratosFromDemandas(data.contratos || []);
+        const cpfTitular = normalizeCpfDigits(data.documento || data.cpf || '');
+        appendContratosFromDemandas(data.contratos || [], cpfTitular);
     };
 
     const fetchDemandasCpf = async (cpfDigits, carteiraId = '') => {
@@ -10085,6 +10145,75 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(payload.error || 'CPF não encontrado.');
         }
         return payload.data;
+    };
+
+    const collectCpfDigitsFromPartesPayload = (partes = []) => {
+        if (!Array.isArray(partes) || !partes.length) return [];
+        return Array.from(new Set(
+            partes
+                .map((parte) => normalizeCpfDigits(parte?.documento || ''))
+                .filter((digits) => digits.length === 11)
+        ));
+    };
+
+    const collectCpfDigitsFromPartesDom = () => {
+        const cpfs = Array.from(document.querySelectorAll('#partes_processuais-group .dynamic-partes'))
+            .filter((row) => !row.classList.contains('empty-form'))
+            .map((row) => normalizeCpfDigits(row.querySelector('[id$="-documento"]')?.value || ''))
+            .filter((digits) => digits.length === 11);
+        return Array.from(new Set(cpfs));
+    };
+
+    const syncDemandasContractsFromEscavador = async (partes = []) => {
+        const cpfsFromPayload = collectCpfDigitsFromPartesPayload(partes);
+        const cpfs = cpfsFromPayload.length ? cpfsFromPayload : collectCpfDigitsFromPartesDom();
+        if (!cpfs.length) {
+            return {
+                cpfs_consultados: 0,
+                cpfs_encontrados: 0,
+                cpfs_sem_cadastro: 0,
+                cpfs_com_falha: 0,
+                contratos_novos: 0,
+            };
+        }
+
+        const carteiraId = document.getElementById('id_carteira')?.value || '';
+        const existingBefore = getExistingContratoNumbers();
+        const knownNumbers = new Set(existingBefore);
+        let cpfsEncontrados = 0;
+        let cpfsSemCadastro = 0;
+        let cpfsComFalha = 0;
+
+        for (const cpf of cpfs) {
+            try {
+                const data = await fetchDemandasCpf(cpf, carteiraId);
+                cpfsEncontrados += 1;
+                const contratos = Array.isArray(data?.contratos) ? data.contratos : [];
+                contratos.forEach((contrato) => {
+                    const numero = String(contrato?.numero_contrato || '').trim();
+                    if (numero) {
+                        knownNumbers.add(numero);
+                    }
+                });
+                appendContratosFromDemandas(contratos, cpf);
+            } catch (error) {
+                const message = String(error?.message || '');
+                if (/cpf não encontrado/i.test(message)) {
+                    cpfsSemCadastro += 1;
+                } else {
+                    cpfsComFalha += 1;
+                    console.warn('[Demandas CPF][Escavador] falha ao buscar CPF', cpf, error);
+                }
+            }
+        }
+
+        return {
+            cpfs_consultados: cpfs.length,
+            cpfs_encontrados: cpfsEncontrados,
+            cpfs_sem_cadastro: cpfsSemCadastro,
+            cpfs_com_falha: cpfsComFalha,
+            contratos_novos: Math.max(0, knownNumbers.size - existingBefore.size),
+        };
     };
 
     const parseCpfBatch = (value) => {
