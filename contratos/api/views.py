@@ -39,6 +39,7 @@ from ..models import (
     Tarefa,
     TarefaLote,
     TarefaMensagem,
+    TarefaNotificacao,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
 from ..permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
@@ -48,6 +49,7 @@ from .serializers import (
     UserSerializer,
     ListaDeTarefasSerializer,
     TarefaMensagemSerializer,
+    TarefaNotificacaoSerializer,
     PrazoMensagemSerializer,
 )
 from ..services.nowlex_calc import (
@@ -1316,7 +1318,8 @@ class TarefaCreateAPIView(generics.CreateAPIView):
         if bool(serializer.validated_data.get('concluida')):
             extra['concluido_em'] = timezone.now()
             extra['concluido_por'] = self.request.user
-        serializer.save(**extra)
+        tarefa = serializer.save(**extra)
+        _create_task_notification_for_receiver(tarefa, actor=self.request.user)
 
 class PrazoCreateAPIView(generics.CreateAPIView):
     """
@@ -1409,6 +1412,17 @@ def _parse_datetime_value(value):
         dt = timezone.make_aware(dt, timezone.get_default_timezone())
     return dt
 
+
+def _create_task_notification_for_receiver(tarefa, actor=None):
+    if not tarefa:
+        return
+    receiver = getattr(tarefa, 'responsavel', None)
+    if not receiver or not receiver.is_active:
+        return
+    if actor and receiver.pk == actor.pk:
+        return
+    TarefaNotificacao.objects.get_or_create(usuario=receiver, tarefa=tarefa)
+
 class TarefaBulkCreateAPIView(APIView):
     """
     API para criar tarefas em lote (com ou sem processos selecionados).
@@ -1482,6 +1496,7 @@ class TarefaBulkCreateAPIView(APIView):
                 criado_por=request.user,
             )
             created_tasks.append(tarefa)
+            _create_task_notification_for_receiver(tarefa, actor=request.user)
             if comentario_texto or arquivo:
                 comentario = TarefaMensagem.objects.create(
                     tarefa=tarefa,
@@ -1502,6 +1517,35 @@ class TarefaBulkCreateAPIView(APIView):
             'created': len(created_tasks),
             'ids': [task.id for task in created_tasks],
         }, status=status.HTTP_201_CREATED)
+
+
+class TarefaNotificacaoListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        notifications = (
+            TarefaNotificacao.objects
+            .select_related('tarefa', 'tarefa__processo', 'tarefa__criado_por')
+            .filter(usuario=request.user, lida_em__isnull=True)
+            .order_by('criada_em', 'id')[:20]
+        )
+        serializer = TarefaNotificacaoSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+
+class TarefaNotificacaoMarcarLidaAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, notificacao_id):
+        notification = get_object_or_404(
+            TarefaNotificacao,
+            pk=notificacao_id,
+            usuario=request.user,
+        )
+        if not notification.lida_em:
+            notification.lida_em = timezone.now()
+            notification.save(update_fields=['lida_em'])
+        return Response({'ok': True, 'id': notification.id})
 
 class TarefaBulkHistoryAPIView(APIView):
     """

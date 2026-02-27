@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import connection, models, transaction
 from django.db.utils import ProgrammingError
-from django.db.models.signals import pre_delete
+from django.db.models.signals import pre_delete, pre_save, post_save
 from django.dispatch import receiver
 from django.utils.text import slugify
 from django.utils import timezone
@@ -933,6 +933,89 @@ class Tarefa(models.Model):
         verbose_name = "Tarefa"
         verbose_name_plural = "Tarefas"
         ordering = ['-data']
+
+
+class TarefaNotificacao(models.Model):
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notificacoes_tarefas',
+        verbose_name='Usuário',
+    )
+    tarefa = models.ForeignKey(
+        Tarefa,
+        on_delete=models.CASCADE,
+        related_name='notificacoes',
+        verbose_name='Tarefa',
+    )
+    criada_em = models.DateTimeField(auto_now_add=True, verbose_name='Criada em')
+    lida_em = models.DateTimeField(null=True, blank=True, verbose_name='Lida em')
+
+    class Meta:
+        verbose_name = 'Notificação de tarefa'
+        verbose_name_plural = 'Notificações de tarefa'
+        ordering = ['-criada_em', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['usuario', 'tarefa'],
+                name='uniq_tarefanotificacao_usuario_tarefa',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Notificação tarefa #{self.tarefa_id} para {self.usuario}'
+
+
+def _has_tarefa_notificacao_table():
+    try:
+        return TarefaNotificacao._meta.db_table in connection.introspection.table_names()
+    except Exception:
+        return False
+
+
+@receiver(pre_save, sender=Tarefa)
+def tarefa_cache_previous_receiver(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._previous_responsavel_id = None
+        return
+    instance._previous_responsavel_id = (
+        sender.objects.filter(pk=instance.pk).values_list('responsavel_id', flat=True).first()
+    )
+
+
+@receiver(post_save, sender=Tarefa)
+def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
+    if not _has_tarefa_notificacao_table():
+        return
+
+    previous_responsavel_id = getattr(instance, '_previous_responsavel_id', None)
+    current_responsavel_id = instance.responsavel_id
+
+    if previous_responsavel_id and previous_responsavel_id != current_responsavel_id:
+        TarefaNotificacao.objects.filter(
+            tarefa=instance,
+            usuario_id=previous_responsavel_id,
+        ).delete()
+
+    if not current_responsavel_id:
+        return
+
+    if not created and previous_responsavel_id == current_responsavel_id:
+        return
+
+    receiver = instance.responsavel
+    if not receiver or not receiver.is_active:
+        return
+
+    if created and instance.criado_por_id and instance.criado_por_id == current_responsavel_id:
+        return
+
+    TarefaNotificacao.objects.get_or_create(
+        tarefa=instance,
+        usuario_id=current_responsavel_id,
+    )
 
 @receiver(pre_delete, sender=Tarefa)
 def cleanup_tarefa_related(sender, instance, **kwargs):

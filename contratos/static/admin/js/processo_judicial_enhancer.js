@@ -3737,9 +3737,54 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    const createAgendaPanel = () => {
-        if (document.querySelector('.agenda-panel-overlay')) {
-            return;
+    const normalizeAgendaFocusOptions = (options = {}) => {
+        if (!options || typeof options !== 'object') return null;
+        const source = options.focus && typeof options.focus === 'object'
+            ? options.focus
+            : options;
+        if (!source || typeof source !== 'object') return null;
+
+        let parsedDate = null;
+        const dateValue = source.date || source.data || source.isoDate || source.value || '';
+        if (dateValue) {
+            parsedDate = parseDateInputValue(dateValue);
+        }
+        if (!parsedDate) {
+            const year = Number(source.year);
+            const monthIndex = Number(source.monthIndex);
+            const day = Number(source.day);
+            if (
+                Number.isFinite(year)
+                && Number.isFinite(monthIndex)
+                && Number.isFinite(day)
+                && monthIndex >= 0
+                && monthIndex <= 11
+                && day >= 1
+                && day <= 31
+            ) {
+                parsedDate = { year, monthIndex, day };
+            }
+        }
+        if (!parsedDate) return null;
+
+        const rawType = String(source.type || '').trim().toUpperCase();
+        const type = ['T', 'P', 'S'].includes(rawType) ? rawType : null;
+        return {
+            year: parsedDate.year,
+            monthIndex: parsedDate.monthIndex,
+            day: parsedDate.day,
+            type,
+        };
+    };
+
+    const createAgendaPanel = (options = {}) => {
+        const existingOverlay = document.querySelector('.agenda-panel-overlay');
+        const requestedFocus = normalizeAgendaFocusOptions(options);
+        if (existingOverlay) {
+            if (requestedFocus && typeof existingOverlay._nowlexAgendaApi?.focusByDate === 'function') {
+                existingOverlay._nowlexAgendaApi.focusByDate(requestedFocus);
+            }
+            return existingOverlay;
         }
         const overlay = document.createElement('div');
         overlay.className = 'agenda-panel-overlay';
@@ -4734,6 +4779,27 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             summaryFetchToken: 0,
         };
+        const focusAgendaByDate = (focusOptions = {}) => {
+            const focus = normalizeAgendaFocusOptions(focusOptions);
+            if (!focus) return false;
+            calendarState.view = 'calendar';
+            calendarState.monthIndex = focus.monthIndex;
+            calendarState.year = focus.year;
+            calendarState.activeDay = {
+                day: focus.day,
+                monthIndex: focus.monthIndex,
+                year: focus.year,
+            };
+            calendarState.activeType = focus.type || calendarState.activeType || 'T';
+            calendarState.preserveView = true;
+            usersToggle?.classList.remove('agenda-panel__users-toggle--active');
+            renderCalendar();
+            restoreActiveDetailControls();
+            return true;
+        };
+        overlay._nowlexAgendaApi = {
+            focusByDate: focusAgendaByDate,
+        };
         const syncSelectedConcludeEntries = () => {
             const availableKeys = new Set(
                 (calendarState.lastAppliedEntries || [])
@@ -5513,7 +5579,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderCalendar();
             });
         });
-        renderCalendar();
+        if (requestedFocus) {
+            focusAgendaByDate(requestedFocus);
+        } else {
+            renderCalendar();
+        }
         const isChangeList = document.body.classList.contains('change-list');
         if (!currentProcessId || isChangeList) {
             setTimeout(() => {
@@ -5526,6 +5596,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }, 900);
         }
+        return overlay;
     };
 
     const closeAgendaPanel = () => {
@@ -6674,8 +6745,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return modal;
     };
 
-    const openAgendaPanel = () => {
-        createAgendaPanel();
+    const openAgendaPanel = (options = {}) => {
+        createAgendaPanel(options);
     };
 
     const openAgendaForm = (type) => {
@@ -6693,6 +6764,179 @@ document.addEventListener('DOMContentLoaded', function() {
     window.nowlexAgenda = window.nowlexAgenda || {};
     window.nowlexAgenda.openPanel = openAgendaPanel;
     window.nowlexAgenda.openForm = openAgendaForm;
+
+    const TASK_NOTIFICATION_POLL_MS = 20000;
+    const TASK_NOTIFICATION_STACK_ID = 'task-notification-stack';
+    const TASK_NOTIFICATION_INIT_KEY = '__nowlexTaskNotificationPollingInit';
+    const seenTaskNotificationIds = new Set();
+    let taskNotificationFetchInFlight = false;
+    let taskNotificationPollHandle = null;
+
+    const ensureTaskNotificationStack = () => {
+        let stack = document.getElementById(TASK_NOTIFICATION_STACK_ID);
+        if (stack) return stack;
+        stack = document.createElement('div');
+        stack.id = TASK_NOTIFICATION_STACK_ID;
+        stack.className = 'task-notification-stack';
+        document.body.appendChild(stack);
+        return stack;
+    };
+
+    const formatTaskNotificationDateLabel = (value) => {
+        const parsed = parseDateInputValue(value);
+        if (!parsed) return '';
+        return formatDateLabel(formatDateIso(parsed.year, parsed.monthIndex, parsed.day));
+    };
+
+    const markTaskNotificationAsRead = (notificationId) => {
+        const id = Number.parseInt(notificationId, 10);
+        if (!Number.isFinite(id) || id <= 0) {
+            return Promise.resolve();
+        }
+        return fetch(`/api/tarefas/notificacoes/${id}/marcar-lida/`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'X-CSRFToken': csrftoken,
+            },
+        }).catch(() => null);
+    };
+
+    const dismissTaskNotificationCard = (card) => {
+        if (!card || card.dataset.closing === '1') return;
+        card.dataset.closing = '1';
+        card.classList.remove('is-visible');
+        card.classList.add('is-closing');
+        window.setTimeout(() => {
+            card.remove();
+        }, 240);
+    };
+
+    const focusAgendaFromTaskNotification = (notification) => {
+        const focus = normalizeAgendaFocusOptions({
+            date: notification?.data,
+            type: 'T',
+        });
+        if (focus) {
+            openAgendaPanel({ focus });
+            return;
+        }
+        openAgendaPanel();
+    };
+
+    const renderTaskNotificationCard = (notification) => {
+        if (!notification || !notification.id) return;
+        const stack = ensureTaskNotificationStack();
+        if (stack.querySelector(`[data-task-notification-id="${notification.id}"]`)) {
+            return;
+        }
+
+        const card = document.createElement('article');
+        card.className = 'task-notification-card';
+        card.dataset.taskNotificationId = String(notification.id);
+
+        const header = document.createElement('div');
+        header.className = 'task-notification-card__header';
+
+        const title = document.createElement('strong');
+        title.className = 'task-notification-card__title';
+        title.textContent = 'Nova tarefa recebida';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'task-notification-card__close';
+        closeBtn.setAttribute('aria-label', 'Dispensar notificação');
+        closeBtn.textContent = '×';
+
+        header.append(title, closeBtn);
+
+        const description = document.createElement('p');
+        description.className = 'task-notification-card__description';
+        description.textContent = notification.descricao || 'Você recebeu uma nova tarefa.';
+
+        const metaParts = [];
+        const dateLabel = formatTaskNotificationDateLabel(notification.data);
+        if (dateLabel) {
+            metaParts.push(`Data: ${dateLabel}`);
+        }
+        if (notification.criado_por) {
+            metaParts.push(`De: ${notification.criado_por}`);
+        }
+        const meta = document.createElement('p');
+        meta.className = 'task-notification-card__meta';
+        meta.textContent = metaParts.join(' · ');
+
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.className = 'task-notification-card__action';
+        actionBtn.textContent = 'Abrir na Agenda Geral';
+
+        const openFromNotification = (event) => {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            focusAgendaFromTaskNotification(notification);
+            markTaskNotificationAsRead(notification.id);
+            dismissTaskNotificationCard(card);
+        };
+
+        closeBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            markTaskNotificationAsRead(notification.id);
+            dismissTaskNotificationCard(card);
+        });
+        actionBtn.addEventListener('click', openFromNotification);
+        card.addEventListener('click', openFromNotification);
+
+        card.append(header, description, meta, actionBtn);
+        stack.appendChild(card);
+        requestAnimationFrame(() => {
+            card.classList.add('is-visible');
+        });
+    };
+
+    const fetchTaskNotifications = () => {
+        if (taskNotificationFetchInFlight) return;
+        if (document.visibilityState === 'hidden') return;
+        taskNotificationFetchInFlight = true;
+        fetch('/api/tarefas/notificacoes/', {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: {
+                Accept: 'application/json',
+            },
+        })
+            .then((response) => {
+                if (!response.ok) throw new Error('Falha ao carregar notificações');
+                return response.json();
+            })
+            .then((items) => {
+                if (!Array.isArray(items)) return;
+                items.forEach((notification) => {
+                    const id = Number.parseInt(notification?.id, 10);
+                    if (!Number.isFinite(id) || id <= 0) return;
+                    if (seenTaskNotificationIds.has(id)) return;
+                    seenTaskNotificationIds.add(id);
+                    renderTaskNotificationCard(notification);
+                });
+            })
+            .catch(() => null)
+            .finally(() => {
+                taskNotificationFetchInFlight = false;
+            });
+    };
+
+    const initializeTaskNotificationPolling = () => {
+        if (window[TASK_NOTIFICATION_INIT_KEY]) return;
+        window[TASK_NOTIFICATION_INIT_KEY] = true;
+        fetchTaskNotifications();
+        taskNotificationPollHandle = window.setInterval(fetchTaskNotifications, TASK_NOTIFICATION_POLL_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                fetchTaskNotifications();
+            }
+        });
+    };
 
     const attachAgendaActions = () => {
         const placeholder = document.querySelector('.agenda-placeholder-card');
@@ -6718,6 +6962,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
     attachAgendaActions();
+    initializeTaskNotificationPolling();
 
     const getAndamentosActionBar = () => {
         const group = document.getElementById('andamentos-group');

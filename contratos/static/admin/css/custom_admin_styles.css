@@ -5991,3 +5991,105 @@ body.admin-navigation-loading-active * {
         transform: translateY(-2px);
     }
 }
+
+.task-notification-stack {
+    position: fixed;
+    top: 78px;
+    right: 18px;
+    width: min(360px, calc(100vw - 24px));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 4200;
+    pointer-events: none;
+}
+
+.task-notification-card {
+    pointer-events: auto;
+    background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+    border: 1px solid #d7e1ef;
+    border-radius: 12px;
+    box-shadow: 0 12px 28px rgba(14, 30, 55, 0.2);
+    padding: 12px 14px;
+    display: grid;
+    gap: 8px;
+    transform: translateX(26px);
+    opacity: 0;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+    cursor: pointer;
+}
+
+.task-notification-card.is-visible {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.task-notification-card.is-closing {
+    transform: translateX(26px);
+    opacity: 0;
+}
+
+.task-notification-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.task-notification-card__title {
+    font-size: 0.95rem;
+    line-height: 1.2;
+    color: #1f3352;
+}
+
+.task-notification-card__close {
+    border: 0;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    background: #ecf2fb;
+    color: #3e5270;
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.task-notification-card__description {
+    margin: 0;
+    color: #2f4260;
+    font-size: 0.88rem;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.task-notification-card__meta {
+    margin: 0;
+    color: #60708a;
+    font-size: 0.78rem;
+    line-height: 1.3;
+}
+
+.task-notification-card__action {
+    justify-self: start;
+    border: 1px solid #2d73db;
+    background: #2d73db;
+    color: #fff;
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.task-notification-card__action:hover {
+    background: #1f64c9;
+    border-color: #1f64c9;
+}
+
+@media (max-width: 720px) {
+    .task-notification-stack {
+        top: 68px;
+        right: 10px;
+        width: min(96vw, 360px);
+    }
+}

@@ -1,7 +1,15 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.urls import reverse
-from ..models import Tarefa, Prazo, ListaDeTarefas, TarefaMensagem, PrazoMensagem, ProcessoArquivo
+from ..models import (
+    Tarefa,
+    Prazo,
+    ListaDeTarefas,
+    TarefaMensagem,
+    PrazoMensagem,
+    ProcessoArquivo,
+    TarefaNotificacao,
+)
 
 class UserSerializer(serializers.ModelSerializer):
     pending_tasks = serializers.IntegerField(read_only=True, default=0)
@@ -118,3 +126,32 @@ class PrazoMensagemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrazoMensagem
         fields = ['id', 'texto', 'autor', 'criado_em', 'anexos']
+
+
+class TarefaNotificacaoSerializer(serializers.ModelSerializer):
+    tarefa_id = serializers.IntegerField(source='tarefa.id', read_only=True)
+    descricao = serializers.CharField(source='tarefa.descricao', read_only=True)
+    data = serializers.DateField(source='tarefa.data', read_only=True)
+    processo_id = serializers.IntegerField(source='tarefa.processo_id', read_only=True)
+    processo_cnj = serializers.CharField(source='tarefa.processo.cnj', read_only=True, default='')
+    criado_por = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TarefaNotificacao
+        fields = [
+            'id',
+            'tarefa_id',
+            'descricao',
+            'data',
+            'processo_id',
+            'processo_cnj',
+            'criado_por',
+            'criada_em',
+        ]
+
+    def get_criado_por(self, obj):
+        autor = getattr(obj.tarefa, 'criado_por', None)
+        if not autor:
+            return ''
+        full_name = (autor.get_full_name() or '').strip()
+        return full_name or autor.username or ''
