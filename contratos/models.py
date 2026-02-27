@@ -1193,7 +1193,12 @@ class QuestaoAnalise(models.Model):
         ordering = ['ordem', 'texto_pergunta']
 
     def __str__(self):
-        return self.texto_pergunta
+        texto = (self.texto_pergunta or "").strip()
+        if self.tipo_analise_id:
+            tipo_label = (getattr(self.tipo_analise, "nome", "") or getattr(self.tipo_analise, "slug", "")).strip()
+            if tipo_label:
+                return f"{texto} - {tipo_label}"
+        return texto
 
 class OpcaoResposta(models.Model):
     questao_origem = models.ForeignKey(
