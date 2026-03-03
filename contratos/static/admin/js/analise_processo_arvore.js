@@ -770,13 +770,34 @@
             return normalizeProcessCardForSummary(rawCard);
         }
 
+        function getCardAnalysisTypeKey(card) {
+            if (!card || typeof card !== 'object') {
+                return '';
+            }
+            const analysisType = card.analysis_type;
+            if (!analysisType) {
+                return '';
+            }
+            if (typeof analysisType === 'string') {
+                return analysisType.trim();
+            }
+            if (typeof analysisType === 'object') {
+                const idValue = analysisType.id != null ? String(analysisType.id).trim() : '';
+                const slugValue = typeof analysisType.slug === 'string' ? analysisType.slug.trim() : '';
+                const nameValue = typeof analysisType.nome === 'string' ? analysisType.nome.trim() : '';
+                return idValue || slugValue || nameValue;
+            }
+            return '';
+        }
+
         function getSummaryCardIdentity(card, fallbackIndex = 0, fallbackSource = 'unknown') {
             if (!card || typeof card !== 'object') {
                 return `${fallbackSource}:${fallbackIndex}`;
             }
+            const typeKey = getCardAnalysisTypeKey(card);
             const cnjDigits = String(card.cnj || '').replace(/\D/g, '');
             if (cnjDigits) {
-                return `cnj:${cnjDigits}`;
+                return typeKey ? `cnj:${cnjDigits}:type:${typeKey}` : `cnj:${cnjDigits}`;
             }
             const contracts = Array.isArray(card.contratos)
                 ? card.contratos.map(item => String(item).trim()).filter(Boolean).sort().join(',')
@@ -2187,22 +2208,30 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             if (source === 'active') {
                 cardData = activeCards[cardIndex] || null;
-                if (cardData) {
-                    const normalizedActive = normalizeProcessCardForSummary(cardData) || cardData;
-                    const activeIdentity = getSummaryCardIdentity(normalizedActive, cardIndex, 'active');
-                    const activeCnjDigits = String((normalizedActive && normalizedActive.cnj) || '').replace(/\D/g, '');
-                    const matchedSavedIndex = savedCards.findIndex((candidate, idx) => {
-                        const normalizedCandidate = normalizeProcessCardForSummary(candidate) || candidate;
-                        const savedIdentity = getSummaryCardIdentity(normalizedCandidate, idx, 'saved');
-                        if (activeIdentity && savedIdentity === activeIdentity) {
-                            return true;
-                        }
-                        if (activeCnjDigits) {
-                            const savedCnjDigits = String((normalizedCandidate && normalizedCandidate.cnj) || '').replace(/\D/g, '');
-                            return Boolean(savedCnjDigits && savedCnjDigits === activeCnjDigits);
-                        }
-                        return false;
-                    });
+                    if (cardData) {
+                        const normalizedActive = normalizeProcessCardForSummary(cardData) || cardData;
+                        const activeIdentity = getSummaryCardIdentity(normalizedActive, cardIndex, 'active');
+                        const activeCnjDigits = String((normalizedActive && normalizedActive.cnj) || '').replace(/\D/g, '');
+                        const activeTypeKey = getCardAnalysisTypeKey(normalizedActive);
+                        const matchedSavedIndex = savedCards.findIndex((candidate, idx) => {
+                            const normalizedCandidate = normalizeProcessCardForSummary(candidate) || candidate;
+                            const savedIdentity = getSummaryCardIdentity(normalizedCandidate, idx, 'saved');
+                            if (activeIdentity && savedIdentity === activeIdentity) {
+                                return true;
+                            }
+                            if (activeCnjDigits) {
+                                const savedCnjDigits = String((normalizedCandidate && normalizedCandidate.cnj) || '').replace(/\D/g, '');
+                                if (!savedCnjDigits || savedCnjDigits !== activeCnjDigits) {
+                                    return false;
+                                }
+                                const savedTypeKey = getCardAnalysisTypeKey(normalizedCandidate);
+                                if (activeTypeKey && savedTypeKey) {
+                                    return activeTypeKey === savedTypeKey;
+                                }
+                                return true;
+                            }
+                            return false;
+                        });
                     if (matchedSavedIndex > -1) {
                         resolvedEditIndex = matchedSavedIndex;
                         cardData = savedCards[matchedSavedIndex];
@@ -4779,6 +4808,7 @@ function formatCnjDigits(raw) {
                         const targetIdentity = getSummaryCardIdentity(targetCard, cardIndex, 'summary');
                         const targetCnjDigits = String((targetCard && targetCard.cnj) || '')
                             .replace(/\D/g, '');
+                        const targetTypeKey = getCardAnalysisTypeKey(targetCard);
                         const targetSource = String((processo && processo.__source) || '').trim();
                         const targetSavedIndex = Number.isFinite(processo && processo.__savedIndex)
                             ? Number(processo.__savedIndex)
@@ -4802,9 +4832,14 @@ function formatCnjDigits(raw) {
                             if (targetCnjDigits) {
                                 const candidateCnjDigits = String((normalizedCandidate && normalizedCandidate.cnj) || '')
                                     .replace(/\D/g, '');
-                                if (candidateCnjDigits && candidateCnjDigits === targetCnjDigits) {
-                                    return true;
+                                if (!candidateCnjDigits || candidateCnjDigits !== targetCnjDigits) {
+                                    return false;
                                 }
+                                const candidateTypeKey = getCardAnalysisTypeKey(normalizedCandidate);
+                                if (targetTypeKey && candidateTypeKey) {
+                                    return targetTypeKey === candidateTypeKey;
+                                }
+                                return true;
                             }
                             return false;
                         };
