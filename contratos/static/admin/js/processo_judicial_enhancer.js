@@ -2138,6 +2138,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!activeUserId) {
             return true;
         }
+        if (entry?.type === 'AP') {
+            return true;
+        }
         const responsavelId = entry?.responsavel_id || resolveResponsavelId(entry?.responsavel);
         return `${responsavelId || ''}` === `${activeUserId}`;
     };
@@ -2162,12 +2165,14 @@ document.addEventListener('DOMContentLoaded', function() {
     let restoreActiveEntryReference = () => {};
 
     const getTypeKey = (type) => {
+        if (type === 'AP') return 'tasksAP';
         if (type === 'P') return 'tasksP';
         if (type === 'S') return 'tasksS';
         return 'tasksT';
     };
 
     const getTypePrefix = (type) => {
+        if (type === 'AP') return 'Andamento';
         if (type === 'P') return 'Prazo';
         if (type === 'S') return 'Supervisão';
         return 'Tarefa';
@@ -2205,7 +2210,7 @@ document.addEventListener('DOMContentLoaded', function() {
         list.forEach((entry, index) => {
             const prefix = getTypePrefix(type);
             entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = type === 'S' ? 'S' : `${index + 1}`;
+            entry.label = type === 'S' ? 'S' : (type === 'AP' ? 'AP' : `${index + 1}`);
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
@@ -2221,6 +2226,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tasksT: [],
                 tasksP: [],
                 tasksS: [],
+                tasksAP: [],
                 monthIndex,
                 year,
             };
@@ -2336,7 +2342,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const mergeEntriesByBackend = (primary = [], secondary = []) => {
         const map = new Map();
         const add = (entry, prefer = false) => {
-            const normalizedType = entry.type === 'P' ? 'p' : entry.type === 'S' ? 's' : 't';
+            const normalizedType = entry.type === 'P'
+                ? 'p'
+                : entry.type === 'S'
+                    ? 's'
+                    : entry.type === 'AP'
+                        ? 'ap'
+                        : 't';
             const key = entry.backendId ? `b-${normalizedType}-${entry.backendId}` : `i-${entry.id}`;
             if (!prefer && map.has(key)) return;
             map.set(key, entry);
@@ -2354,6 +2366,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 day.tasksT.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'T' }));
                 day.tasksP.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'P' }));
                 day.tasksS.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'S' }));
+                day.tasksAP.forEach(entry => rebuilt.push({ ...entry, ...common, type: 'AP' }));
             });
         });
         return rebuilt;
@@ -2361,7 +2374,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const buildAgendaBackendKey = (entryType, backendId) => {
         const normalizedType = String(entryType || '').trim().toUpperCase();
         const normalizedId = `${backendId ?? ''}`.trim();
-        if (!normalizedId || !['T', 'P', 'S'].includes(normalizedType)) return '';
+        if (!normalizedId || !['T', 'P', 'S', 'AP'].includes(normalizedType)) return '';
         return `${normalizedType}:${normalizedId}`;
     };
 
@@ -2411,6 +2424,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const payloadDate = formatDateIso(targetDayInfo.year, targetDayInfo.monthIndex, targetDayInfo.day);
         rememberAgendaPendingDateOverride(entryData.type, entryData.backendId, targetDayInfo);
 
+        if (entryData.type === 'AP') {
+            return;
+        }
         if (entryData.type === 'S') {
             const cardSource = `${entryData.card_source || ''}`.trim();
             const cardIndex = Number.parseInt(`${entryData.card_index ?? ''}`, 10);
@@ -2463,6 +2479,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? 'P'
                 : entry.type === 'S'
                     ? 'S'
+                    : entry.type === 'AP'
+                        ? 'AP'
                     : 'T';
             entry.type = entryType;
             const targetList = dayInfo[getTypeKey(entryType)];
@@ -2550,6 +2568,8 @@ document.addEventListener('DOMContentLoaded', function() {
             ? 'P'
             : item.type === 'S'
                 ? 'S'
+                : item.type === 'AP'
+                    ? 'AP'
                 : 'T';
         const parsed = parseDateInputValue(item.date || item.data_limite || item.data);
         if (!parsed) return null;
@@ -2614,8 +2634,10 @@ document.addEventListener('DOMContentLoaded', function() {
             backendId: item.id || null,
             label: item.label || (
                 type === 'S'
-                        ? 'S'
-                        : (item.id ? `${item.id}` : `${parsed.day}`)
+                    ? 'S'
+                    : (type === 'AP'
+                        ? 'AP'
+                        : (item.id ? `${item.id}` : `${parsed.day}`))
                 ),
             nome: parteNome,
             parte_nome: parteNome,
@@ -2627,10 +2649,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     || item.title
                 || item.titulo
                 || '',
-            detail: item.detail || item.observacoes || '',
+            detail: item.detail || item.observacoes || item.texto_bruto || '',
             priority: type === 'T' ? (item.prioridade || '') : '',
             originalDay: originalParsed ? originalParsed.day : parsed.day,
             originalDate,
+            date: item.date || formatDateIso(parsed.year, parsed.monthIndex, parsed.day),
             day: parsed.day,
             monthIndex: parsed.monthIndex,
             year: parsed.year,
@@ -2652,6 +2675,11 @@ document.addEventListener('DOMContentLoaded', function() {
             analysis_lines: Array.isArray(item.analysis_lines)
                 ? item.analysis_lines.filter(line => line !== null && line !== undefined && line !== '')
                 : [],
+            texto_bruto: String(item.texto_bruto || item.detail || item.observacoes || '').trim(),
+            data_andamento: item.data_andamento || null,
+            data_deteccao: item.data_deteccao || null,
+            prazo_extraido: item.prazo_extraido || null,
+            status: item.status || '',
             prescricao_date: item.prescricao_date || null,
             expired: Boolean(item.expired),
             active: Boolean(item.active),
@@ -2864,7 +2892,9 @@ document.addEventListener('DOMContentLoaded', function() {
             ? dayData.tasksT
             : type === 'P'
                 ? dayData.tasksP
-                : dayData.tasksS;
+                : type === 'AP'
+                    ? dayData.tasksAP
+                    : dayData.tasksS;
         if (navWrap) {
             navWrap.style.display = 'none';
         }
@@ -3192,7 +3222,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 const detail = entryData.detail || entryData.observacoes || entryData.description;
                 detailCardBody.innerHTML = '';
-                if (type === 'S') {
+                if (type === 'AP') {
+                    const rawText = entryData.texto_bruto || detail || '';
+                    if (rawText) {
+                        const paragraph = document.createElement('p');
+                        paragraph.textContent = rawText;
+                        detailCardBody.appendChild(paragraph);
+                    }
+                    const meta = document.createElement('div');
+                    meta.className = 'agenda-panel__details-item-meta';
+                    const addMetaRow = (labelText, valueText) => {
+                        if (!valueText) return;
+                        const row = document.createElement('div');
+                        row.className = 'agenda-panel__details-item-meta-row';
+                        const labelEl = document.createElement('span');
+                        labelEl.className = 'agenda-panel__details-item-meta-label';
+                        labelEl.textContent = `${labelText}:`;
+                        const valueEl = document.createElement('span');
+                        valueEl.className = 'agenda-panel__details-item-meta-value';
+                        valueEl.textContent = valueText;
+                        row.append(labelEl, valueEl);
+                        meta.appendChild(row);
+                    };
+                    addMetaRow('Status', entryData.status_label || entryData.status);
+                    addMetaRow('Data do andamento', formatDateLabel(entryData.originalDate || entryData.data_andamento));
+                    addMetaRow('Detectado em', formatDateLabel(entryData.date || entryData.data_deteccao));
+                    addMetaRow('CNJ', entryData.cnj_label);
+                    addMetaRow('Parte', entryData.nome || entryData.parte_nome || '');
+                    addMetaRow('Prazo extraído', formatDateLabel(entryData.prazo_extraido));
+                    if (meta.children.length) {
+                        detailCardBody.appendChild(meta);
+                    }
+                    if (!detailCardBody.textContent.trim()) {
+                        detailCardBody.textContent = 'Sem detalhes adicionais.';
+                    }
+                } else if (type === 'S') {
                     if (detail) {
                         const paragraph = document.createElement('p');
                         paragraph.textContent = detail;
@@ -3229,7 +3293,7 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.dataset.entryId = entryData.id;
             entry.dataset.day = dayData.day;
             entryElements.push(entry);
-            const canDragDetailEntry = !isCompletedMode;
+            const canDragDetailEntry = !isCompletedMode && type !== 'AP';
             entry.draggable = Boolean(canDragDetailEntry);
             if (canDragDetailEntry) {
                 entry.addEventListener('dragstart', (event) => {
@@ -3250,7 +3314,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             detailList.appendChild(entry);
         });
-        const enableNav = (type === 'T' || type === 'P') && entryElements.length > 1;
+        const enableNav = (type === 'T' || type === 'P' || type === 'AP') && entryElements.length > 1;
         if (navWrap) {
             navWrap.style.display = enableNav ? 'inline-flex' : 'none';
         }
@@ -3287,7 +3351,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
         gridElement.innerHTML = '';
-        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>';
+        detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P, S ou AP para ver as tarefas, prazos, supervisões e andamentos.</p>';
         resetDetailCardBody();
         setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
@@ -3346,7 +3410,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const cardsWrapper = document.createElement('div');
             cardsWrapper.className = 'agenda-panel__day-cards';
             const currentDate = formatDateIso(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
-            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP, ...dayInfo.tasksS]
+            const hasHistory = [...dayInfo.tasksT, ...dayInfo.tasksP, ...dayInfo.tasksS, ...dayInfo.tasksAP]
                 .some(entry => entry.originalDate && entry.originalDate !== currentDate);
             if (showHistory && hasHistory) {
                 dayCell.classList.add('agenda-panel__day--history');
@@ -3361,7 +3425,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.className = 'agenda-panel__day-tag';
                 tag.dataset.type = type;
                 const draggableEntries = entries;
-                tag.draggable = !isCompletedMode && Boolean(draggableEntries.length);
+                tag.draggable = !isCompletedMode && type !== 'AP' && Boolean(draggableEntries.length);
                 const label = document.createElement('span');
                 label.className = 'agenda-panel__day-tag-letter';
                 label.textContent = type;
@@ -3434,6 +3498,7 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTag('T', dayInfo.tasksT);
             renderTag('P', dayInfo.tasksP);
             renderTag('S', dayInfo.tasksS);
+            renderTag('AP', dayInfo.tasksAP);
             const shortenName = (value, maxWords = 2) => {
                 if (!value) return '';
                 const parts = String(value).trim().split(/\s+/).filter(Boolean);
@@ -3494,6 +3559,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     ...dayInfo.tasksT.map(entry => ({ entry, type: 'T' })),
                     ...dayInfo.tasksP.map(entry => ({ entry, type: 'P' })),
                     ...dayInfo.tasksS.map(entry => ({ entry, type: 'S' })),
+                    ...dayInfo.tasksAP.map(entry => ({ entry, type: 'AP' })),
                 ];
                 if (!allEntries.length) {
                     return;
@@ -3504,7 +3570,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     const card = document.createElement('button');
                     card.type = 'button';
                     card.className = `agenda-panel__day-card agenda-panel__day-card--${type.toLowerCase()}`;
-                    card.draggable = !isCompletedMode;
+                    const canDragCard = !isCompletedMode && type !== 'AP';
+                    card.draggable = canDragCard;
                     if (type === 'S' && entry.expired) {
                         card.classList.add('agenda-panel__day-card--expired');
                     }
@@ -3546,7 +3613,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         card.title = labelText;
                     }
                     card.append(typeEl, textEl);
-                    if (!isCompletedMode) {
+                    if (canDragCard) {
                         card.addEventListener('dragstart', (event) => {
                             const payloadEntry = {
                                 id: entry.id,
@@ -3615,6 +3682,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (dayInfo.tasksS.length) {
                     populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'S');
+                } else if (dayInfo.tasksAP.length) {
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    recordActiveDay(dayInfo, 'AP');
                 } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'T');
@@ -3719,6 +3789,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const preferredType = state.activeType;
                 if (preferredType === 'S' && dayInfo.tasksS.length) {
                     populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                } else if (preferredType === 'AP' && dayInfo.tasksAP.length) {
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                 } else if (preferredType === 'T' && dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
@@ -3726,6 +3798,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (dayInfo.tasksS.length) {
                     populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'S');
+                } else if (dayInfo.tasksAP.length) {
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    recordActiveDay(dayInfo, 'AP');
                 } else if (dayInfo.tasksT.length) {
                     populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
                     recordActiveDay(dayInfo, 'T');
@@ -3768,7 +3843,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!parsedDate) return null;
 
         const rawType = String(source.type || '').trim().toUpperCase();
-        const type = ['T', 'P', 'S'].includes(rawType) ? rawType : null;
+        const type = ['T', 'P', 'S', 'AP'].includes(rawType) ? rawType : null;
         return {
             year: parsedDate.year,
             monthIndex: parsedDate.monthIndex,
@@ -3840,7 +3915,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="agenda-panel__details-list">
                                 <p class="agenda-panel__details-title">Eventos do dia</p>
                                 <div class="agenda-panel__details-list-inner">
-                                    <p class="agenda-panel__details-empty">Clique em T, P ou S para ver as tarefas, prazos e supervisões.</p>
+                                    <p class="agenda-panel__details-empty">Clique em T, P, S ou AP para ver as tarefas, prazos, supervisões e andamentos.</p>
                                 </div>
                             </div>
                             <div class="agenda-panel__details-card">
@@ -4607,7 +4682,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     ? 'Prazo'
                     : type === 'S'
                         ? 'Supervisão'
-                        : '';
+                        : type === 'AP'
+                            ? 'Andamento'
+                            : '';
             detailTitleType.textContent = typeLabel;
             detailTitleType.dataset.type = type || '';
             detailTitleType.style.visibility = typeLabel ? 'visible' : 'hidden';
@@ -8869,9 +8946,46 @@ document.addEventListener('DOMContentLoaded', function() {
     stripInlineOriginalCells();
 
     const makeInfoCardSticky = () => {
-        const card = document.querySelector('.info-card');
-        if (!card) return;
-        card.classList.add('info-card-floating');
+        const shell = document.querySelector('.info-cards-shell');
+        if (!shell) return;
+        const cards = shell.querySelectorAll('.info-card');
+        if (!cards.length) return;
+        cards.forEach((card) => card.classList.add('info-card-floating'));
+
+        const placeholder = document.createElement('div');
+        placeholder.className = 'info-cards-shell-placeholder';
+        placeholder.style.display = 'none';
+        shell.parentNode?.insertBefore(placeholder, shell.nextSibling);
+
+        const topOffset = 12;
+        const applyFixed = () => {
+            const isFixed = shell.classList.contains('info-cards-shell--fixed');
+            const rect = (isFixed && placeholder.style.display !== 'none')
+                ? placeholder.getBoundingClientRect()
+                : shell.getBoundingClientRect();
+            const shouldFix = rect.top <= topOffset;
+
+            if (shouldFix && !isFixed) {
+                placeholder.style.height = `${shell.offsetHeight}px`;
+                placeholder.style.display = 'block';
+                shell.classList.add('info-cards-shell--fixed');
+            } else if (!shouldFix && isFixed) {
+                shell.classList.remove('info-cards-shell--fixed');
+                placeholder.style.display = 'none';
+                shell.style.width = '';
+                shell.style.left = '';
+            }
+
+            if (shell.classList.contains('info-cards-shell--fixed')) {
+                const anchorRect = placeholder.getBoundingClientRect();
+                shell.style.width = `${anchorRect.width}px`;
+                shell.style.left = `${anchorRect.left}px`;
+            }
+        };
+
+        applyFixed();
+        document.addEventListener('scroll', applyFixed, true);
+        window.addEventListener('resize', applyFixed);
     };
     makeInfoCardSticky();
 

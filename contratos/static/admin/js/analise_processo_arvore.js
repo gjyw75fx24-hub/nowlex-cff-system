@@ -5011,7 +5011,17 @@ function formatCnjDigits(raw) {
             const $barradoNote = $('<div class="analise-supervision-barrado-note" style="display:none;"></div>');
             const $concludeRow = $('<div class="analise-supervision-conclude-row"></div>');
             const $concludeBtn = $('<button type="button" class="analise-supervision-conclude-btn">Concluir Revisão</button>');
+            const isArchived = () => {
+                const status = String(processo.supervisor_status || 'pendente').toLowerCase();
+                return !processo.supervisionado && status !== 'pendente';
+            };
             const updateConcludeButton = () => {
+                if (isArchived()) {
+                    $concludeBtn.text('Retomar revisão');
+                    $concludeBtn.prop('disabled', false);
+                    return;
+                }
+                $concludeBtn.text('Concluir Revisão');
                 const needsConfirm = Boolean(processo.awaiting_supervision_confirm) && (processo.supervisor_status || 'pendente') !== 'pendente';
                 $concludeBtn.prop('disabled', !needsConfirm);
             };
@@ -5023,6 +5033,7 @@ function formatCnjDigits(raw) {
                 $statusBtn.removeClass(allStatusClasses);
                 $statusBtn.addClass(SUPERVISION_STATUS_CLASSES[status]);
                 processo.awaiting_supervision_confirm = status !== 'pendente';
+                $statusBtn.prop('disabled', isArchived());
                 if (typeof onStatusChange === 'function') {
                     onStatusChange(status);
                 }
@@ -5170,6 +5181,20 @@ function formatCnjDigits(raw) {
             updateConcludeButton();
 
             $concludeBtn.on('click', () => {
+                if (isArchived()) {
+                    processo.supervisionado = true;
+                    processo.supervisor_status = 'pendente';
+                    processo.awaiting_supervision_confirm = false;
+                    if (processo.cnj && processo.cnj.toLowerCase().includes('não judicializado')) {
+                        userResponses.supervisionado_nao_judicializado = true;
+                        userResponses.supervisor_status_nao_judicializado = 'pendente';
+                        userResponses.awaiting_supervision_confirm = false;
+                    }
+                    updateStatusButton();
+                    saveResponses();
+                    renderSupervisionPanel();
+                    return;
+                }
                 processo.supervisionado = false;
                 processo.awaiting_supervision_confirm = false;
                 updateConcludeButton();
@@ -5286,9 +5311,13 @@ function formatCnjDigits(raw) {
                         return;
                     }
                     ensureSupervisionFields(processo);
-                    if (!processo.supervisionado) {
+                    const status = String(processo.supervisor_status || 'pendente').toLowerCase();
+                    const isArchived = !processo.supervisionado && status !== 'pendente';
+                    const isActive = Boolean(processo.supervisionado);
+                    if (!isActive && !isArchived) {
                         return;
                     }
+                    processo.__supervisionArchived = isArchived;
                     const identity = getSupervisionCardIdentity(processo, index, source);
                     if (identityToIndex.has(identity)) {
                         if (preferOnDuplicate) {
@@ -5304,26 +5333,59 @@ function formatCnjDigits(raw) {
 
             appendFrom(savedProcessos, 'saved', false);
             appendFrom(activeProcessos, 'active', true);
-            return deduped;
+
+            const active = [];
+            const archived = [];
+            deduped.forEach((processo) => {
+                if (processo.__supervisionArchived) {
+                    archived.push(processo);
+                } else {
+                    active.push(processo);
+                }
+            });
+            return { active, archived };
         }
 
         function renderSupervisionPanel() {
             if (!isSupervisorUser || !$supervisionPanelContent) {
                 return;
             }
-            const processos = getProcessCardsForSupervisionPanel();
-            if (processos.length === 0) {
+            const { active: processos, archived: archivedProcessos } = getProcessCardsForSupervisionPanel();
+            if (processos.length === 0 && archivedProcessos.length === 0) {
                 $supervisionPanelContent.html(
                     '<p>Nenhum processo está aguardando supervisão.</p>'
                 );
                 return;
             }
-            const $list = $('<div class="analise-supervision-card-list"></div>');
-            processos.forEach((processo, index) => {
-                const $card = createSupervisionCard(processo, index);
-                $list.append($card);
-            });
-            $supervisionPanelContent.empty().append($list);
+            $supervisionPanelContent.empty();
+            if (processos.length) {
+                const $list = $('<div class="analise-supervision-card-list"></div>');
+                processos.forEach((processo, index) => {
+                    const $card = createSupervisionCard(processo, index);
+                    $list.append($card);
+                });
+                $supervisionPanelContent.append($list);
+            } else {
+                $supervisionPanelContent.append(
+                    '<p style="margin:0; color:#5f6b7a;">Nenhum processo pendente no momento.</p>'
+                );
+            }
+
+            if (archivedProcessos.length) {
+                const $archive = $('<details class="analise-supervision-archive"></details>');
+                const $summary = $(
+                    `<summary>Concluídos (${archivedProcessos.length})</summary>`
+                );
+                const $archiveList = $('<div class="analise-supervision-card-list analise-supervision-card-list--archive"></div>');
+                archivedProcessos.forEach((processo, index) => {
+                    const $card = createSupervisionCard(processo, index);
+                    $card.addClass('analise-supervision-card--archived');
+                    $archiveList.append($card);
+                });
+                $archive.append($summary);
+                $archive.append($archiveList);
+                $supervisionPanelContent.append($archive);
+            }
             refreshObservationNotes();
         }
 

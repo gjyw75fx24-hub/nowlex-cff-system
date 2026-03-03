@@ -1,0 +1,381 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+    <style>
+        .guardados-page {
+            padding: 2rem 1.25rem;
+            display: flex;
+            justify-content: center;
+        }
+        .guardados-panel {
+            width: min(1200px, 100%);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .guardados-card {
+            background: #fff;
+            border-radius: 18px;
+            border: 1px solid rgba(15, 58, 118, 0.12);
+            box-shadow: 0 12px 26px rgba(15, 58, 118, 0.12);
+            padding: 1.5rem;
+        }
+        .guardados-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .guardados-header h1 {
+            margin: 0 0 0.35rem 0;
+        }
+        .guardados-header p {
+            margin: 0;
+            color: #4b5563;
+            font-size: 0.9rem;
+        }
+        .guardados-filters {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .guardados-filters-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        .guardados-field {
+            min-width: 190px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        .guardados-field label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #2f3b4f;
+        }
+        .guardados-field select {
+            padding: 0.35rem 0.5rem;
+            border-radius: 6px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            font-size: 0.85rem;
+        }
+        .guardados-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .guardados-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .guardados-table th,
+        .guardados-table td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0.6rem 0.5rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        .guardados-table th {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+        .guardados-table a {
+            color: #1f6da0;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .guardados-table a:hover {
+            text-decoration: underline;
+        }
+        .guardados-card-tipo--clickable {
+            cursor: pointer;
+            user-select: none;
+        }
+        .guardados-card-tipo--clickable:hover {
+            text-decoration: underline;
+        }
+        .guardados-card-tipo--clickable.is-single {
+            cursor: default;
+            text-decoration: none;
+        }
+        .guardados-card-count {
+            color: #6b7280;
+            font-size: 0.7rem;
+        }
+        .guardados-empty {
+            text-align: center;
+            padding: 2rem 0;
+            color: #6b7280;
+        }
+        .guardados-pagination {
+            margin-top: 1rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+        }
+        .guardados-pagination a,
+        .guardados-pagination span {
+            padding: 0.35rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid #d1d5db;
+            font-size: 0.8rem;
+            text-decoration: none;
+            color: #374151;
+        }
+        .guardados-pagination .is-active {
+            background: #1f6da0;
+            color: #fff;
+            border-color: #1f6da0;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="guardados-page">
+    <div class="guardados-panel">
+        <div class="guardados-card">
+            <div class="guardados-header">
+                <div>
+                    <h1>Guardados</h1>
+                    <p>Cadastros concluídos sem pendências operacionais abertas.</p>
+                </div>
+                <a class="button" href="{% url 'admin:contratos_processojudicial_changelist' %}">Processos</a>
+            </div>
+            <form method="get" class="guardados-filters">
+                <div class="guardados-filters-row">
+                    <div class="guardados-field">
+                        <label for="guardados-view">Modo</label>
+                        <select id="guardados-view" name="view">
+                            <option value="processo" {% if view_mode == "processo" %}selected{% endif %}>Resumo por processo</option>
+                            <option value="analise" {% if view_mode == "analise" %}selected{% endif %}>Por análise</option>
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-carteira">Carteira</label>
+                        <select id="guardados-carteira" name="carteira">
+                            <option value="">Todas</option>
+                            {% for carteira in carteiras %}
+                                <option value="{{ carteira.id }}" {% if carteira.id|stringformat:"s" == selected.carteira %}selected{% endif %}>
+                                    {{ carteira.nome }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-tipo">Tipo de análise</label>
+                        <select id="guardados-tipo" name="tipo_analise">
+                            <option value="">Todos</option>
+                            {% for tipo in tipos_analise %}
+                                <option value="{{ tipo.slug }}" {% if tipo.slug == selected.tipo_analise %}selected{% endif %}>
+                                    {{ tipo.nome }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-supervision-status">Status supervisão</label>
+                        <select id="guardados-supervision-status" name="supervision_status">
+                            <option value="">Todos</option>
+                            {% for value, label in supervision_status_choices %}
+                                <option value="{{ value }}" {% if value == selected.supervision_status %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-viabilidade">Viabilidade</label>
+                        <select id="guardados-viabilidade" name="viabilidade">
+                            <option value="">Todas</option>
+                            {% for value, label in viabilidade_choices %}
+                                <option value="{{ value }}" {% if value == selected.viabilidade %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-prescricao">Mês de prescrição</label>
+                        <select id="guardados-prescricao" name="prescricao_mes">
+                            <option value="">Todos</option>
+                            {% for month in prescricao_meses %}
+                                <option value="{{ month }}" {% if month|stringformat:"s" == selected.prescricao_mes %}selected{% endif %}>
+                                    {{ month }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-ordem">Ordenação</label>
+                        <select id="guardados-ordem" name="ordem">
+                            <option value="recente" {% if selected.ordem == "recente" %}selected{% endif %}>Última movimentação (recente)</option>
+                            <option value="antigo" {% if selected.ordem == "antigo" %}selected{% endif %}>Última movimentação (antigo)</option>
+                        </select>
+                    </div>
+                    <div class="guardados-field">
+                        <label for="guardados-analista">Analista</label>
+                        <input id="guardados-analista" type="text" name="analista" value="{{ selected.analista }}" placeholder="Nome do analista" style="padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #d1d5db; font-size:0.85rem;">
+                    </div>
+                </div>
+                <div class="guardados-actions">
+                    <button type="submit" class="button">Filtrar</button>
+                    <a class="button" href="{% url 'admin:contratos_guardados' %}">Limpar</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="guardados-card">
+            <table class="guardados-table">
+                <thead>
+                    <tr>
+                        <th>Processo</th>
+                        <th>Parte</th>
+                        {% if view_mode == "processo" %}
+                            <th>Tipo de análise</th>
+                            <th>Carteira</th>
+                            <th>Analista</th>
+                            <th>Analisado em</th>
+                            <th>Viabilidade</th>
+                            <th>Prescrição</th>
+                            <th>Última movimentação</th>
+                        {% else %}
+                            <th>Tipo de análise</th>
+                            <th>Carteira</th>
+                            <th>Analista</th>
+                            <th>Analisado em</th>
+                            <th>Viabilidade</th>
+                            <th>Prescrição</th>
+                            <th>Última movimentação</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td><a href="{{ row.admin_url }}">{{ row.cnj }}</a></td>
+                            <td>
+                                <div>{{ row.parte_nome }}</div>
+                                {% if row.parte_documento %}
+                                    <small>{{ row.parte_documento }}</small>
+                                {% endif %}
+                            </td>
+                            {% if view_mode == "processo" %}
+                                <td class="guardados-card-tipo guardados-card-tipo--clickable" data-cards="{{ row.cards_json|escape }}" role="button" tabindex="0" aria-label="Alternar tipo de análise">
+                                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                                        <span class="guardados-card-tipo-text">{{ row.card_tipo }}</span>
+                                        <small class="guardados-card-count">{% if row.cards_count %}1/{{ row.cards_count }}{% else %}0/0{% endif %}</small>
+                                    </div>
+                                </td>
+                                <td class="guardados-card-carteira">{{ row.card_carteira }}</td>
+                                <td class="guardados-card-analista">{{ row.card_analista }}</td>
+                                <td class="guardados-card-data">{{ row.card_analisado_em }}</td>
+                                <td>{{ row.viabilidade }}</td>
+                                <td>{{ row.prescricao }}</td>
+                                <td>{{ row.ultima_movimentacao }}</td>
+                            {% else %}
+                                <td>{{ row.tipo_nome }}</td>
+                                <td>{{ row.card_carteira }}</td>
+                                <td>{{ row.card_analista }}</td>
+                                <td>{{ row.card_analisado_em }}</td>
+                                <td>{{ row.viabilidade }}</td>
+                                <td>{{ row.prescricao }}</td>
+                                <td>{{ row.ultima_movimentacao }}</td>
+                            {% endif %}
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="9" class="guardados-empty">Nenhum cadastro guardado encontrado.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            {% if page_obj and page_obj.paginator.num_pages > 1 %}
+                <div class="guardados-pagination">
+                    {% if page_obj.has_previous %}
+                        <a href="?{% if base_query %}{{ base_query }}&{% endif %}page={{ page_obj.previous_page_number }}">‹ Anterior</a>
+                    {% endif %}
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if num == page_obj.number %}
+                            <span class="is-active">{{ num }}</span>
+                        {% elif num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
+                            <a href="?{% if base_query %}{{ base_query }}&{% endif %}page={{ num }}">{{ num }}</a>
+                        {% endif %}
+                    {% endfor %}
+                    {% if page_obj.has_next %}
+                        <a href="?{% if base_query %}{{ base_query }}&{% endif %}page={{ page_obj.next_page_number }}">Próxima ›</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% if view_mode == "processo" %}
+<script>
+    document.querySelectorAll('.guardados-card-tipo').forEach((cell) => {
+        const cards = (() => {
+            try {
+                return JSON.parse(cell.dataset.cards || '[]');
+            } catch (e) {
+                return [];
+            }
+        })();
+        if (!cards.length) {
+            const row = cell.closest('tr');
+            cell.classList.add('is-single');
+            cell.setAttribute('aria-disabled', 'true');
+            cell.removeAttribute('role');
+            cell.removeAttribute('tabindex');
+            return;
+        }
+        let index = 0;
+        const row = cell.closest('tr');
+        const tipoEl = cell.querySelector('.guardados-card-tipo-text');
+        const countEl = cell.querySelector('.guardados-card-count');
+        const carteiraEl = row.querySelector('.guardados-card-carteira');
+        const analistaEl = row.querySelector('.guardados-card-analista');
+        const dataEl = row.querySelector('.guardados-card-data');
+
+        const applyCard = () => {
+            const card = cards[index] || {};
+            if (tipoEl) tipoEl.textContent = card.tipo_nome || '-';
+            if (carteiraEl) carteiraEl.textContent = card.carteira || '-';
+            if (analistaEl) analistaEl.textContent = card.analista || '-';
+            if (dataEl) dataEl.textContent = card.analisado_em || '-';
+            if (countEl) countEl.textContent = `${index + 1}/${cards.length}`;
+        };
+        applyCard();
+        const advance = () => {
+            index = (index + 1) % cards.length;
+            applyCard();
+        };
+        if (cards.length <= 1) {
+            cell.classList.add('is-single');
+            cell.setAttribute('aria-disabled', 'true');
+            cell.removeAttribute('role');
+            cell.removeAttribute('tabindex');
+            return;
+        }
+        cell.addEventListener('click', advance);
+        cell.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                advance();
+            }
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}

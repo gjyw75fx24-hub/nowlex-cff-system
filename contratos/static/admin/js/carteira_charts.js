@@ -1058,7 +1058,7 @@ window.addEventListener('DOMContentLoaded', () => {
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
 
-    const buildPeticaoUrl = (tipoSlug, carteiraId) => {
+    const buildPeticaoUrl = (tipoSlug, carteiraId, protocoladas = false) => {
         if (!kpiProcessChangelistUrl) return '';
         const slug = String(tipoSlug || '').trim();
         if (!slug) return '';
@@ -1067,6 +1067,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const carteiraParsed = Number(carteiraId || 0);
         if (carteiraParsed > 0) {
             params.set('peticao_carteira_id', String(carteiraParsed));
+        }
+        if (protocoladas) {
+            params.set('peticao_protocoladas', '1');
         }
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
@@ -1502,11 +1505,13 @@ window.addEventListener('DOMContentLoaded', () => {
                 const label = String(tipo.label || slug || 'Tipo');
                 const pieces = Number(totalItem.pieces || 0);
                 const processos = Number(totalItem.processos || 0);
+                const protocoladas = Number(totalItem.protocoladas || 0);
                 const url = buildPeticaoUrl(slug, null);
                 const inner = `
                     <span style="font-weight:700;">${escapeHtml(label)}</span>
                     <span>· Peças: <strong>${numberPt(pieces)}</strong></span>
                     <span>· Processos: <strong>${numberPt(processos)}</strong></span>
+                    <span>· Protocoladas: <strong>${numberPt(protocoladas)}</strong></span>
                 `;
                 if (url) {
                     return `
@@ -1527,15 +1532,28 @@ window.addEventListener('DOMContentLoaded', () => {
         const peticaoCtx = peticaoCanvas ? peticaoCanvas.getContext('2d') : null;
         if (peticaoCtx) {
             const labels = peticaoByCarteira.map((item) => String(item.carteira_nome || item.carteira_id || 'Carteira'));
-            const datasets = peticaoTypes.map((tipo, idx) => {
+            const datasets = [];
+            peticaoTypes.forEach((tipo, idx) => {
                 const slug = String(tipo.slug || '');
-                return {
-                    label: String(tipo.label || slug || 'Tipo'),
+                const label = String(tipo.label || slug || 'Tipo');
+                datasets.push({
+                    label,
+                    tipoSlug: slug,
+                    protocoladas: false,
                     data: peticaoByCarteira.map((item) => Number((item.pieces || {})[slug] || 0)),
                     backgroundColor: paletteColor(idx, 0.68),
                     borderColor: paletteColor(idx, 0.96),
                     borderWidth: 1,
-                };
+                });
+                datasets.push({
+                    label: `${label} (Protocoladas)`,
+                    tipoSlug: slug,
+                    protocoladas: true,
+                    data: peticaoByCarteira.map((item) => Number((item.protocoladas || {})[slug] || 0)),
+                    backgroundColor: paletteColor(idx, 0.22),
+                    borderColor: paletteColor(idx, 0.96),
+                    borderWidth: 1.4,
+                });
             });
 
             new Chart(peticaoCtx, {
@@ -1581,10 +1599,12 @@ window.addEventListener('DOMContentLoaded', () => {
                         const first = elements[0];
                         const datasetIndex = Number(first.datasetIndex);
                         const dataIndex = Number(first.index);
-                        const tipo = peticaoTypes[datasetIndex];
+                        const dataset = chart.data.datasets?.[datasetIndex] || {};
+                        const tipoSlug = String(dataset.tipoSlug || '').trim();
+                        const isProtocoladas = Boolean(dataset.protocoladas);
                         const carteira = peticaoByCarteira[dataIndex];
-                        if (!tipo || !carteira) return;
-                        const url = buildPeticaoUrl(tipo.slug, carteira.carteira_id);
+                        if (!tipoSlug || !carteira) return;
+                        const url = buildPeticaoUrl(tipoSlug, carteira.carteira_id, isProtocoladas);
                         if (url) {
                             window.location.href = url;
                         }

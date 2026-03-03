@@ -492,6 +492,34 @@
     gap: 16px;
 }
 
+.analise-supervision-archive {
+    border: 1px dashed #d6deea;
+    border-radius: 10px;
+    background: #f8fafd;
+    padding: 6px 8px 10px;
+}
+
+.analise-supervision-archive summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #3f536b;
+    padding: 8px 6px;
+    list-style: none;
+}
+
+.analise-supervision-archive summary::-webkit-details-marker {
+    display: none;
+}
+
+.analise-supervision-card-list--archive {
+    margin-top: 8px;
+}
+
+.analise-supervision-card--archived {
+    border-color: #d7e0ec;
+    background: #fbfcff;
+}
+
 .analise-supervision-card {
     border: 1px solid #e0e0e0;
     border-radius: 8px;

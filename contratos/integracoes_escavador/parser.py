@@ -1,8 +1,16 @@
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
+from django.db import connection
 from django.db.models import Count
+from django.utils import timezone
 from django.utils.timezone import make_aware
-from contratos.models import ProcessoJudicial, StatusProcessual, Parte, AndamentoProcessual
+from contratos.models import (
+    ProcessoJudicial,
+    StatusProcessual,
+    Parte,
+    AndamentoProcessual,
+    AndamentoProcessualPendente,
+)
 
 def parse_dados_processo(processo: ProcessoJudicial, dados_api: dict):
     """
@@ -68,6 +76,22 @@ def _normalize_descricao(descricao: str | None) -> str:
         return ""
     return " ".join(descricao.split())
 
+def _build_andamento_titulo(descricao: str | None) -> str:
+    normalized = _normalize_descricao(descricao)
+    if not normalized:
+        return ""
+    max_len = 255
+    if len(normalized) <= max_len:
+        return normalized
+    return normalized[: max_len - 3].rstrip() + "..."
+
+
+def _has_andamento_pendente_table():
+    try:
+        return AndamentoProcessualPendente._meta.db_table in connection.introspection.table_names()
+    except Exception:
+        return False
+
 
 def _normalize_cnj_digits(value: str | None) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
@@ -120,6 +144,8 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
         (andamento.numero_cnj_id, andamento.data.isoformat(), _normalize_descricao(andamento.descricao))
         for andamento in processo.andamentos.all()
     }
+    detected_at = timezone.now()
+    pending_table_available = _has_andamento_pendente_table()
     for andamento_api in movimentacoes:
         data_str = andamento_api.get('data')
         descricao = andamento_api.get('conteudo')
@@ -133,7 +159,7 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
             if chave in existentes:
                 continue
 
-            _, criado = AndamentoProcessual.objects.get_or_create(
+            andamento_obj, criado = AndamentoProcessual.objects.get_or_create(
                 processo=processo,
                 numero_cnj=numero_cnj_obj,
                 data=data_andamento,
@@ -142,6 +168,20 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
             if criado:
                 novos_andamentos += 1
                 existentes.add(chave)
+                if pending_table_available:
+                    titulo = _build_andamento_titulo(descricao)
+                    if not titulo:
+                        titulo = f"Andamento {data_andamento.date().isoformat()}"
+                    AndamentoProcessualPendente.objects.get_or_create(
+                        andamento=andamento_obj,
+                        defaults={
+                            'processo': processo,
+                            'titulo': titulo,
+                            'texto_bruto': descricao,
+                            'data_andamento': data_andamento,
+                            'data_deteccao': detected_at,
+                        },
+                    )
         except (ValueError, TypeError):
             print(f"Formato de data inválido para o andamento: {data_str}")
             continue

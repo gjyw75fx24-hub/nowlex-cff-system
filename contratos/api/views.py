@@ -25,6 +25,7 @@ from django.views import View
 from django.http import JsonResponse
 
 from ..models import (
+    AndamentoProcessualPendente,
     AnaliseProcesso,
     Carteira,
     Contrato,
@@ -270,6 +271,21 @@ class AgendaGeralAPIView(APIView):
             .select_related('processo', 'responsavel')
             .filter(**prazo_filter)
         )
+        andamentos_pendentes = (
+            AndamentoProcessualPendente.objects
+            .select_related('processo', 'andamento')
+        )
+        if show_completed:
+            andamentos_pendentes = andamentos_pendentes.filter(
+                status=AndamentoProcessualPendente.STATUS_TRATADO
+            )
+        else:
+            andamentos_pendentes = andamentos_pendentes.filter(
+                status__in=[
+                    AndamentoProcessualPendente.STATUS_NOVO,
+                    AndamentoProcessualPendente.STATUS_PENDENTE_RESPONDIDO_MANUALMENTE,
+                ]
+            )
 
         # Por padrão, Agenda Geral mostra apenas itens do próprio usuário.
         # Supervisor pode ver todos com `?all_users=1`.
@@ -292,10 +308,15 @@ class AgendaGeralAPIView(APIView):
                 | Q(processo__carteira_id__in=allowed_carteiras)
                 | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
             ).distinct()
+            andamentos_pendentes = andamentos_pendentes.filter(
+                Q(processo__carteira_id__in=allowed_carteiras)
+                | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
+            ).distinct()
 
         processo_ids = set(
             list(tarefas.values_list('processo_id', flat=True))
             + list(prazos.values_list('processo_id', flat=True))
+            + list(andamentos_pendentes.values_list('processo_id', flat=True))
         )
         processo_meta = {}
         if processo_ids:
@@ -369,6 +390,59 @@ class AgendaGeralAPIView(APIView):
                 item['parte_cpf'] = meta.get('cpf', '')
                 item['documento'] = meta.get('cpf', '')
 
+        def _format_date_only(value):
+            if not value:
+                return ''
+            if isinstance(value, datetime):
+                dt = value
+                if timezone.is_naive(dt):
+                    dt = timezone.make_aware(dt, timezone.get_default_timezone())
+                dt = timezone.localtime(dt, timezone.get_default_timezone())
+                return dt.date().isoformat()
+            if hasattr(value, 'isoformat'):
+                return value.isoformat()[:10]
+            return str(value)[:10]
+
+        andamentos_data = []
+        for andamento in andamentos_pendentes:
+            processo = andamento.processo
+            meta = processo_meta.get(andamento.processo_id) or {}
+            texto_bruto = andamento.texto_bruto or (
+                andamento.andamento.descricao if andamento.andamento_id else ''
+            )
+            titulo = (andamento.titulo or '').strip() or (texto_bruto or '').strip()
+            if not titulo:
+                titulo = 'Andamento processual'
+            date_str = _format_date_only(andamento.data_deteccao)
+            original_date_str = _format_date_only(andamento.data_andamento)
+            andamentos_data.append({
+                'type': 'AP',
+                'id': andamento.pk,
+                'title': titulo,
+                'titulo': titulo,
+                'description': titulo,
+                'detail': texto_bruto,
+                'texto_bruto': texto_bruto,
+                'date': date_str,
+                'original_date': original_date_str,
+                'data_andamento': andamento.data_andamento.isoformat() if andamento.data_andamento else None,
+                'data_deteccao': andamento.data_deteccao.isoformat() if andamento.data_deteccao else None,
+                'prazo_extraido': andamento.prazo_extraido.isoformat() if andamento.prazo_extraido else None,
+                'status': andamento.status,
+                'status_label': andamento.get_status_display(),
+                'admin_url': (
+                    reverse('admin:contratos_processojudicial_change', args=[processo.pk])
+                    if processo else ''
+                ),
+                'processo_id': processo.pk if processo else None,
+                'cnj_label': (processo.cnj if processo else '') or 'CNJ não informado',
+                'nome': meta.get('nome', ''),
+                'parte_nome': meta.get('nome', ''),
+                'cpf': meta.get('cpf', ''),
+                'parte_cpf': meta.get('cpf', ''),
+                'documento': meta.get('cpf', ''),
+            })
+
         # Supervisões (S):
         # - por padrão, supervisor deve enxergar toda a fila de supervisão;
         # - quando `user_id` é informado, filtra para o usuário selecionado.
@@ -379,7 +453,7 @@ class AgendaGeralAPIView(APIView):
             target_user=supervision_target_user,
         )
         agenda_items = sorted(
-            tarefas_data + prazos_data + supervision_entries,
+            tarefas_data + prazos_data + supervision_entries + andamentos_data,
             key=lambda x: x.get('date') or ''
         )
 

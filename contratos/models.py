@@ -312,6 +312,60 @@ class AndamentoProcessual(models.Model):
         return f"Andamento de {self.data.strftime('%d/%m/%Y')} em {self.processo.cnj}"
 
 
+class AndamentoProcessualPendente(models.Model):
+    STATUS_NOVO = 'novo'
+    STATUS_PENDENTE_RESPONDIDO_MANUALMENTE = 'pendente_respondido_manualmente'
+    STATUS_TRATADO = 'tratado'
+
+    STATUS_CHOICES = [
+        (STATUS_NOVO, 'Novo'),
+        (STATUS_PENDENTE_RESPONDIDO_MANUALMENTE, 'Pendente respondido manualmente'),
+        (STATUS_TRATADO, 'Tratado'),
+    ]
+
+    processo = models.ForeignKey(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='andamentos_pendentes',
+        verbose_name='Processo',
+    )
+    andamento = models.OneToOneField(
+        AndamentoProcessual,
+        on_delete=models.CASCADE,
+        related_name='pendencia',
+        verbose_name='Andamento',
+    )
+    titulo = models.CharField(max_length=255, verbose_name='Título')
+    texto_bruto = models.TextField(verbose_name='Texto bruto')
+    data_andamento = models.DateTimeField(verbose_name='Data do andamento')
+    data_deteccao = models.DateTimeField(default=timezone.now, verbose_name='Data de detecção')
+    prazo_extraido = models.DateField(null=True, blank=True, verbose_name='Prazo extraído')
+    status = models.CharField(
+        max_length=40,
+        choices=STATUS_CHOICES,
+        default=STATUS_NOVO,
+        verbose_name='Status',
+    )
+    tratado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='andamentos_processuais_tratados',
+        verbose_name='Tratado por',
+    )
+    tratado_em = models.DateTimeField(null=True, blank=True, verbose_name='Tratado em')
+    justificativa = models.TextField(blank=True, verbose_name='Justificativa')
+
+    class Meta:
+        verbose_name = 'Andamento Processual Pendente'
+        verbose_name_plural = 'Andamentos Processuais Pendentes'
+        ordering = ['-data_deteccao', '-id']
+
+    def __str__(self):
+        return f"Pendência AP #{self.pk} — {self.processo.cnj}"
+
+
 def processo_arquivo_upload_path(instance, filename):
     processo_id = instance.processo_id or 'novo'
     return f'processos/{processo_id}/pasta/{filename}'
@@ -1363,11 +1417,16 @@ class AnaliseProcesso(models.Model):
 
     def _respostas_requerem_supervisao(self):
         respostas = getattr(self, 'respostas', {}) or {}
+        concluded_statuses = {'aprovado', 'reprovado'}
         for key in ('processos_vinculados', 'saved_processos_vinculados'):
             entries = respostas.get(key)
             if not entries or not isinstance(entries, list):
                 continue
             for item in entries:
-                if isinstance(item, dict) and item.get('supervisionado'):
-                    return True
+                if not isinstance(item, dict) or not item.get('supervisionado'):
+                    continue
+                status = str(item.get('supervisor_status') or 'pendente').strip().lower()
+                if status in concluded_statuses:
+                    continue
+                return True
         return False

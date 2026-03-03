@@ -22,9 +22,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core import signing
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
-from django.db.models import Count, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
+from django.db.models import Count, Exists, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
 from django.db.models.query import prefetch_related_objects
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
@@ -34,6 +35,7 @@ from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -42,7 +44,7 @@ from decimal import Decimal, InvalidOperation
 logger = logging.getLogger(__name__)
 
 from .models import (
-    AnaliseProcesso, AndamentoProcessual, AdvogadoPassivo, BuscaAtivaConfig,
+    AnaliseProcesso, AndamentoProcessual, AndamentoProcessualPendente, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
     KpiGlobalConfig,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
@@ -2717,6 +2719,449 @@ def demandas_analise_planilha_pending_tarefas_view(request):
 
     return JsonResponse({"stored": True, "cpfs": len(set([c for c in cpfs if c]))})
 
+
+def guardados_view(request):
+    def _safe_positive_int_value(raw):
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    carteira_id = _safe_positive_int_value(request.GET.get("carteira"))
+    tipo_slug = str(request.GET.get("tipo_analise") or "").strip()
+    viabilidade = str(request.GET.get("viabilidade") or "").strip().upper()
+    prescricao_mes = _safe_positive_int_value(request.GET.get("prescricao_mes"))
+    ordem = str(request.GET.get("ordem") or "recente").strip().lower()
+    view_mode = str(request.GET.get("view") or "processo").strip().lower()
+    if view_mode not in {"processo", "analise"}:
+        view_mode = "processo"
+    analista_query = str(request.GET.get("analista") or "").strip().lower()
+    supervision_status = str(request.GET.get("supervision_status") or "").strip().lower()
+
+    qs = ProcessoJudicial.objects.all()
+    qs = filter_processos_queryset_for_user(qs, request.user)
+
+    if carteira_id:
+        qs = qs.filter(
+            Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
+        ).distinct()
+
+    viabilidade_choices = {key for key, _ in ProcessoJudicial.VIABILIDADE_CHOICES if key}
+    if viabilidade in viabilidade_choices:
+        qs = qs.filter(viabilidade=viabilidade)
+
+    qs = qs.filter(analise_processo__isnull=False)
+
+    base_path_key = "saved_processos_vinculados"
+    alias_obs = "_guardados_obs_match"
+    alias_resp = "_guardados_resp_match"
+    path_obs_any = f"$.{base_path_key}[*] ? (@.observacoes != null && @.observacoes != \"\")"
+    path_resp_any = (
+        f"$.{base_path_key}[*].tipo_de_acao_respostas.* ? (@ != null && @ != \"\" && @ != \"---\")"
+    )
+    supervision_pending_expr = (
+        "@.supervisionado == true && "
+        "(!exists(@.supervisor_status) || @.supervisor_status == null || "
+        "(@.supervisor_status != \"aprovado\" && @.supervisor_status != \"reprovado\"))"
+    )
+    path_supervision_pending_saved = f"$.saved_processos_vinculados[*] ? ({supervision_pending_expr})"
+    path_supervision_pending_active = f"$.processos_vinculados[*] ? ({supervision_pending_expr})"
+    qs = qs.annotate(
+        **{
+            alias_obs: models.Func(
+                models.F("analise_processo__respostas"),
+                models.Value(path_obs_any),
+                function="jsonb_path_exists",
+                output_field=models.BooleanField(),
+            ),
+            alias_resp: models.Func(
+                models.F("analise_processo__respostas"),
+                models.Value(path_resp_any),
+                function="jsonb_path_exists",
+                output_field=models.BooleanField(),
+            ),
+            "_guardados_pend_supervision_saved": models.Func(
+                models.F("analise_processo__respostas"),
+                models.Value(path_supervision_pending_saved),
+                function="jsonb_path_exists",
+                output_field=models.BooleanField(),
+            ),
+            "_guardados_pend_supervision_active": models.Func(
+                models.F("analise_processo__respostas"),
+                models.Value(path_supervision_pending_active),
+                function="jsonb_path_exists",
+                output_field=models.BooleanField(),
+            ),
+        }
+    ).filter(Q(**{alias_obs: True}) | Q(**{alias_resp: True}))
+
+    if tipo_slug:
+        alias_tipo_obs = "_guardados_tipo_obs_match"
+        alias_tipo_resp = "_guardados_tipo_resp_match"
+        safe_slug = tipo_slug.replace('"', "")
+        path_obs_tipo = (
+            f"$.{base_path_key}[*] ? (@.analysis_type.slug == \"{safe_slug}\" && "
+            "@.observacoes != null && @.observacoes != \"\")"
+        )
+        path_resp_tipo = (
+            f"$.{base_path_key}[*] ? (@.analysis_type.slug == \"{safe_slug}\")."
+            "tipo_de_acao_respostas.* ? (@ != null && @ != \"\" && @ != \"---\")"
+        )
+        qs = qs.annotate(
+            **{
+                alias_tipo_obs: models.Func(
+                    models.F("analise_processo__respostas"),
+                    models.Value(path_obs_tipo),
+                    function="jsonb_path_exists",
+                    output_field=models.BooleanField(),
+                ),
+                alias_tipo_resp: models.Func(
+                    models.F("analise_processo__respostas"),
+                    models.Value(path_resp_tipo),
+                    function="jsonb_path_exists",
+                    output_field=models.BooleanField(),
+                ),
+            }
+        ).filter(Q(**{alias_tipo_obs: True}) | Q(**{alias_tipo_resp: True}))
+
+    pending_ap_statuses = [
+        AndamentoProcessualPendente.STATUS_NOVO,
+        AndamentoProcessualPendente.STATUS_PENDENTE_RESPONDIDO_MANUALMENTE,
+    ]
+    qs = qs.annotate(
+        _has_pend_tarefa=Exists(
+            Tarefa.objects.filter(processo=OuterRef("pk"), concluida=False)
+        ),
+        _has_pend_prazo=Exists(
+            Prazo.objects.filter(processo=OuterRef("pk"), concluido=False)
+        ),
+        _has_pend_ap=Exists(
+            AndamentoProcessualPendente.objects.filter(
+                processo=OuterRef("pk"),
+                status__in=pending_ap_statuses,
+            )
+        ),
+    ).filter(
+        _has_pend_tarefa=False,
+        _has_pend_prazo=False,
+        _has_pend_ap=False,
+        _guardados_pend_supervision_saved=False,
+        _guardados_pend_supervision_active=False,
+    )
+
+    today = timezone.localdate()
+    qs = qs.annotate(
+        proxima_prescricao_futura=models.Min(
+            "contratos__data_prescricao",
+            filter=Q(contratos__data_prescricao__gte=today),
+        ),
+        ultima_movimentacao=Max("andamentos__data"),
+        analise_atualizada_em=models.F("analise_processo__updated_at"),
+    )
+
+    if prescricao_mes and 1 <= prescricao_mes <= 12:
+        qs = qs.filter(proxima_prescricao_futura__month=prescricao_mes)
+
+    supervision_status_labels = {
+        "pendente": "Pendente",
+        "pre_aprovado": "Pré-aprovado",
+        "aprovado": "Aprovado",
+        "reprovado": "Reprovado",
+    }
+    if supervision_status not in supervision_status_labels:
+        supervision_status = ""
+
+    has_user_filters = any(
+        [
+            carteira_id,
+            tipo_slug,
+            viabilidade,
+            prescricao_mes,
+            analista_query,
+            supervision_status,
+        ]
+    )
+    auto_limited = False
+    if not has_user_filters and ordem == "recente":
+        page_number = _safe_positive_int_value(request.GET.get("page")) or 1
+        if page_number == 1:
+            qs_today = qs.filter(analise_atualizada_em__date=today)
+            if qs_today.exists():
+                qs = qs_today.order_by(
+                    models.F("analise_atualizada_em").desc(nulls_last=True),
+                    "-pk",
+                )
+                auto_limited = True
+            else:
+                qs = qs.order_by(
+                    models.F("analise_atualizada_em").desc(nulls_last=True),
+                    "-pk",
+                )[:10]
+                auto_limited = True
+
+    if not auto_limited:
+        if ordem == "antigo":
+            qs = qs.order_by(models.F("ultima_movimentacao").asc(nulls_last=True), "pk")
+        else:
+            qs = qs.order_by(models.F("ultima_movimentacao").desc(nulls_last=True), "-pk")
+
+    qs = qs.select_related("carteira").prefetch_related(
+        "carteiras_vinculadas",
+        Prefetch(
+            "partes_processuais",
+            queryset=Parte.objects.only("id", "processo_id", "tipo_polo", "nome", "documento").order_by("id"),
+            to_attr="_prefetched_partes_processuais",
+        ),
+    )
+
+    def _format_date(value):
+        if not value:
+            return "-"
+        if isinstance(value, str):
+            parsed = parse_datetime(value) or parse_date(value)
+            if parsed:
+                value = parsed
+        try:
+            return value.strftime("%d/%m/%Y")
+        except Exception:
+            return str(value)
+
+    def _format_user_label(user):
+        if not user:
+            return ""
+        first = (user.first_name or "").strip()
+        last = (user.last_name or "").strip()
+        full = " ".join([p for p in [first, last] if p])
+        if full:
+            return full
+        return user.username or ""
+
+    carteira_lookup = {
+        carteira.id: carteira.nome
+        for carteira in Carteira.objects.only("id", "nome")
+    }
+
+    def _resolve_card_carteira_label(card, processo):
+        if isinstance(card, dict):
+            nome = str(card.get("carteira_nome") or "").strip()
+            if nome:
+                return nome
+            carteira_id_card = _safe_positive_int_value(card.get("carteira_id"))
+            if carteira_id_card and carteira_id_card in carteira_lookup:
+                return carteira_lookup[carteira_id_card]
+        if processo and processo.carteira_id and processo.carteira_id in carteira_lookup:
+            return carteira_lookup[processo.carteira_id]
+        return "-"
+
+    def _resolve_card_tipo(card):
+        if not isinstance(card, dict):
+            return {"slug": "", "nome": "Sem tipo"}
+        analysis_type = card.get("analysis_type") if isinstance(card.get("analysis_type"), dict) else {}
+        slug = str(analysis_type.get("slug") or "").strip()
+        nome = str(analysis_type.get("nome") or slug or "Sem tipo").strip() or "Sem tipo"
+        return {"slug": slug, "nome": nome}
+
+    def _resolve_card_analista(card, analise_obj):
+        if isinstance(card, dict):
+            author = str(card.get("analysis_author") or "").strip()
+            if author:
+                return author
+        return _format_user_label(getattr(analise_obj, "updated_by", None)) or "-"
+
+    def _resolve_card_updated_at(card, analise_obj):
+        if isinstance(card, dict):
+            updated_at = card.get("updated_at")
+            if updated_at:
+                return _format_date(updated_at)
+        return _format_date(getattr(analise_obj, "updated_at", None))
+
+    def _resolve_card_supervision_status(card):
+        if not isinstance(card, dict):
+            return ""
+        raw = str(card.get("supervisor_status") or "").strip().lower()
+        if raw:
+            return raw
+        return "pendente" if card.get("supervisionado") else ""
+
+    def _card_matches_filters(card, processo, analise_obj):
+        card_tipo = _resolve_card_tipo(card)
+        if tipo_slug and card_tipo["slug"] != tipo_slug:
+            return False
+        if supervision_status:
+            card_status = _resolve_card_supervision_status(card)
+            if card_status != supervision_status:
+                return False
+        if analista_query:
+            analista_label = _resolve_card_analista(card, analise_obj).lower()
+            if analista_query not in analista_label:
+                return False
+        return True
+
+    def _extract_cards(processo):
+        analise_obj = getattr(processo, "analise_processo", None)
+        respostas = getattr(analise_obj, "respostas", None) if analise_obj else None
+        cards = respostas.get("saved_processos_vinculados") if isinstance(respostas, dict) else []
+        if not isinstance(cards, list):
+            cards = []
+        normalized_cards = []
+        for card in cards:
+            if not isinstance(card, dict):
+                continue
+            if not _card_matches_filters(card, processo, analise_obj):
+                continue
+            card_tipo = _resolve_card_tipo(card)
+            normalized_cards.append(
+                {
+                    "tipo_slug": card_tipo["slug"],
+                    "tipo_nome": card_tipo["nome"],
+                    "carteira": _resolve_card_carteira_label(card, processo),
+                    "analista": _resolve_card_analista(card, analise_obj),
+                    "analisado_em": _resolve_card_updated_at(card, analise_obj),
+                }
+            )
+        return normalized_cards
+
+    viabilidade_labels = dict(ProcessoJudicial.VIABILIDADE_CHOICES)
+    viabilidade_choices = [(key, label) for key, label in ProcessoJudicial.VIABILIDADE_CHOICES if key]
+
+    rows = []
+    page_obj = None
+    if view_mode == "analise":
+        card_rows = []
+        for processo in qs.iterator():
+            cards = _extract_cards(processo)
+            if not cards:
+                continue
+            partes = getattr(processo, "_prefetched_partes_processuais", []) or []
+            parte_passiva = next((p for p in partes if p.tipo_polo == "PASSIVO"), None) or (partes[0] if partes else None)
+            carteira_names = []
+            if processo.carteira_id and processo.carteira:
+                carteira_names.append(processo.carteira.nome)
+            for linked in getattr(processo, "carteiras_vinculadas", []).all():
+                if linked and linked.nome not in carteira_names:
+                    carteira_names.append(linked.nome)
+            carteira_label = carteira_names[0] if carteira_names else "-"
+            if len(carteira_names) > 1:
+                carteira_label = f"{carteira_label} +{len(carteira_names) - 1}"
+            for card in cards:
+                card_rows.append(
+                    {
+                        "id": processo.pk,
+                        "cnj": processo.cnj or "CNJ não informado",
+                        "parte_nome": getattr(parte_passiva, "nome", "") if parte_passiva else "",
+                        "parte_documento": getattr(parte_passiva, "documento", "") if parte_passiva else "",
+                        "carteira": carteira_label,
+                        "viabilidade": viabilidade_labels.get(processo.viabilidade, "-"),
+                        "prescricao": _format_date(getattr(processo, "proxima_prescricao_futura", None)),
+                        "ultima_movimentacao": _format_date(getattr(processo, "ultima_movimentacao", None)),
+                        "admin_url": reverse("admin:contratos_processojudicial_change", args=[processo.pk]),
+                        "tipo_nome": card["tipo_nome"],
+                        "tipo_slug": card["tipo_slug"],
+                        "card_carteira": card["carteira"],
+                        "card_analista": card["analista"],
+                        "card_analisado_em": card["analisado_em"],
+                    }
+                )
+        paginator = Paginator(card_rows, 50)
+        page_number = request.GET.get("page") or 1
+        page_obj = paginator.get_page(page_number)
+        rows = list(page_obj)
+    else:
+        if analista_query:
+            filtered_processes = []
+            for processo in qs.iterator():
+                cards = _extract_cards(processo)
+                if not cards:
+                    continue
+                filtered_processes.append((processo, cards))
+            paginator = Paginator(filtered_processes, 50)
+            page_number = request.GET.get("page") or 1
+            page_obj = paginator.get_page(page_number)
+            process_items = list(page_obj)
+        else:
+            paginator = Paginator(qs, 50)
+            page_number = request.GET.get("page") or 1
+            page_obj = paginator.get_page(page_number)
+            process_items = [(processo, _extract_cards(processo)) for processo in page_obj]
+
+        for processo, cards in process_items:
+            partes = getattr(processo, "_prefetched_partes_processuais", []) or []
+            parte_passiva = next((p for p in partes if p.tipo_polo == "PASSIVO"), None) or (partes[0] if partes else None)
+            carteira_names = []
+            if processo.carteira_id and processo.carteira:
+                carteira_names.append(processo.carteira.nome)
+            for linked in getattr(processo, "carteiras_vinculadas", []).all():
+                if linked and linked.nome not in carteira_names:
+                    carteira_names.append(linked.nome)
+            carteira_label = carteira_names[0] if carteira_names else "-"
+            if len(carteira_names) > 1:
+                carteira_label = f"{carteira_label} +{len(carteira_names) - 1}"
+            cards_payload = cards or []
+            first_card = cards_payload[0] if cards_payload else {
+                "tipo_nome": "-",
+                "carteira": "-",
+                "analista": "-",
+                "analisado_em": "-",
+            }
+            rows.append(
+                {
+                    "id": processo.pk,
+                    "cnj": processo.cnj or "CNJ não informado",
+                    "parte_nome": getattr(parte_passiva, "nome", "") if parte_passiva else "",
+                    "parte_documento": getattr(parte_passiva, "documento", "") if parte_passiva else "",
+                    "carteira": carteira_label,
+                    "viabilidade": viabilidade_labels.get(processo.viabilidade, "-"),
+                    "prescricao": _format_date(getattr(processo, "proxima_prescricao_futura", None)),
+                    "ultima_movimentacao": _format_date(getattr(processo, "ultima_movimentacao", None)),
+                    "admin_url": reverse("admin:contratos_processojudicial_change", args=[processo.pk]),
+                    "cards": cards_payload,
+                    "cards_json": json.dumps(cards_payload, ensure_ascii=False),
+                    "cards_count": len(cards_payload),
+                    "card_tipo": first_card.get("tipo_nome", "-"),
+                    "card_carteira": first_card.get("carteira", "-"),
+                    "card_analista": first_card.get("analista", "-"),
+                    "card_analisado_em": first_card.get("analisado_em", "-"),
+                }
+            )
+
+    carteiras_qs = Carteira.objects.all().order_by("nome")
+    allowed_ids = get_user_allowed_carteira_ids(request.user)
+    if allowed_ids not in (None, []) and allowed_ids:
+        carteiras_qs = carteiras_qs.filter(id__in=allowed_ids)
+    tipos_qs = TipoAnaliseObjetiva.objects.filter(ativo=True).order_by("nome")
+
+    params = request.GET.copy()
+    params.pop("page", None)
+    base_query = params.urlencode()
+
+    context = admin.site.each_context(request)
+    context.update(
+        {
+            "title": "Guardados",
+            "rows": rows,
+            "page_obj": page_obj,
+            "base_query": base_query,
+            "carteiras": list(carteiras_qs),
+            "tipos_analise": list(tipos_qs),
+            "viabilidade_choices": viabilidade_choices,
+            "prescricao_meses": list(range(1, 13)),
+            "supervision_status_choices": list(supervision_status_labels.items()),
+            "view_mode": view_mode,
+            "selected": {
+                "carteira": str(carteira_id or ""),
+                "tipo_analise": tipo_slug,
+                "viabilidade": viabilidade,
+                "prescricao_mes": str(prescricao_mes or ""),
+                "ordem": ordem or "recente",
+                "analista": analista_query,
+                "supervision_status": supervision_status,
+                "view": view_mode,
+            },
+        }
+    )
+    return render(request, "admin/contratos/guardados.html", context)
+
 _original_get_admin_urls = admin.site.get_urls
 
 def _get_admin_urls():
@@ -2772,6 +3217,11 @@ def _get_admin_urls():
             admin.site.admin_view(demandas_analise_planilha_pending_tarefas_view),
             name="contratos_demandas_analise_planilha_pending_tarefas",
         ),
+        path(
+            "contratos/guardados/",
+            admin.site.admin_view(guardados_view),
+            name="contratos_guardados",
+        ),
     ]
     return custom_urls + urls
 
@@ -2787,13 +3237,16 @@ def _get_app_list(request, app_label=None):
         insertion_index = None
         filtered_models = []
         for idx, model in enumerate(app.get("models", [])):
-            if model.get("object_name") in {"QuestaoAnalise", "OpcaoResposta", "TipoAnaliseObjetiva"}:
+            if model.get("object_name") in {"QuestaoAnalise", "OpcaoResposta", "TipoAnaliseObjetiva", "Pessoa"}:
                 if insertion_index is None:
                     insertion_index = idx
                 continue
             filtered_models.append(model)
         if insertion_index is None:
             insertion_index = 0
+        for model in filtered_models:
+            if model.get("object_name") == "Carteira":
+                model["name"] = "Carteiras e KPI"
         config_position = min(insertion_index, len(filtered_models))
         filtered_models.insert(
             config_position,
@@ -2818,6 +3271,21 @@ def _get_app_list(request, app_label=None):
                 "view_only": True,
             },
         )
+        guardados_entry = {
+            "name": "Guardados",
+            "object_name": "Guardados",
+            "admin_url": reverse("admin:contratos_guardados"),
+            "add_url": None,
+            "perms": {"add": False, "change": False, "delete": False, "view": True},
+            "view_only": True,
+        }
+        if not any(model.get("object_name") == "Guardados" for model in filtered_models):
+            processo_index = next(
+                (idx for idx, model in enumerate(filtered_models) if model.get("object_name") == "ProcessoJudicial"),
+                None,
+            )
+            if processo_index is not None:
+                filtered_models.insert(processo_index + 1, guardados_entry)
         app["models"] = filtered_models
     return app_list
 
@@ -5546,16 +6014,23 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "carteira_nome": carteira_nome,
                 "pieces": {slug: 0 for slug in peticao_slugs},
                 "process_ids": {slug: set() for slug in peticao_slugs},
+                "protocoladas": {slug: 0 for slug in peticao_slugs},
+                "protocol_process_ids": {slug: set() for slug in peticao_slugs},
             }
             for carteira_id, carteira_nome in carteira_lookup.items()
         }
         peticao_totals = {
-            slug: {"pieces": 0, "process_ids": set()}
+            slug: {"pieces": 0, "process_ids": set(), "protocoladas": 0, "protocol_process_ids": set()}
             for slug in peticao_slugs
         }
 
-        arquivo_rows = ProcessoArquivo.objects.values_list("processo_id", "nome", "arquivo")
-        for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
+        arquivo_rows = ProcessoArquivo.objects.values_list(
+            "processo_id",
+            "nome",
+            "arquivo",
+            "protocolado_no_tribunal",
+        )
+        for processo_id, nome_arquivo, arquivo_path, protocolado in arquivo_rows.iterator():
             if not processo_id:
                 continue
             tipo_slug = _classify_peticao_kind(nome_arquivo, arquivo_path)
@@ -5574,13 +6049,21 @@ class CarteiraAdmin(admin.ModelAdmin):
                         "carteira_nome": carteira_lookup.get(carteira_id, f"Carteira {carteira_id}"),
                         "pieces": {slug: 0 for slug in peticao_slugs},
                         "process_ids": {slug: set() for slug in peticao_slugs},
+                        "protocoladas": {slug: 0 for slug in peticao_slugs},
+                        "protocol_process_ids": {slug: set() for slug in peticao_slugs},
                     }
                     peticao_by_carteira[carteira_id] = carteira_bucket
                 carteira_bucket["pieces"][tipo_slug] += 1
                 carteira_bucket["process_ids"][tipo_slug].add(int(processo_id))
+                if protocolado:
+                    carteira_bucket["protocoladas"][tipo_slug] += 1
+                    carteira_bucket["protocol_process_ids"][tipo_slug].add(int(processo_id))
 
             peticao_totals[tipo_slug]["pieces"] += 1
             peticao_totals[tipo_slug]["process_ids"].add(int(processo_id))
+            if protocolado:
+                peticao_totals[tipo_slug]["protocoladas"] += 1
+                peticao_totals[tipo_slug]["protocol_process_ids"].add(int(processo_id))
 
         serialized_peticao_by_carteira = []
         for carteira in sorted(peticao_by_carteira.values(), key=lambda item: (item["carteira_nome"] or "").upper()):
@@ -5591,15 +6074,27 @@ class CarteiraAdmin(admin.ModelAdmin):
                 slug: len(carteira["process_ids"].get(slug, set()))
                 for slug in peticao_slugs
             }
+            protocol_processos_map = {
+                slug: len(carteira["protocol_process_ids"].get(slug, set()))
+                for slug in peticao_slugs
+            }
             total_processos = len(set().union(*[carteira["process_ids"].get(slug, set()) for slug in peticao_slugs]))
+            total_protocoladas = sum(int(carteira["protocoladas"].get(slug, 0)) for slug in peticao_slugs)
+            total_protocol_processos = len(
+                set().union(*[carteira["protocol_process_ids"].get(slug, set()) for slug in peticao_slugs])
+            )
             serialized_peticao_by_carteira.append(
                 {
                     "carteira_id": carteira["carteira_id"],
                     "carteira_nome": carteira["carteira_nome"],
                     "pieces": {slug: int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs},
+                    "protocoladas": {slug: int(carteira["protocoladas"].get(slug, 0)) for slug in peticao_slugs},
                     "processos": processos_map,
+                    "protocolados_processos": protocol_processos_map,
                     "total_pieces": int(total_pieces),
                     "total_processos": int(total_processos),
+                    "total_protocoladas": int(total_protocoladas),
+                    "total_protocolados_processos": int(total_protocol_processos),
                 }
             )
 
@@ -5609,6 +6104,8 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "label": item["label"],
                 "pieces": int(peticao_totals[item["slug"]]["pieces"]),
                 "processos": len(peticao_totals[item["slug"]]["process_ids"]),
+                "protocoladas": int(peticao_totals[item["slug"]]["protocoladas"]),
+                "protocolados_processos": len(peticao_totals[item["slug"]]["protocol_process_ids"]),
             }
             for item in peticao_type_defs
         ]
@@ -6144,7 +6641,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260221c',
+            'admin/js/carteira_charts.js?v=20260303a',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -6472,6 +6969,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'kpi_uf',
             'peticao_tipo',
             'peticao_carteira_id',
+            'peticao_protocoladas',
             'priority_kpi_tag_id',
             'priority_kpi_status',
             'priority_kpi_uf',
@@ -7089,9 +7587,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         allowed = {'monitoria_inicial', 'cobranca_judicial', 'habilitacao'}
         if tipo_slug not in allowed:
             return None
+        protocoladas_raw = str(request.GET.get('peticao_protocoladas') or '').strip().lower()
         return {
             'tipo_slug': tipo_slug,
             'carteira_id': self._safe_positive_int(request.GET.get('peticao_carteira_id')),
+            'protocoladas': protocoladas_raw in {'1', 'true', 'sim', 'yes'},
         }
 
     def _build_peticao_kpi_process_ids(self, queryset, peticao_filter):
@@ -7107,10 +7607,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return set()
 
         target_tipo = peticao_filter.get('tipo_slug')
+        protocoladas = bool(peticao_filter.get('protocoladas'))
         matched_ids = set()
-        arquivo_rows = ProcessoArquivo.objects.filter(
-            processo_id__in=candidate_ids
-        ).values_list('processo_id', 'nome', 'arquivo')
+        arquivo_qs = ProcessoArquivo.objects.filter(processo_id__in=candidate_ids)
+        if protocoladas:
+            arquivo_qs = arquivo_qs.filter(protocolado_no_tribunal=True)
+        arquivo_rows = arquivo_qs.values_list('processo_id', 'nome', 'arquivo')
         for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
             tipo_slug = self._classify_peticao_kind(nome_arquivo, arquivo_path)
             if tipo_slug == target_tipo:
