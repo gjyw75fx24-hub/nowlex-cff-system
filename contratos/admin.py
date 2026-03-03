@@ -2738,6 +2738,9 @@ def guardados_view(request):
         view_mode = "processo"
     analista_query = str(request.GET.get("analista") or "").strip().lower()
     supervision_status = str(request.GET.get("supervision_status") or "").strip().lower()
+    periodo = str(request.GET.get("periodo") or "hoje").strip().lower()
+    if periodo not in {"hoje", "semana", "mes", "todos"}:
+        periodo = "hoje"
 
     qs = ProcessoJudicial.objects.all()
     qs = filter_processos_queryset_for_user(qs, request.user)
@@ -2863,6 +2866,13 @@ def guardados_view(request):
     if prescricao_mes and 1 <= prescricao_mes <= 12:
         qs = qs.filter(proxima_prescricao_futura__month=prescricao_mes)
 
+    if periodo == "hoje":
+        qs = qs.filter(analise_processo__updated_at__date=today)
+    elif periodo == "semana":
+        qs = qs.filter(analise_processo__updated_at__date__gte=today - datetime.timedelta(days=6))
+    elif periodo == "mes":
+        qs = qs.filter(analise_processo__updated_at__date__gte=today.replace(day=1))
+
     supervision_status_labels = {
         "pendente": "Pendente",
         "pre_aprovado": "Pré-aprovado",
@@ -2871,40 +2881,10 @@ def guardados_view(request):
     }
     if supervision_status not in supervision_status_labels:
         supervision_status = ""
-
-    has_user_filters = any(
-        [
-            carteira_id,
-            tipo_slug,
-            viabilidade,
-            prescricao_mes,
-            analista_query,
-            supervision_status,
-        ]
-    )
-    auto_limited = False
-    if not has_user_filters and ordem == "recente":
-        page_number = _safe_positive_int_value(request.GET.get("page")) or 1
-        if page_number == 1:
-            qs_today = qs.filter(analise_atualizada_em__date=today)
-            if qs_today.exists():
-                qs = qs_today.order_by(
-                    models.F("analise_atualizada_em").desc(nulls_last=True),
-                    "-pk",
-                )
-                auto_limited = True
-            else:
-                qs = qs.order_by(
-                    models.F("analise_atualizada_em").desc(nulls_last=True),
-                    "-pk",
-                )[:10]
-                auto_limited = True
-
-    if not auto_limited:
-        if ordem == "antigo":
-            qs = qs.order_by(models.F("ultima_movimentacao").asc(nulls_last=True), "pk")
-        else:
-            qs = qs.order_by(models.F("ultima_movimentacao").desc(nulls_last=True), "-pk")
+    if ordem == "antigo":
+        qs = qs.order_by(models.F("ultima_movimentacao").asc(nulls_last=True), "pk")
+    else:
+        qs = qs.order_by(models.F("ultima_movimentacao").desc(nulls_last=True), "-pk")
 
     qs = qs.select_related("carteira").prefetch_related(
         "carteiras_vinculadas",
@@ -3147,6 +3127,12 @@ def guardados_view(request):
             "viabilidade_choices": viabilidade_choices,
             "prescricao_meses": list(range(1, 13)),
             "supervision_status_choices": list(supervision_status_labels.items()),
+            "periodo_choices": [
+                ("hoje", "Hoje"),
+                ("semana", "Últimos 7 dias"),
+                ("mes", "Este mês"),
+                ("todos", "Todos"),
+            ],
             "view_mode": view_mode,
             "selected": {
                 "carteira": str(carteira_id or ""),
@@ -3156,6 +3142,7 @@ def guardados_view(request):
                 "ordem": ordem or "recente",
                 "analista": analista_query,
                 "supervision_status": supervision_status,
+                "periodo": periodo,
                 "view": view_mode,
             },
         }

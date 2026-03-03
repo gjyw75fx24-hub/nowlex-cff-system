@@ -185,6 +185,16 @@
                         </select>
                     </div>
                     <div class="guardados-field">
+                        <label for="guardados-periodo">Período</label>
+                        <select id="guardados-periodo" name="periodo">
+                            {% for value, label in periodo_choices %}
+                                <option value="{{ value }}" {% if value == selected.periodo %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="guardados-field">
                         <label for="guardados-supervision-status">Status supervisão</label>
                         <select id="guardados-supervision-status" name="supervision_status">
                             <option value="">Todos</option>
