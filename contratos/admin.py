@@ -4844,6 +4844,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'peticao_ano',
         'peticao_kind',
         'peticao_pendente',
+        'cpf_lote',
         'priority_kpi_tag_id',
         'priority_kpi_status',
         'priority_kpi_uf',
@@ -4875,6 +4876,7 @@ class ProcessoJudicialChangeList(ChangeList):
             "kpi_carteira_id",
             "peticao_carteira_id",
             "peticao_pendente",
+            "cpf_lote",
             "priority_kpi_tag_id",
         )
         if any(request.GET.get(param) for param in scoped_params):
@@ -7091,6 +7093,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'peticao_ano',
             'peticao_kind',
             'peticao_pendente',
+            'cpf_lote',
             'priority_kpi_tag_id',
             'priority_kpi_status',
             'priority_kpi_uf',
@@ -7319,6 +7322,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_peticao_kpi_filter(qs, request)
         qs = self._apply_peticao_pendente_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
+        cpf_info = self._get_cpf_lote_info(request)
+        if cpf_info.get('cpfs'):
+            process_ids = cpf_info.get('process_ids') or set()
+            if not process_ids:
+                return qs.none()
+            qs = qs.filter(pk__in=process_ids)
         qs = qs.select_related('carteira').prefetch_related(
             'carteiras_vinculadas',
             Prefetch(
@@ -7468,6 +7477,74 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not process_ids:
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
+
+    def _parse_cpf_lote_param(self, request):
+        raw = str(request.GET.get('cpf_lote') or '').strip()
+        if not raw:
+            return []
+        matches = re.findall(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b', raw)
+        cpfs = []
+        seen = set()
+        for match in matches:
+            digits = re.sub(r'\D', '', match)
+            if len(digits) != 11:
+                continue
+            if digits in seen:
+                continue
+            seen.add(digits)
+            cpfs.append(digits)
+        return cpfs
+
+    def _format_cpf_display(self, cpf_digits):
+        digits = re.sub(r'\D', '', str(cpf_digits or ''))
+        if len(digits) == 11:
+            return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+        return digits
+
+    def _get_cpf_lote_info(self, request):
+        cached = getattr(request, '_cpf_lote_cache', None)
+        if cached is not None:
+            return cached
+        cpfs = self._parse_cpf_lote_param(request)
+        info = {
+            'raw': str(request.GET.get('cpf_lote') or ''),
+            'cpfs': cpfs,
+            'process_ids': set(),
+            'found': set(),
+            'missing': [],
+        }
+        if not cpfs:
+            request._cpf_lote_cache = info
+            return info
+
+        parte_qs = Parte.objects.filter(
+            tipo_polo='PASSIVO',
+        ).exclude(documento__isnull=True).exclude(documento__exact='')
+        parte_qs = parte_qs.annotate(
+            _doc_digits=models.Func(
+                models.F('documento'),
+                models.Value(r'\D'),
+                models.Value(''),
+                models.Value('g'),
+                function='regexp_replace',
+                output_field=models.TextField(),
+            )
+        ).filter(_doc_digits__in=cpfs)
+
+        process_ids = set()
+        found = set()
+        for processo_id, doc_digits in parte_qs.values_list('processo_id', '_doc_digits').distinct().iterator():
+            if not doc_digits:
+                continue
+            found.add(doc_digits)
+            if processo_id:
+                process_ids.add(int(processo_id))
+
+        info['process_ids'] = process_ids
+        info['found'] = found
+        info['missing'] = [cpf for cpf in cpfs if cpf not in found]
+        request._cpf_lote_cache = info
+        return info
 
     def _safe_positive_int(self, value):
         try:
@@ -8782,6 +8859,26 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             )
         else:
             extra_context['changelist_carteira_options'] = []
+        cpf_info = self._get_cpf_lote_info(request)
+        if cpf_info.get('cpfs'):
+            max_items = 50
+            found_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('found', set())]
+            missing_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('missing', [])]
+            found_list_sorted = sorted(found_list)
+            missing_list_sorted = sorted(missing_list)
+            extra_context['cpf_lote_summary'] = {
+                'total': len(cpf_info['cpfs']),
+                'found': len(cpf_info.get('found', set())),
+                'missing': len(cpf_info.get('missing', [])),
+                'found_list': found_list_sorted[:max_items],
+                'missing_list': missing_list_sorted[:max_items],
+                'found_more': max(len(found_list_sorted) - max_items, 0),
+                'missing_more': max(len(missing_list_sorted) - max_items, 0),
+            }
+            extra_context['cpf_lote_input'] = cpf_info.get('raw', '')
+        else:
+            extra_context['cpf_lote_summary'] = None
+            extra_context['cpf_lote_input'] = ''
         response = super().changelist_view(request, extra_context=extra_context)
         context_data = getattr(response, 'context_data', None)
         if not context_data:

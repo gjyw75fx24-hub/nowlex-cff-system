@@ -223,6 +223,36 @@
             flex: 1;
             min-width: 0;
         }
+        .processo-search-inline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 10px;
+        }
+        .processo-search-inline #toolbar {
+            margin: 0;
+        }
+        .processo-search-inline #changelist-search {
+            margin-bottom: 0;
+        }
+        .processo-cpf-lote-inline {
+            flex-basis: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .processo-cpf-lote-inline__item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .processo-cpf-lote-inline__value {
+            font-weight: 600;
+            color: #2f435b;
+        }
         .processo-search-side {
             display: inline-flex;
             flex-direction: column;
@@ -238,6 +268,59 @@
         }
         .processo-search-main #toolbar {
             margin-bottom: 0;
+        }
+        .processo-cpf-lote-summary {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #fff;
+            flex-basis: 100%;
+        }
+        .processo-cpf-lote-summary__header {
+            font-size: 0.78rem;
+            color: #2f435b;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .processo-cpf-lote-summary__lists {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .processo-cpf-lote-summary__label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 4px;
+        }
+        .processo-cpf-lote-summary__chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .processo-cpf-lote-summary__chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            border: 1px solid #e2e8f0;
+            background: #f7fafc;
+            color: #2d3748;
+        }
+        .processo-cpf-lote-summary__chip--miss {
+            background: #fff5f5;
+            border-color: #fed7d7;
+            color: #9b2c2c;
+        }
+        .processo-cpf-lote-summary__chip--more {
+            background: #edf2f7;
+            color: #4a5568;
         }
         .processo-context-badge {
             display: inline-flex;
@@ -449,7 +532,63 @@
 {% block search %}
     <div class="processo-search-row">
         <div class="processo-search-main">
-            {{ block.super }}
+            <div class="processo-search-inline">
+                {{ block.super }}
+                <div class="processo-cpf-lote-inline" id="cpf-lote-inline">
+                    <span class="processo-cpf-lote-inline__item" id="cpf-lote-count" hidden>
+                        CPFs no lote:
+                        <span class="processo-cpf-lote-inline__value">0</span>
+                    </span>
+                    {% if cpf_lote_summary %}
+                        <span class="processo-cpf-lote-inline__item">
+                            Encontrados:
+                            <span class="processo-cpf-lote-inline__value">{{ cpf_lote_summary.found }}</span>
+                        </span>
+                        <span class="processo-cpf-lote-inline__item">
+                            Não encontrados:
+                            <span class="processo-cpf-lote-inline__value">{{ cpf_lote_summary.missing }}</span>
+                        </span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if cpf_lote_summary %}
+                <div class="processo-cpf-lote-summary">
+                    <div class="processo-cpf-lote-summary__header">
+                        <strong>Consulta em lote</strong>
+                        <span>Consultados: {{ cpf_lote_summary.total }}</span>
+                        <span>Encontrados: {{ cpf_lote_summary.found }}</span>
+                        <span>Não encontrados: {{ cpf_lote_summary.missing }}</span>
+                    </div>
+                    <div class="processo-cpf-lote-summary__lists">
+                        <div>
+                            <span class="processo-cpf-lote-summary__label">Encontrados</span>
+                            <div class="processo-cpf-lote-summary__chips">
+                                {% for cpf in cpf_lote_summary.found_list %}
+                                    <span class="processo-cpf-lote-summary__chip">{{ cpf }}</span>
+                                {% empty %}
+                                    <span class="processo-cpf-lote-summary__chip">—</span>
+                                {% endfor %}
+                                {% if cpf_lote_summary.found_more %}
+                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.found_more }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div>
+                            <span class="processo-cpf-lote-summary__label">Não encontrados</span>
+                            <div class="processo-cpf-lote-summary__chips">
+                                {% for cpf in cpf_lote_summary.missing_list %}
+                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--miss">{{ cpf }}</span>
+                                {% empty %}
+                                    <span class="processo-cpf-lote-summary__chip">—</span>
+                                {% endfor %}
+                                {% if cpf_lote_summary.missing_more %}
+                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.missing_more }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
         </div>
         {% if changelist_context_badge %}
             <div class="processo-search-side">
@@ -1049,6 +1188,138 @@
         }
     });
     </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchForm = document.getElementById('changelist-search');
+        if (!searchForm) return;
+        const input = searchForm.querySelector('input[name="q"]');
+        if (!input) return;
+        const countWrap = document.getElementById('cpf-lote-count');
+        const countValue = countWrap ? countWrap.querySelector('.processo-cpf-lote-inline__value') : null;
+
+        if (!input.placeholder || !input.placeholder.trim()) {
+            input.placeholder = 'Pesquisar (nome, CPF, CNJ ou vários CPFs)';
+        }
+
+        const parseCpfs = (raw) => {
+            const matches = String(raw || '').match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g) || [];
+            const cpfs = [];
+            const seen = new Set();
+            matches.forEach(match => {
+                const digits = match.replace(/\D/g, '');
+                if (digits.length !== 11) return;
+                if (seen.has(digits)) return;
+                seen.add(digits);
+                cpfs.push(digits);
+            });
+            return cpfs;
+        };
+
+        const formatCpf = (digits) => {
+            if (!digits || digits.length !== 11) return digits || '';
+            return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+        };
+
+        const updateCount = (rawValue) => {
+            const cpfs = parseCpfs(rawValue);
+            const hasBatchSeparator = /[,\n;]/.test(rawValue || '');
+            if (countWrap) {
+                if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
+                    countWrap.hidden = false;
+                    if (countValue) {
+                        countValue.textContent = String(cpfs.length);
+                    }
+                } else {
+                    countWrap.hidden = true;
+                }
+            }
+            return cpfs;
+        };
+
+        const normalizeInput = () => {
+            const rawValue = (input.value || '').trim();
+            if (!rawValue) {
+                updateCount('');
+                return;
+            }
+            const cpfs = parseCpfs(rawValue);
+            const hasBatchSeparator = /[,\n;]/.test(rawValue);
+            if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
+                input.value = cpfs.map(formatCpf).join(', ');
+                updateCount(input.value);
+            } else {
+                updateCount(rawValue);
+            }
+        };
+
+        const cpfLoteRaw = '{{ cpf_lote_input|escapejs }}';
+        if (cpfLoteRaw && !input.value) {
+            input.value = cpfLoteRaw;
+        }
+        if (cpfLoteRaw) {
+            normalizeInput();
+        } else {
+            updateCount(input.value);
+        }
+
+        const applyCpfLote = (rawValue) => {
+            const url = new URL(window.location.href);
+            if (rawValue) {
+                url.searchParams.set('cpf_lote', rawValue);
+            } else {
+                url.searchParams.delete('cpf_lote');
+            }
+            url.searchParams.delete('q');
+            url.searchParams.delete('p');
+            window.location.href = url.toString();
+        };
+
+        searchForm.addEventListener('submit', (event) => {
+            const rawValue = (input.value || '').trim();
+            const url = new URL(window.location.href);
+            const hasCpfLote = url.searchParams.has('cpf_lote');
+
+            if (!rawValue) {
+                if (hasCpfLote) {
+                    event.preventDefault();
+                    applyCpfLote('');
+                }
+                return;
+            }
+
+            const cpfs = parseCpfs(rawValue);
+            const hasBatchSeparator = /[,\n;]/.test(rawValue);
+            if (!cpfs.length) return;
+            if (cpfs.length < 2 && !hasBatchSeparator) return;
+
+            event.preventDefault();
+            applyCpfLote(rawValue);
+        });
+
+        input.addEventListener('input', normalizeInput);
+        input.addEventListener('blur', normalizeInput);
+        input.addEventListener('paste', () => setTimeout(normalizeInput, 0));
+
+        const clearSearch = (event) => {
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('cpf_lote')) return;
+            event.preventDefault();
+            url.searchParams.delete('cpf_lote');
+            url.searchParams.delete('q');
+            url.searchParams.delete('p');
+            window.location.href = url.toString();
+        };
+
+        const clearLink = searchForm.querySelector('#searchbar-clear');
+        if (clearLink) {
+            clearLink.addEventListener('click', clearSearch);
+        }
+        const resetBtn = searchForm.querySelector('input[type=\"reset\"], button[type=\"reset\"]');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', clearSearch);
+        }
+    });
+    </script>
 {% endblock %}
 
 {% block extrahead %}
@@ -1246,6 +1517,14 @@
         clearBtn.style.marginLeft = '4px';
         clearBtn.addEventListener('click', function(event) {
             event.preventDefault();
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('cpf_lote')) {
+                url.searchParams.delete('cpf_lote');
+                url.searchParams.delete('q');
+                url.searchParams.delete('p');
+                window.location.href = url.toString();
+                return;
+            }
             if (!searchInput.value) {
                 searchInput.focus();
                 return;
