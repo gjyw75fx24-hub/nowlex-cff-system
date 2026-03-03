@@ -6757,7 +6757,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260303g',
+            'admin/js/carteira_charts.js?v=20260303h',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):

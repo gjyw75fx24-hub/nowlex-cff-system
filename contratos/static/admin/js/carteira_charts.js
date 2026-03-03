@@ -1656,37 +1656,32 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const totalsWrap = peticaoSection.querySelector('.carteira-kpi-peticao-totals');
         if (totalsWrap) {
-            totalsWrap.innerHTML = peticaoTypes.map((tipo, idx) => {
-                const slug = String(tipo.slug || '');
-                const totalItem = peticaoTotals.find((item) => String(item.slug || '') === slug) || {};
-                const label = String(tipo.label || slug || 'Tipo');
-                const pieces = Number(totalItem.pieces || 0);
-                const piecesProcessos = Number(totalItem.processos_pecas || 0);
-                const zips = Number(totalItem.zips || 0);
-                const zipsProcessos = Number(totalItem.processos_zips || 0);
-                const protocoladas = Number(totalItem.protocoladas || 0);
-                const protocolProcessos = Number(totalItem.protocolados_processos || 0);
-
-                const makeCountLink = (count, kind) => {
-                    const url = buildPeticaoUrl(slug, null, kind);
-                    if (!url || Number(count || 0) <= 0) {
-                        return numberPt(count);
-                    }
-                    return `<a href="${escapeHtml(url)}" style="color:#1f5f9e; text-decoration:none; font-weight:700;">${numberPt(count)}</a>`;
-                };
-
+            const carteiraRows = peticaoByCarteira
+                .slice()
+                .sort((a, b) => String(a.carteira_nome || '').localeCompare(String(b.carteira_nome || ''), 'pt-BR'));
+            totalsWrap.innerHTML = carteiraRows.map((item) => {
+                const label = String(item.carteira_nome || item.carteira_id || 'Carteira');
+                const pieces = Number(item.total_pieces || 0);
+                const piecesProcessos = Number(item.total_processos_pecas || 0);
+                const zips = Number(item.total_zips || 0);
+                const zipsProcessos = Number(item.total_processos_zips || 0);
+                const protocoladas = Number(item.total_protocoladas || 0);
+                const protocolProcessos = Number(item.total_protocolados_processos || 0);
+                if ((pieces + zips + protocoladas) <= 0) {
+                    return '';
+                }
                 const inner = `
                     <span style="font-weight:700;">${escapeHtml(label)}</span>
-                    <span>· Peças: ${makeCountLink(pieces, 'peca')} (proc. ${numberPt(piecesProcessos)})</span>
-                    <span>· ZIPs: ${makeCountLink(zips, 'zip')} (proc. ${numberPt(zipsProcessos)})</span>
-                    <span>· Protocoladas: ${makeCountLink(protocoladas, 'protocolada')} (proc. ${numberPt(protocolProcessos)})</span>
+                    <span>· Peças: <strong>${numberPt(pieces)}</strong> (proc. ${numberPt(piecesProcessos)})</span>
+                    <span>· ZIPs: <strong>${numberPt(zips)}</strong> (proc. ${numberPt(zipsProcessos)})</span>
+                    <span>· Protocoladas: <strong>${numberPt(protocoladas)}</strong> (proc. ${numberPt(protocolProcessos)})</span>
                 `;
                 return `
-                    <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#2f435b; border:1px solid #e2e9f2; border-radius:999px; padding:5px 10px; background:${paletteColor(idx, 0.14)};">
+                    <span style="display:inline-flex; align-items:center; gap:6px; font-size:11px; color:#4b5a6b; border:1px solid #e6edf5; border-radius:12px; padding:4px 8px; background:#f8fbff;">
                         ${inner}
                     </span>
                 `;
-            }).join('');
+            }).filter(Boolean).join('');
         }
 
         const peticaoCanvas = document.getElementById('kpiPeticaoCarteiraChart');
