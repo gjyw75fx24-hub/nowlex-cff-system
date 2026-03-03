@@ -1,4 +1,5 @@
 import datetime
+import calendar
 import logging
 import json
 import os
@@ -25,7 +26,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
-from django.db.models import Count, Exists, FloatField, Max, OuterRef, Q, Sum, Subquery, Prefetch, Window
+from django.db.models import Count, Exists, FloatField, Max, Min, OuterRef, Q, Sum, Subquery, Prefetch, Window
 from django.db.models.query import prefetch_related_objects
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
@@ -4838,6 +4839,11 @@ class ProcessoJudicialChangeList(ChangeList):
         'kpi_uf',
         'peticao_tipo',
         'peticao_carteira_id',
+        'peticao_periodo',
+        'peticao_mes',
+        'peticao_ano',
+        'peticao_kind',
+        'peticao_pendente',
         'priority_kpi_tag_id',
         'priority_kpi_status',
         'priority_kpi_uf',
@@ -4868,6 +4874,7 @@ class ProcessoJudicialChangeList(ChangeList):
             "intersection_carteira_b",
             "kpi_carteira_id",
             "peticao_carteira_id",
+            "peticao_pendente",
             "priority_kpi_tag_id",
         )
         if any(request.GET.get(param) for param in scoped_params):
@@ -6002,6 +6009,37 @@ class CarteiraAdmin(admin.ModelAdmin):
             {"slug": "habilitacao", "label": "Habilitação"},
         ]
         peticao_slugs = [item["slug"] for item in peticao_type_defs]
+        peticao_periodo = "todos"
+        peticao_mes = None
+        peticao_ano = None
+        peticao_year_min = None
+        peticao_year_max = None
+        today = timezone.localdate()
+        if request is not None:
+            raw_periodo = str(request.GET.get("peticao_periodo") or "").strip().lower()
+            raw_mes = _safe_int(request.GET.get("peticao_mes"))
+            raw_ano = _safe_int(request.GET.get("peticao_ano"))
+            if raw_periodo in {"semana", "mes", "todos"}:
+                peticao_periodo = raw_periodo
+            elif raw_mes or raw_ano:
+                peticao_periodo = "mes"
+            if isinstance(raw_mes, int) and 1 <= raw_mes <= 12:
+                peticao_mes = raw_mes
+            if isinstance(raw_ano, int) and 1900 <= raw_ano <= 2100:
+                peticao_ano = raw_ano
+        if peticao_mes is None:
+            peticao_mes = today.month
+        if peticao_ano is None:
+            peticao_ano = today.year
+        peticao_date_from = None
+        peticao_date_to = None
+        if peticao_periodo == "semana":
+            peticao_date_from = today - datetime.timedelta(days=6)
+            peticao_date_to = today
+        elif peticao_periodo == "mes":
+            last_day = calendar.monthrange(peticao_ano, peticao_mes)[1]
+            peticao_date_from = datetime.date(peticao_ano, peticao_mes, 1)
+            peticao_date_to = datetime.date(peticao_ano, peticao_mes, last_day)
 
         processo_carteiras = {}
         processo_carteira_rows = (
@@ -6019,26 +6057,71 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "carteira_id": int(carteira_id),
                 "carteira_nome": carteira_nome,
                 "pieces": {slug: 0 for slug in peticao_slugs},
-                "process_ids": {slug: set() for slug in peticao_slugs},
+                "process_ids_pieces": {slug: set() for slug in peticao_slugs},
+                "zips": {slug: 0 for slug in peticao_slugs},
+                "process_ids_zips": {slug: set() for slug in peticao_slugs},
                 "protocoladas": {slug: 0 for slug in peticao_slugs},
                 "protocol_process_ids": {slug: set() for slug in peticao_slugs},
             }
             for carteira_id, carteira_nome in carteira_lookup.items()
         }
         peticao_totals = {
-            slug: {"pieces": 0, "process_ids": set(), "protocoladas": 0, "protocol_process_ids": set()}
+            slug: {
+                "pieces": 0,
+                "process_ids_pieces": set(),
+                "zips": 0,
+                "process_ids_zips": set(),
+                "protocoladas": 0,
+                "protocol_process_ids": set(),
+            }
             for slug in peticao_slugs
         }
+        peticao_pendentes_process_ids = set()
 
-        arquivo_rows = ProcessoArquivo.objects.values_list(
+        peticao_keyword_q = Q()
+        for keyword in (
+            "monitoria",
+            "monitória",
+            "cobranca",
+            "cobrança",
+            "habilitacao",
+            "habilitação",
+        ):
+            peticao_keyword_q |= Q(nome__icontains=keyword) | Q(arquivo__icontains=keyword)
+        arquivo_base_qs = ProcessoArquivo.objects.filter(peticao_keyword_q) if peticao_keyword_q else ProcessoArquivo.objects.all()
+        year_bounds = arquivo_base_qs.aggregate(min_date=Min("criado_em"), max_date=Max("criado_em"))
+        min_date = year_bounds.get("min_date")
+        max_date = year_bounds.get("max_date")
+        if min_date:
+            peticao_year_min = timezone.localdate(min_date).year
+        if max_date:
+            peticao_year_max = timezone.localdate(max_date).year
+        if peticao_year_min is None:
+            peticao_year_min = today.year
+        if peticao_year_max is None:
+            peticao_year_max = today.year
+
+        arquivo_qs = arquivo_base_qs.values_list(
             "processo_id",
             "nome",
             "arquivo",
             "protocolado_no_tribunal",
         )
+        if peticao_date_from:
+            arquivo_qs = arquivo_qs.filter(criado_em__date__gte=peticao_date_from)
+        if peticao_date_to:
+            arquivo_qs = arquivo_qs.filter(criado_em__date__lte=peticao_date_to)
+        arquivo_rows = arquivo_qs
         for processo_id, nome_arquivo, arquivo_path, protocolado in arquivo_rows.iterator():
             if not processo_id:
                 continue
+            nome_str = str(nome_arquivo or "").strip().lower()
+            path_str = str(arquivo_path or "").strip().lower()
+            is_zip = False
+            if nome_str.endswith(".zip") or path_str.endswith(".zip"):
+                is_zip = True
+            if is_zip and not protocolado:
+                peticao_pendentes_process_ids.add(int(processo_id))
             tipo_slug = _classify_peticao_kind(nome_arquivo, arquivo_path)
             if not tipo_slug:
                 continue
@@ -6054,51 +6137,69 @@ class CarteiraAdmin(admin.ModelAdmin):
                         "carteira_id": int(carteira_id),
                         "carteira_nome": carteira_lookup.get(carteira_id, f"Carteira {carteira_id}"),
                         "pieces": {slug: 0 for slug in peticao_slugs},
-                        "process_ids": {slug: set() for slug in peticao_slugs},
+                        "process_ids_pieces": {slug: set() for slug in peticao_slugs},
+                        "zips": {slug: 0 for slug in peticao_slugs},
+                        "process_ids_zips": {slug: set() for slug in peticao_slugs},
                         "protocoladas": {slug: 0 for slug in peticao_slugs},
                         "protocol_process_ids": {slug: set() for slug in peticao_slugs},
                     }
                     peticao_by_carteira[carteira_id] = carteira_bucket
-                carteira_bucket["pieces"][tipo_slug] += 1
-                carteira_bucket["process_ids"][tipo_slug].add(int(processo_id))
-                if protocolado:
-                    carteira_bucket["protocoladas"][tipo_slug] += 1
-                    carteira_bucket["protocol_process_ids"][tipo_slug].add(int(processo_id))
+                if is_zip:
+                    carteira_bucket["zips"][tipo_slug] += 1
+                    carteira_bucket["process_ids_zips"][tipo_slug].add(int(processo_id))
+                    if protocolado:
+                        carteira_bucket["protocoladas"][tipo_slug] += 1
+                        carteira_bucket["protocol_process_ids"][tipo_slug].add(int(processo_id))
+                else:
+                    carteira_bucket["pieces"][tipo_slug] += 1
+                    carteira_bucket["process_ids_pieces"][tipo_slug].add(int(processo_id))
 
-            peticao_totals[tipo_slug]["pieces"] += 1
-            peticao_totals[tipo_slug]["process_ids"].add(int(processo_id))
-            if protocolado:
-                peticao_totals[tipo_slug]["protocoladas"] += 1
-                peticao_totals[tipo_slug]["protocol_process_ids"].add(int(processo_id))
+            if is_zip:
+                peticao_totals[tipo_slug]["zips"] += 1
+                peticao_totals[tipo_slug]["process_ids_zips"].add(int(processo_id))
+                if protocolado:
+                    peticao_totals[tipo_slug]["protocoladas"] += 1
+                    peticao_totals[tipo_slug]["protocol_process_ids"].add(int(processo_id))
+            else:
+                peticao_totals[tipo_slug]["pieces"] += 1
+                peticao_totals[tipo_slug]["process_ids_pieces"].add(int(processo_id))
 
         serialized_peticao_by_carteira = []
         for carteira in sorted(peticao_by_carteira.values(), key=lambda item: (item["carteira_nome"] or "").upper()):
             total_pieces = sum(int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs)
-            if total_pieces <= 0:
+            total_zips = sum(int(carteira["zips"].get(slug, 0)) for slug in peticao_slugs)
+            if (total_pieces + total_zips) <= 0:
                 continue
-            processos_map = {
-                slug: len(carteira["process_ids"].get(slug, set()))
+            processos_pecas_map = {
+                slug: len(carteira["process_ids_pieces"].get(slug, set()))
+                for slug in peticao_slugs
+            }
+            processos_zips_map = {
+                slug: len(carteira["process_ids_zips"].get(slug, set()))
                 for slug in peticao_slugs
             }
             protocol_processos_map = {
                 slug: len(carteira["protocol_process_ids"].get(slug, set()))
                 for slug in peticao_slugs
             }
-            total_processos = len(set().union(*[carteira["process_ids"].get(slug, set()) for slug in peticao_slugs]))
+            total_processos_pecas = len(set().union(*[carteira["process_ids_pieces"].get(slug, set()) for slug in peticao_slugs]))
+            total_processos_zips = len(set().union(*[carteira["process_ids_zips"].get(slug, set()) for slug in peticao_slugs]))
             total_protocoladas = sum(int(carteira["protocoladas"].get(slug, 0)) for slug in peticao_slugs)
-            total_protocol_processos = len(
-                set().union(*[carteira["protocol_process_ids"].get(slug, set()) for slug in peticao_slugs])
-            )
+            total_protocol_processos = len(set().union(*[carteira["protocol_process_ids"].get(slug, set()) for slug in peticao_slugs]))
             serialized_peticao_by_carteira.append(
                 {
                     "carteira_id": carteira["carteira_id"],
                     "carteira_nome": carteira["carteira_nome"],
                     "pieces": {slug: int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs},
+                    "zips": {slug: int(carteira["zips"].get(slug, 0)) for slug in peticao_slugs},
                     "protocoladas": {slug: int(carteira["protocoladas"].get(slug, 0)) for slug in peticao_slugs},
-                    "processos": processos_map,
+                    "processos_pecas": processos_pecas_map,
+                    "processos_zips": processos_zips_map,
                     "protocolados_processos": protocol_processos_map,
                     "total_pieces": int(total_pieces),
-                    "total_processos": int(total_processos),
+                    "total_zips": int(total_zips),
+                    "total_processos_pecas": int(total_processos_pecas),
+                    "total_processos_zips": int(total_processos_zips),
                     "total_protocoladas": int(total_protocoladas),
                     "total_protocolados_processos": int(total_protocol_processos),
                 }
@@ -6109,12 +6210,15 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "slug": item["slug"],
                 "label": item["label"],
                 "pieces": int(peticao_totals[item["slug"]]["pieces"]),
-                "processos": len(peticao_totals[item["slug"]]["process_ids"]),
+                "processos_pecas": len(peticao_totals[item["slug"]]["process_ids_pieces"]),
+                "zips": int(peticao_totals[item["slug"]]["zips"]),
+                "processos_zips": len(peticao_totals[item["slug"]]["process_ids_zips"]),
                 "protocoladas": int(peticao_totals[item["slug"]]["protocoladas"]),
                 "protocolados_processos": len(peticao_totals[item["slug"]]["protocol_process_ids"]),
             }
             for item in peticao_type_defs
         ]
+        peticao_pendentes_total = len(peticao_pendentes_process_ids)
 
         # KPI adicional: cadastros importados com etiqueta de prioridade da planilha
         priority_default_bg = "#f5c242"
@@ -6622,6 +6726,12 @@ class CarteiraAdmin(admin.ModelAdmin):
             "peticao_types": peticao_type_defs,
             "peticao_by_carteira": serialized_peticao_by_carteira,
             "peticao_totals": serialized_peticao_totals,
+            "peticao_periodo": peticao_periodo,
+            "peticao_mes": int(peticao_mes or today.month),
+            "peticao_ano": int(peticao_ano or today.year),
+            "peticao_year_min": int(peticao_year_min or today.year),
+            "peticao_year_max": int(peticao_year_max or today.year),
+            "peticao_pendentes_total": int(peticao_pendentes_total or 0),
             "priority_kpi": priority_kpi_data,
             "productivity_kpi": productivity_kpi_data,
             "online_presence_kpi": online_presence_kpi_data,
@@ -6647,7 +6757,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             'https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js',
             'admin/js/carteira_color_picker.js',
             'https://cdn.jsdelivr.net/npm/chart.js',
-            'admin/js/carteira_charts.js?v=20260303a',
+            'admin/js/carteira_charts.js?v=20260303g',
         )
 
 class ValorCausaOrderFilter(admin.SimpleListFilter):
@@ -6976,6 +7086,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'peticao_tipo',
             'peticao_carteira_id',
             'peticao_protocoladas',
+            'peticao_periodo',
+            'peticao_mes',
+            'peticao_ano',
+            'peticao_kind',
+            'peticao_pendente',
             'priority_kpi_tag_id',
             'priority_kpi_status',
             'priority_kpi_uf',
@@ -7202,6 +7317,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_intersection_pair_filter(qs, request)
         qs = self._apply_kpi_response_filter(qs, request)
         qs = self._apply_peticao_kpi_filter(qs, request)
+        qs = self._apply_peticao_pendente_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related(
             'carteiras_vinculadas',
@@ -7594,11 +7710,42 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if tipo_slug not in allowed:
             return None
         protocoladas_raw = str(request.GET.get('peticao_protocoladas') or '').strip().lower()
+        kind = str(request.GET.get('peticao_kind') or '').strip().lower()
+        if kind not in {'peca', 'zip', 'protocolada'}:
+            kind = 'protocolada' if protocoladas_raw in {'1', 'true', 'sim', 'yes'} else 'peca'
+        periodo = str(request.GET.get('peticao_periodo') or '').strip().lower()
+        mes = self._safe_positive_int(request.GET.get('peticao_mes'))
+        ano = self._safe_positive_int(request.GET.get('peticao_ano'))
+        if periodo not in {'semana', 'mes', 'todos'}:
+            periodo = 'mes' if mes or ano else 'todos'
+        if mes and not (1 <= mes <= 12):
+            mes = None
+        if ano and not (1900 <= ano <= 2100):
+            ano = None
         return {
             'tipo_slug': tipo_slug,
             'carteira_id': self._safe_positive_int(request.GET.get('peticao_carteira_id')),
+            'kind': kind,
             'protocoladas': protocoladas_raw in {'1', 'true', 'sim', 'yes'},
+            'periodo': periodo,
+            'mes': mes,
+            'ano': ano,
         }
+
+    def _parse_peticao_pendente_filter(self, request):
+        raw = str(request.GET.get('peticao_pendente') or '').strip().lower()
+        if raw not in {'1', 'true', 'sim', 'yes'}:
+            return None
+        periodo = str(request.GET.get('peticao_periodo') or '').strip().lower()
+        mes = self._safe_positive_int(request.GET.get('peticao_mes'))
+        ano = self._safe_positive_int(request.GET.get('peticao_ano'))
+        if periodo not in {'semana', 'mes', 'todos'}:
+            periodo = 'mes' if mes or ano else 'todos'
+        if mes and not (1 <= mes <= 12):
+            mes = None
+        if ano and not (1900 <= ano <= 2100):
+            ano = None
+        return {'periodo': periodo, 'mes': mes, 'ano': ano}
 
     def _build_peticao_kpi_process_ids(self, queryset, peticao_filter):
         candidate_qs = queryset
@@ -7613,11 +7760,33 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return set()
 
         target_tipo = peticao_filter.get('tipo_slug')
-        protocoladas = bool(peticao_filter.get('protocoladas'))
         matched_ids = set()
+        kind = peticao_filter.get('kind') or 'peca'
         arquivo_qs = ProcessoArquivo.objects.filter(processo_id__in=candidate_ids)
-        if protocoladas:
+        if kind in {'zip', 'protocolada'}:
+            arquivo_qs = arquivo_qs.filter(Q(nome__iendswith='.zip') | Q(arquivo__iendswith='.zip'))
+        else:
+            arquivo_qs = arquivo_qs.exclude(Q(nome__iendswith='.zip') | Q(arquivo__iendswith='.zip'))
+        if kind == 'protocolada':
             arquivo_qs = arquivo_qs.filter(protocolado_no_tribunal=True)
+        periodo = peticao_filter.get('periodo') or 'todos'
+        if periodo in {'semana', 'mes'}:
+            today = timezone.localdate()
+            date_from = None
+            date_to = None
+            if periodo == 'semana':
+                date_from = today - datetime.timedelta(days=6)
+                date_to = today
+            else:
+                mes = peticao_filter.get('mes') or today.month
+                ano = peticao_filter.get('ano') or today.year
+                last_day = calendar.monthrange(ano, mes)[1]
+                date_from = datetime.date(ano, mes, 1)
+                date_to = datetime.date(ano, mes, last_day)
+            if date_from:
+                arquivo_qs = arquivo_qs.filter(criado_em__date__gte=date_from)
+            if date_to:
+                arquivo_qs = arquivo_qs.filter(criado_em__date__lte=date_to)
         arquivo_rows = arquivo_qs.values_list('processo_id', 'nome', 'arquivo')
         for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
             tipo_slug = self._classify_peticao_kind(nome_arquivo, arquivo_path)
@@ -7633,6 +7802,33 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not process_ids:
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
+
+    def _apply_peticao_pendente_filter(self, queryset, request):
+        pendente_filter = self._parse_peticao_pendente_filter(request)
+        if not pendente_filter:
+            return queryset
+        qs = queryset.filter(arquivos__protocolado_no_tribunal=False).filter(
+            Q(arquivos__nome__iendswith='.zip') | Q(arquivos__arquivo__iendswith='.zip')
+        )
+        periodo = pendente_filter.get('periodo') or 'todos'
+        if periodo in {'semana', 'mes'}:
+            today = timezone.localdate()
+            date_from = None
+            date_to = None
+            if periodo == 'semana':
+                date_from = today - datetime.timedelta(days=6)
+                date_to = today
+            else:
+                mes = pendente_filter.get('mes') or today.month
+                ano = pendente_filter.get('ano') or today.year
+                last_day = calendar.monthrange(ano, mes)[1]
+                date_from = datetime.date(ano, mes, 1)
+                date_to = datetime.date(ano, mes, last_day)
+            if date_from:
+                qs = qs.filter(arquivos__criado_em__date__gte=date_from)
+            if date_to:
+                qs = qs.filter(arquivos__criado_em__date__lte=date_to)
+        return qs.distinct()
 
     def _build_changelist_context_badge(self, request):
         pair_ids = self._parse_intersection_pair_ids(request)
@@ -7675,6 +7871,28 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'subtitle': f'{pergunta}: {kpi_filter["answer_value"]} ({uf_label})',
             }
 
+        pendente_filter = self._parse_peticao_pendente_filter(request)
+        if pendente_filter:
+            periodo = pendente_filter.get('periodo') or 'todos'
+            if periodo == 'mes':
+                mes = pendente_filter.get('mes')
+                ano = pendente_filter.get('ano')
+                if mes and ano:
+                    periodo_label = f"Mês {int(mes):02d}/{int(ano)}"
+                else:
+                    periodo_label = 'Este mês'
+            else:
+                periodo_label = {
+                    'semana': 'Últimos 7 dias',
+                    'todos': 'Todos',
+                }.get(periodo, 'Todos')
+            return {
+                'kind': 'kpi',
+                'title': 'KPI',
+                'value': 'ZIPs pendentes de protocolo',
+                'subtitle': periodo_label,
+            }
+
         peticao_filter = self._parse_peticao_kpi_filter(request)
         if peticao_filter:
             tipo_label = {
@@ -7691,11 +7909,30 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 ) or f'Carteira {carteira_id}'
             else:
                 carteira_label = 'Todas as carteiras'
+            periodo = peticao_filter.get('periodo') or 'todos'
+            if periodo == 'mes':
+                mes = peticao_filter.get('mes')
+                ano = peticao_filter.get('ano')
+                if mes and ano:
+                    periodo_label = f"Mês {int(mes):02d}/{int(ano)}"
+                else:
+                    periodo_label = 'Este mês'
+            else:
+                periodo_label = {
+                    'semana': 'Últimos 7 dias',
+                    'todos': 'Todos',
+                }.get(periodo, 'Todos')
+            kind = peticao_filter.get('kind') or 'peca'
+            kind_label = {
+                'peca': 'Peças geradas',
+                'zip': 'ZIPs gerados',
+                'protocolada': 'ZIPs protocolados',
+            }.get(kind, 'Peças geradas')
             return {
                 'kind': 'kpi',
                 'title': 'KPI',
-                'value': f'Peças geradas · {tipo_label}',
-                'subtitle': carteira_label,
+                'value': f'{kind_label} · {tipo_label}',
+                'subtitle': f'{carteira_label} · {periodo_label}',
             }
 
         priority_filter = self._parse_priority_kpi_filter(request)

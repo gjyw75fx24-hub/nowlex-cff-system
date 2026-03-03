@@ -931,6 +931,15 @@ window.addEventListener('DOMContentLoaded', () => {
     const peticaoTypes = Array.isArray(kpiData.peticao_types) ? kpiData.peticao_types : [];
     const peticaoByCarteira = Array.isArray(kpiData.peticao_by_carteira) ? kpiData.peticao_by_carteira : [];
     const peticaoTotals = Array.isArray(kpiData.peticao_totals) ? kpiData.peticao_totals : [];
+    const peticaoPeriodo = String(kpiData.peticao_periodo || 'todos').trim().toLowerCase() || 'todos';
+    const nowDate = new Date();
+    const defaultPeticaoYear = Number.isFinite(nowDate.getFullYear()) ? nowDate.getFullYear() : 2026;
+    const defaultPeticaoMonth = Number.isFinite(nowDate.getMonth()) ? nowDate.getMonth() + 1 : 1;
+    const peticaoMes = Number(kpiData.peticao_mes || defaultPeticaoMonth) || defaultPeticaoMonth;
+    const peticaoAno = Number(kpiData.peticao_ano || defaultPeticaoYear) || defaultPeticaoYear;
+    const peticaoYearMin = Number(kpiData.peticao_year_min || peticaoAno) || peticaoAno;
+    const peticaoYearMax = Number(kpiData.peticao_year_max || peticaoAno) || peticaoAno;
+    const peticaoPendentesTotal = Number(kpiData.peticao_pendentes_total || 0);
     const priorityKpi = (kpiData && typeof kpiData === 'object' && kpiData.priority_kpi)
         ? kpiData.priority_kpi
         : {};
@@ -1058,18 +1067,43 @@ window.addEventListener('DOMContentLoaded', () => {
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
 
-    const buildPeticaoUrl = (tipoSlug, carteiraId, protocoladas = false) => {
+    const buildPeticaoUrl = (tipoSlug, carteiraId, kind = 'peca') => {
         if (!kpiProcessChangelistUrl) return '';
         const slug = String(tipoSlug || '').trim();
         if (!slug) return '';
         const params = new URLSearchParams();
         params.set('peticao_tipo', slug);
+        const normalizedKind = ['peca', 'zip', 'protocolada'].includes(String(kind || '').trim())
+            ? String(kind || '').trim()
+            : 'peca';
+        params.set('peticao_kind', normalizedKind);
+        if (peticaoPeriodo && peticaoPeriodo !== 'todos') {
+            params.set('peticao_periodo', peticaoPeriodo);
+            if (peticaoPeriodo === 'mes') {
+                params.set('peticao_mes', String(peticaoMes));
+                params.set('peticao_ano', String(peticaoAno));
+            }
+        }
         const carteiraParsed = Number(carteiraId || 0);
         if (carteiraParsed > 0) {
             params.set('peticao_carteira_id', String(carteiraParsed));
         }
-        if (protocoladas) {
+        if (normalizedKind === 'protocolada') {
             params.set('peticao_protocoladas', '1');
+        }
+        return `${kpiProcessChangelistUrl}?${params.toString()}`;
+    };
+
+    const buildPeticaoPendentesUrl = () => {
+        if (!kpiProcessChangelistUrl) return '';
+        const params = new URLSearchParams();
+        params.set('peticao_pendente', '1');
+        if (peticaoPeriodo && peticaoPeriodo !== 'todos') {
+            params.set('peticao_periodo', peticaoPeriodo);
+            if (peticaoPeriodo === 'mes') {
+                params.set('peticao_mes', String(peticaoMes));
+                params.set('peticao_ano', String(peticaoAno));
+            }
         }
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
@@ -1486,16 +1520,139 @@ window.addEventListener('DOMContentLoaded', () => {
         peticaoSection.style.background = '#fff';
         peticaoSection.innerHTML = `
             <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
-                <h3 style="margin:0;">Peças Geradas por Tipo e Carteira</h3>
-                <div style="font-size:12px; color:#5d6f83;">Clique em uma barra para abrir a lista filtrada.</div>
+                <h3 style="margin:0;">Peças e ZIPs por Tipo e Carteira</h3>
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px; color:#5d6f83;">
+                    <label style="display:flex; align-items:center; gap:6px; font-weight:600; color:#2f435b;">
+                        Período
+                        <select class="carteira-kpi-peticao-period" style="padding:3px 8px; border:1px solid #d9e1ea; border-radius:6px; font-size:12px;">
+                            <option value="todos">Todos</option>
+                            <option value="semana">Últimos 7 dias</option>
+                            <option value="mes">Mês</option>
+                        </select>
+                    </label>
+                    <label class="carteira-kpi-peticao-month-wrap" style="display:flex; align-items:center; gap:6px; font-weight:600; color:#2f435b;">
+                        Mês
+                        <select class="carteira-kpi-peticao-month" style="padding:3px 8px; border:1px solid #d9e1ea; border-radius:6px; font-size:12px;"></select>
+                    </label>
+                    <label class="carteira-kpi-peticao-year-wrap" style="display:flex; align-items:center; gap:6px; font-weight:600; color:#2f435b;">
+                        Ano
+                        <select class="carteira-kpi-peticao-year" style="padding:3px 8px; border:1px solid #d9e1ea; border-radius:6px; font-size:12px;"></select>
+                    </label>
+                </div>
             </div>
+            <div class="carteira-kpi-peticao-pendentes" style="margin-bottom:8px; font-size:11px; color:#6b7b8c;"></div>
             <div class="carteira-kpi-peticao-totals" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
             <div style="height:290px;">
                 <canvas id="kpiPeticaoCarteiraChart"></canvas>
             </div>
+            <div class="carteira-kpi-peticao-help" style="margin-top:6px; font-size:11px; color:#8a98a8;">Clique em uma barra para abrir a lista filtrada.</div>
         `;
         chartContainer.appendChild(peticaoSection);
-        attachPrintButtonToPanel(peticaoSection, 'Pecas Geradas por Tipo e Carteira');
+        attachPrintButtonToPanel(peticaoSection, 'Pecas e ZIPs por Tipo e Carteira');
+
+        const periodSelect = peticaoSection.querySelector('.carteira-kpi-peticao-period');
+        const monthWrap = peticaoSection.querySelector('.carteira-kpi-peticao-month-wrap');
+        const yearWrap = peticaoSection.querySelector('.carteira-kpi-peticao-year-wrap');
+        const monthSelect = peticaoSection.querySelector('.carteira-kpi-peticao-month');
+        const yearSelect = peticaoSection.querySelector('.carteira-kpi-peticao-year');
+
+        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+        const normalizePeriodValue = (value) => (
+            ['semana', 'mes', 'todos'].includes(value) ? value : 'todos'
+        );
+
+        const applyPeticaoPeriod = (nextPeriod) => {
+            const normalized = normalizePeriodValue(nextPeriod);
+            const nextUrl = new URL(window.location.href);
+            if (normalized === 'todos') {
+                nextUrl.searchParams.delete('peticao_periodo');
+                nextUrl.searchParams.delete('peticao_mes');
+                nextUrl.searchParams.delete('peticao_ano');
+            } else if (normalized === 'semana') {
+                nextUrl.searchParams.set('peticao_periodo', 'semana');
+                nextUrl.searchParams.delete('peticao_mes');
+                nextUrl.searchParams.delete('peticao_ano');
+            } else {
+                const selectedMonth = Number(monthSelect?.value || peticaoMes || defaultPeticaoMonth) || defaultPeticaoMonth;
+                const selectedYear = Number(yearSelect?.value || peticaoAno || defaultPeticaoYear) || defaultPeticaoYear;
+                nextUrl.searchParams.set('peticao_periodo', 'mes');
+                nextUrl.searchParams.set('peticao_mes', String(selectedMonth));
+                nextUrl.searchParams.set('peticao_ano', String(selectedYear));
+            }
+            window.location.href = nextUrl.toString();
+        };
+
+        const toggleMonthYearVisibility = (periodValue) => {
+            const show = normalizePeriodValue(periodValue) === 'mes';
+            if (monthWrap) {
+                monthWrap.style.display = show ? 'flex' : 'none';
+            }
+            if (yearWrap) {
+                yearWrap.style.display = show ? 'flex' : 'none';
+            }
+            if (monthSelect) {
+                monthSelect.disabled = !show;
+            }
+            if (yearSelect) {
+                yearSelect.disabled = !show;
+            }
+        };
+
+        if (monthSelect) {
+            monthSelect.innerHTML = monthNames
+                .map((label, idx) => {
+                    const value = idx + 1;
+                    return `<option value="${value}">${label}</option>`;
+                })
+                .join('');
+            monthSelect.value = String(peticaoMes || defaultPeticaoMonth);
+            monthSelect.addEventListener('change', () => {
+                applyPeticaoPeriod('mes');
+            });
+        }
+
+        if (yearSelect) {
+            const minYear = Math.min(peticaoYearMin || peticaoAno, peticaoYearMax || peticaoAno, peticaoAno);
+            const maxYear = Math.max(peticaoYearMin || peticaoAno, peticaoYearMax || peticaoAno, peticaoAno);
+            const years = [];
+            for (let year = maxYear; year >= minYear; year -= 1) {
+                years.push(year);
+            }
+            yearSelect.innerHTML = years
+                .map((year) => `<option value="${year}">${year}</option>`)
+                .join('');
+            yearSelect.value = String(peticaoAno || defaultPeticaoYear);
+            yearSelect.addEventListener('change', () => {
+                applyPeticaoPeriod('mes');
+            });
+        }
+
+        if (periodSelect) {
+            const normalizedPeriod = normalizePeriodValue(peticaoPeriodo);
+            periodSelect.value = normalizedPeriod;
+            toggleMonthYearVisibility(normalizedPeriod);
+            periodSelect.addEventListener('change', () => {
+                const nextPeriod = String(periodSelect.value || 'todos').trim().toLowerCase() || 'todos';
+                toggleMonthYearVisibility(nextPeriod);
+                applyPeticaoPeriod(nextPeriod);
+            });
+        }
+
+        const pendentesWrap = peticaoSection.querySelector('.carteira-kpi-peticao-pendentes');
+        if (pendentesWrap) {
+            if (peticaoPendentesTotal > 0) {
+                const pendentesUrl = buildPeticaoPendentesUrl();
+                const label = `ZIPs pendentes de protocolo: <strong>${numberPt(peticaoPendentesTotal)}</strong>`;
+                if (pendentesUrl) {
+                    pendentesWrap.innerHTML = `<a href="${escapeHtml(pendentesUrl)}" style="color:#1f5f9e; text-decoration:none;">${label}</a>`;
+                } else {
+                    pendentesWrap.innerHTML = label;
+                }
+            } else {
+                pendentesWrap.style.display = 'none';
+            }
+        }
 
         const totalsWrap = peticaoSection.querySelector('.carteira-kpi-peticao-totals');
         if (totalsWrap) {
@@ -1504,22 +1661,26 @@ window.addEventListener('DOMContentLoaded', () => {
                 const totalItem = peticaoTotals.find((item) => String(item.slug || '') === slug) || {};
                 const label = String(tipo.label || slug || 'Tipo');
                 const pieces = Number(totalItem.pieces || 0);
-                const processos = Number(totalItem.processos || 0);
+                const piecesProcessos = Number(totalItem.processos_pecas || 0);
+                const zips = Number(totalItem.zips || 0);
+                const zipsProcessos = Number(totalItem.processos_zips || 0);
                 const protocoladas = Number(totalItem.protocoladas || 0);
-                const url = buildPeticaoUrl(slug, null);
+                const protocolProcessos = Number(totalItem.protocolados_processos || 0);
+
+                const makeCountLink = (count, kind) => {
+                    const url = buildPeticaoUrl(slug, null, kind);
+                    if (!url || Number(count || 0) <= 0) {
+                        return numberPt(count);
+                    }
+                    return `<a href="${escapeHtml(url)}" style="color:#1f5f9e; text-decoration:none; font-weight:700;">${numberPt(count)}</a>`;
+                };
+
                 const inner = `
                     <span style="font-weight:700;">${escapeHtml(label)}</span>
-                    <span>· Peças: <strong>${numberPt(pieces)}</strong></span>
-                    <span>· Processos: <strong>${numberPt(processos)}</strong></span>
-                    <span>· Protocoladas: <strong>${numberPt(protocoladas)}</strong></span>
+                    <span>· Peças: ${makeCountLink(pieces, 'peca')} (proc. ${numberPt(piecesProcessos)})</span>
+                    <span>· ZIPs: ${makeCountLink(zips, 'zip')} (proc. ${numberPt(zipsProcessos)})</span>
+                    <span>· Protocoladas: ${makeCountLink(protocoladas, 'protocolada')} (proc. ${numberPt(protocolProcessos)})</span>
                 `;
-                if (url) {
-                    return `
-                        <a href="${escapeHtml(url)}" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#2f435b; text-decoration:none; border:1px solid #e2e9f2; border-radius:999px; padding:5px 10px; background:${paletteColor(idx, 0.14)};">
-                            ${inner}
-                        </a>
-                    `;
-                }
                 return `
                     <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#2f435b; border:1px solid #e2e9f2; border-radius:999px; padding:5px 10px; background:${paletteColor(idx, 0.14)};">
                         ${inner}
@@ -1537,20 +1698,29 @@ window.addEventListener('DOMContentLoaded', () => {
                 const slug = String(tipo.slug || '');
                 const label = String(tipo.label || slug || 'Tipo');
                 datasets.push({
-                    label,
+                    label: `${label} (Peças)`,
                     tipoSlug: slug,
-                    protocoladas: false,
+                    kind: 'peca',
                     data: peticaoByCarteira.map((item) => Number((item.pieces || {})[slug] || 0)),
                     backgroundColor: paletteColor(idx, 0.68),
                     borderColor: paletteColor(idx, 0.96),
                     borderWidth: 1,
                 });
                 datasets.push({
+                    label: `${label} (ZIPs)`,
+                    tipoSlug: slug,
+                    kind: 'zip',
+                    data: peticaoByCarteira.map((item) => Number((item.zips || {})[slug] || 0)),
+                    backgroundColor: paletteColor(idx, 0.38),
+                    borderColor: paletteColor(idx, 0.96),
+                    borderWidth: 1.2,
+                });
+                datasets.push({
                     label: `${label} (Protocoladas)`,
                     tipoSlug: slug,
-                    protocoladas: true,
+                    kind: 'protocolada',
                     data: peticaoByCarteira.map((item) => Number((item.protocoladas || {})[slug] || 0)),
-                    backgroundColor: paletteColor(idx, 0.22),
+                    backgroundColor: paletteColor(idx, 0.9),
                     borderColor: paletteColor(idx, 0.96),
                     borderWidth: 1.4,
                 });
@@ -1568,9 +1738,14 @@ window.addEventListener('DOMContentLoaded', () => {
                     plugins: {
                         legend: {
                             position: 'bottom',
+                            align: 'start',
                             labels: {
-                                boxWidth: 12,
-                                font: { size: 11 },
+                                boxWidth: 10,
+                                boxHeight: 10,
+                                padding: 8,
+                                usePointStyle: true,
+                                pointStyle: 'rectRounded',
+                                font: { size: 10 },
                             },
                         },
                         tooltip: {
@@ -1601,10 +1776,10 @@ window.addEventListener('DOMContentLoaded', () => {
                         const dataIndex = Number(first.index);
                         const dataset = chart.data.datasets?.[datasetIndex] || {};
                         const tipoSlug = String(dataset.tipoSlug || '').trim();
-                        const isProtocoladas = Boolean(dataset.protocoladas);
+                        const kind = String(dataset.kind || 'peca').trim();
                         const carteira = peticaoByCarteira[dataIndex];
                         if (!tipoSlug || !carteira) return;
-                        const url = buildPeticaoUrl(tipoSlug, carteira.carteira_id, isProtocoladas);
+                        const url = buildPeticaoUrl(tipoSlug, carteira.carteira_id, kind);
                         if (url) {
                             window.location.href = url;
                         }
