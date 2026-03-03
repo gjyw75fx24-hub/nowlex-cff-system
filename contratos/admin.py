@@ -3673,6 +3673,20 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
     title = "Equipe"
     parameter_name = "delegado_para"
 
+    @staticmethod
+    def _get_selected_carteira_id(request):
+        for key in ("carteira", "carteira__id__exact"):
+            raw = str(request.GET.get(key) or "").strip()
+            if not raw:
+                continue
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
+
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             items = [('none', "Não Delegado")]
@@ -3685,7 +3699,12 @@ class EquipeDelegadoFilter(admin.SimpleListFilter):
             items.extend(user_items)
             return items
 
-        base_qs = model_admin.model.objects.all()
+        base_qs = model_admin.get_queryset(request)
+        carteira_id = self._get_selected_carteira_id(request)
+        if carteira_id:
+            base_qs = base_qs.filter(
+                Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
+            ).distinct()
         counts = {
             row['delegado_para_id']: row['total']
             for row in base_qs.values('delegado_para_id').annotate(total=models.Count('id')).filter(delegado_para_id__isnull=False)
