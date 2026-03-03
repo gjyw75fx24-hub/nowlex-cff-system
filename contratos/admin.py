@@ -3009,7 +3009,7 @@ def guardados_view(request):
     page_obj = None
     if view_mode == "analise":
         card_rows = []
-        for processo in qs.iterator():
+        for processo in qs.iterator(chunk_size=200):
             cards = _extract_cards(processo)
             if not cards:
                 continue
@@ -3050,7 +3050,7 @@ def guardados_view(request):
     else:
         if analista_query:
             filtered_processes = []
-            for processo in qs.iterator():
+            for processo in qs.iterator(chunk_size=200):
                 cards = _extract_cards(processo)
                 if not cards:
                     continue
