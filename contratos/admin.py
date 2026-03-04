@@ -3864,7 +3864,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
 
 
 class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
-    title = "Por Análise"
+    title = "Análise"
     parameter_name = "tipo_analise"
     exclude_parameter_name = "tipo_analise_exclude"
 
@@ -4045,6 +4045,45 @@ class TipoAnaliseConcluidaFilter(admin.SimpleListFilter):
             return self._filter_queryset(queryset, slug)
         if exclude_slug:
             return self._exclude_queryset(queryset, exclude_slug)
+        return queryset
+
+
+class ContratoCanceladoFilter(admin.SimpleListFilter):
+    title = "Tem contrato cancelado"
+    parameter_name = "contrato_cancelado"
+
+    def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return [("1", "Sim")]
+        base_qs = model_admin.get_queryset(request)
+        total = base_qs.filter(contratos__status=3).distinct().count()
+        label = mark_safe(f"Sim <span class='filter-count'>({total})</span>")
+        return [("1", label)]
+
+    def choices(self, changelist):
+        current = self.value()
+        remove_keys = [self.parameter_name, "o", "p", "_skip_saved_filters"]
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {"_skip_saved_filters": "1"},
+                    remove=remove_keys
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=["o", "p", "_skip_saved_filters"]
+                )
+            yield {
+                "selected": selected,
+                "query_string": query_string,
+                "display": label,
+            }
+
+    def queryset(self, request, queryset):
+        if self.value() == "1":
+            return queryset.filter(contratos__status=3).distinct()
         return queryset
 
 
@@ -6898,6 +6937,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         EquipeDelegadoFilter,
         AprovacaoFilter,
         TipoAnaliseConcluidaFilter,
+        ContratoCanceladoFilter,
         ProtocoladosFilter,
         PrescricaoOrderFilter,
         ViabilidadeFinanceiraFilter,
