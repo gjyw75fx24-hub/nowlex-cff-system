@@ -4848,6 +4848,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'priority_kpi_tag_id',
         'priority_kpi_status',
         'priority_kpi_uf',
+        'show_importado',
     )
 
     def get_filters_params(self, params=None):
@@ -6875,7 +6876,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return ProcessoJudicialChangeList
     class Media:
         js = ('contratos/js/contrato_money_mask.js',)
-    list_display = ("uf", "proxima_prescricao_lista", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
+    list_display = ("uf", "importado_em_lista", "proxima_prescricao_lista", "cpf_passivo", "get_polo_passivo", "get_x_separator", "get_polo_ativo",
                     "cnj_with_navigation", "classe_processual", "carteira_com_indicador", "nao_judicializado", "busca_ativa")
     list_display_links = ("cnj_with_navigation",)
     list_per_page = 25
@@ -7346,7 +7347,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             proxima_prescricao_futura=models.Min(
                 'contratos__data_prescricao',
                 filter=Q(contratos__data_prescricao__gte=today),
-            )
+            ),
+            importado_em=models.Min('numeros_cnj__criado_em'),
         )
         prescricao_mes = self._safe_positive_int(request.GET.get('prescricao_mes'))
         if prescricao_mes and 1 <= prescricao_mes <= 12:
@@ -7368,6 +7370,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     @admin.display(description="Prescrição", ordering="proxima_prescricao_futura")
     def proxima_prescricao_lista(self, obj):
         data = getattr(obj, 'proxima_prescricao_futura', None)
+        if not data:
+            return "-"
+        return data.strftime("%d/%m/%Y")
+
+    @admin.display(description="Importado em", ordering="importado_em")
+    def importado_em_lista(self, obj):
+        data = getattr(obj, 'importado_em', None)
         if not data:
             return "-"
         return data.strftime("%d/%m/%Y")

@@ -409,6 +409,45 @@
             z-index: 6;
             overflow: visible;
             padding-right: 56px;
+            position: relative;
+        }
+        .prescricao-ip-slot {
+            position: absolute;
+            top: 50%;
+            left: 8px;
+            transform: translateY(-50%);
+            display: inline-flex;
+            align-items: center;
+        }
+        #result_list thead th.column-proxima_prescricao_lista .text {
+            padding-left: 32px;
+        }
+        #result_list .column-importado_em_lista,
+        #result_list .field-importado_em_lista {
+            display: none;
+            min-width: 88px;
+            white-space: nowrap;
+        }
+        #result_list.show-importado-em .column-importado_em_lista,
+        #result_list.show-importado-em .field-importado_em_lista {
+            display: table-cell;
+        }
+        .importado-toggle {
+            margin-left: 0;
+            border: 1px solid #c6d3e0;
+            background: #f7fbff;
+            color: #2f435b;
+            border-radius: 7px;
+            padding: 1px 6px;
+            font-size: 10px;
+            line-height: 1.2;
+            cursor: pointer;
+        }
+        .importado-toggle.is-active {
+            background: #eaf3ff;
+            border-color: #7fa8d6;
+            color: #1f3f63;
+            font-weight: 600;
         }
         #result_list thead th.column-proxima_prescricao_lista .text {
             z-index: 7;
@@ -420,6 +459,7 @@
             transform: translateY(-50%);
             display: inline-flex;
             align-items: center;
+            gap: 4px;
             margin-left: 0;
             vertical-align: middle;
             z-index: 30;
@@ -724,6 +764,7 @@
 
             const prescricaoHeader = document.querySelector('#result_list thead th.column-proxima_prescricao_lista');
             if (prescricaoHeader) {
+                const table = document.getElementById('result_list');
                 const monthNames = [
                     { value: '1', label: 'Jan' },
                     { value: '2', label: 'Fev' },
@@ -743,6 +784,16 @@
                 if (!prescricaoHeader.querySelector('.prescricao-mes-filter')) {
                     const filterWrap = document.createElement('span');
                     filterWrap.className = 'prescricao-mes-filter';
+
+                    const importadoBtn = document.createElement('button');
+                    importadoBtn.type = 'button';
+                    importadoBtn.className = 'importado-toggle';
+                    importadoBtn.textContent = 'IP';
+                    importadoBtn.title = 'Mostrar/ocultar coluna Importado em';
+
+                    const ipSlot = document.createElement('span');
+                    ipSlot.className = 'prescricao-ip-slot';
+                    ipSlot.appendChild(importadoBtn);
 
                     const triggerBtn = document.createElement('button');
                     triggerBtn.type = 'button';
@@ -813,6 +864,58 @@
                     filterWrap.appendChild(triggerBtn);
                     filterWrap.appendChild(menu);
                     prescricaoHeader.appendChild(filterWrap);
+                    prescricaoHeader.appendChild(ipSlot);
+                    if (table) {
+                        const updateLinks = (enabled) => {
+                            const selector = '#result_list thead th a';
+                            document.querySelectorAll(selector).forEach(link => {
+                                try {
+                                    const linkUrl = new URL(link.getAttribute('href') || '', window.location.href);
+                                    if (enabled) {
+                                        linkUrl.searchParams.set('show_importado', '1');
+                                    } else {
+                                        linkUrl.searchParams.delete('show_importado');
+                                    }
+                                    link.setAttribute('href', linkUrl.toString());
+                                } catch (err) {
+                                    // ignore malformed URLs
+                                }
+                            });
+                        };
+
+                        const refreshState = (shouldSyncLinks = false) => {
+                            const isEnabled = table.classList.contains('show-importado-em');
+                            importadoBtn.classList.toggle('is-active', isEnabled);
+                            if (shouldSyncLinks) {
+                                updateLinks(isEnabled);
+                            }
+                        };
+
+                        const params = new URLSearchParams(window.location.search);
+                        if (params.get('show_importado') === '1') {
+                            table.classList.add('show-importado-em');
+                        }
+                        refreshState(true);
+
+                        importadoBtn.addEventListener('click', (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            table.classList.toggle('show-importado-em');
+                            const isEnabled = table.classList.contains('show-importado-em');
+                            const nextParams = new URLSearchParams(window.location.search);
+                            if (isEnabled) {
+                                nextParams.set('show_importado', '1');
+                            } else {
+                                nextParams.delete('show_importado');
+                            }
+                            const nextQuery = nextParams.toString();
+                            const nextUrl = nextQuery
+                                ? `${window.location.pathname}?${nextQuery}`
+                                : window.location.pathname;
+                            window.history.replaceState(null, '', nextUrl);
+                            refreshState(true);
+                        });
+                    }
                 }
             }
 
