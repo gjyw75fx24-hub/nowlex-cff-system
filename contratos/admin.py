@@ -23,6 +23,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core import signing
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.core.management.color import no_style
 from django.db import connection, models, transaction
@@ -41,6 +43,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from decimal import Decimal, InvalidOperation
+from rq.job import Job
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,8 @@ from .services.passivas_planilha import (
     normalize_header,
     validate_planilha_upload,
 )
+from .queue import get_passivas_import_queue, get_queue_connection
+from .tasks import run_passivas_planilha_import_job
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
 
@@ -1840,6 +1845,7 @@ def demandas_analise_planilha_view(request):
     import_modal_data = request.session.pop(import_modal_session_key, None)
     selected_cpfs = []
     selected_cpfs_payload = ""
+    background_job = None
 
     action = (request.POST.get("action") or request.POST.get("action_override")) if request.method == "POST" else None
     import_action_requested = request.method == "POST" and action == "import"
@@ -1915,6 +1921,16 @@ def demandas_analise_planilha_view(request):
             {"value": key, "label": labels_by_key[key]}
             for key in sorted(labels_by_key.keys(), key=lambda item: labels_by_key[item].upper())
         ]
+
+    def _persist_upload_to_storage(file_bytes: bytes, upload_name: str) -> str:
+        if not file_bytes:
+            raise ValueError("Arquivo vazio ou não encontrado.")
+        ext = os.path.splitext(upload_name or "")[1].lower()
+        if ext not in {".xlsx", ".csv"}:
+            ext = ".xlsx"
+        storage_path = f"passivas_imports/{uuid.uuid4().hex}{ext}"
+        default_storage.save(storage_path, ContentFile(file_bytes))
+        return storage_path
 
     def _build_imported_status_map(rows, carteira_obj, tipo_analise_obj):
         cpfs = {normalize_cpf(getattr(r, "cpf", "")) for r in rows if getattr(r, "cpf", "")}
@@ -2576,6 +2592,62 @@ def demandas_analise_planilha_view(request):
                         "title": "Falha ao importar",
                         "error": str(exc),
                     }
+            elif action == "import_async":
+                if selected_cpfs:
+                    parsed = [r for r in parsed if r.cpf in set(selected_cpfs)]
+                storage_path = ""
+                try:
+                    storage_path = _persist_upload_to_storage(file_bytes, upload_name or "planilha.xlsx")
+                    pending_actions = request.session.get(_pending_actions_session_key(), {}) or {}
+                    token_pending = (token or "").strip()
+                    pending_for_token = pending_actions.get(token_pending) if token_pending else None
+                    pending_tarefas = []
+                    if isinstance(pending_for_token, dict):
+                        pending_tarefas = pending_for_token.get("tarefas") or []
+
+                    if token_pending and token_pending in pending_actions:
+                        pending_actions.pop(token_pending, None)
+                        request.session[_pending_actions_session_key()] = pending_actions
+
+                    queue = get_passivas_import_queue()
+                    job = queue.enqueue(
+                        run_passivas_planilha_import_job,
+                        kwargs={
+                            "storage_path": storage_path,
+                            "upload_name": upload_name or "planilha.xlsx",
+                            "carteira_id": form.cleaned_data["carteira"].id,
+                            "tipo_analise_id": form.cleaned_data["tipo_analise"].id,
+                            "sheet_prefix": form.cleaned_data.get("sheet_prefix") or "E - PASSIVAS",
+                            "uf": form.cleaned_data.get("uf") or "",
+                            "limit": int(form.cleaned_data.get("limit") or 0),
+                            "selected_cpfs": selected_cpfs,
+                            "consider_priority": consider_priority,
+                            "selected_priority_keys": selected_priority_keys,
+                            "pending_tarefas": pending_tarefas,
+                            "user_id": getattr(request.user, "id", None),
+                        },
+                        result_ttl=86400,
+                    )
+                    request.session["passivas_planilha_last_job_id"] = job.id
+                    background_job = {
+                        "id": job.id,
+                        "status": job.get_status(),
+                        "result": None,
+                        "error": None,
+                    }
+                    messages.success(
+                        request,
+                        "Importação em background iniciada. "
+                        "Você pode atualizar a página para acompanhar o status.",
+                    )
+                except Exception as exc:
+                    if storage_path:
+                        try:
+                            if default_storage.exists(storage_path):
+                                default_storage.delete(storage_path)
+                        except Exception:
+                            pass
+                    messages.error(request, f"Falha ao iniciar importação em background: {exc}")
             elif action == "remove":
                 supervisor_password = (request.POST.get("supervisor_password") or "").strip()
                 if not selected_cpfs:
@@ -2639,6 +2711,35 @@ def demandas_analise_planilha_view(request):
                 "note": "Nenhuma alteração foi aplicada nesta execução.",
             }
 
+    if background_job is None:
+        job_id = request.session.get("passivas_planilha_last_job_id")
+        if job_id:
+            try:
+                connection = get_queue_connection()
+                job = Job.fetch(job_id, connection=connection)
+                status = job.get_status()
+                result = job.result if status == "finished" else None
+                error_message = ""
+                if status == "failed":
+                    exc_info = job.exc_info or ""
+                    if exc_info:
+                        error_message = exc_info.strip().splitlines()[-1]
+                    else:
+                        error_message = "Falha ao processar importação em background."
+                background_job = {
+                    "id": job_id,
+                    "status": status,
+                    "result": result,
+                    "error": error_message,
+                }
+            except Exception as exc:
+                background_job = {
+                    "id": job_id,
+                    "status": "indisponivel",
+                    "result": None,
+                    "error": str(exc),
+                }
+
     # Nome do arquivo mantido (quando já houve prévia)
     kept_name = ""
     try:
@@ -2664,6 +2765,7 @@ def demandas_analise_planilha_view(request):
             "priority_options": priority_options,
             "selected_priority_keys": selected_priority_keys,
             "selected_cpfs_payload": selected_cpfs_payload,
+            "background_job": background_job,
         }
     )
     return render(request, "admin/contratos/demandas_analise_planilha.html", context)

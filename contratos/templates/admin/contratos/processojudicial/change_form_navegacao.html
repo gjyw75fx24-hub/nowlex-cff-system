@@ -8,6 +8,7 @@ window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"t
 window.__documento_peticoes_css_url = "{% static 'admin/css/documento_modelo_peticoes.css' %}";
 window.__pdfjs_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 window.__pdfjs_worker_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+window.__analise_username = "{{ request.user.get_full_name|default:request.user.username|escapejs }}";
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 window.__tipos_peticao_preview_url = "{{ tipos_peticao_preview_url|default:'' }}";
 window.__tipos_peticao_generate_url = "{{ tipos_peticao_generate_url|default:'' }}";

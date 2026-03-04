@@ -123,6 +123,44 @@
       </div>
     </div>
 
+    {% if background_job %}
+      <div class="mini-postit" style="margin-top: 12px; padding: 10px 12px;">
+        <div>
+          <strong>Importação em background:</strong>
+          {% if background_job.status == "queued" or background_job.status == "deferred" %}
+            Na fila
+          {% elif background_job.status == "started" %}
+            Processando
+          {% elif background_job.status == "finished" %}
+            Concluída
+          {% elif background_job.status == "failed" %}
+            Falhou
+          {% elif background_job.status == "indisponivel" %}
+            Status indisponível
+          {% else %}
+            {{ background_job.status }}
+          {% endif %}
+        </div>
+        {% if background_job.status == "finished" and background_job.result %}
+          <div style="margin-top: 6px; opacity: .85;">
+            Cadastros: {{ background_job.result.created_cadastros|default:0 }} novo(s),
+            {{ background_job.result.updated_cadastros|default:0 }} atualizado(s).
+            CNJs: {{ background_job.result.created_cnjs|default:0 }} novo(s),
+            {{ background_job.result.updated_cnjs|default:0 }} atualizado(s).
+            Cards: {{ background_job.result.created_cards|default:0 }} novo(s),
+            {{ background_job.result.updated_cards|default:0 }} atualizado(s).
+            {% if background_job.result.applied_tasks %}
+              Agenda Geral: {{ background_job.result.applied_tasks }} tarefa(s) aplicada(s)
+              em {{ background_job.result.applied_tasks_targets|default:0 }} processo(s).
+            {% endif %}
+          </div>
+        {% elif background_job.error %}
+          <div style="margin-top: 6px; color: #8a1f1f;">{{ background_job.error }}</div>
+        {% endif %}
+        <div style="margin-top: 6px; opacity: .7;">Atualize a página para acompanhar.</div>
+      </div>
+    {% endif %}
+
 	    <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
 		      {% csrf_token %}
 		      {{ form.upload_token }}
@@ -235,10 +273,11 @@
           syncPriorityVisibility();
         })();
 
-        (function () {
+	        (function () {
 	          const bindImportSubmitState = () => {
 	            const formEl = document.querySelector('.demandas-panel form');
 	            const importBtn = document.getElementById('planilha-import-btn');
+	            const asyncBtn = document.getElementById('planilha-import-async-btn');
 	            const removeBtn = document.getElementById('planilha-remove-btn');
 	            const actionOverrideInput = document.getElementById('id_action_override');
 	            const supervisorPasswordInput = document.getElementById('id_supervisor_password');
@@ -253,6 +292,11 @@
 	                && submitterName === 'action'
 	                && submitterValue === 'import'
 	              );
+	              const isImportAsyncAction = Boolean(
+	                submitter
+	                && submitterName === 'action'
+	                && submitterValue === 'import_async'
+	              );
 	              const isRemoveAction = Boolean(
 	                submitter
 	                && submitterName === 'action'
@@ -264,9 +308,13 @@
 	              if (!isRemoveAction && supervisorPasswordInput) {
 	                supervisorPasswordInput.value = '';
 	              }
-	              if (!isImportAction && !isRemoveAction) return;
+	              if (!isImportAction && !isImportAsyncAction && !isRemoveAction) return;
 
 	              if (isImportAction && importBtn.dataset.importing === '1') {
+	                event.preventDefault();
+	                return;
+	              }
+	              if (isImportAsyncAction && asyncBtn && asyncBtn.dataset.importing === '1') {
 	                event.preventDefault();
 	                return;
 	              }
@@ -302,6 +350,20 @@
 	                return;
 	              }
 
+	              if (isImportAsyncAction) {
+	                if (actionOverrideInput) {
+	                  actionOverrideInput.value = 'import_async';
+	                }
+	                if (asyncBtn) {
+	                  asyncBtn.dataset.importing = '1';
+	                  asyncBtn.style.pointerEvents = 'none';
+	                  asyncBtn.setAttribute('aria-disabled', 'true');
+	                  asyncBtn.classList.add('disabled');
+	                  asyncBtn.textContent = 'Enfileirando...';
+	                }
+	                return;
+	              }
+
 	              if (actionOverrideInput) {
 	                actionOverrideInput.value = 'import';
 	              }
@@ -325,6 +387,7 @@
 		        <div class="demandas-form__actions">
 		          <button class="button" type="submit" name="action" value="preview">Pré-visualizar</button>
 		          <button class="button default" type="submit" name="action" value="import" id="planilha-import-btn">Importar</button>
+		          <button class="button" type="submit" name="action" value="import_async" id="planilha-import-async-btn">Importar em background</button>
 		          <button class="button" type="submit" name="action" value="cancel" formnovalidate>Cancelar importação</button>
 		        </div>
 	      </div>
