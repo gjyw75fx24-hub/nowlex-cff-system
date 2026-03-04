@@ -651,6 +651,12 @@ class Contrato(models.Model):
     custas = models.DecimalField("Custas", max_digits=14, decimal_places=2, null=True, blank=True)
     parcelas_em_aberto = models.IntegerField(verbose_name="Parcelas em Aberto", blank=True, null=True)
     data_prescricao = models.DateField(verbose_name="Data de Prescrição", blank=True, null=True)
+    status = models.IntegerField(
+        verbose_name="Status",
+        null=True,
+        blank=True,
+        help_text="Status importado da planilha (ex.: 3 = Cancelado).",
+    )
 
     @property
     def is_prescrito(self):
@@ -658,6 +664,10 @@ class Contrato(models.Model):
         if not self.data_prescricao:
             return False
         return self.data_prescricao < timezone.now().date()
+
+    @property
+    def is_cancelado(self):
+        return self.status == 3
 
     def __str__(self):
         return self.numero_contrato if self.numero_contrato else f"Contrato do processo {self.processo.cnj}"

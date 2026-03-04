@@ -5543,10 +5543,12 @@ function formatCnjDigits(raw) {
                 const valorTotalRaw = $element.attr('data-valor-total');
                 const valorCausaRaw = $element.attr('data-valor-causa');
                 const custasRaw = $element.attr('data-custas');
+                const statusRaw = $element.attr('data-status');
                 const dataPrescricaoRaw = extractContractPrescricaoIso($element);
                 return {
                     id: resolvedId || candidate,
                     numero_contrato: numeroContrato || (resolvedId || candidate),
+                    status: statusRaw,
                     is_prescrito: String($element.attr('data-is-prescrito') || '').toLowerCase() === 'true',
                     is_quitado: String($element.attr('data-is-quitado') || '').toLowerCase() === 'true',
                     valor_total_devido: parseDecimalValue(valorTotalRaw),
@@ -5565,6 +5567,7 @@ function formatCnjDigits(raw) {
                 return {
                     id: candidate,
                     numero_contrato: numeroContrato || candidate,
+                    status: $row.find('input[name$="-status"]').val(),
                     is_prescrito: false,
                     is_quitado: false,
                     valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
@@ -5580,6 +5583,14 @@ function formatCnjDigits(raw) {
         function loadContratosFromDOM() {
             const statusMap = userResponses.contratos_status || {};
             const contractsById = new Map();
+            const normalizeStatus = (value) => {
+                const raw = String(value == null ? '' : value).trim();
+                if (!raw) return null;
+                const digits = raw.replace(/[^0-9]/g, '');
+                if (!digits) return null;
+                const parsed = Number(digits);
+                return Number.isFinite(parsed) ? parsed : null;
+            };
 
             const upsertContract = (raw) => {
                 if (!raw || raw.id === undefined || raw.id === null || raw.id === '') {
@@ -5593,10 +5604,12 @@ function formatCnjDigits(raw) {
                 const status = statusMap[contratoId] || {};
                 const numeroContrato = String(raw.numero_contrato || existing.numero_contrato || contratoId)
                     .trim();
+                const statusValue = normalizeStatus(raw.status != null ? raw.status : existing.status);
 
                 contractsById.set(contratoId, {
                     id: contratoId,
                     numero_contrato: numeroContrato || contratoId,
+                    status: statusValue,
                     is_prescrito: Boolean(
                         raw.is_prescrito != null ? raw.is_prescrito : existing.is_prescrito
                     ),
@@ -5634,6 +5647,7 @@ function formatCnjDigits(raw) {
                 upsertContract({
                     id: rawId,
                     numero_contrato: numeroContrato,
+                    status: $wrapper.attr('data-status'),
                     is_prescrito: String($wrapper.attr('data-is-prescrito') || '').toLowerCase() === 'true',
                     is_quitado: String($wrapper.attr('data-is-quitado') || '').toLowerCase() === 'true',
                     valor_total_devido: parseDecimalValue($wrapper.attr('data-valor-total')),
@@ -5652,6 +5666,7 @@ function formatCnjDigits(raw) {
                 upsertContract({
                     id: rowId,
                     numero_contrato: String($row.find('input[name$="-numero_contrato"]').val() || '').trim(),
+                    status: $row.find('input[name$="-status"]').val(),
                     valor_total_devido: parseDecimalValue($row.find('input[name$="-valor_total_devido"]').val()),
                     valor_causa: parseDecimalValue($row.find('input[name$="-valor_causa"]').val()),
                     custas: parseDecimalValue($row.find('input[name$="-custas"]').val()),
@@ -7445,11 +7460,14 @@ function formatCnjDigits(raw) {
             if (!contratoInfo) {
                 return null;
             }
+            const statusValue = contratoInfo.status != null ? Number(contratoInfo.status) : null;
             return {
                 id: String(contratoInfo.id),
                 numero_contrato: String(contratoInfo.numero_contrato || contratoInfo.id),
                 is_prescrito: Boolean(contratoInfo.is_prescrito),
                 is_quitado: Boolean(contratoInfo.is_quitado),
+                status: Number.isFinite(statusValue) ? statusValue : null,
+                is_cancelado: Number.isFinite(statusValue) && statusValue === 3,
                 data_prescricao: normalizeIsoDateValue(contratoInfo.data_prescricao)
             };
         }
@@ -7575,16 +7593,29 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 return;
             }
 
+            let removedCancelled = false;
             resolvedCandidates.forEach(function (contratoInfo) {
                 const idStr = String(contratoInfo.id);
-                const isChecked = normalizedSelection.includes(idStr);
-                const isDisabled = contratoInfo.is_prescrito || contratoInfo.is_quitado;
+                let isChecked = normalizedSelection.includes(idStr);
+                const isDisabled = contratoInfo.is_prescrito || contratoInfo.is_quitado || contratoInfo.is_cancelado;
+                if (contratoInfo.is_cancelado && isChecked) {
+                    const idx = normalizedSelection.indexOf(idStr);
+                    if (idx >= 0) {
+                        normalizedSelection.splice(idx, 1);
+                        currentResponses.contratos_para_monitoria = normalizedSelection.slice();
+                        currentResponses.ativar_botao_monitoria = normalizedSelection.length > 0 ? 'SIM' : '';
+                        removedCancelled = true;
+                        isChecked = false;
+                    }
+                }
 
                 let label = `${contratoInfo.numero_contrato}`;
                 if (contratoInfo.is_prescrito) {
                     label += ' <span style="color:#c62828;font-style:italic;">(Prescrito)</span>';
                 } else if (contratoInfo.is_quitado) {
                     label += ' <span style="color:#007bff;font-style:italic;">(Quitado)</span>';
+                } else if (contratoInfo.is_cancelado) {
+                    label += ' <span style="color:#8a1b1b;font-style:italic;">(Cancelado)</span>';
                 }
 
                 const $checkboxWrapper = $(
@@ -7593,13 +7624,26 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                                id="monitoria_contrato_${idStr}"
                                value="${idStr}"
                                ${isChecked ? 'checked' : ''}
-                               ${isDisabled ? 'disabled' : ''}>
+                               ${isDisabled ? 'disabled' : ''}
+                               ${contratoInfo.is_cancelado ? 'title="Contrato cancelado: não pode ser selecionado para monitória."' : ''}>
                         <label for="monitoria_contrato_${idStr}">${label}</label>
                     </div>`
                 );
+                if (contratoInfo.is_cancelado) {
+                    $checkboxWrapper.on('click', function (event) {
+                        const target = event.target;
+                        if (target && target.tagName && target.tagName.toLowerCase() === 'input') {
+                            return;
+                        }
+                        showCanceladoAlert('Contrato cancelado: não pode ser selecionado para monitória.');
+                    });
+                }
 
                 $selectorDiv.append($checkboxWrapper);
             });
+            if (removedCancelled) {
+                saveResponses();
+            }
 
             $selectorDiv.on('change', 'input[type="checkbox"]', function () {
                 const contratoId = $(this).val(); // string
@@ -7632,6 +7676,112 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             }
 
             $container.append($selectorDiv);
+        }
+
+        function ensureCanceladoAlertStyle() {
+            if (document.getElementById('cancelado-alert-style')) {
+                return;
+            }
+            const style = document.createElement('style');
+            style.id = 'cancelado-alert-style';
+            style.textContent = `
+                .cancelado-alert-overlay {
+                    position: fixed;
+                    inset: 0;
+                    background: rgba(0, 0, 0, 0.35);
+                    display: none;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 12000;
+                    padding: 16px;
+                }
+                .cancelado-alert-overlay.open {
+                    display: flex;
+                }
+                .cancelado-alert-modal {
+                    width: min(420px, calc(100vw - 24px));
+                    background: #ffecec;
+                    border: 1px solid #f2b2b2;
+                    border-radius: 12px;
+                    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2);
+                    padding: 16px;
+                    color: #6a1f1f;
+                }
+                .cancelado-alert-title {
+                    margin: 0 0 8px 0;
+                    font-size: 1rem;
+                    font-weight: 700;
+                }
+                .cancelado-alert-message {
+                    margin: 0 0 14px 0;
+                    font-size: 0.9rem;
+                    line-height: 1.4;
+                }
+                .cancelado-alert-actions {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 8px;
+                }
+                .cancelado-alert-actions button {
+                    border: 1px solid #e3a2a2;
+                    background: #fff;
+                    border-radius: 8px;
+                    padding: 6px 14px;
+                    cursor: pointer;
+                    font-weight: 600;
+                    color: #6a1f1f;
+                }
+                .cancelado-alert-actions .cancelado-alert-ok {
+                    background: #e35a5a;
+                    border-color: #c34747;
+                    color: #fff;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        function showCanceladoAlert(message) {
+            ensureCanceladoAlertStyle();
+            let overlay = document.getElementById('cancelado-alert-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'cancelado-alert-overlay';
+                overlay.className = 'cancelado-alert-overlay';
+                overlay.innerHTML = `
+                    <div class="cancelado-alert-modal" role="dialog" aria-modal="true" aria-labelledby="cancelado-alert-title">
+                        <h3 class="cancelado-alert-title" id="cancelado-alert-title">Aviso</h3>
+                        <p class="cancelado-alert-message" id="cancelado-alert-message"></p>
+                        <div class="cancelado-alert-actions">
+                            <button type="button" class="cancelado-alert-ok">OK</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                const okButton = overlay.querySelector('.cancelado-alert-ok');
+                const close = () => {
+                    overlay.classList.remove('open');
+                    overlay.setAttribute('aria-hidden', 'true');
+                };
+                overlay.addEventListener('click', (event) => {
+                    if (event.target === overlay) {
+                        close();
+                    }
+                });
+                okButton.addEventListener('click', close);
+                document.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape' && overlay.classList.contains('open')) {
+                        close();
+                    }
+                });
+            }
+
+            const messageEl = overlay.querySelector('#cancelado-alert-message');
+            if (messageEl) {
+                messageEl.textContent = String(message || '').trim() || 'Contrato cancelado: não pode ser selecionado para monitória.';
+            }
+            overlay.setAttribute('aria-hidden', 'false');
+            overlay.classList.add('open');
         }
 
         function ensureNaoJudicializadoSupervisionToggle($container) {

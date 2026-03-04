@@ -22,6 +22,7 @@ carteira_consignado_dump_*.dump
 
 # Planilhas locais (importação)
 E - PASSIVAS - Modelo.xlsx
+erp_contratos_status3_CANCELADOS.xlsx
 
 # Arquivos de ambiente (NUNCA commitar!)
 .env

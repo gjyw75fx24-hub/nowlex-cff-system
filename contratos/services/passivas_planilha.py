@@ -215,8 +215,11 @@ def load_xlsx_sheet_rows_from_bytes(file_bytes: bytes, sheet_name_prefix: str) -
         target = rid_to_target.get(target_rid)
         if not target:
             raise PassivasPlanilhaError("Não foi possível resolver a planilha (rels).")
-
-        sheet_path = "xl/" + target
+        target = target.lstrip("/")
+        if target.startswith("xl/"):
+            sheet_path = target
+        else:
+            sheet_path = "xl/" + target
         root = ET.fromstring(z.read(sheet_path))
         rows: List[Dict[str, Any]] = []
         cols_seen = set()
@@ -233,6 +236,13 @@ def load_xlsx_sheet_rows_from_bytes(file_bytes: bytes, sheet_name_prefix: str) -
                 v = c.find(f"{{{SHEET_NS}}}v")
                 if v is None or v.text is None:
                     value = ""
+                    if t == "inlineStr":
+                        is_el = c.find(f"{{{SHEET_NS}}}is")
+                        if is_el is not None:
+                            texts = []
+                            for t_el in is_el.findall(f".//{{{SHEET_NS}}}t"):
+                                texts.append(t_el.text or "")
+                            value = "".join(texts)
                 else:
                     raw = v.text
                     if t == "s":

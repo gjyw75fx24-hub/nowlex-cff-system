@@ -266,6 +266,23 @@
         display: inline-block;
         vertical-align: middle;
     }
+    .contrato-status-cancelado {
+        display: inline-flex;
+        align-items: center;
+        margin: 0 8px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: #8a1b1b;
+        background: #fdeaea;
+        border: 1px solid #f5c2c2;
+    }
+    .contrato-numero.is-cancelado {
+        color: #8a1b1b;
+    }
     .info-card-body .contrato-item-empty {
         color: #6b778c;
         font-style: italic;
@@ -614,15 +631,18 @@
                     {% with contratos_card=parte.info_card_contratos %}
                         {% if contratos_card %}
                             {% for contrato in contratos_card %}
-                                <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}" data-prescricao="{{ contrato.data_prescricao|date:'Y-m-d'|default_if_none:'' }}" data-documento-titular="{{ contrato.documento_titular|default:'' }}">
+                                <span class="contrato-item-wrapper" data-contrato-id="{{ contrato.id }}" data-status="{{ contrato.status|default_if_none:'' }}" data-is-prescrito="{{ contrato.is_prescrito|yesno:'true,false' }}" data-valor-total="{{ contrato.valor_total_devido|default_if_none:'' }}" data-valor-causa="{{ contrato.valor_causa|default_if_none:'' }}" data-custas="{{ contrato.custas|default_if_none:'' }}" data-prescricao="{{ contrato.data_prescricao|date:'Y-m-d'|default_if_none:'' }}" data-documento-titular="{{ contrato.documento_titular|default:'' }}">
                                     <input type="checkbox" class="contrato-selector" value="{{ contrato.id }}" title="Selecionar para análise">
                                     <button type="button" class="contrato-quitado-toggle" title="Marcar como Quitado">Q</button>
-                                    <span class="contrato-numero">
+                                    <span class="contrato-numero{% if contrato.is_cancelado %} is-cancelado{% endif %}">
                                         {{ contrato.numero_contrato }}
                                         {% if contrato.valor_total_devido %}
                                             (R$ {{ contrato.valor_total_devido|brl }})
                                         {% elif contrato.valor_causa %}
                                             (R$ {{ contrato.valor_causa|brl }})
+                                        {% endif %}
+                                        {% if contrato.is_cancelado %}
+                                            <span class="contrato-status-cancelado">Cancelado</span>
                                         {% endif %}
                                     </span>
                                     {% if contrato.data_prescricao %}

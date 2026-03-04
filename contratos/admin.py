@@ -4624,6 +4624,17 @@ class ContratoInline(NoRelatedLinksMixin, admin.StackedInline):
     model = Contrato
     extra = 0
     fk_name = "processo"
+    fields = (
+        "numero_contrato",
+        "status",
+        "valor_total_devido",
+        "valor_causa",
+        "data_saldo_atualizado",
+        "custas",
+        "parcelas_em_aberto",
+        "data_prescricao",
+        "documento_titular",
+    )
 
 class TarefaInlineForm(forms.ModelForm):
     criado_por_label = forms.CharField(required=False, widget=forms.HiddenInput())
