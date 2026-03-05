@@ -2599,15 +2599,21 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 snapshotsToPersist.length
             ) {
                 const snapshotToUpdate = snapshotsToPersist.shift();
+                const previousTypeKey = getCardAnalysisTypeKey(snapshotToUpdate);
                 snapshotToUpdate.saved_at = timestamp;
                 snapshotToUpdate.updated_at = timestamp;
                 if (analysisTypeSnapshot) {
                     snapshotToUpdate.analysis_type = analysisTypeSnapshot;
                 }
-                snapshotToUpdate.analysis_author = resolveCardAnalysisAuthor(
-                    snapshotToUpdate,
-                    currentAnalysisAuthor
-                );
+                const nextTypeKey = getCardAnalysisTypeKey(snapshotToUpdate);
+                if (!previousTypeKey || (analysisTypeSnapshot && previousTypeKey !== nextTypeKey)) {
+                    snapshotToUpdate.analysis_author = currentAnalysisAuthor;
+                } else {
+                    snapshotToUpdate.analysis_author = resolveCardAnalysisAuthor(
+                        snapshotToUpdate,
+                        currentAnalysisAuthor
+                    );
+                }
                 if (!snapshotToUpdate.nj_label && savedCards[editingIndex].nj_label) {
                     snapshotToUpdate.nj_label = savedCards[editingIndex].nj_label;
                 }
@@ -2624,15 +2630,21 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
 
             snapshotsToPersist.forEach(snapshot => {
+                const previousTypeKey = getCardAnalysisTypeKey(snapshot);
                 snapshot.saved_at = timestamp;
                 snapshot.updated_at = timestamp;
                 if (analysisTypeSnapshot) {
                     snapshot.analysis_type = analysisTypeSnapshot;
                 }
-                snapshot.analysis_author = resolveCardAnalysisAuthor(
-                    snapshot,
-                    currentAnalysisAuthor
-                );
+                const nextTypeKey = getCardAnalysisTypeKey(snapshot);
+                if (!previousTypeKey || (analysisTypeSnapshot && previousTypeKey !== nextTypeKey)) {
+                    snapshot.analysis_author = currentAnalysisAuthor;
+                } else {
+                    snapshot.analysis_author = resolveCardAnalysisAuthor(
+                        snapshot,
+                        currentAnalysisAuthor
+                    );
+                }
                 appendProcessCardToHistory(snapshot);
             });
 
