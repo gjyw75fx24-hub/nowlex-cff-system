@@ -1189,6 +1189,874 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
         window.showCffSystemDialog = showCffSystemDialog;
 
+        function ensurePeticaoPreflightStyles() {
+            if (document.getElementById('peticao-preflight-styles')) {
+                return;
+            }
+            const style = document.createElement('style');
+            style.id = 'peticao-preflight-styles';
+            style.textContent = `
+                .peticao-preflight-box {
+                    max-width: 760px;
+                    width: min(92vw, 760px);
+                    border: 1px solid #417690;
+                }
+                .peticao-preflight-note {
+                    font-size: 12px;
+                    opacity: 0.7;
+                    margin-top: 6px;
+                }
+                .peticao-preflight-section {
+                    margin-top: 14px;
+                }
+                .peticao-preflight-section-title {
+                    font-weight: 600;
+                    margin-bottom: 6px;
+                }
+                .peticao-preflight-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                    gap: 10px;
+                }
+                .peticao-preflight-field label {
+                    display: block;
+                    font-size: 12px;
+                    opacity: 0.75;
+                    margin-bottom: 4px;
+                }
+                .peticao-preflight-field input,
+                .peticao-preflight-field select,
+                .peticao-preflight-field textarea {
+                    width: 100%;
+                    box-sizing: border-box;
+                    padding: 6px 8px;
+                    border-radius: 6px;
+                    border: 1px solid #cbd5e0;
+                    font-size: 13px;
+                    background: #fff;
+                }
+                .peticao-preflight-textarea {
+                    width: 100%;
+                    box-sizing: border-box;
+                    padding: 8px 10px;
+                    border-radius: 8px;
+                    border: 1px solid #cbd5e0;
+                    font-size: 13px;
+                    resize: vertical;
+                    overflow: auto;
+                }
+                .peticao-preflight-address {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 8px;
+                }
+                .peticao-preflight-actions {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 8px;
+                    margin-top: 18px;
+                }
+                .peticao-preflight-actions .cff-dialog-ok {
+                    border: 1px solid #417690;
+                    background: #fff;
+                    color: #0b3b55;
+                    padding: 6px 18px;
+                    border-radius: 999px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+                    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+                }
+                .peticao-preflight-actions .cff-dialog-ok:hover {
+                    background: #f2f7fb;
+                    border-color: #356074;
+                    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+                }
+                .peticao-preflight-actions .cff-dialog-ok:disabled {
+                    opacity: 0.6;
+                    cursor: not-allowed;
+                    box-shadow: none;
+                }
+                .peticao-preflight-error {
+                    color: #8a1f1f;
+                    font-size: 12px;
+                    margin-top: 6px;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        function parseEnderecoParts(raw) {
+            const output = { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' };
+            if (!raw) {
+                return output;
+            }
+            Object.keys(output).forEach((key) => {
+                const regex = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\s*-\\s*[A-H]:|$)`, 'i');
+                const match = String(raw).match(regex);
+                output[key] = match ? String(match[1] || '').trim() : '';
+            });
+            return output;
+        }
+
+        function buildEnderecoRaw(parts) {
+            const fields = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+            return fields.map((field) => `${field}: ${(parts?.[field] || '').trim()}`).join(' - ');
+        }
+
+        function findPassivoInlineRow() {
+            const rows = Array.from(document.querySelectorAll('#partes_processuais-group .inline-related'));
+            for (const row of rows) {
+                const tipoSelect = row.querySelector('select[name$="-tipo_polo"]');
+                if (tipoSelect && String(tipoSelect.value || '').toUpperCase() === 'PASSIVO') {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        function getPassivoEnderecoData() {
+            const row = findPassivoInlineRow();
+            if (!row) {
+                return { raw: '', parts: { A: '', B: '', C: '', D: '', E: '', F: '', G: '', H: '' }, parteId: null };
+            }
+            const rawInput = row.querySelector('textarea[name$="-endereco"]');
+            const rawValue = rawInput ? rawInput.value || '' : '';
+            const parteIdInput = row.querySelector('input[name$="-id"]');
+            const parteId = parteIdInput ? parteIdInput.value || null : null;
+            return { raw: rawValue, parts: parseEnderecoParts(rawValue), parteId };
+        }
+
+        function applyPassivoEnderecoRaw(rawValue) {
+            const row = findPassivoInlineRow();
+            if (!row) {
+                return;
+            }
+            const rawInput = row.querySelector('textarea[name$="-endereco"]');
+            if (rawInput) {
+                rawInput.value = rawValue || '';
+                rawInput.dispatchEvent(new Event('input', { bubbles: true }));
+                rawInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const gridInputs = row.querySelectorAll('.endereco-fields-grid input[data-part]');
+            if (gridInputs.length) {
+                const parts = parseEnderecoParts(rawValue || '');
+                gridInputs.forEach((input) => {
+                    const key = input.getAttribute('data-part');
+                    if (key && Object.prototype.hasOwnProperty.call(parts, key)) {
+                        input.value = parts[key];
+                    }
+                });
+            }
+        }
+
+        function getCnjEntriesSnapshot() {
+            if (typeof window.__getCnjEntriesState === 'function') {
+                return window.__getCnjEntriesState();
+            }
+            const hidden = document.getElementById('id_cnj_entries_data');
+            if (hidden && hidden.value) {
+                try {
+                    const parsed = JSON.parse(hidden.value);
+                    return Array.isArray(parsed) ? parsed : [];
+                } catch (err) {
+                    return [];
+                }
+            }
+            return Array.isArray(window.__cnj_entries) ? window.__cnj_entries : [];
+        }
+
+        function getActiveCnjIndexSnapshot() {
+            if (typeof window.__getCnjActiveIndex === 'function') {
+                return window.__getCnjActiveIndex();
+            }
+            const hidden = document.getElementById('id_cnj_active_index');
+            const raw = hidden ? parseInt(hidden.value, 10) : NaN;
+            return Number.isFinite(raw) ? raw : 0;
+        }
+
+        function getSelectedSummaryCards() {
+            const selections = Array.isArray(userResponses.selected_analysis_cards)
+                ? userResponses.selected_analysis_cards
+                : [];
+            if (!selections.length) {
+                return [];
+            }
+            const selectedIndices = selections
+                .filter(sel => typeof sel === 'string' && sel.startsWith('card-'))
+                .map(sel => Number(String(sel).replace(/^card-/, '')))
+                .filter(idx => Number.isFinite(idx) && idx >= 0);
+            if (!selectedIndices.length) {
+                return [];
+            }
+            const combined = getCombinedProcessCardsForSummary();
+            return combined.filter((_, idx) => selectedIndices.includes(idx));
+        }
+
+        function inferValorCausaFromSelectedCard() {
+            const selectedCards = getSelectedSummaryCards();
+            if (!selectedCards.length) {
+                return null;
+            }
+            const target = selectedCards[0];
+            const contratoIds = parseContractsField(target.contratos);
+            const monitoriaIds = parseContractsField(
+                target.tipo_de_acao_respostas &&
+                target.tipo_de_acao_respostas.contratos_para_monitoria
+                    ? target.tipo_de_acao_respostas.contratos_para_monitoria
+                    : []
+            );
+            const effectiveIds = monitoriaIds.length ? monitoriaIds : contratoIds;
+            if (!effectiveIds.length) {
+                return null;
+            }
+            let total = 0;
+            effectiveIds.forEach((rawId) => {
+                const contratoInfo = resolveContratoInfo(rawId);
+                if (!contratoInfo) {
+                    return;
+                }
+                const valor = parseCurrencyValue(contratoInfo.valor_causa);
+                if (Number.isFinite(valor)) {
+                    total += valor;
+                }
+            });
+            if (!(total > 0)) {
+                const fallbackValue = parseCurrencyValue(target.valor_causa);
+                if (Number.isFinite(fallbackValue) && fallbackValue > 0) {
+                    return fallbackValue;
+                }
+            }
+            return total > 0 ? total : null;
+        }
+
+        function inferCustasFromSelectedCard() {
+            const selectedCards = getSelectedSummaryCards();
+            if (!selectedCards.length) {
+                return null;
+            }
+            const target = selectedCards[0];
+            const contratoIds = parseContractsField(target.contratos);
+            const monitoriaIds = parseContractsField(
+                target.tipo_de_acao_respostas &&
+                target.tipo_de_acao_respostas.contratos_para_monitoria
+                    ? target.tipo_de_acao_respostas.contratos_para_monitoria
+                    : []
+            );
+            const effectiveIds = monitoriaIds.length ? monitoriaIds : contratoIds;
+            if (!effectiveIds.length) {
+                return null;
+            }
+            let total = 0;
+            let hasValue = false;
+            effectiveIds.forEach((rawId) => {
+                const contratoInfo = resolveContratoInfo(rawId);
+                if (!contratoInfo) {
+                    return;
+                }
+                const custas = parseCurrencyValue(contratoInfo.custas);
+                if (Number.isFinite(custas)) {
+                    total += custas;
+                    hasValue = true;
+                }
+            });
+            if (!hasValue) {
+                const fallbackValue = parseCurrencyValue(target.custas_total);
+                if (Number.isFinite(fallbackValue)) {
+                    return fallbackValue;
+                }
+            }
+            if (hasValue) {
+                return total;
+            }
+            const valorCausa = inferValorCausaFromSelectedCard();
+            if (Number.isFinite(valorCausa) && valorCausa > 0) {
+                return Math.round((valorCausa * 0.025) * 100) / 100;
+            }
+            return null;
+        }
+
+        function getCustasParagraphDefault(kind) {
+            if (kind === 'cobranca') {
+                return [
+                    'DAS CUSTAS',
+                    'Considerando que a ora Exequente está assumindo a posição em milhares de processos em todo o Brasil, vem pugnar pelo parcelamento das custas com o objetivo de imprimir a celeridade natural ao presente feito e alinhar o desembolso de recursos não apenas deste processo — cujas custas são sensivelmente elevadas —, mas também dos demais em trâmite sob sua responsabilidade.',
+                    'O art. 98, §6o, do CPC autoriza o parcelamento do pagamento das custas e despesas processuais, conforme apreciação judicial, solução adequada ao contexto de carteira massificada, preservando a regularidade do feito.',
+                    'Para fins de transparência e controle, a Requerente demonstra o montante devido a título das custas iniciais a serem recolhidas em cerca de ([2,5% DO VALOR DA CAUSA POR EXTENSO]) em [X PARCELAS] ([X PARCELAS POR EXTENSO]) parcelas.',
+                    'A requerente requer o parcelamento em [X PARCELAS] ([X PARCELAS POR EXTENSO]) mensais e sucessivas. Após o deferimento, seja autorizado o depósito judicial pertinente às custas, sendo a primeira parcela à vista e as demais parcelas com vencimento no mesmo dia dos meses subsequentes.'
+                ].join('\n');
+            }
+            return 'Seja deferido o parcelamento das custas iniciais';
+        }
+
+        function buildPeticaoSourceOptions() {
+            const base = {
+                key: 'base',
+                source: 'base',
+                label: 'Cadastro (dados gerais)',
+                uf: (document.getElementById('id_uf')?.value || '').trim(),
+                vara: (document.getElementById('id_vara')?.value || '').trim(),
+                tribunal: (document.getElementById('id_tribunal')?.value || '').trim(),
+                valor_causa: (document.getElementById('id_valor_causa')?.value || '').trim(),
+                cnj: (document.getElementById('id_cnj')?.value || '').trim(),
+            };
+            const entries = getCnjEntriesSnapshot();
+            const activeIndex = getActiveCnjIndexSnapshot();
+            const options = [base];
+            entries.forEach((entry, index) => {
+                const labelCnj = String(entry?.cnj || '').trim();
+                const activeTag = index === activeIndex ? ' (ativo)' : '';
+                options.push({
+                    key: `cnj:${entry?.id ?? labelCnj ?? index}`,
+                    source: 'cnj',
+                    id: entry?.id ?? null,
+                    isActive: index === activeIndex,
+                    label: labelCnj ? `Dados do CNJ ${labelCnj}${activeTag}` : `Dados do CNJ${activeTag}`,
+                    uf: (entry?.uf || base.uf || '').trim(),
+                    vara: (entry?.vara || base.vara || '').trim(),
+                    tribunal: (entry?.tribunal || base.tribunal || '').trim(),
+                    valor_causa: (entry?.valor_causa || base.valor_causa || '').trim(),
+                    cnj: labelCnj || base.cnj || '',
+                });
+            });
+            return { base, options };
+        }
+
+        function updateCnjEntryState(entryId, patch) {
+            if (typeof window.__updateCnjEntryState === 'function') {
+                return window.__updateCnjEntryState(entryId, patch);
+            }
+            return false;
+        }
+
+        function updatePeticaoDados(payload) {
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            return $.ajax({
+                url: `/contratos/processo/${currentProcessoId}/peticao-dados/`,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: JSON.stringify(payload),
+                contentType: 'application/json',
+                dataType: 'json'
+            });
+        }
+
+        function fetchCustasPreview(payload) {
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            return $.ajax({
+                url: `/contratos/processo/${currentProcessoId}/peticao-custas-preview/`,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                data: payload,
+                dataType: 'json'
+            });
+        }
+
+        function openPeticaoPreflight(kind) {
+            return new Promise((resolve) => {
+                ensurePeticaoPreflightStyles();
+                const { base, options } = buildPeticaoSourceOptions();
+                const passivoData = getPassivoEnderecoData();
+                const ufFallback = String(passivoData?.parts?.H || '').trim();
+                if (!String(base.uf || '').trim() && ufFallback) {
+                    base.uf = ufFallback;
+                }
+                const inferredValorCausa = inferValorCausaFromSelectedCard();
+                if (!String(base.valor_causa || '').trim() && Number.isFinite(inferredValorCausa)) {
+                    base.valor_causa = formatCurrency(inferredValorCausa);
+                }
+                const inferredCustas = inferCustasFromSelectedCard();
+
+                const isHabilitacao = kind === 'habilitacao';
+                const cnjOnlyOptions = options.filter((opt) => opt.source === 'cnj');
+                const selectableOptions = isHabilitacao
+                    ? (cnjOnlyOptions.length ? cnjOnlyOptions : [base])
+                    : options;
+                if (isHabilitacao && !cnjOnlyOptions.length && selectableOptions.length) {
+                    selectableOptions[0].label = 'CNJ do cadastro';
+                }
+                if (!isHabilitacao) {
+                    let processoIndex = 1;
+                    selectableOptions.forEach((opt) => {
+                        if (opt.source === 'cnj') {
+                            opt.label = `Processo cadastrado ${processoIndex}${opt.isActive ? ' (ativo)' : ''}`;
+                            processoIndex += 1;
+                        }
+                    });
+                }
+                let selected = isHabilitacao
+                    ? (selectableOptions.find((opt) => opt.isActive) || selectableOptions[0])
+                    : base;
+
+                const overlay = document.createElement('div');
+                overlay.className = 'cff-dialog-overlay';
+                overlay.id = 'peticao-preflight-modal';
+
+                const dialog = document.createElement('div');
+                dialog.className = 'cff-dialog-box info peticao-preflight-box';
+                dialog.style.padding = '20px';
+                dialog.style.textAlign = 'left';
+
+                const title = document.createElement('div');
+                title.className = 'cff-dialog-title';
+                const tipoPeticaoLabel = isHabilitacao
+                    ? 'Habilitação'
+                    : (kind === 'cobranca' ? 'Cobrança Judicial' : 'Monitória');
+                title.textContent = `Prévia dos dados da petição ${tipoPeticaoLabel}`;
+
+                const body = document.createElement('div');
+                body.className = 'cff-dialog-body';
+
+                const note = document.createElement('div');
+                note.className = 'peticao-preflight-note';
+                note.textContent = isHabilitacao
+                    ? 'Confirme o CNJ e os dados antes de gerar a habilitação.'
+                    : 'Os dados abaixo apenas preenchem a peça. Não vincula o contrato a um CNJ.';
+
+                const sourceSection = document.createElement('div');
+                sourceSection.className = 'peticao-preflight-section';
+                const sourceTitle = document.createElement('div');
+                sourceTitle.className = 'peticao-preflight-section-title';
+                sourceTitle.textContent = isHabilitacao ? 'Número CNJ' : 'Fonte dos dados do processo';
+                const sourceField = document.createElement('div');
+                sourceField.className = 'peticao-preflight-field';
+                const sourceSelect = document.createElement('select');
+                selectableOptions.forEach((opt) => {
+                    const optionEl = document.createElement('option');
+                    optionEl.value = opt.key;
+                    optionEl.textContent = opt.label;
+                    if (selected && opt.key === selected.key) {
+                        optionEl.selected = true;
+                    }
+                    sourceSelect.appendChild(optionEl);
+                });
+                sourceField.appendChild(sourceSelect);
+                sourceSection.appendChild(sourceTitle);
+                sourceSection.appendChild(sourceField);
+
+                const processoSection = document.createElement('div');
+                processoSection.className = 'peticao-preflight-section';
+                const processoTitle = document.createElement('div');
+                processoTitle.className = 'peticao-preflight-section-title';
+                processoTitle.textContent = 'Dados do processo';
+                const processoGrid = document.createElement('div');
+                processoGrid.className = 'peticao-preflight-grid';
+
+                const makeField = (labelText, value = '') => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'peticao-preflight-field';
+                    const label = document.createElement('label');
+                    label.textContent = labelText;
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = value || '';
+                    wrap.appendChild(label);
+                    wrap.appendChild(input);
+                    return { wrap, input };
+                };
+
+                const ufField = makeField('UF', selected.uf);
+                const varaField = makeField('Vara', selected.vara);
+                const tribunalField = makeField('Tribunal', selected.tribunal);
+                const valorField = makeField('Valor da causa', selected.valor_causa);
+                const custasField = makeField(
+                    'Custas',
+                    Number.isFinite(inferredCustas) ? formatCurrency(inferredCustas) : ''
+                );
+                const parcelasField = makeField('Parcelas', '');
+                const parcelaValorField = makeField('Valor da parcela', '');
+
+                processoGrid.appendChild(ufField.wrap);
+                processoGrid.appendChild(varaField.wrap);
+                processoGrid.appendChild(tribunalField.wrap);
+                processoGrid.appendChild(valorField.wrap);
+                processoGrid.appendChild(custasField.wrap);
+                processoGrid.appendChild(parcelasField.wrap);
+                processoGrid.appendChild(parcelaValorField.wrap);
+
+                let cnjInput = null;
+                if (isHabilitacao) {
+                    const cnjField = makeField('CNJ', selected.cnj);
+                    cnjInput = cnjField.input;
+                    processoGrid.appendChild(cnjField.wrap);
+                }
+
+                processoSection.appendChild(processoTitle);
+                processoSection.appendChild(processoGrid);
+
+                const enderecoSection = document.createElement('div');
+                enderecoSection.className = 'peticao-preflight-section';
+                const enderecoTitle = document.createElement('div');
+                enderecoTitle.className = 'peticao-preflight-section-title';
+                enderecoTitle.textContent = 'Endereço (polo passivo)';
+                const enderecoGrid = document.createElement('div');
+                enderecoGrid.className = 'peticao-preflight-address';
+                const enderecoInputs = {};
+                const enderecoLabels = {
+                    A: 'A (Rua ou Av)',
+                    B: 'B (Número)',
+                    C: 'C (Complemento)',
+                    D: 'D (Bairro)',
+                    E: 'E (Cidade)',
+                    F: 'F (Estado)',
+                    G: 'G (CEP)',
+                    H: 'H (UF)'
+                };
+                ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].forEach((key) => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'peticao-preflight-field';
+                    const label = document.createElement('label');
+                    label.textContent = enderecoLabels[key] || key;
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = passivoData.parts[key] || '';
+                    wrap.appendChild(label);
+                    wrap.appendChild(input);
+                    enderecoGrid.appendChild(wrap);
+                    enderecoInputs[key] = input;
+                });
+                const formatCepValue = (value) => {
+                    const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+                    if (digits.length <= 5) {
+                        return digits;
+                    }
+                    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+                };
+                const cepInput = enderecoInputs.G;
+                if (cepInput) {
+                    const applyCepMask = () => {
+                        const masked = formatCepValue(cepInput.value);
+                        if (cepInput.value !== masked) {
+                            cepInput.value = masked;
+                        }
+                    };
+                    cepInput.addEventListener('input', applyCepMask);
+                    cepInput.addEventListener('blur', applyCepMask);
+                    applyCepMask();
+                }
+                enderecoSection.appendChild(enderecoTitle);
+                enderecoSection.appendChild(enderecoGrid);
+
+                const custasSection = document.createElement('div');
+                custasSection.className = 'peticao-preflight-section';
+                const custasTitle = document.createElement('div');
+                custasTitle.className = 'peticao-preflight-section-title';
+                custasTitle.textContent = 'Parágrafo das custas';
+                const custasTextarea = document.createElement('textarea');
+                custasTextarea.className = 'peticao-preflight-textarea';
+                custasTextarea.rows = 3;
+                custasTextarea.value = getCustasParagraphDefault(kind);
+                custasSection.appendChild(custasTitle);
+                custasSection.appendChild(custasTextarea);
+
+                const errorBox = document.createElement('div');
+                errorBox.className = 'peticao-preflight-error';
+                errorBox.style.display = 'none';
+
+                const actions = document.createElement('div');
+                actions.className = 'peticao-preflight-actions';
+                const cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'cff-dialog-ok';
+                cancelBtn.textContent = 'Cancelar';
+                const saveBtn = document.createElement('button');
+                saveBtn.type = 'button';
+                saveBtn.className = 'cff-dialog-ok';
+                saveBtn.textContent = 'Salvar e gerar';
+                actions.appendChild(cancelBtn);
+                actions.appendChild(saveBtn);
+
+                body.appendChild(note);
+                body.appendChild(sourceSection);
+                body.appendChild(processoSection);
+                body.appendChild(enderecoSection);
+                body.appendChild(custasSection);
+                body.appendChild(errorBox);
+                body.appendChild(actions);
+
+                dialog.appendChild(title);
+                dialog.appendChild(body);
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                const handleKeydown = (event) => {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeModal();
+                    }
+                };
+
+                const closeModal = () => {
+                    document.removeEventListener('keydown', handleKeydown);
+                    overlay.remove();
+                    resolve(null);
+                };
+
+                cancelBtn.addEventListener('click', closeModal);
+                document.addEventListener('keydown', handleKeydown);
+
+                const computeParcelasFromCustas = (custasValue) => {
+                    if (!Number.isFinite(custasValue) || custasValue <= 0) {
+                        return null;
+                    }
+                    const raw = Math.ceil(custasValue / 500);
+                    return Math.min(10, Math.max(1, raw));
+                };
+
+                const computeParcelaValor = (custasValue, parcelasValue) => {
+                    if (!Number.isFinite(custasValue) || custasValue <= 0 || !Number.isFinite(parcelasValue) || parcelasValue <= 0) {
+                        return null;
+                    }
+                    return Math.round((custasValue / parcelasValue) * 100) / 100;
+                };
+
+                const syncParcelasDefaults = () => {
+                    const custasValue = parseCurrencyValue(custasField.input.value);
+                    if (!Number.isFinite(custasValue) || custasValue <= 0) {
+                        return;
+                    }
+                    if (!parcelasTouched) {
+                        const parcelasValue = computeParcelasFromCustas(custasValue);
+                        parcelasField.input.value = parcelasValue != null ? String(parcelasValue) : '';
+                    }
+                    if (!valorParcelaTouched) {
+                        const parcelasValue = parseInt(parcelasField.input.value || '', 10);
+                        const parcelaValue = computeParcelaValor(custasValue, parcelasValue);
+                        parcelaValorField.input.value = parcelaValue != null ? formatCurrency(parcelaValue) : '';
+                    }
+                };
+
+                const shouldShowCustasParagraph = () => {
+                    if (isHabilitacao) {
+                        return false;
+                    }
+                    const custasValue = parseCurrencyValue(custasField.input.value);
+                    return Number.isFinite(custasValue) && custasValue >= 1000;
+                };
+
+                let custasParagraphTouched = false;
+                let custasPreviewRequest = null;
+                let parcelasTouched = false;
+                let valorParcelaTouched = false;
+                const previewContractIds = !isHabilitacao && typeof getMonitoriaContractIds === 'function'
+                    ? getMonitoriaContractIds({
+                        includeGeneralSnapshot: true,
+                        includeSummaryCardContracts: true
+                    })
+                    : [];
+
+                const refreshCustasParagraph = (force = false) => {
+                    if (!shouldShowCustasParagraph()) {
+                        return;
+                    }
+                    if (custasParagraphTouched && !force) {
+                        return;
+                    }
+                    if (custasPreviewRequest && typeof custasPreviewRequest.abort === 'function') {
+                        custasPreviewRequest.abort();
+                    }
+                    custasPreviewRequest = fetchCustasPreview({
+                        kind,
+                        contratos_para_monitoria: JSON.stringify(previewContractIds || []),
+                        peticao_source: selected?.source || 'base',
+                        peticao_cnj_entry_id: selected?.source === 'cnj' ? selected?.id : '',
+                        valor_causa: (valorField.input.value || '').trim(),
+                        custas_total: (custasField.input.value || '').trim(),
+                        custas_parcelas: (parcelasField.input.value || '').trim(),
+                        custas_valor_parcela: (parcelaValorField.input.value || '').trim()
+                    })
+                        .done((response) => {
+                            if (response && typeof response.custas_preview === 'string') {
+                                const previewText = response.custas_preview.trim();
+                                if (previewText) {
+                                    custasTextarea.value = previewText;
+                                    resizeCustasTextarea();
+                                }
+                            }
+                        })
+                        .always(() => {
+                            custasPreviewRequest = null;
+                        });
+                };
+
+                const updateCustasParagraphVisibility = () => {
+                    if (shouldShowCustasParagraph()) {
+                        custasSection.style.display = '';
+                    } else {
+                        custasSection.style.display = 'none';
+                    }
+                };
+
+                const resizeCustasTextarea = () => {
+                    const lines = String(custasTextarea.value || '').split('\n').length;
+                    custasTextarea.rows = Math.max(3, Math.min(8, lines));
+                };
+
+                custasField.input.addEventListener('input', () => {
+                    parcelasTouched = false;
+                    valorParcelaTouched = false;
+                    updateCustasParagraphVisibility();
+                    syncParcelasDefaults();
+                });
+                custasField.input.addEventListener('blur', () => {
+                    updateCustasParagraphVisibility();
+                    syncParcelasDefaults();
+                });
+                parcelasField.input.addEventListener('input', () => {
+                    parcelasTouched = true;
+                    const custasValue = parseCurrencyValue(custasField.input.value);
+                    const parcelasValue = parseInt(parcelasField.input.value || '', 10);
+                    if (Number.isFinite(custasValue) && Number.isFinite(parcelasValue) && parcelasValue > 0) {
+                        const parcelaValue = computeParcelaValor(custasValue, parcelasValue);
+                        parcelaValorField.input.value = parcelaValue != null ? formatCurrency(parcelaValue) : '';
+                    }
+                });
+                parcelasField.input.addEventListener('blur', () => {
+                    const parcelasValue = parseInt(parcelasField.input.value || '', 10);
+                    parcelasField.input.value = Number.isFinite(parcelasValue) && parcelasValue > 0 ? String(parcelasValue) : '';
+                    refreshCustasParagraph();
+                });
+                parcelaValorField.input.addEventListener('input', () => {
+                    valorParcelaTouched = true;
+                });
+                parcelaValorField.input.addEventListener('blur', () => {
+                    const parcelaValue = parseCurrencyValue(parcelaValorField.input.value);
+                    parcelaValorField.input.value = Number.isFinite(parcelaValue) ? formatCurrency(parcelaValue) : '';
+                    refreshCustasParagraph();
+                });
+                custasTextarea.addEventListener('input', () => {
+                    custasParagraphTouched = true;
+                    resizeCustasTextarea();
+                });
+                valorField.input.addEventListener('blur', () => refreshCustasParagraph());
+                custasField.input.addEventListener('blur', () => refreshCustasParagraph());
+                updateCustasParagraphVisibility();
+                resizeCustasTextarea();
+                syncParcelasDefaults();
+                refreshCustasParagraph(true);
+
+                const applySelected = (opt) => {
+                    if (!opt) return;
+                    selected = opt;
+                    const ufValue = String(opt.uf || '').trim();
+                    ufField.input.value = ufValue || ufFallback || '';
+                    varaField.input.value = opt.vara || '';
+                    tribunalField.input.value = opt.tribunal || '';
+                    valorField.input.value = opt.valor_causa || '';
+                    if (cnjInput) {
+                        cnjInput.value = opt.cnj || '';
+                    }
+                    syncParcelasDefaults();
+                    refreshCustasParagraph();
+                };
+
+                sourceSelect.addEventListener('change', () => {
+                    const chosen = selectableOptions.find((opt) => opt.key === sourceSelect.value);
+                    applySelected(chosen || base);
+                });
+
+                const collectEnderecoParts = () => {
+                    const parts = {};
+                    Object.keys(enderecoInputs).forEach((key) => {
+                        parts[key] = (enderecoInputs[key].value || '').trim();
+                    });
+                    return parts;
+                };
+
+                saveBtn.addEventListener('click', () => {
+                    errorBox.style.display = 'none';
+                    errorBox.textContent = '';
+
+                    const enderecoParts = collectEnderecoParts();
+                    const custasRaw = (custasField.input.value || '').trim();
+                    const custasParagraph = shouldShowCustasParagraph()
+                        ? String(custasTextarea.value || '').trim()
+                        : '';
+                    const parcelasRaw = (parcelasField.input.value || '').trim();
+                    const valorParcelaRaw = (parcelaValorField.input.value || '').trim();
+                    const payload = {
+                        source: selected.source,
+                        cnj_entry_id: selected.source === 'cnj' ? selected.id : null,
+                        cnj: cnjInput ? (cnjInput.value || '').trim() : '',
+                        uf: (ufField.input.value || '').trim(),
+                        vara: (varaField.input.value || '').trim(),
+                        tribunal: (tribunalField.input.value || '').trim(),
+                        valor_causa: (valorField.input.value || '').trim(),
+                        endereco_parts: enderecoParts,
+                        polo_passivo_id: passivoData.parteId || null,
+                        update_base_cnj: Boolean(cnjInput && selected.source === 'base')
+                    };
+
+                    if (isHabilitacao) {
+                        const missing = [];
+                        if (!payload.cnj) {
+                            missing.push('CNJ');
+                        }
+                        if (!payload.vara) {
+                            missing.push('Vara');
+                        }
+                        const enderecoRequired = ['A', 'B', 'D', 'E', 'F', 'G', 'H'];
+                        const enderecoMissing = enderecoRequired.filter((key) => !String(enderecoParts[key] || '').trim());
+                        if (enderecoMissing.length) {
+                            missing.push(`Endereço (${enderecoMissing.join(', ')})`);
+                        }
+                        if (missing.length) {
+                            errorBox.textContent = `Preencha antes de gerar: ${missing.join('; ')}.`;
+                            errorBox.style.display = 'block';
+                            return;
+                        }
+                    }
+
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = 'Salvando...';
+                    updatePeticaoDados(payload)
+                        .done((response) => {
+                            if (response?.processo) {
+                                const ufInput = document.getElementById('id_uf');
+                                const varaInput = document.getElementById('id_vara');
+                                const tribunalInput = document.getElementById('id_tribunal');
+                                const valorInput = document.getElementById('id_valor_causa');
+                                if (selected.source === 'base') {
+                                    if (ufInput) ufInput.value = response.processo.uf || '';
+                                    if (varaInput) varaInput.value = response.processo.vara || '';
+                                    if (tribunalInput) tribunalInput.value = response.processo.tribunal || '';
+                                    if (valorInput) valorInput.value = response.processo.valor_causa || '';
+                                }
+                                if (cnjInput && response.processo.cnj) {
+                                    const cnjMain = document.getElementById('id_cnj');
+                                    if (cnjMain && selected.source === 'base') {
+                                        cnjMain.value = response.processo.cnj || '';
+                                    }
+                                }
+                            }
+                            if (response?.cnj_entry && selected.source === 'cnj') {
+                                updateCnjEntryState(response.cnj_entry.id, response.cnj_entry);
+                            }
+                            if (response?.endereco) {
+                                applyPassivoEnderecoRaw(response.endereco);
+                            }
+                            document.removeEventListener('keydown', handleKeydown);
+                            overlay.remove();
+                            resolve({
+                                source: selected.source,
+                                cnjEntryId: selected.source === 'cnj' ? selected.id : null,
+                                custasTotal: custasRaw,
+                                custasParagraph: custasParagraph,
+                                custasParcelas: parcelasRaw,
+                                custasValorParcela: valorParcelaRaw
+                            });
+                        })
+                        .fail((xhr) => {
+                            const message = xhr?.responseJSON?.error || 'Falha ao salvar dados da petição.';
+                            errorBox.textContent = message;
+                            errorBox.style.display = 'block';
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'Salvar e gerar';
+                        });
+                });
+            });
+        }
+
         function showCffConfirmDialog(message, title = 'CFF System') {
             return new Promise(resolve => {
                 const existing = document.getElementById('cff-system-confirm-dialog');
@@ -8146,25 +9014,35 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 return;
             }
 
-            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria/`;
+            openPeticaoPreflight('monitoria').then((context) => {
+                if (!context) {
+                    return;
+                }
+                const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+                const url = `/contratos/processo/${currentProcessoId}/gerar-monitoria/`;
 
-            $.ajax({
-                url: url,
-                method: 'POST',
-                headers: { 'X-CSRFToken': csrftoken },
-                data: {
-                    processo_id: currentProcessoId,
-                    contratos_para_monitoria: JSON.stringify(aggregatedContratoIds)
-                },
-                dataType: 'json',
-                beforeSend: function () {
-                    $('#id_gerar_monitoria_btn')
-                        .prop('disabled', true)
-                        .text('Gerando...');
-                    startCountdown(5);
-                },
-                success: function (data) {
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken },
+                    data: {
+                        processo_id: currentProcessoId,
+                        contratos_para_monitoria: JSON.stringify(aggregatedContratoIds),
+                        peticao_source: context.source,
+                        peticao_cnj_entry_id: context.cnjEntryId,
+                        custas_total: context.custasTotal,
+                        custas_paragrafo: context.custasParagraph,
+                        custas_parcelas: context.custasParcelas,
+                        custas_valor_parcela: context.custasValorParcela
+                    },
+                    dataType: 'json',
+                    beforeSend: function () {
+                        $('#id_gerar_monitoria_btn')
+                            .prop('disabled', true)
+                            .text('Gerando...');
+                        startCountdown(5);
+                    },
+                    success: function (data) {
                     const msg = data && data.message ? data.message : 'Operação concluída.';
                     let details = [];
                     if (data && data.monitoria) {
@@ -8202,24 +9080,25 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     window.location.reload();
                 };
                 showCffSystemDialog(successLines.join('\n'), 'success', handleReload);
-                },
-                error: function (xhr, status, error) {
-                    let errorMessage =
-                        'Erro ao gerar petição. Tente novamente.';
-                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                        errorMessage = xhr.responseJSON.message;
-                    } else if (xhr.responseText) {
-                        errorMessage = xhr.responseText;
+                    },
+                    error: function (xhr, status, error) {
+                        let errorMessage =
+                            'Erro ao gerar petição. Tente novamente.';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMessage = xhr.responseJSON.message;
+                        } else if (xhr.responseText) {
+                            errorMessage = xhr.responseText;
+                        }
+                        alert(errorMessage);
+                        console.error('Erro na geração da petição:', status, error, xhr);
+                    },
+                    complete: function () {
+                        stopCountdown();
+                        $('#id_gerar_monitoria_btn')
+                            .prop('disabled', false)
+                            .text('Gerar Petição Monitória');
                     }
-                    alert(errorMessage);
-                    console.error('Erro na geração da petição:', status, error, xhr);
-                },
-                complete: function () {
-                    stopCountdown();
-                    $('#id_gerar_monitoria_btn')
-                        .prop('disabled', false)
-                        .text('Gerar Petição Monitória');
-                }
+                });
             });
         });
 
@@ -8255,25 +9134,35 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 return;
             }
 
-            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/contratos/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
+            openPeticaoPreflight('cobranca').then((context) => {
+                if (!context) {
+                    return;
+                }
+                const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+                const url = `/contratos/processo/${currentProcessoId}/gerar-cobranca-judicial/`;
 
-            $.ajax({
-                url: url,
-                method: 'POST',
-                headers: { 'X-CSRFToken': csrftoken },
-                data: {
-                    processo_id: currentProcessoId,
-                    contratos_para_monitoria: JSON.stringify(aggregatedContratoIds)
-                },
-                dataType: 'json',
-                beforeSend: function () {
-            $('#id_gerar_cobranca_btn')
-                        .prop('disabled', true)
-                        .text('Gerando cobrança...');
-                    startCountdown(5);
-                },
-                success: function (data) {
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken },
+                    data: {
+                        processo_id: currentProcessoId,
+                        contratos_para_monitoria: JSON.stringify(aggregatedContratoIds),
+                        peticao_source: context.source,
+                        peticao_cnj_entry_id: context.cnjEntryId,
+                        custas_total: context.custasTotal,
+                        custas_paragrafo: context.custasParagraph,
+                        custas_parcelas: context.custasParcelas,
+                        custas_valor_parcela: context.custasValorParcela
+                    },
+                    dataType: 'json',
+                    beforeSend: function () {
+                $('#id_gerar_cobranca_btn')
+                            .prop('disabled', true)
+                            .text('Gerando cobrança...');
+                        startCountdown(5);
+                    },
+                    success: function (data) {
                 const successLines = [];
                 if (data && data.cobranca) {
                     if (data.cobranca.ok) {
@@ -8307,23 +9196,24 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     window.location.reload();
                 };
                 showCffSystemDialog(successLines.join('\n'), 'success', handleReload);
-                },
-                error: function (xhr, status, error) {
-                    let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
-                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                        errorMessage = xhr.responseJSON.message;
-                    } else if (xhr.responseText) {
-                        errorMessage = xhr.responseText;
+                    },
+                    error: function (xhr, status, error) {
+                        let errorMessage = 'Erro ao gerar petição de cobrança. Tente novamente.';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMessage = xhr.responseJSON.message;
+                        } else if (xhr.responseText) {
+                            errorMessage = xhr.responseText;
+                        }
+                        alert(errorMessage);
+                        console.error('Erro na geração da cobrança judicial:', status, error, xhr);
+                    },
+                    complete: function () {
+                        stopCountdown();
+                        $('#id_gerar_cobranca_btn')
+                            .prop('disabled', false)
+                            .text('Petição Cobrança Judicial (PDF)');
                     }
-                    alert(errorMessage);
-                    console.error('Erro na geração da cobrança judicial:', status, error, xhr);
-                },
-                complete: function () {
-                    stopCountdown();
-                    $('#id_gerar_cobranca_btn')
-                        .prop('disabled', false)
-                        .text('Petição Cobrança Judicial (PDF)');
-                }
+                });
             });
         });
 
@@ -8335,24 +9225,34 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 return;
             }
 
-            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
-            const url = `/contratos/processo/${currentProcessoId}/gerar-habilitacao/`;
+            openPeticaoPreflight('habilitacao').then((context) => {
+                if (!context) {
+                    return;
+                }
+                const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+                const url = `/contratos/processo/${currentProcessoId}/gerar-habilitacao/`;
 
-            $.ajax({
-                url: url,
-                method: 'POST',
-                headers: { 'X-CSRFToken': csrftoken },
-                data: {
-                    processo_id: currentProcessoId
-                },
-                dataType: 'json',
-                beforeSend: function () {
-                    $('#id_gerar_habilitacao_btn')
-                        .prop('disabled', true)
-                        .text('Gerando habilitação...');
-                    startCountdown(5);
-                },
-                success: function (data) {
+                $.ajax({
+                    url: url,
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrftoken },
+                    data: {
+                        processo_id: currentProcessoId,
+                        peticao_source: context.source,
+                        peticao_cnj_entry_id: context.cnjEntryId,
+                        custas_total: context.custasTotal,
+                        custas_paragrafo: context.custasParagraph,
+                        custas_parcelas: context.custasParcelas,
+                        custas_valor_parcela: context.custasValorParcela
+                    },
+                    dataType: 'json',
+                    beforeSend: function () {
+                        $('#id_gerar_habilitacao_btn')
+                            .prop('disabled', true)
+                            .text('Gerando habilitação...');
+                        startCountdown(5);
+                    },
+                    success: function (data) {
                     const lines = [];
                     if (data && data.habilitacao) {
                         if (data.habilitacao.ok) {
@@ -8373,23 +9273,24 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                         window.location.reload();
                     };
                     showCffSystemDialog(lines.join('\n'), 'success', handleReload);
-                },
-                error: function (xhr, status, error) {
-                    let errorMessage = 'Erro ao gerar petição de habilitação. Tente novamente.';
-                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                        errorMessage = xhr.responseJSON.message;
-                    } else if (xhr.responseText) {
-                        errorMessage = xhr.responseText;
+                    },
+                    error: function (xhr, status, error) {
+                        let errorMessage = 'Erro ao gerar petição de habilitação. Tente novamente.';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMessage = xhr.responseJSON.message;
+                        } else if (xhr.responseText) {
+                            errorMessage = xhr.responseText;
+                        }
+                        showCffSystemDialog(errorMessage, 'warning');
+                        console.error('Erro na geração da habilitação:', status, error, xhr);
+                    },
+                    complete: function () {
+                        stopCountdown();
+                        $('#id_gerar_habilitacao_btn')
+                            .prop('disabled', false)
+                            .text('Gerar Petição de Habilitação (PDF)');
                     }
-                    showCffSystemDialog(errorMessage, 'warning');
-                    console.error('Erro na geração da habilitação:', status, error, xhr);
-                },
-                complete: function () {
-                    stopCountdown();
-                    $('#id_gerar_habilitacao_btn')
-                        .prop('disabled', false)
-                        .text('Gerar Petição de Habilitação (PDF)');
-                }
+                });
             });
         });
 

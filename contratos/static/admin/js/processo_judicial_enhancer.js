@@ -11672,6 +11672,54 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         openChecagemModal(card, trigger);
     });
 
+    const exportEntryState = (entry) => ({
+        id: entry?.id ?? null,
+        cnj: entry?.cnj ?? '',
+        uf: entry?.uf ?? '',
+        valor_causa: entry?.valor_causa ?? '',
+        status: entry?.status ?? '',
+        carteira: entry?.carteira ?? '',
+        vara: entry?.vara ?? '',
+        tribunal: entry?.tribunal ?? '',
+    });
+
+    window.__getCnjEntriesState = () => entryStates.map(exportEntryState);
+    window.__getCnjActiveIndex = () => currentEntryIndex;
+    window.__updateCnjEntryState = (entryId, patch = {}) => {
+        ensureEntriesHydrated();
+        let targetIndex = -1;
+        if (entryId !== null && entryId !== undefined && entryId !== '') {
+            entryStates.forEach((entry, idx) => {
+                if (entry && String(entry.id) === String(entryId)) {
+                    targetIndex = idx;
+                }
+            });
+        }
+        if (targetIndex < 0 && patch && patch.cnj) {
+            const patchDigits = String(patch.cnj || '').replace(/\D/g, '');
+            entryStates.forEach((entry, idx) => {
+                const entryDigits = String(entry?.cnj || '').replace(/\D/g, '');
+                if (patchDigits && entryDigits && patchDigits === entryDigits) {
+                    targetIndex = idx;
+                }
+            });
+        }
+        if (targetIndex < 0) {
+            return false;
+        }
+        entryStates[targetIndex] = {
+            ...entryStates[targetIndex],
+            ...patch,
+        };
+        dedupeEntryStates();
+        syncHiddenEntries();
+        updateNavButtons();
+        if (currentEntryIndex === targetIndex && entryStates[targetIndex]) {
+            applyEntryState(entryStates[targetIndex]);
+        }
+        return true;
+    };
+
     if (typeof jQuery !== 'undefined') {
         jQuery(document).on('formset:added', function(event, $row, formsetName) {
             // Verifica se a nova linha pertence ao formset 'partes_processuais'

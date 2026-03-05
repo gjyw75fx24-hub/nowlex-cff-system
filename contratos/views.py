@@ -4,7 +4,7 @@ from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
 from .models import (
-    ProcessoJudicial, StatusProcessual, QuestaoAnalise,
+    ProcessoJudicial, ProcessoJudicialNumeroCnj, Parte, StatusProcessual, QuestaoAnalise,
     OpcaoResposta, Contrato, ProcessoArquivo, DocumentoModelo, TipoAnaliseObjetiva
 )
 from .permissoes import filter_processos_queryset_for_user
@@ -81,6 +81,42 @@ def _format_cpf(cpf_value):
     if len(digits) == 11:
         return f'{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}'
     return str(cpf_value or '')
+
+
+def _parse_decimal_input(raw):
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    text = text.replace('R$', '').replace(' ', '')
+    if ',' in text and '.' in text:
+        text = text.replace('.', '').replace(',', '.')
+    elif ',' in text:
+        text = text.replace(',', '.')
+    try:
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _parse_int_input(raw):
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _build_endereco_from_parts(parts):
+    if not isinstance(parts, dict):
+        return ''
+    fields = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+    chunks = []
+    for field in fields:
+        value = str(parts.get(field, '') or '').strip()
+        chunks.append(f'{field}: {value}')
+    return ' - '.join(chunks).strip()
 
 
 def _extrair_primeiros_nomes(nome, max_nomes=2):
@@ -321,6 +357,121 @@ def _remove_paragraphs_containing(container, text_substring):
             _delete_paragraph(paragraph)
 
 
+def _replace_paragraph_text(paragraph, replacement):
+    if paragraph is None or replacement is None:
+        return
+    for run in list(paragraph.runs):
+        run.text = ''
+    lines = str(replacement).splitlines()
+    if not lines:
+        return
+    for idx, line in enumerate(lines):
+        if idx > 0:
+            paragraph.add_run().add_break()
+        paragraph.add_run(line)
+
+
+def _replace_paragraphs_containing(container, text_substring, replacement, first_only=False):
+    if not container or not text_substring or replacement is None:
+        return
+    for paragraph in list(_iter_container_paragraphs(container)):
+        if text_substring in paragraph.text:
+            _replace_paragraph_text(paragraph, replacement)
+            if first_only:
+                break
+
+
+def _extract_custas_block_text(document, start_markers, end_markers=None):
+    if not document or not start_markers:
+        return ''
+    collecting = False
+    lines = []
+    marker_set = tuple(start_markers)
+    end_set = tuple(end_markers or [])
+    for paragraph in _iter_container_paragraphs(document):
+        text = (paragraph.text or '').strip()
+        if not text:
+            continue
+        has_marker = any(marker in text for marker in marker_set)
+        if not collecting and has_marker:
+            collecting = True
+        if collecting:
+            if end_set and any(marker in text for marker in end_set) and not has_marker:
+                break
+            if re.match(r'^[IVXLCDM]+\.', text) and not has_marker:
+                break
+            lines.append(text)
+    return '\n'.join(lines).strip()
+
+
+def _extract_custas_block_from_docx_bytes(docx_bytes, start_markers, end_markers=None):
+    if not docx_bytes:
+        return ''
+    try:
+        document = Document(BytesIO(docx_bytes))
+    except Exception:
+        return ''
+    return _extract_custas_block_text(document, start_markers, end_markers=end_markers)
+
+
+def _complete_cobranca_custas_preview(text, custas_valor, parcelas_override=None, valor_parcela_override=None):
+    if not text or custas_valor is None:
+        return text or ''
+    parcelas, valor_parcela = _resolve_custas_parcelamento(
+        custas_valor,
+        parcelas_override=parcelas_override,
+        valor_parcela_override=valor_parcela_override,
+    )
+    custas_formatadas = _format_currency_brl(custas_valor)
+    parcela_formatada = _format_currency_brl(valor_parcela) if valor_parcela is not None else ''
+    parcelas_extenso = number_to_words_pt_br(
+        parcelas,
+        feminine=True,
+        include_currency=False,
+        capitalize_first=False
+    ) if parcelas else ''
+    lines = []
+    for line in text.splitlines():
+        trimmed = line.rstrip()
+        if 'A requerente requer o parcelamento em' in trimmed and parcelas and parcelas_extenso:
+            trimmed = f"A requerente requer o parcelamento em {parcelas} ({parcelas_extenso}) parcelas mensais e"
+        if 'milhares de' in trimmed and ('R$' not in trimmed and 'reais' not in trimmed):
+            trimmed = re.sub(
+                r'(milhares de)\s*$',
+                f"\\1 reais ({custas_formatadas})",
+                trimmed,
+                flags=re.IGNORECASE
+            )
+        if parcela_formatada and 'parcelas mensais' in trimmed and 'valor de' not in trimmed:
+            trimmed = re.sub(
+                r'(parcelas mensais(?:\s+e)?)\s*$',
+                f"\\1 sucessivas no valor de {parcela_formatada}.",
+                trimmed,
+                flags=re.IGNORECASE
+            )
+        lines.append(trimmed)
+    return '\n'.join(lines).strip()
+
+
+def _complete_cobranca_custas_paragraphs(document, custas_valor, parcelas, valor_parcela):
+    if not document or custas_valor is None:
+        return
+    for paragraph in _iter_container_paragraphs(document):
+        raw_text = paragraph.text or ''
+        if not raw_text:
+            continue
+        if not any(marker in raw_text for marker in ('milhares de', 'parcelas mensais', 'A requerente requer o parcelamento em')):
+            continue
+        updated = _complete_cobranca_custas_preview(
+            raw_text,
+            custas_valor,
+            parcelas_override=parcelas,
+            valor_parcela_override=valor_parcela
+        )
+        if updated and updated != raw_text:
+            _replace_paragraph_text(paragraph, updated)
+
+
 def _replacePlaceholderStyled_(document, pattern, replacement, bold=False):
     if not pattern or replacement is None:
         return
@@ -475,6 +626,22 @@ def _calculate_monitoria_installments(amount, target=Decimal('500'), max_install
     return min(installments, max_installments)
 
 
+def _resolve_custas_parcelamento(custas_valor, parcelas_override=None, valor_parcela_override=None):
+    if custas_valor is None:
+        return None, None
+    parcelas = parcelas_override if parcelas_override is not None else _calculate_monitoria_installments(custas_valor)
+    try:
+        parcelas = int(parcelas)
+    except (TypeError, ValueError):
+        parcelas = _calculate_monitoria_installments(custas_valor)
+    if parcelas <= 0:
+        parcelas = _calculate_monitoria_installments(custas_valor)
+    if valor_parcela_override is not None:
+        valor_parcela = _to_decimal(valor_parcela_override).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    else:
+        valor_parcela = (custas_valor / Decimal(parcelas)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return parcelas, valor_parcela
+
 def _normalize_monitoria_contracts(contracts):
     if isinstance(contracts, QuerySet):
         try:
@@ -486,8 +653,21 @@ def _normalize_monitoria_contracts(contracts):
     return list(contracts)
 
 
-def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
+def _build_docx_bytes_common(
+    processo,
+    polo_passivo,
+    contratos_monitoria,
+    processo_override=None,
+    custas_override=None,
+    custas_paragrafo=None,
+    custas_parcelas=None,
+    custas_valor_parcela=None
+):
     contratos_monitoria = _normalize_monitoria_contracts(contratos_monitoria)
+    processo_override = processo_override or {}
+    override_vara = processo_override.get('vara')
+    override_uf = processo_override.get('uf')
+    override_valor_causa = processo_override.get('valor_causa')
     dados = {}
     parte_nome = (polo_passivo.nome or '').strip()
     dados['PARTE CONTRÁRIA'] = f"[n]{parte_nome}[n]" if parte_nome else ''
@@ -503,8 +683,8 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     dados['G'] = _format_address_component(endereco_parts.get('G', '') or '')
     dados['H'] = _format_address_component(endereco_parts.get('H', '') or '')
 
-    dados['E_FORO'] = processo.vara
-    dados['H_FORO'] = processo.uf
+    dados['E_FORO'] = override_vara if override_vara is not None else processo.vara
+    dados['H_FORO'] = override_uf if override_uf is not None else processo.uf
 
     dados['CONTRATO'] = ", ".join([c.numero_contrato for c in contratos_monitoria if c.numero_contrato])
 
@@ -514,19 +694,29 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
     ) if contratos_monitoria else Decimal('0')
     total_valor_causa = contrato_total
     if total_valor_causa == Decimal('0'):
-        total_valor_causa = _to_decimal(processo.valor_causa)
+        if override_valor_causa is not None:
+            total_valor_causa = _to_decimal(override_valor_causa)
+        else:
+            total_valor_causa = _to_decimal(processo.valor_causa)
 
     dados['VALOR DA CAUSA'] = _format_currency_brl(total_valor_causa)
     dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
 
     custas_rate = Decimal('0.025')
-    valor_custas_iniciais = (total_valor_causa * custas_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if custas_override is not None:
+        valor_custas_iniciais = _to_decimal(custas_override).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    else:
+        valor_custas_iniciais = (total_valor_causa * custas_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     valor_custas_texto = number_to_words_pt_br(valor_custas_iniciais)
     dados['2,5 % DO VALOR DA CAUSA'] = _format_currency_brl(valor_custas_iniciais)
     dados['2,5% DO VALOR DA CAUSA'] = dados['2,5 % DO VALOR DA CAUSA']
     dados['2,5 % DO VALOR DA CAUSA POR EXTENSO'] = valor_custas_texto
     dados['2,5% DO VALOR DA CAUSA POR EXTENSO'] = valor_custas_texto
-    parcelas_custas = _calculate_monitoria_installments(valor_custas_iniciais)
+    parcelas_custas, valor_parcela = _resolve_custas_parcelamento(
+        valor_custas_iniciais,
+        parcelas_override=custas_parcelas,
+        valor_parcela_override=custas_valor_parcela
+    )
     dados['X PARCELAS'] = str(parcelas_custas)
     dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(
         parcelas_custas,
@@ -558,6 +748,13 @@ def _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria):
             document,
             "Seja deferido o parcelamento das custas iniciais"
         )
+    elif custas_paragrafo:
+        _replace_paragraphs_containing(
+            document,
+            "Seja deferido o parcelamento das custas iniciais",
+            custas_paragrafo,
+            first_only=True
+        )
 
     _replace_placeholders_in_container(document, dados)
     for section in document.sections:
@@ -585,24 +782,30 @@ def _build_monitoria_base_filename(polo_passivo, contratos_monitoria):
     return _sanitize_filename(base)
 
 
-def _get_total_contrato_value(contratos, processo):
+def _get_total_contrato_value(contratos, processo, processo_valor_causa=None):
     total = Decimal('0')
     for contrato in contratos:
         valor = contrato.valor_total_devido if contrato.valor_total_devido is not None else contrato.valor_causa
         if valor is not None:
             total += valor
-    if total == Decimal('0') and processo.valor_causa is not None:
-        total = processo.valor_causa
+    if total == Decimal('0'):
+        if processo_valor_causa is not None:
+            total = processo_valor_causa
+        elif processo.valor_causa is not None:
+            total = processo.valor_causa
     return total
 
 
-def _get_total_valor_causa(contratos, processo):
+def _get_total_valor_causa(contratos, processo, processo_valor_causa=None):
     total = Decimal('0')
     for contrato in contratos:
         if contrato.valor_causa is not None:
             total += _to_decimal(contrato.valor_causa)
     if total == Decimal('0'):
-        total = _to_decimal(processo.valor_causa)
+        if processo_valor_causa is not None:
+            total = _to_decimal(processo_valor_causa)
+        else:
+            total = _to_decimal(processo.valor_causa)
     return total
 
 
@@ -613,9 +816,9 @@ def _build_cobranca_base_filename(polo_passivo, contratos):
     return _sanitize_filename(base)
 
 
-def _build_habilitacao_base_filename(polo_passivo, processo):
+def _build_habilitacao_base_filename(polo_passivo, processo, cnj_reference=None):
     nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
-    reference = processo.cnj or f'processo-{processo.pk}'
+    reference = cnj_reference or processo.cnj or f'processo-{processo.pk}'
     base = f"Habilitação - {nome_parte} - {reference}"
     return _sanitize_filename(base)
 
@@ -905,8 +1108,21 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
         return None
 
 
-def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
+def _build_cobranca_docx_bytes(
+    processo,
+    polo_passivo,
+    contratos,
+    processo_override=None,
+    custas_override=None,
+    custas_paragrafo=None,
+    custas_parcelas=None,
+    custas_valor_parcela=None
+):
     contratos = sorted(contratos, key=lambda c: (c.numero_contrato or '', c.id))
+    processo_override = processo_override or {}
+    override_vara = processo_override.get('vara')
+    override_uf = processo_override.get('uf')
+    override_valor_causa = processo_override.get('valor_causa')
     dados = {
         'PARTE CONTRÁRIA': (polo_passivo.nome or '').upper(),
         'CPF': _format_cpf(polo_passivo.documento),
@@ -916,13 +1132,13 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     for key in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
         dados[key] = _format_address_component(endereco_parts.get(key, '') or '')
 
-    dados['E_FORO'] = processo.vara or ''
-    dados['H_FORO'] = (processo.uf or '').upper()
-    dados['UF'] = (processo.uf or '').upper()
+    dados['E_FORO'] = (override_vara if override_vara is not None else processo.vara) or ''
+    dados['H_FORO'] = (override_uf if override_uf is not None else processo.uf or '').upper()
+    dados['UF'] = (override_uf if override_uf is not None else processo.uf or '').upper()
     dados['CONTRATO'] = _formatar_lista_contratos(contratos)
 
-    total_valor = _get_total_contrato_value(contratos, processo)
-    total_valor_causa = _get_total_valor_causa(contratos, processo)
+    total_valor = _get_total_contrato_value(contratos, processo, override_valor_causa)
+    total_valor_causa = _get_total_valor_causa(contratos, processo, override_valor_causa)
 
     dados['VALOR'] = _format_currency_brl(total_valor)
     dados['VALOR POR EXTENSO'] = number_to_words_pt_br(total_valor)
@@ -930,14 +1146,21 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     dados['VALOR DA CAUSA'] = _format_currency_brl(total_valor_causa)
     dados['VALOR DA CAUSA POR EXTENSO'] = number_to_words_pt_br(total_valor_causa)
 
-    custas_iniciais_2 = (total_valor_causa * Decimal('0.02')).quantize(
-        Decimal('0.01'),
-        rounding=ROUND_HALF_UP
-    )
-    custas_iniciais_25 = (total_valor_causa * Decimal('0.025')).quantize(
-        Decimal('0.01'),
-        rounding=ROUND_HALF_UP
-    )
+    if custas_override is not None:
+        custas_iniciais_25 = _to_decimal(custas_override).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
+        custas_iniciais_2 = custas_iniciais_25
+    else:
+        custas_iniciais_2 = (total_valor_causa * Decimal('0.02')).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
+        custas_iniciais_25 = (total_valor_causa * Decimal('0.025')).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
     custas_extenso_2 = number_to_words_pt_br(custas_iniciais_2)
     custas_extenso_25 = number_to_words_pt_br(custas_iniciais_25)
     custas_formatadas_2 = _format_currency_brl(custas_iniciais_2)
@@ -1007,7 +1230,11 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
     for alias in custas_25_extenso_aliases:
         dados[alias] = custas_extenso_25
 
-    parcelas_custas = _calculate_monitoria_installments(custas_iniciais_25)
+    parcelas_custas, valor_parcela = _resolve_custas_parcelamento(
+        custas_iniciais_25,
+        parcelas_override=custas_parcelas,
+        valor_parcela_override=custas_valor_parcela
+    )
     dados['X PARCELAS'] = str(parcelas_custas)
     dados['X PARCELAS POR EXTENSO'] = number_to_words_pt_br(
         parcelas_custas,
@@ -1029,19 +1256,52 @@ def _build_cobranca_docx_bytes(processo, polo_passivo, contratos):
 
     if not show_parcelamento:
         for marker in (
+            "DAS CUSTAS",
             "II. DAS CUSTAS",
             "Seja deferido o parcelamento das custas iniciais",
             "Considerando que a ora Exequente está assumindo a posição em milhares de",
-            "O art. 98, §6",
+            "O art. 98",
             "Para fins de transparência e controle",
-            "A requerente requer o parcelamento em 10 (dez) parcelas mensais e",
+            "A requerente requer o parcelamento em",
         ):
             _remove_paragraphs_containing(document, marker)
+    elif custas_paragrafo:
+        _replace_paragraphs_containing(
+            document,
+            "DAS CUSTAS",
+            custas_paragrafo,
+            first_only=True
+        )
+        _replace_paragraphs_containing(
+            document,
+            "II. DAS CUSTAS",
+            custas_paragrafo,
+            first_only=True
+        )
+        for marker in (
+            "Seja deferido o parcelamento das custas iniciais",
+            "Considerando que a ora Exequente está assumindo a posição em milhares de",
+            "O art. 98",
+            "Para fins de transparência e controle",
+            "A requerente requer o parcelamento em",
+        ):
+            for paragraph in list(_iter_container_paragraphs(document)):
+                text = paragraph.text or ''
+                if marker in text and "DAS CUSTAS" not in text and "II. DAS CUSTAS" not in text:
+                    _delete_paragraph(paragraph)
 
     _replace_placeholders_in_container(document, dados)
     for section in document.sections:
         _replace_placeholders_in_container(section.header, dados)
         _replace_placeholders_in_container(section.footer, dados)
+
+    if show_parcelamento:
+        _complete_cobranca_custas_paragraphs(
+            document,
+            custas_iniciais_25,
+            parcelas_custas,
+            valor_parcela
+        )
 
     _apply_placeholder_styles(document)
     _bold_keywords_in_document(document, ['EXCELENTÍSSIMO(A)'])
@@ -1064,11 +1324,16 @@ def _parse_habilitacao_data(polo_passivo):
     }
 
 
-def _collect_missing_habilitacao_fields(processo, polo_passivo):
+def _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override=None):
+    processo_override = processo_override or {}
+    override_cnj = processo_override.get('cnj')
+    override_vara = processo_override.get('vara')
     missing = []
-    if not (processo.cnj and processo.cnj.strip()):
+    cnj_value = override_cnj if override_cnj is not None else processo.cnj
+    if not (cnj_value and str(cnj_value).strip()):
         missing.append('Número de processo (CNJ)')
-    if not (processo.vara and processo.vara.strip()):
+    vara_value = override_vara if override_vara is not None else processo.vara
+    if not (vara_value and str(vara_value).strip()):
         missing.append('Vara')
     endereco = polo_passivo.endereco or ''
     endereco_parts = parse_endereco(endereco)
@@ -1110,17 +1375,30 @@ def _replace_with_style(document, pattern, replacement, uppercase=False, bold=Fa
     _replacePlaceholderStyled_(document, pattern, value, bold)
 
 
-def _build_habilitacao_docx_bytes(processo, polo_passivo):
+def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None):
+    processo_override = processo_override or {}
+    override_cnj = processo_override.get('cnj')
+    override_vara = processo_override.get('vara')
     replacements = _parse_habilitacao_data(polo_passivo)
     endereco = replacements.get('ENDERECO', '')
     cidade = replacements.get('CIDADE', '')
     uf = replacements.get('UF', '')
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
-    _replace_with_style(document, '[VARA]', _format_vara_text(processo.vara), uppercase=True)
+    _replace_with_style(
+        document,
+        '[VARA]',
+        _format_vara_text(override_vara if override_vara is not None else processo.vara),
+        uppercase=True
+    )
     _replace_with_style(document, '[CIDADE]', cidade, uppercase=True)
     _replace_with_style(document, '[UF]', uf.upper(), uppercase=True)
-    _replace_with_style(document, '[Processo]', processo.cnj or '', uppercase=False)
+    _replace_with_style(
+        document,
+        '[Processo]',
+        (override_cnj if override_cnj is not None else processo.cnj) or '',
+        uppercase=False
+    )
     _replace_with_style(document, '[Polo Passivo]', polo_passivo.nome, uppercase=False)
     _replace_with_style(document, '[Polo Passivo MAIÚSCULAS]', polo_passivo.nome, uppercase=True)
     _replace_with_style(document, '[Polo Passivo TODAS MAIÚSCULAS E NEGRITO]', polo_passivo.nome, uppercase=True, bold=True)
@@ -1584,6 +1862,124 @@ def parse_endereco(endereco_str):
     return parts
 
 
+def _resolve_peticao_cnj_entry(processo, entry_id=None, cnj_value=None):
+    if not processo:
+        return None
+    if entry_id not in (None, ''):
+        try:
+            entry_id_int = int(entry_id)
+        except (TypeError, ValueError):
+            entry_id_int = None
+        if entry_id_int:
+            entry = processo.numeros_cnj.filter(pk=entry_id_int).first()
+            if entry:
+                return entry
+    if cnj_value:
+        digits = re.sub(r'\D', '', str(cnj_value or ''))
+        if digits:
+            for entry in processo.numeros_cnj.all():
+                if re.sub(r'\D', '', entry.cnj or '') == digits:
+                    return entry
+    return None
+
+
+@login_required
+@require_POST
+def update_peticao_dados(request, processo_id=None):
+    processo_id = processo_id or request.POST.get('processo_id')
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'ID do processo inválido.'}, status=400)
+
+    processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        payload = {}
+
+    source = str(payload.get('source') or 'base').strip().lower()
+    cnj_entry_id = payload.get('cnj_entry_id')
+    cnj_value = (payload.get('cnj') or '').strip()
+    uf_value = (payload.get('uf') or '').strip().upper()[:2]
+    vara_value = (payload.get('vara') or '').strip()
+    tribunal_value = (payload.get('tribunal') or '').strip()
+    valor_causa_value = _parse_decimal_input(payload.get('valor_causa'))
+    endereco_parts = payload.get('endereco_parts')
+    endereco_raw = payload.get('endereco_raw')
+    update_base_cnj = bool(payload.get('update_base_cnj'))
+
+    updated_entry = None
+    updated_processo = None
+
+    if source == 'cnj':
+        entry = _resolve_peticao_cnj_entry(processo, entry_id=cnj_entry_id, cnj_value=cnj_value)
+        if not entry:
+            return JsonResponse({'error': 'Número CNJ não encontrado no cadastro.'}, status=404)
+        if cnj_value:
+            entry.cnj = cnj_value
+        entry.uf = uf_value
+        entry.vara = vara_value
+        entry.tribunal = tribunal_value
+        entry.valor_causa = valor_causa_value
+        entry.save()
+        updated_entry = {
+            'id': entry.pk,
+            'cnj': entry.cnj or '',
+            'uf': entry.uf or '',
+            'vara': entry.vara or '',
+            'tribunal': entry.tribunal or '',
+            'valor_causa': str(entry.valor_causa or '') if entry.valor_causa is not None else '',
+        }
+    else:
+        processo.uf = uf_value
+        processo.vara = vara_value
+        processo.tribunal = tribunal_value
+        processo.valor_causa = valor_causa_value
+        if update_base_cnj and cnj_value:
+            processo.cnj = cnj_value
+        processo.save()
+        updated_processo = {
+            'cnj': processo.cnj or '',
+            'uf': processo.uf or '',
+            'vara': processo.vara or '',
+            'tribunal': processo.tribunal or '',
+            'valor_causa': str(processo.valor_causa or '') if processo.valor_causa is not None else '',
+        }
+
+    endereco_text = None
+    if isinstance(endereco_parts, dict):
+        endereco_text = _build_endereco_from_parts(endereco_parts)
+    elif isinstance(endereco_raw, str):
+        endereco_text = endereco_raw.strip()
+
+    updated_parte_id = None
+    if endereco_text is not None:
+        polo_passivo = None
+        if payload.get('polo_passivo_id'):
+            try:
+                polo_passivo = processo.partes_processuais.filter(
+                    pk=int(payload.get('polo_passivo_id'))
+                ).first()
+            except (TypeError, ValueError):
+                polo_passivo = None
+        if polo_passivo is None:
+            polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+        if polo_passivo:
+            polo_passivo.endereco = endereco_text
+            polo_passivo.save(update_fields=['endereco'])
+            updated_parte_id = polo_passivo.pk
+
+    return JsonResponse({
+        'status': 'success',
+        'source': source,
+        'processo': updated_processo,
+        'cnj_entry': updated_entry,
+        'endereco': endereco_text,
+        'polo_passivo_id': updated_parte_id,
+    })
+
+
 ADDRESS_LOWERCASE_WORDS = {
     'a', 'à', 'ao', 'aos', 'as',
     'da', 'das', 'de', 'do', 'dos',
@@ -1746,7 +2142,34 @@ def generate_monitoria_petition(request, processo_id=None):
         return HttpResponse("Nenhum contrato selecionado para monitória na análise deste processo.", status=404)
 
     try:
-        docx_bytes = _build_docx_bytes_common(processo, polo_passivo, contratos_monitoria)
+        cnj_entry = _resolve_peticao_cnj_entry(
+            processo,
+            entry_id=request.POST.get('peticao_cnj_entry_id'),
+        )
+        custas_override = _parse_decimal_input(request.POST.get('custas_total'))
+        custas_paragrafo = request.POST.get('custas_paragrafo') or ''
+        custas_parcelas = _parse_int_input(request.POST.get('custas_parcelas'))
+        custas_valor_parcela = _parse_decimal_input(request.POST.get('custas_valor_parcela'))
+        processo_override = {}
+        if cnj_entry:
+            processo_override = {
+                'cnj': cnj_entry.cnj or '',
+                'uf': cnj_entry.uf or '',
+                'vara': cnj_entry.vara or '',
+                'tribunal': cnj_entry.tribunal or '',
+                'valor_causa': cnj_entry.valor_causa,
+            }
+
+        docx_bytes = _build_docx_bytes_common(
+            processo,
+            polo_passivo,
+            contratos_monitoria,
+            processo_override=processo_override,
+            custas_override=custas_override,
+            custas_paragrafo=custas_paragrafo,
+            custas_parcelas=custas_parcelas,
+            custas_valor_parcela=custas_valor_parcela,
+        )
         base_filename = _build_monitoria_base_filename(polo_passivo, contratos_monitoria)
 
         monitoria_info = {}
@@ -1855,7 +2278,34 @@ def generate_cobranca_judicial_petition(request, processo_id=None):
 
     extrato_result = None
     try:
-        docx_bytes = _build_cobranca_docx_bytes(processo, polo_passivo, contratos_lista)
+        cnj_entry = _resolve_peticao_cnj_entry(
+            processo,
+            entry_id=request.POST.get('peticao_cnj_entry_id'),
+        )
+        custas_override = _parse_decimal_input(request.POST.get('custas_total'))
+        custas_paragrafo = request.POST.get('custas_paragrafo') or ''
+        custas_parcelas = _parse_int_input(request.POST.get('custas_parcelas'))
+        custas_valor_parcela = _parse_decimal_input(request.POST.get('custas_valor_parcela'))
+        processo_override = {}
+        if cnj_entry:
+            processo_override = {
+                'cnj': cnj_entry.cnj or '',
+                'uf': cnj_entry.uf or '',
+                'vara': cnj_entry.vara or '',
+                'tribunal': cnj_entry.tribunal or '',
+                'valor_causa': cnj_entry.valor_causa,
+            }
+
+        docx_bytes = _build_cobranca_docx_bytes(
+            processo,
+            polo_passivo,
+            contratos_lista,
+            processo_override=processo_override,
+            custas_override=custas_override,
+            custas_paragrafo=custas_paragrafo,
+            custas_parcelas=custas_parcelas,
+            custas_valor_parcela=custas_valor_parcela,
+        )
         base_filename = _build_cobranca_base_filename(polo_passivo, contratos_lista)
         docx_url = ''
 
@@ -1935,7 +2385,21 @@ def generate_habilitacao_petition(request, processo_id=None):
     if not polo_passivo:
         return HttpResponse("Polo passivo não encontrado para este processo.", status=404)
 
-    missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo)
+    cnj_entry = _resolve_peticao_cnj_entry(
+        processo,
+        entry_id=request.POST.get('peticao_cnj_entry_id'),
+    )
+    processo_override = {}
+    if cnj_entry:
+        processo_override = {
+            'cnj': cnj_entry.cnj or '',
+            'uf': cnj_entry.uf or '',
+            'vara': cnj_entry.vara or '',
+            'tribunal': cnj_entry.tribunal or '',
+            'valor_causa': cnj_entry.valor_causa,
+        }
+
+    missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override)
     if missing_fields:
         message = (
             'Não foi possível gerar a habilitação porque faltam os seguintes dados no cadastro (aba Partes): '
@@ -1945,8 +2409,12 @@ def generate_habilitacao_petition(request, processo_id=None):
         return JsonResponse({'message': message}, status=422)
 
     try:
-        docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo)
-        base_filename = _build_habilitacao_base_filename(polo_passivo, processo)
+        docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override)
+        base_filename = _build_habilitacao_base_filename(
+            polo_passivo,
+            processo,
+            cnj_reference=processo_override.get('cnj') if processo_override else None,
+        )
         docx_url = ''
 
         docx_saved = False
@@ -1985,6 +2453,112 @@ def generate_habilitacao_petition(request, processo_id=None):
         "message": "Petição de habilitação gerada - Salva em Arquivos.",
         "habilitacao": habilitacao_info,
     })
+
+
+@login_required
+@require_POST
+def preview_peticao_custas(request, processo_id=None):
+    processo_id = processo_id or request.POST.get('processo_id')
+    try:
+        processo_id_int = int(processo_id)
+    except (TypeError, ValueError):
+        return JsonResponse({'custas_preview': ''}, status=400)
+
+    kind = str(request.POST.get('kind') or '').strip().lower()
+    if kind not in ('monitoria', 'cobranca'):
+        return JsonResponse({'custas_preview': ''}, status=400)
+
+    try:
+        processo = get_object_or_404(ProcessoJudicial, pk=processo_id_int)
+    except ProcessoJudicial.DoesNotExist:
+        return JsonResponse({'custas_preview': ''}, status=404)
+
+    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+    if not polo_passivo:
+        return JsonResponse({'custas_preview': ''}, status=404)
+
+    contratos_para_monitoria_ids = []
+    try:
+        posted_json = request.POST.get('contratos_para_monitoria')
+        if posted_json:
+            contratos_para_monitoria_ids = json.loads(posted_json)
+    except (TypeError, json.JSONDecodeError):
+        contratos_para_monitoria_ids = []
+    contratos_para_monitoria_ids = _parse_contract_ids(contratos_para_monitoria_ids)
+    contratos = list(Contrato.objects.filter(id__in=contratos_para_monitoria_ids))
+
+    cnj_entry = _resolve_peticao_cnj_entry(
+        processo,
+        entry_id=request.POST.get('peticao_cnj_entry_id'),
+    )
+    processo_override = {}
+    if cnj_entry:
+        processo_override = {
+            'cnj': cnj_entry.cnj or '',
+            'uf': cnj_entry.uf or '',
+            'vara': cnj_entry.vara or '',
+            'tribunal': cnj_entry.tribunal or '',
+            'valor_causa': cnj_entry.valor_causa,
+        }
+    valor_causa_override = _parse_decimal_input(request.POST.get('valor_causa'))
+    if valor_causa_override is not None:
+        processo_override['valor_causa'] = valor_causa_override
+
+    custas_override = _parse_decimal_input(request.POST.get('custas_total'))
+    custas_parcelas = _parse_int_input(request.POST.get('custas_parcelas'))
+    custas_valor_parcela = _parse_decimal_input(request.POST.get('custas_valor_parcela'))
+
+    try:
+        if kind == 'monitoria':
+            docx_bytes = _build_docx_bytes_common(
+                processo,
+                polo_passivo,
+                contratos,
+                processo_override=processo_override,
+                custas_override=custas_override,
+                custas_parcelas=custas_parcelas,
+                custas_valor_parcela=custas_valor_parcela,
+            )
+            start_markers = ["Seja deferido o parcelamento das custas iniciais"]
+            end_markers = None
+        else:
+            total_valor_causa = _get_total_valor_causa(
+                contratos,
+                processo,
+                processo_override.get('valor_causa')
+            )
+            if custas_override is None:
+                custas_override = (total_valor_causa * Decimal('0.025')).quantize(
+                    Decimal('0.01'),
+                    rounding=ROUND_HALF_UP
+                )
+            docx_bytes = _build_cobranca_docx_bytes(
+                processo,
+                polo_passivo,
+                contratos,
+                processo_override=processo_override,
+                custas_override=custas_override,
+                custas_parcelas=custas_parcelas,
+                custas_valor_parcela=custas_valor_parcela,
+            )
+            start_markers = ["DAS CUSTAS", "II. DAS CUSTAS"]
+            end_markers = ["DOS FATOS"]
+        preview_text = _extract_custas_block_from_docx_bytes(
+            docx_bytes,
+            start_markers,
+            end_markers=end_markers
+        )
+        if kind == 'cobranca' and preview_text:
+            preview_text = _complete_cobranca_custas_preview(
+                preview_text,
+                custas_override,
+                parcelas_override=custas_parcelas,
+                valor_parcela_override=custas_valor_parcela
+            )
+    except Exception:
+        preview_text = ''
+
+    return JsonResponse({'custas_preview': preview_text})
 
 
 @login_required
