@@ -169,12 +169,18 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         const originalText = cnjDisplayHeading.dataset.originalCnjText || '';
-        const isDraft = currentEntryIndex < 0;
+        const hasCnjValue = Boolean(normalizeCnjDigits(cnjInput?.value || ''));
+        const hasEntryStates = entryStates.length > 0;
+        const hasAnyCards = Boolean(document.querySelector('.info-card'));
+        const hasAnyPartes = Boolean(document.querySelector('#partes_processuais-group .inline-related'));
+        const treatAsSingleNoCnj = !hasEntryStates && !hasCnjValue && (hasAnyCards || hasAnyPartes);
+        const treatAsSingle = (currentEntryIndex < 0 && !hasEntryStates && hasCnjValue) || treatAsSingleNoCnj;
+        const isDraft = currentEntryIndex < 0 && !treatAsSingle;
         const draftValue = (cnjInput?.value || '').trim();
         const activeEntry = getActiveEntryState();
         const activeEntryIsUnsaved = Boolean(activeEntry && !activeEntry.id);
 
-        if (isDraft || activeEntryIsUnsaved) {
+        if ((isDraft || activeEntryIsUnsaved) && !treatAsSingle) {
             if (draftValue) {
                 cnjDisplayHeading.textContent = draftValue;
                 cnjDisplayHeading.style.display = '';
@@ -187,6 +193,8 @@ document.addEventListener('DOMContentLoaded', function() {
         cnjDisplayHeading.style.display = '';
         if (activeEntry && activeEntry.cnj) {
             cnjDisplayHeading.textContent = activeEntry.cnj;
+        } else if (draftValue) {
+            cnjDisplayHeading.textContent = draftValue;
         } else if (originalText) {
             cnjDisplayHeading.textContent = originalText;
         }
@@ -1130,18 +1138,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const refreshCnjScopedInlines = () => {
         ensureEntriesHydrated();
-        const isDraft = currentEntryIndex < 0;
+        const hasCnjValue = Boolean(normalizeCnjDigits(cnjInput?.value || ''));
+        const scopedRows = getCnjScopedRows();
+        const cards = Array.from(document.querySelectorAll('.info-card'));
+        const hasAnyRows = scopedRows.some((row) => !isRowMarkedForDelete(row));
+        const hasAnyCards = cards.length > 0;
+        const treatAsSingleNoCnj = !entryStates.length && !hasCnjValue && (hasAnyRows || hasAnyCards);
+        const treatAsSingle = (currentEntryIndex < 0 && !entryStates.length && hasCnjValue) || treatAsSingleNoCnj;
+        const isDraft = currentEntryIndex < 0 && !treatAsSingle;
         const draftDigits = isDraft ? String(cnjInput?.value || '').replace(/\D/g, '') : '';
         const draftRef = draftDigits ? `cnj:${draftDigits}` : '';
         const multiCnj = entryStates.length > 1 || isDraft;
         const activeEntry = getActiveEntryState();
         const activeEntryIsUnsaved = Boolean(activeEntry && !activeEntry.id);
-        const hideCardsForDraft = isDraft || activeEntryIsUnsaved;
+        const hideCardsForDraft = (isDraft || activeEntryIsUnsaved) && !treatAsSingle;
         const activeRef = isDraft ? draftRef : normalizeEntryRef(activeEntry);
         const firstEntryRef = normalizeEntryRef(entryStates[0]);
         const allowUnboundDraft = isDraft && !!draftDigits;
         const hideAllDraft = isDraft && !draftDigits;
-        const scopedRows = getCnjScopedRows();
         let hasActiveMatch = false;
         const rowRefs = new Map();
 
@@ -1186,8 +1200,10 @@ document.addEventListener('DOMContentLoaded', function() {
             row.style.display = shouldShow ? '' : 'none';
         });
 
-        const cards = Array.from(document.querySelectorAll('.info-card'));
         const infoShell = document.querySelector('.info-cards-shell');
+        if (infoShell && !cards.length) {
+            infoShell.style.display = '';
+        }
         let hasActiveCard = false;
         if (!hideCardsForDraft && activeRef) {
             cards.forEach((card) => {
