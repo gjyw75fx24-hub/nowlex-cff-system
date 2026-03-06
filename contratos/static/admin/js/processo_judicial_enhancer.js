@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let inlineCnjObserver = null;
     let agendaObservationParagraphResolver = null;
     let agendaObservationOpenHandler = null;
+    let updateCarteirasHighlight = null;
+    let carteiraBadge = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -640,6 +642,96 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         };
 
+        const resolveCarteiraLabel = (value) => {
+            const normalized = String(value || '').trim();
+            if (!normalized) {
+                return '';
+            }
+            const match = getCheckboxes().find((input) => String(input.value || '').trim() === normalized);
+            if (match) {
+                const label = match.closest('label');
+                const text = label?.querySelector('.carteira-vinculo-text')?.textContent;
+                if (text) {
+                    return text.trim();
+                }
+            }
+            if (carteiraSelect) {
+                const option = Array.from(carteiraSelect.options || []).find(
+                    (opt) => String(opt.value || '').trim() === normalized
+                );
+                const label = option?.textContent || option?.label || '';
+                if (label) {
+                    return String(label).trim();
+                }
+            }
+            return normalized;
+        };
+
+        const applyCarteiraHighlight = () => {
+            const activeEntry = entryStates[currentEntryIndex] || null;
+            const checkboxes = getCheckboxes();
+            const checkedBoxes = checkboxes.filter((input) => input.checked);
+            let activeValue = String(activeEntry?.carteira || '').trim() || String(carteiraSelect?.value || '').trim();
+            if (!checkedBoxes.length) {
+                activeValue = '';
+            }
+            let touched = false;
+            if (activeValue) {
+                const activeCheckbox = checkboxes.find(
+                    (input) => String(input.value || '').trim() === activeValue
+                );
+                if (activeCheckbox && !activeCheckbox.checked) {
+                    activeCheckbox.checked = true;
+                    touched = true;
+                }
+            }
+            if (touched) {
+                syncCheckboxVisualState();
+                syncSelectionPayload();
+            }
+            checkboxes.forEach((input) => {
+                const optionLabel = input.closest('label');
+                if (!optionLabel) {
+                    return;
+                }
+                optionLabel.classList.remove('carteira-vinculo-primary', 'carteira-vinculo-secondary');
+                if (!input.checked) {
+                    optionLabel.style.background = '#f8fbff';
+                    optionLabel.style.borderColor = 'rgba(15, 58, 118, 0.12)';
+                    return;
+                }
+                if (activeValue && String(input.value || '').trim() === activeValue) {
+                    optionLabel.classList.add('carteira-vinculo-primary');
+                    optionLabel.style.background = '#dbeafe';
+                    optionLabel.style.borderColor = '#2563eb';
+                } else {
+                    optionLabel.classList.add('carteira-vinculo-secondary');
+                    optionLabel.style.background = '#eef2f7';
+                    optionLabel.style.borderColor = '#cbd5e1';
+                }
+            });
+
+            if (carteiraBadge) {
+                const label = resolveCarteiraLabel(activeValue);
+                if (label) {
+                    carteiraBadge.textContent = label;
+                    carteiraBadge.style.display = 'inline-flex';
+                    carteiraBadge.style.alignItems = 'center';
+                    carteiraBadge.style.padding = '2px 10px';
+                    carteiraBadge.style.borderRadius = '999px';
+                    carteiraBadge.style.fontSize = '0.85rem';
+                    carteiraBadge.style.fontWeight = '600';
+                    carteiraBadge.style.border = '1px solid #2563eb';
+                    carteiraBadge.style.background = '#dbeafe';
+                    carteiraBadge.style.color = '#1e3a8a';
+                } else {
+                    carteiraBadge.textContent = '';
+                    carteiraBadge.style.display = 'none';
+                }
+            }
+        };
+        updateCarteirasHighlight = applyCarteiraHighlight;
+
         const updateToggleReadyState = () => {
             if (getCheckboxes().length > 0) {
                 document.body.classList.add('carteiras-vinculadas-toggle-ready');
@@ -674,8 +766,22 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') {
                 return;
             }
-            syncPrimaryFromLinked();
+            if (carteiraSelect && target.checked) {
+                carteiraSelect.value = target.value;
+                carteiraSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                syncPrimaryFromLinked();
+            }
+            const checked = getCheckboxes().filter((input) => input.checked);
+            if (!checked.length && carteiraSelect) {
+                carteiraSelect.value = '';
+                if (currentEntryIndex >= 0 && entryStates[currentEntryIndex]) {
+                    entryStates[currentEntryIndex].carteira = '';
+                    syncHiddenEntries();
+                }
+            }
             syncCheckboxVisualState();
+            applyCarteiraHighlight();
             updateToggleReadyState();
             syncSelectionPayload();
         });
@@ -693,6 +799,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     checkbox.checked = true;
                 }
                 syncCheckboxVisualState();
+                applyCarteiraHighlight();
                 updateToggleReadyState();
                 syncSelectionPayload();
             });
@@ -707,6 +814,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         syncPrimaryFromLinked();
         syncCheckboxVisualState();
+        applyCarteiraHighlight();
         updateToggleReadyState();
         syncSelectionPayload();
     };
@@ -783,9 +891,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!group) {
             return [];
         }
-        return Array.from(group.querySelectorAll('.inline-related, tr.form-row, tr.dynamic-andamentos, .dynamic-partes, .dynamic-andamento'))
-            .filter((row) => row && !row.classList?.contains('empty-form'))
-            .filter((row) => !!row.querySelector('input[name$="-numero_cnj"]'));
+        if (groupId === 'partes_processuais-group') {
+            return Array.from(group.querySelectorAll('.inline-related'))
+                .filter((row) => row && !row.classList?.contains('empty-form'));
+        }
+        const rows = Array.from(group.querySelectorAll('.inline-related, tr.form-row, tr.dynamic-andamentos, .dynamic-andamento'))
+            .filter((row) => row && !row.classList?.contains('empty-form'));
+        return rows.filter((row) => !!row.querySelector('input[name$="-numero_cnj"]'));
     };
 
     const getCnjScopedRows = () => {
@@ -886,11 +998,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             let rowRef = getRowCurrentRef(row);
-            if (!rowRef && activeEntry) {
-                bindRowToEntry(row, activeEntry, true);
-                rowRef = getRowCurrentRef(row);
+            if (rowRef && rowRef.startsWith('cnj:')) {
+                const digits = rowRef.replace('cnj:', '');
+                const matchedEntry = entryStates.find((entry) => {
+                    const entryDigits = String(entry?.cnj || '').replace(/\D/g, '');
+                    return entryDigits && entryDigits === digits;
+                });
+                if (matchedEntry && (matchedEntry.id !== null && matchedEntry.id !== undefined && matchedEntry.id !== '')) {
+                    bindRowToEntry(row, matchedEntry, true);
+                    rowRef = getRowCurrentRef(row);
+                }
             }
-            const shouldShow = !multiCnj || !activeRef || !rowRef || rowRef === activeRef;
+            const shouldShow = !multiCnj || !activeRef ? true : (rowRef && rowRef === activeRef);
             row.style.display = shouldShow ? '' : 'none';
         });
 
@@ -944,6 +1063,9 @@ document.addEventListener('DOMContentLoaded', function() {
         cnjInput.focus();
         setActiveCnjText();
         refreshCnjScopedInlines();
+        if (typeof updateCarteirasHighlight === 'function') {
+            updateCarteirasHighlight();
+        }
     };
 
     const updateNavButtons = () => {
@@ -1051,6 +1173,14 @@ document.addEventListener('DOMContentLoaded', function() {
         deleteButton.style.height = '32px';
         inlineGroup.appendChild(deleteButton);
 
+        carteiraBadge = document.createElement('span');
+        carteiraBadge.className = 'cnj-carteira-badge';
+        carteiraBadge.style.display = 'none';
+        inlineGroup.appendChild(carteiraBadge);
+        if (typeof updateCarteirasHighlight === 'function') {
+            updateCarteirasHighlight();
+        }
+
         const clearFields = () => {
         cnjInput.value = '';
         if (ufInput) ufInput.value = '';
@@ -1064,6 +1194,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         cnjInput.focus();
         setActiveCnjText();
+        if (typeof updateCarteirasHighlight === 'function') {
+            updateCarteirasHighlight();
+        }
         };
 
         deleteButton.addEventListener('click', () => {
@@ -2108,6 +2241,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
                 const element = row && row.jquery ? row[0] : row;
                 enhanceNowlexRow(element);
+                scheduleContratosGrouping();
             });
         }
     }
@@ -9486,6 +9620,19 @@ document.addEventListener('DOMContentLoaded', function() {
                         card.dataset.obito = '1';
                     }
                     updateCardObitoData(card, data);
+                    if (card) {
+                        const cpf = normalizeCpf(card.dataset.parteCpf);
+                        if (cpf) {
+                            document.querySelectorAll('.info-card').forEach((otherCard) => {
+                                const otherCpf = normalizeCpf(otherCard.dataset.parteCpf);
+                                if (!otherCpf || otherCpf !== cpf) {
+                                    return;
+                                }
+                                otherCard.dataset.obito = '1';
+                                updateCardObitoData(otherCard, data);
+                            });
+                        }
+                    }
                     hideObitoModal();
                     createSystemAlert('Óbito', 'Dados atualizados com sucesso.');
                 })
@@ -10130,6 +10277,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const successMessage = data.message || 'Dados preenchidos com sucesso.';
                     setFeedback(successMessage, 'success');
                     fillFormFields(data.processo, data.partes, data.andamentos);
+                    scheduleContratosGrouping();
                     syncDemandasContractsFromEscavador(data.partes || [])
                         .then((summary) => {
                             if (!summary || !summary.cpfs_consultados) return;
@@ -10158,6 +10306,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Erro na requisição:', error);
                 setFeedback(error.message || 'Ocorreu um erro inesperado.', 'error');
             });
+        });
+    }
+
+    observeContratosGrouping();
+    scheduleContratosGrouping();
+    const contratosGroup = getContratosInlineGroup();
+    if (contratosGroup && !contratosGroup.dataset.cpfGroupingBound) {
+        contratosGroup.dataset.cpfGroupingBound = '1';
+        contratosGroup.addEventListener('input', (event) => {
+            if (!(event.target instanceof HTMLInputElement)) return;
+            if (event.target.name && event.target.name.includes('documento_titular')) {
+                scheduleContratosGrouping();
+            }
         });
     }
 
@@ -10399,6 +10560,298 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const normalizeDocumentDigits = (value) => String(value || '').replace(/\D/g, '');
+    const formatDocumentoDisplay = (digits) => {
+        const clean = normalizeDocumentDigits(digits);
+        if (!clean) return '';
+        if (typeof maskCpfCnpj === 'function') {
+            return maskCpfCnpj(clean);
+        }
+        return clean;
+    };
+
+    function getContratosInlineGroup() {
+        const byId = document.getElementById('contratos-group');
+        if (byId) return byId;
+        const row = document.querySelector('.dynamic-contratos, .inline-related.dynamic-contratos');
+        if (!row) return null;
+        return row.closest('.inline-group') || row.parentElement || null;
+    }
+
+    function buildInfoCardDocMap() {
+        const map = new Map();
+        const cards = Array.from(document.querySelectorAll('.info-card'));
+        cards.forEach((card) => {
+            const docText = (card.querySelector('.parte-documento')?.textContent || '').trim();
+            const docDigits = normalizeDocumentDigits(docText);
+            if (!docDigits) return;
+            const name = (card.querySelector('.parte-nome')?.textContent || '').trim();
+            map.set(docDigits, {
+                documento: docText || formatDocumentoDisplay(docDigits),
+                nome: name,
+            });
+        });
+        return map;
+    }
+
+    function buildInfoCardContratoOwnerMap() {
+        const contractDocMap = new Map();
+        const contractInfoMap = new Map();
+        const docInfoMap = new Map();
+        const cards = Array.from(document.querySelectorAll('.info-card'));
+        cards.forEach((card) => {
+            const docText = (card.querySelector('.parte-documento')?.textContent || '').trim();
+            const cardDocDigits = normalizeDocumentDigits(docText);
+            const wrappers = Array.from(card.querySelectorAll('.contrato-item-wrapper'));
+            const name = (card.querySelector('.parte-nome')?.textContent || '').trim();
+            if (cardDocDigits) {
+                docInfoMap.set(cardDocDigits, {
+                    documento: docText || formatDocumentoDisplay(cardDocDigits),
+                    nome: name,
+                });
+            }
+            wrappers.forEach((wrapper) => {
+                const idValue = (wrapper.dataset.contratoId || '').trim();
+                const wrapperDocDigits = normalizeDocumentDigits(wrapper.dataset.documentoTitular || '') || cardDocDigits;
+                const numeroText = (wrapper.querySelector('.contrato-numero')?.textContent || '').trim();
+                const numeroMatch = numeroText.match(/\d+/);
+                const numeroDigits = numeroMatch ? numeroMatch[0] : '';
+                if (idValue) {
+                    contractDocMap.set(`id:${idValue}`, wrapperDocDigits);
+                }
+                if (numeroDigits) {
+                    contractDocMap.set(`num:${numeroDigits}`, wrapperDocDigits);
+                    if (wrapperDocDigits) {
+                        contractInfoMap.set(numeroDigits, {
+                            docDigits: wrapperDocDigits,
+                            documento: docText || formatDocumentoDisplay(wrapperDocDigits),
+                            nome: name,
+                        });
+                    }
+                }
+            });
+        });
+        return { contractDocMap, contractInfoMap, docInfoMap };
+    }
+
+    function buildPartesDocMap() {
+        const map = new Map();
+        const parteRows = Array.from(document.querySelectorAll('#partes_processuais-group .inline-related'))
+            .filter((row) => row && !row.classList.contains('empty-form'));
+        parteRows.forEach((row) => {
+            const docInput = row.querySelector('input[name$="-documento"]');
+            const nameInput = row.querySelector('input[name$="-nome"]');
+            const docDigits = normalizeDocumentDigits(docInput?.value || '');
+            if (!docDigits) return;
+            if (!map.has(docDigits)) {
+                map.set(docDigits, {
+                    documento: docInput?.value || formatDocumentoDisplay(docDigits),
+                    nome: (nameInput?.value || '').trim(),
+                });
+            } else {
+                const current = map.get(docDigits);
+                if (!current.nome && nameInput?.value) {
+                    current.nome = nameInput.value.trim();
+                    map.set(docDigits, current);
+                }
+            }
+        });
+        if (!map.size) {
+            return buildInfoCardDocMap();
+        }
+        const infoMap = buildInfoCardDocMap();
+        infoMap.forEach((value, key) => {
+            if (!map.has(key)) {
+                map.set(key, value);
+            }
+        });
+        return map;
+    }
+
+    function ensureContratosGroupingStyles() {
+        if (document.getElementById('contratos-cpf-grouping-styles')) {
+            return;
+        }
+        const style = document.createElement('style');
+        style.id = 'contratos-cpf-grouping-styles';
+        style.textContent = `
+            .contratos-cpf-groups { display: flex; flex-direction: column; gap: 14px; }
+            .contratos-cpf-group { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px 2px; background: #f8fbff; }
+            .contratos-cpf-header,
+            .contratos-cpf-heading {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 8px;
+                margin: 10px 0 6px;
+                padding: 6px 10px;
+                border-radius: 10px;
+                background: #f8fbff;
+                border: 1px solid #e2e8f0;
+                color: #3b4b5f;
+                font-size: 0.9rem;
+            }
+            .contratos-cpf-header .contratos-cpf-name,
+            .contratos-cpf-heading-name { font-weight: 600; }
+            .contratos-cpf-header .contratos-cpf-doc,
+            .contratos-cpf-heading-doc { font-size: 0.85rem; color: #6b7280; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function buildContratosGrouping() {
+        const groupRoot = getContratosInlineGroup();
+        if (!groupRoot) return;
+        const inlineGroup = groupRoot;
+        const addRow = inlineGroup.querySelector('.add-row');
+
+        const existingContainer = inlineGroup.querySelector('.contratos-cpf-groups');
+        if (existingContainer) {
+            const containerParent = existingContainer.parentNode;
+            if (containerParent) {
+                Array.from(existingContainer.querySelectorAll('.dynamic-contratos, .inline-related'))
+                    .filter((row) => row && !row.classList.contains('empty-form'))
+                    .forEach((row) => containerParent.insertBefore(row, existingContainer));
+            }
+            existingContainer.remove();
+        }
+        inlineGroup.querySelectorAll('.contratos-cpf-heading').forEach((el) => el.remove());
+
+        const rows = Array.from(inlineGroup.querySelectorAll('.dynamic-contratos, .inline-related'))
+            .filter((row) => row && !row.classList.contains('empty-form'))
+            .filter((row) => !!row.querySelector('input[name$="-numero_contrato"], input[name$="-documento_titular"]'));
+        if (!rows.length) return;
+
+        const docMap = buildPartesDocMap();
+        const infoCardMaps = buildInfoCardContratoOwnerMap();
+        const contratoDocMap = infoCardMaps.contractDocMap;
+        if (infoCardMaps.docInfoMap && infoCardMaps.docInfoMap.size) {
+            infoCardMaps.docInfoMap.forEach((value, key) => {
+                if (!docMap.has(key)) {
+                    docMap.set(key, value);
+                }
+            });
+        }
+        const groupOrder = [];
+        const groups = new Map();
+        rows.forEach((row) => {
+            const docInput = row.querySelector('input[name$="-documento_titular"]');
+            let docDigits = normalizeDocumentDigits(docInput?.value || '');
+            if (!docDigits) {
+                const idInput = row.querySelector('input[name$="-id"]');
+                const idValue = (idInput?.value || '').trim();
+                if (idValue && contratoDocMap.has(`id:${idValue}`)) {
+                    docDigits = contratoDocMap.get(`id:${idValue}`) || '';
+                }
+            }
+            if (!docDigits) {
+                const numeroInput = row.querySelector('input[name$="-numero_contrato"]');
+                const numeroDigits = (numeroInput?.value || '').replace(/\D/g, '');
+                if (numeroDigits && infoCardMaps.contractInfoMap?.has(numeroDigits)) {
+                    const info = infoCardMaps.contractInfoMap.get(numeroDigits);
+                    docDigits = info?.docDigits || '';
+                    if (docDigits && !docMap.has(docDigits)) {
+                        docMap.set(docDigits, {
+                            documento: info.documento || formatDocumentoDisplay(docDigits),
+                            nome: info.nome || '',
+                        });
+                    }
+                }
+                if (!docDigits && numeroDigits && contratoDocMap.has(`num:${numeroDigits}`)) {
+                    docDigits = contratoDocMap.get(`num:${numeroDigits}`) || '';
+                }
+            }
+            const key = docDigits || '__sem_doc__';
+            if (!groups.has(key)) {
+                groups.set(key, []);
+                groupOrder.push(key);
+            }
+            groups.get(key).push(row);
+        });
+
+        ensureContratosGroupingStyles();
+        let lastKey = null;
+        rows.forEach((row) => {
+            const docInput = row.querySelector('input[name$="-documento_titular"]');
+            let docDigits = normalizeDocumentDigits(docInput?.value || '');
+            if (!docDigits) {
+                const idInput = row.querySelector('input[name$="-id"]');
+                const idValue = (idInput?.value || '').trim();
+                if (idValue && contratoDocMap.has(`id:${idValue}`)) {
+                    docDigits = contratoDocMap.get(`id:${idValue}`) || '';
+                }
+            }
+            if (!docDigits) {
+                const numeroInput = row.querySelector('input[name$="-numero_contrato"]');
+                const numeroDigits = (numeroInput?.value || '').replace(/\D/g, '');
+                if (numeroDigits && infoCardMaps.contractInfoMap?.has(numeroDigits)) {
+                    const info = infoCardMaps.contractInfoMap.get(numeroDigits);
+                    docDigits = info?.docDigits || '';
+                    if (docDigits && !docMap.has(docDigits)) {
+                        docMap.set(docDigits, {
+                            documento: info.documento || formatDocumentoDisplay(docDigits),
+                            nome: info.nome || '',
+                        });
+                    }
+                }
+                if (!docDigits && numeroDigits && contratoDocMap.has(`num:${numeroDigits}`)) {
+                    docDigits = contratoDocMap.get(`num:${numeroDigits}`) || '';
+                }
+            }
+            const key = docDigits || '__sem_doc__';
+            if (key === lastKey) {
+                return;
+            }
+            lastKey = key;
+            const header = document.createElement('div');
+            header.className = 'contratos-cpf-heading';
+            if (key === '__sem_doc__') {
+                header.innerHTML = `<span class="contratos-cpf-heading-name">CPF/CNPJ não informado</span>`;
+            } else {
+                const info = docMap.get(key) || {};
+                const displayDoc = info.documento || formatDocumentoDisplay(key);
+                const name = info.nome || 'CPF/CNPJ sem nome';
+                header.innerHTML = `<span class="contratos-cpf-heading-name">${name}</span><span class="contratos-cpf-heading-doc">${displayDoc}</span>`;
+            }
+            const parent = row.parentNode || inlineGroup;
+            parent.insertBefore(header, row);
+        });
+    }
+
+    var contratosGroupingTimer = null;
+
+    function scheduleContratosGrouping() {
+        if (contratosGroupingTimer) {
+            clearTimeout(contratosGroupingTimer);
+        }
+        contratosGroupingTimer = setTimeout(buildContratosGrouping, 60);
+    }
+
+    function observeContratosGrouping() {
+        const root = document.body;
+        if (!root || root.dataset.cpfGroupingObserver) return;
+        root.dataset.cpfGroupingObserver = '1';
+        const observer = new MutationObserver((mutations) => {
+            let shouldUpdate = false;
+            for (const mutation of mutations) {
+                if (!mutation.addedNodes || !mutation.addedNodes.length) continue;
+                mutation.addedNodes.forEach((node) => {
+                    if (!(node instanceof HTMLElement)) return;
+                    if (node.matches('.info-card, .contrato-item-wrapper, #contratos-group, .dynamic-contratos')) {
+                        shouldUpdate = true;
+                        return;
+                    }
+                    if (node.querySelector?.('.info-card, .contrato-item-wrapper, #contratos-group, .dynamic-contratos')) {
+                        shouldUpdate = true;
+                    }
+                });
+                if (shouldUpdate) break;
+            }
+            if (shouldUpdate) {
+                scheduleContratosGrouping();
+            }
+        });
+        observer.observe(root, { childList: true, subtree: true });
+    }
 
     const setContratoTitularDocumento = (row, documentoDigits = '') => {
         if (!row) return;
@@ -10454,6 +10907,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+        scheduleContratosGrouping();
     };
 
     const applyDemandasDataToParte = (parteInline, data) => {
@@ -10920,70 +11374,97 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (partes && partes.length > 0) {
             const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
-            let totalFormsInput = document.querySelector('#id_partes_processuais-TOTAL_FORMS');
-            let totalForms = parseInt(totalFormsInput.value);
-            
-            console.log(`Encontradas ${totalForms} inlines de partes. Recebidas ${partes.length} partes.`);
+            const activeEntry = getActiveEntryState() || buildEntryState();
+            let activeRef = normalizeEntryRef(activeEntry);
+            if (!activeRef) {
+                const digits = String(cnjInput?.value || '').replace(/\D/g, '');
+                if (digits) {
+                    activeRef = `cnj:${digits}`;
+                }
+            }
 
-            // Adiciona novas inlines se necessário
-            for (let i = totalForms; i < partes.length; i++) {
+            const allRows = getInlineRowsByGroup('partes_processuais-group').filter((row) => !isRowMarkedForDelete(row));
+            let activeRows = allRows.filter((row) => {
+                if (!activeRef) {
+                    return true;
+                }
+                const rowRef = getRowCurrentRef(row);
+                return !rowRef || rowRef === activeRef;
+            });
+
+            activeRows.forEach((row) => bindRowToEntry(row, activeEntry));
+
+            console.log(`Encontradas ${activeRows.length} inlines de partes para o CNJ ativo. Recebidas ${partes.length} partes.`);
+
+            // Adiciona novas inlines apenas para o CNJ ativo
+            for (let i = activeRows.length; i < partes.length; i++) {
                 if (addParteButton) {
-                    console.log("Adicionando nova inline de parte...");
+                    console.log("Adicionando nova inline de parte (CNJ ativo)...");
                     addParteButton.click();
                 }
             }
-            
-            // Lógica para esconder inlines extras
-            totalForms = parseInt(totalFormsInput.value); // Re-ler o total
-            for (let i = partes.length; i < totalForms; i++) {
-                 const inlineToDelete = document.getElementById(`partes_processuais-${i}`);
-                 if (inlineToDelete) {
-                    const deleteCheckbox = inlineToDelete.querySelector('input[id$="-DELETE"]');
-                    if(deleteCheckbox) deleteCheckbox.checked = true;
-                    inlineToDelete.style.display = 'none';
-                 }
-            }
-
 
             // Aumentado o timeout para garantir a renderização de novas inlines
             setTimeout(() => {
                 console.log("Iniciando preenchimento das inlines de partes após timeout.");
-                
-                // Itera sobre os dados das partes recebidas para preencher as inlines correspondentes
+
+                const refreshedRows = getInlineRowsByGroup('partes_processuais-group').filter((row) => !isRowMarkedForDelete(row));
+                activeRows = refreshedRows.filter((row) => {
+                    if (!activeRef) {
+                        return true;
+                    }
+                    const rowRef = getRowCurrentRef(row);
+                    return !rowRef || rowRef === activeRef;
+                });
+
+                activeRows.forEach((row) => bindRowToEntry(row, activeEntry, true));
+
+                // Esconde inlines extras apenas do CNJ ativo
+                if (activeRows.length > partes.length) {
+                    for (let i = partes.length; i < activeRows.length; i++) {
+                        const inlineToDelete = activeRows[i];
+                        if (!inlineToDelete) continue;
+                        const deleteCheckbox = inlineToDelete.querySelector('input[id$="-DELETE"]');
+                        if (deleteCheckbox) deleteCheckbox.checked = true;
+                        inlineToDelete.style.display = 'none';
+                    }
+                }
+
+                // Itera sobre os dados das partes recebidas para preencher as inlines do CNJ ativo
                 for (let i = 0; i < partes.length; i++) {
-                    const inline = document.getElementById(`partes_processuais-${i}`);
+                    const inline = activeRows[i];
                     if (!inline) {
-                        console.error(`Não foi possível encontrar a inline de parte #${i} para preencher. O formulário pode não ter sido adicionado a tempo.`);
+                        console.error(`Não foi possível encontrar a inline de parte #${i} para preencher (CNJ ativo).`);
                         continue;
                     }
-                    
-                    const parte = partes[i];
-                    console.log(`Processando inline #${i} com dados:`, parte);
 
-                    const prefix = `id_partes_processuais-${i}-`;
-                    const tipoPoloSelect = inline.querySelector(`#${prefix}tipo_polo`);
-                    const nomeInput = inline.querySelector(`#${prefix}nome`);
-                    const tipoPessoaSelect = inline.querySelector(`#${prefix}tipo_pessoa`);
-                    const documentoInput = inline.querySelector(`#${prefix}documento`);
-                    const enderecoInput = inline.querySelector(`#${prefix}endereco`);
+                    const parte = partes[i];
+                    console.log(`Processando inline (CNJ ativo) #${i} com dados:`, parte);
+
+                    const tipoPoloSelect = inline.querySelector('select[name$="-tipo_polo"]');
+                    const nomeInput = inline.querySelector('input[name$="-nome"]');
+                    const tipoPessoaSelect = inline.querySelector('select[name$="-tipo_pessoa"]');
+                    const documentoInput = inline.querySelector('input[name$="-documento"]');
+                    const enderecoInput = inline.querySelector('textarea[name$="-endereco"], input[name$="-endereco"]');
 
                     if (nomeInput) nomeInput.value = parte.nome || '';
-                                            if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo || '';
-                                            if (tipoPessoaSelect) {
-                                                const apiTipoPessoa = parte.tipo_pessoa ? parte.tipo_pessoa.toUpperCase() : '';
-                                                tipoPessoaSelect.value = tipoPessoaMap[apiTipoPessoa] || '';
-                                            }
-                                            if (documentoInput) {                        documentoInput.value = parte.documento || '';
-                        documentoInput.dispatchEvent(new Event('input', { bubbles: true })); 
+                    if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo || '';
+                    if (tipoPessoaSelect) {
+                        const apiTipoPessoa = parte.tipo_pessoa ? parte.tipo_pessoa.toUpperCase() : '';
+                        tipoPessoaSelect.value = tipoPessoaMap[apiTipoPessoa] || '';
+                    }
+                    if (documentoInput) {
+                        documentoInput.value = parte.documento || '';
+                        documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
                     }
                     if (enderecoInput) enderecoInput.value = parte.endereco || '';
 
                     // Garante que o checkbox de deleção esteja desmarcado para as partes que estamos preenchendo
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = false;
-                    inline.style.display = 'block'; // Garante que a inline esteja visível
+                    inline.style.display = 'block';
                 }
-            }, 500); 
+            }, 500);
         }
 
         if (andamentos && andamentos.length > 0) {
