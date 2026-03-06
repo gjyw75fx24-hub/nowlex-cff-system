@@ -4606,6 +4606,7 @@ class ParteInline(NoRelatedLinksMixin, admin.StackedInline):
                     ("documento", "data_nascimento"),
                     "endereco",
                     ("obito",),
+                    "numero_cnj",
                 )
             },
         ),

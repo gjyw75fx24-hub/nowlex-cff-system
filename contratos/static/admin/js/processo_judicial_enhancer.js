@@ -914,6 +914,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const getActiveEntryState = () => {
         if (currentEntryIndex < 0 || currentEntryIndex >= entryStates.length) {
+            const digits = normalizeCnjDigits(cnjInput?.value || '');
+            if (digits) {
+                const idx = entryStates.findIndex((entry) => normalizeCnjDigits(entry?.cnj) === digits);
+                if (idx >= 0) {
+                    currentEntryIndex = idx;
+                    syncHiddenEntries();
+                    return entryStates[idx] || null;
+                }
+            }
             return null;
         }
         return entryStates[currentEntryIndex] || null;
@@ -1492,6 +1501,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         form.addEventListener('submit', function() {
+            const digits = normalizeCnjDigits(cnjInput?.value || '');
+            if (digits) {
+                const idx = entryStates.findIndex((entry) => normalizeCnjDigits(entry?.cnj) === digits);
+                if (idx >= 0) {
+                    currentEntryIndex = idx;
+                }
+            }
             storeCurrentEntry();
             syncHiddenEntries();
             console.debug('cnj_entries submit', entryStates);
