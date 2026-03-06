@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let agendaObservationParagraphResolver = null;
     let agendaObservationOpenHandler = null;
     let updateCarteirasHighlight = null;
+    let resetCarteirasVinculadas = null;
     let carteiraBadge = null;
     const entryStates = [];
     let currentEntryIndex = -1;
@@ -119,6 +120,8 @@ document.addEventListener('DOMContentLoaded', function() {
         syncHiddenEntries();
     };
 
+    const normalizeCnjDigits = (value) => String(value || '').replace(/\D/g, '');
+
     const buildEntryState = () => {
         const currentId = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex].id : null;
         return {
@@ -131,6 +134,62 @@ document.addEventListener('DOMContentLoaded', function() {
             vara: varaInput ? varaInput.value.trim() : '',
             tribunal: tribunalInput ? tribunalInput.value.trim() : '',
         };
+    };
+
+    const ensureDraftEntryState = () => {
+        if (!cnjInput) {
+            return null;
+        }
+        const cnjDigits = normalizeCnjDigits(cnjInput.value);
+        if (!cnjDigits) {
+            return null;
+        }
+        if (currentEntryIndex >= 0 && entryStates[currentEntryIndex]) {
+            return entryStates[currentEntryIndex];
+        }
+        const existingIndex = entryStates.findIndex((entry) => normalizeCnjDigits(entry?.cnj) === cnjDigits);
+        const nextState = buildEntryState();
+        if (existingIndex >= 0) {
+            entryStates[existingIndex] = {
+                ...entryStates[existingIndex],
+                ...nextState,
+            };
+            currentEntryIndex = existingIndex;
+        } else {
+            entryStates.push(nextState);
+            currentEntryIndex = entryStates.length - 1;
+        }
+        syncHiddenEntries();
+        updateNavButtons();
+        return entryStates[currentEntryIndex] || null;
+    };
+
+    const updateCnjDisplayHeading = () => {
+        if (!cnjDisplayHeading) {
+            return;
+        }
+        const originalText = cnjDisplayHeading.dataset.originalCnjText || '';
+        const isDraft = currentEntryIndex < 0;
+        const draftValue = (cnjInput?.value || '').trim();
+        const activeEntry = getActiveEntryState();
+        const activeEntryIsUnsaved = Boolean(activeEntry && !activeEntry.id);
+
+        if (isDraft || activeEntryIsUnsaved) {
+            if (draftValue) {
+                cnjDisplayHeading.textContent = draftValue;
+                cnjDisplayHeading.style.display = '';
+            } else {
+                cnjDisplayHeading.style.display = 'none';
+            }
+            return;
+        }
+
+        cnjDisplayHeading.style.display = '';
+        if (activeEntry && activeEntry.cnj) {
+            cnjDisplayHeading.textContent = activeEntry.cnj;
+        } else if (originalText) {
+            cnjDisplayHeading.textContent = originalText;
+        }
     };
 
     const HEADER_TITLE = 'Dados do Processo';
@@ -152,6 +211,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let headerElement = findHeaderElement();
     const headerTitleSpan = document.createElement('span');
     const headerControls = document.createElement('div');
+    const cnjDisplayHeading = document.querySelector('#content h2') || document.querySelector('#content-main h2');
+    if (cnjDisplayHeading && !cnjDisplayHeading.dataset.originalCnjText) {
+        cnjDisplayHeading.dataset.originalCnjText = (cnjDisplayHeading.textContent || '').trim();
+    }
     const storageKey = `dados_processo_state_${window.location.pathname}`;
     const loadCollapsedPreference = () => {
         try {
@@ -740,6 +803,35 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
 
+        const clearCarteirasSelection = (opts = {}) => {
+            const checkboxes = getCheckboxes();
+            let hadChecked = false;
+            checkboxes.forEach((input) => {
+                if (input.checked) {
+                    input.checked = false;
+                    hadChecked = true;
+                }
+            });
+            if (carteiraSelect) {
+                carteiraSelect.value = '';
+            }
+            if (hadChecked) {
+                syncCheckboxVisualState();
+                updateToggleReadyState();
+                syncSelectionPayload();
+            } else {
+                updateToggleReadyState();
+            }
+            applyCarteiraHighlight();
+            if (opts && opts.focus && checkboxes.length) {
+                const label = checkboxes[0].closest('label');
+                if (label) {
+                    label.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
+            }
+        };
+        resetCarteirasVinculadas = clearCarteirasSelection;
+
         const syncPrimaryFromLinked = () => {
             if (!carteiraSelect) {
                 return;
@@ -956,9 +1048,47 @@ document.addEventListener('DOMContentLoaded', function() {
         row.dataset.numeroCnjRef = ref;
     };
 
+    const syncRowRefToEntry = (row, entry) => {
+        if (!row || !entry) return;
+        const ref = normalizeEntryRef(entry);
+        if (!ref) return;
+        const refInput = ensureNumeroCnjRefInput(row, row.querySelector('input[name$="-numero_cnj"]'));
+        if (refInput) {
+            refInput.value = ref;
+        }
+        row.dataset.numeroCnjRef = ref;
+    };
+
     const isRowMarkedForDelete = (row) => {
         const deleteField = row?.querySelector('input[name$="-DELETE"]');
         return Boolean(deleteField && deleteField.checked);
+    };
+
+    const updateParteInlineLabels = () => {
+        const group = document.getElementById('partes_processuais-group');
+        if (!group) {
+            return;
+        }
+        const rows = Array.from(group.querySelectorAll('.inline-related'))
+            .filter((row) => row && !row.classList.contains('empty-form'))
+            .filter((row) => !isRowMarkedForDelete(row))
+            .filter((row) => row.style.display !== 'none');
+
+        let counter = 1;
+        rows.forEach((row) => {
+            const label = row.querySelector('.inline_label');
+            if (!label) {
+                counter += 1;
+                return;
+            }
+            const raw = (label.textContent || '').trim();
+            const shouldReplace = !raw || /^#\d+$/.test(raw) || label.dataset.autoNumbered === '1';
+            if (shouldReplace) {
+                label.textContent = `#${counter}`;
+                label.dataset.autoNumbered = '1';
+            }
+            counter += 1;
+        });
     };
 
     const persistVisibleInlineBindings = () => {
@@ -980,19 +1110,33 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const currentRef = getRowCurrentRef(row);
             if (!currentRef || currentRef === activeRef) {
-                bindRowToEntry(row, activeEntry);
+                if (activeEntry?.id && currentRef && currentRef.startsWith('cnj:')) {
+                    syncRowRefToEntry(row, activeEntry);
+                } else {
+                    bindRowToEntry(row, activeEntry);
+                }
             }
         });
     };
 
     const refreshCnjScopedInlines = () => {
         ensureEntriesHydrated();
-        const multiCnj = entryStates.length > 1;
+        const isDraft = currentEntryIndex < 0;
+        const draftDigits = isDraft ? String(cnjInput?.value || '').replace(/\D/g, '') : '';
+        const draftRef = draftDigits ? `cnj:${draftDigits}` : '';
+        const multiCnj = entryStates.length > 1 || isDraft;
         const activeEntry = getActiveEntryState();
-        const activeRef = normalizeEntryRef(activeEntry);
+        const activeEntryIsUnsaved = Boolean(activeEntry && !activeEntry.id);
+        const hideCardsForDraft = isDraft || activeEntryIsUnsaved;
+        const activeRef = isDraft ? draftRef : normalizeEntryRef(activeEntry);
         const firstEntryRef = normalizeEntryRef(entryStates[0]);
+        const allowUnboundDraft = isDraft && !!draftDigits;
+        const hideAllDraft = isDraft && !draftDigits;
+        const scopedRows = getCnjScopedRows();
+        let hasActiveMatch = false;
+        const rowRefs = new Map();
 
-        getCnjScopedRows().forEach((row) => {
+        scopedRows.forEach((row) => {
             if (isRowMarkedForDelete(row)) {
                 row.style.display = 'none';
                 return;
@@ -1009,22 +1153,70 @@ document.addEventListener('DOMContentLoaded', function() {
                     rowRef = getRowCurrentRef(row);
                 }
             }
-            const shouldShow = !multiCnj || !activeRef ? true : (rowRef && rowRef === activeRef);
+            rowRefs.set(row, rowRef);
+            if (activeRef && rowRef === activeRef) {
+                hasActiveMatch = true;
+            }
+        });
+
+        const allowUnboundFallback = !hideAllDraft && !isDraft && !!activeRef && !hasActiveMatch;
+
+        scopedRows.forEach((row) => {
+            if (isRowMarkedForDelete(row)) {
+                row.style.display = 'none';
+                return;
+            }
+            const rowRef = rowRefs.get(row) || '';
+            const shouldShow = hideAllDraft
+                ? false
+                : (!multiCnj || !activeRef
+                    ? true
+                    : ((rowRef && rowRef === activeRef)
+                        || (allowUnboundDraft && !rowRef)
+                        || (allowUnboundFallback && !rowRef)));
             row.style.display = shouldShow ? '' : 'none';
         });
 
-        document.querySelectorAll('.info-card').forEach((card) => {
-            if (!multiCnj || !activeRef) {
-                card.style.display = '';
-                return;
+        const cards = Array.from(document.querySelectorAll('.info-card'));
+        const infoShell = document.querySelector('.info-cards-shell');
+        let hasActiveCard = false;
+        if (!hideCardsForDraft && activeRef) {
+            cards.forEach((card) => {
+                const cardNumeroCnjId = String(card.dataset?.numeroCnjId || '').trim();
+                if (cardNumeroCnjId && activeRef === `id:${cardNumeroCnjId}`) {
+                    hasActiveCard = true;
+                }
+            });
+        }
+
+        let activeCardCount = 0;
+        cards.forEach((card) => {
+            let enabled = true;
+            if (hideCardsForDraft) {
+                enabled = false;
+            } else if (multiCnj && activeRef) {
+                const cardNumeroCnjId = String(card.dataset?.numeroCnjId || '').trim();
+                if (cardNumeroCnjId) {
+                    enabled = activeRef === `id:${cardNumeroCnjId}`;
+                } else {
+                    enabled = !hasActiveCard ? true : activeRef === firstEntryRef;
+                }
             }
-            const cardNumeroCnjId = String(card.dataset?.numeroCnjId || '').trim();
-            if (!cardNumeroCnjId) {
-                card.style.display = activeRef === firstEntryRef ? '' : 'none';
-                return;
+            card.dataset.cardEnabled = enabled ? '1' : '0';
+            if (enabled) {
+                activeCardCount += 1;
             }
-            card.style.display = activeRef === `id:${cardNumeroCnjId}` ? '' : 'none';
         });
+
+        if (infoShell) {
+            infoShell.style.display = activeCardCount ? '' : 'none';
+        }
+        if (typeof window.__refreshInfoCards === 'function') {
+            window.__refreshInfoCards();
+        }
+
+        updateParteInlineLabels();
+        updateCnjDisplayHeading();
     };
 
     const observeInlineCnjRows = () => {
@@ -1192,15 +1384,34 @@ document.addEventListener('DOMContentLoaded', function() {
             carteiraSelect.selectedIndex = 0;
             carteiraSelect.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        if (typeof resetCarteirasVinculadas === 'function') {
+            resetCarteirasVinculadas();
+        }
         cnjInput.focus();
         setActiveCnjText();
+        updateCnjDisplayHeading();
         if (typeof updateCarteirasHighlight === 'function') {
             updateCarteirasHighlight();
         }
         };
 
         deleteButton.addEventListener('click', () => {
-            if (currentEntryIndex < 0 || entryStates.length === 0) {
+            const currentEntry = currentEntryIndex >= 0 ? entryStates[currentEntryIndex] : null;
+            if (currentEntry && !currentEntry.id) {
+                entryStates.splice(currentEntryIndex, 1);
+                currentEntryIndex = -1;
+                clearFields();
+                syncHiddenEntries();
+                updateNavButtons();
+                refreshCnjScopedInlines();
+                return;
+            }
+            if (currentEntryIndex < 0) {
+                clearFields();
+                refreshCnjScopedInlines();
+                return;
+            }
+            if (entryStates.length === 0) {
                 return;
             }
             persistVisibleInlineBindings();
@@ -1284,6 +1495,15 @@ document.addEventListener('DOMContentLoaded', function() {
             storeCurrentEntry();
             syncHiddenEntries();
             console.debug('cnj_entries submit', entryStates);
+        });
+    }
+
+    if (cnjInput) {
+        cnjInput.addEventListener('input', () => {
+            if (currentEntryIndex < 0) {
+                ensureDraftEntryState();
+            }
+            updateCnjDisplayHeading();
         });
     }
 
@@ -11374,7 +11594,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (partes && partes.length > 0) {
             const addParteButton = document.querySelector('#partes_processuais-group .add-row a');
-            const activeEntry = getActiveEntryState() || buildEntryState();
+            const draftEntry = ensureDraftEntryState();
+            const activeEntry = getActiveEntryState() || draftEntry || buildEntryState();
             let activeRef = normalizeEntryRef(activeEntry);
             if (!activeRef) {
                 const digits = String(cnjInput?.value || '').replace(/\D/g, '');
@@ -11464,6 +11685,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (deleteCheckbox) deleteCheckbox.checked = false;
                     inline.style.display = 'block';
                 }
+                updateParteInlineLabels();
             }, 500);
         }
 
@@ -12211,7 +12433,7 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 }
             }
             if ($row && $row.length && (formsetName === 'partes_processuais' || formsetName === 'andamentos')) {
-                const activeEntry = getActiveEntryState();
+                const activeEntry = getActiveEntryState() || ensureDraftEntryState();
                 if (activeEntry) {
                     bindRowToEntry($row[0], activeEntry, true);
                 }

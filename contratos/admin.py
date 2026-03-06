@@ -23,6 +23,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core import signing
 from django.core.exceptions import ValidationError
+from django.forms.models import BaseInlineFormSet
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
@@ -4544,8 +4545,53 @@ class ParteForm(forms.ModelForm):
                 polo_field.choices = [('', '---------')] + list(polo_field.choices)
 
 class ParteInline(NoRelatedLinksMixin, admin.StackedInline):
+    class FormSet(BaseInlineFormSet):
+        def clean(self):
+            super().clean()
+            seen = {}
+            duplicates = False
+
+            for form in self.forms:
+                cleaned = getattr(form, 'cleaned_data', None)
+                if not cleaned or cleaned.get('DELETE'):
+                    continue
+
+                documento = (cleaned.get('documento') or '').strip()
+                doc_digits = re.sub(r'\D', '', documento)
+                if not doc_digits:
+                    continue
+
+                numero_cnj_obj = cleaned.get('numero_cnj')
+                cnj_key = None
+                if numero_cnj_obj and getattr(numero_cnj_obj, 'id', None):
+                    cnj_key = f"id:{numero_cnj_obj.id}"
+                else:
+                    ref_value = ''
+                    if hasattr(form, 'data'):
+                        ref_value = (form.data.get(f'{form.prefix}-numero_cnj_ref') or '').strip()
+                    if ref_value:
+                        cnj_key = ref_value
+
+                # Se não conseguimos resolver o CNJ, não bloqueia para evitar falso positivo.
+                if not cnj_key:
+                    continue
+
+                key = (cnj_key, doc_digits)
+                if key in seen:
+                    duplicates = True
+                    form.add_error('documento', 'CPF/CNPJ duplicado para este CNJ.')
+                    first_form = seen[key]
+                    if first_form and not first_form.errors.get('documento'):
+                        first_form.add_error('documento', 'CPF/CNPJ duplicado para este CNJ.')
+                else:
+                    seen[key] = form
+
+            if duplicates:
+                raise ValidationError('Existem partes com CPF/CNPJ duplicado para o mesmo CNJ.')
+
     model = Parte
     form = ParteForm
+    formset = FormSet
     extra = 0
     fk_name = "processo"
     classes = ('dynamic-partes',)
@@ -7092,8 +7138,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def _build_parte_dedupe_key(self, parte):
         documento = re.sub(r"\D", "", str(getattr(parte, "documento", "") or ""))
         nome = re.sub(r"\s+", " ", str(getattr(parte, "nome", "") or "").strip()).lower()
+        numero_cnj_id = getattr(parte, "numero_cnj_id", None)
+        cnj_prefix = f"cnj:{numero_cnj_id}|" if numero_cnj_id else ""
         if documento or nome:
-            return f"{documento}|{nome}"
+            return f"{cnj_prefix}{documento}|{nome}"
         return f"id:{getattr(parte, 'pk', '')}"
 
     def _parte_card_score(self, parte):

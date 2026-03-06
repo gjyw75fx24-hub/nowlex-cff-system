@@ -848,35 +848,43 @@ document.addEventListener('DOMContentLoaded', function() {
         let currentIndex = 0;
         let expanded = false;
 
-        const hasMultipleCards = cards.length > 1;
-        if (!hasMultipleCards && toolbar) {
-            toolbar.hidden = true;
-        }
+        const getActiveCards = () => {
+            const enabled = cards.filter((card) => card.dataset.cardEnabled !== '0');
+            return enabled.length ? enabled : cards;
+        };
 
-        const clampIndex = () => {
-            if (!cards.length) {
+        const clampIndex = (activeCards) => {
+            if (!activeCards.length) {
                 currentIndex = 0;
                 return;
             }
             if (currentIndex < 0) currentIndex = 0;
-            if (currentIndex > cards.length - 1) currentIndex = cards.length - 1;
+            if (currentIndex > activeCards.length - 1) currentIndex = activeCards.length - 1;
         };
 
         const renderCards = () => {
-            clampIndex();
-            cards.forEach((card, index) => {
+            const activeCards = getActiveCards();
+            const hasMultipleCards = activeCards.length > 1;
+            if (toolbar) {
+                toolbar.hidden = !hasMultipleCards;
+            }
+            clampIndex(activeCards);
+            cards.forEach((card) => {
+                card.hidden = true;
+            });
+            activeCards.forEach((card, index) => {
                 card.hidden = !(expanded || index === currentIndex);
             });
             if (counterEl) {
-                const total = cards.length || 1;
-                const current = cards.length ? currentIndex + 1 : 1;
+                const total = activeCards.length || 1;
+                const current = activeCards.length ? currentIndex + 1 : 1;
                 counterEl.textContent = `${current}/${total}`;
             }
             if (prevBtn) {
                 prevBtn.disabled = !hasMultipleCards || expanded || currentIndex <= 0;
             }
             if (nextBtn) {
-                nextBtn.disabled = !hasMultipleCards || expanded || currentIndex >= cards.length - 1;
+                nextBtn.disabled = !hasMultipleCards || expanded || currentIndex >= activeCards.length - 1;
             }
             if (expandBtn) {
                 expandBtn.textContent = expanded ? '−' : '+';
@@ -899,6 +907,10 @@ document.addEventListener('DOMContentLoaded', function() {
             expanded = !expanded;
             renderCards();
         });
+
+        window.__refreshInfoCards = () => {
+            renderCards();
+        };
 
         renderCards();
     }
