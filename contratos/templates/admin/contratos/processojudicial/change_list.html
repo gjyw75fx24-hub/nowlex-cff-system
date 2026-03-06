@@ -235,6 +235,36 @@
         .processo-search-inline #changelist-search {
             margin-bottom: 0;
         }
+        .processo-lembretes-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 8px;
+            padding: 4px 10px;
+            border-radius: 10px;
+            border: 1px solid #c7d3e6;
+            background: #f5f8fd;
+            color: #1f3f68;
+            font-weight: 600;
+            text-decoration: none;
+            font-size: 0.78rem;
+            white-space: nowrap;
+        }
+        .processo-lembretes-link:hover {
+            background: #e7effc;
+        }
+        .processo-lembretes-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: #1f3f68;
+            color: #fff;
+            font-size: 0.68rem;
+            padding: 0 5px;
+        }
         .processo-cpf-lote-inline {
             flex-basis: 100%;
             display: flex;
@@ -574,6 +604,14 @@
         <div class="processo-search-main">
             <div class="processo-search-inline">
                 {{ block.super }}
+                {% if lembretes_url %}
+                    <a class="processo-lembretes-link" href="{{ lembretes_url }}">
+                        Lembretes
+                        {% if lembretes_total %}
+                            <span class="processo-lembretes-count">{{ lembretes_total }}</span>
+                        {% endif %}
+                    </a>
+                {% endif %}
                 <div class="processo-cpf-lote-inline" id="cpf-lote-inline">
                     <span class="processo-cpf-lote-inline__item" id="cpf-lote-count" hidden>
                         CPFs no lote:
@@ -976,6 +1014,22 @@
         </div>
     </div>
 
+    <!-- Modal de lembrete em massa -->
+    <div id="lembrete-modal" style="display:none; position: fixed; z-index: 2000; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.2); align-items: center; justify-content: center;">
+        <div style="background:#fff; padding:16px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.2); min-width:280px; max-width:90%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0;">Inserir lembrete em lote</h3>
+                <button type="button" id="lembrete-close" style="border:none; background:transparent; font-size:20px; cursor:pointer;">×</button>
+            </div>
+            <label for="lembrete-dias" style="display:block; margin-bottom:8px; font-weight:bold;">Periodicidade (dias)</label>
+            <input type="number" id="lembrete-dias" min="1" step="1" style="width:100%; padding:6px; margin-bottom:12px;" placeholder="Ex.: 30">
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" id="lembrete-cancel" class="button">Cancelar</button>
+                <button type="button" id="lembrete-confirm" class="button default">Aplicar</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         const STORAGE_KEY = 'processo_filtros_salvos';
@@ -1209,8 +1263,13 @@
         const delegateCancel = document.getElementById('delegate-cancel');
         const delegateClose = document.getElementById('delegate-close');
         const delegateUrl = "{% url 'admin:processo_delegate_bulk' %}";
+        const lembreteModal = document.getElementById('lembrete-modal');
+        const lembreteInput = document.getElementById('lembrete-dias');
+        const lembreteConfirm = document.getElementById('lembrete-confirm');
+        const lembreteCancel = document.getElementById('lembrete-cancel');
+        const lembreteClose = document.getElementById('lembrete-close');
 
-        if (!form || !actionSelect || !delegateModal) return;
+        if (!form || !actionSelect) return;
 
         function getCsrfToken() {
             const match = document.cookie.match(/csrftoken=([^;]+)/);
@@ -1220,10 +1279,33 @@
             return Array.from(form.querySelectorAll('input.action-select:checked')).map(el => el.value);
         }
         function showModal() {
-            delegateModal.style.display = 'flex';
+            if (delegateModal) {
+                delegateModal.style.display = 'flex';
+            }
         }
         function hideModal() {
-            delegateModal.style.display = 'none';
+            if (delegateModal) {
+                delegateModal.style.display = 'none';
+            }
+        }
+        function showLembreteModal() {
+            if (lembreteModal) {
+                lembreteModal.style.display = 'flex';
+                if (lembreteInput) {
+                    lembreteInput.focus();
+                }
+            }
+        }
+        function hideLembreteModal() {
+            if (lembreteModal) {
+                lembreteModal.style.display = 'none';
+            }
+            if (lembreteInput) {
+                lembreteInput.value = '';
+            }
+            if (form) {
+                form.dataset.lembreteSubmitting = '0';
+            }
         }
         function applyDelegation(ids, userId) {
             if (delegateConfirm) {
@@ -1265,14 +1347,27 @@
         }
 
         form.addEventListener('submit', function(e) {
-            if (!actionSelect || actionSelect.value !== 'delegate_processes') return;
-            e.preventDefault();
-            const ids = getSelectedIds();
-            if (!ids.length) {
-                alert('Selecione ao menos um processo para delegar.');
+            if (!actionSelect) return;
+            if (actionSelect.value === 'delegate_processes') {
+                e.preventDefault();
+                const ids = getSelectedIds();
+                if (!ids.length) {
+                    alert('Selecione ao menos um processo para delegar.');
+                    return;
+                }
+                showModal();
                 return;
             }
-            showModal();
+            if (actionSelect.value === 'inserir_lembrete') {
+                if (form.dataset.lembreteSubmitting === '1') return;
+                e.preventDefault();
+                const ids = getSelectedIds();
+                if (!ids.length) {
+                    alert('Selecione ao menos um processo para inserir lembrete.');
+                    return;
+                }
+                showLembreteModal();
+            }
         });
 
         [delegateCancel, delegateClose].forEach(btn => {
@@ -1287,6 +1382,36 @@
                     return;
                 }
                 applyDelegation(ids, delegateUser ? delegateUser.value : '');
+            });
+        }
+
+        [lembreteCancel, lembreteClose].forEach(btn => {
+            if (btn) btn.addEventListener('click', hideLembreteModal);
+        });
+
+        if (lembreteConfirm) {
+            lembreteConfirm.addEventListener('click', function() {
+                const ids = getSelectedIds();
+                if (!ids.length) {
+                    hideLembreteModal();
+                    return;
+                }
+                const dias = parseInt((lembreteInput && lembreteInput.value) ? lembreteInput.value : '', 10);
+                if (!dias || dias <= 0) {
+                    alert('Informe a periodicidade em dias.');
+                    if (lembreteInput) lembreteInput.focus();
+                    return;
+                }
+                let hidden = form.querySelector('input[name=\"pertinencia_dias\"]');
+                if (!hidden) {
+                    hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'pertinencia_dias';
+                    form.appendChild(hidden);
+                }
+                hidden.value = String(dias);
+                form.dataset.lembreteSubmitting = '1';
+                form.submit();
             });
         }
     });

@@ -6,7 +6,8 @@ import os
 import re
 import uuid
 import unicodedata
-from urllib.parse import quote, unquote, urlparse
+from types import SimpleNamespace
+from urllib.parse import quote, unquote, urlparse, urlencode
 from typing import Optional
 
 from django.conf import settings
@@ -15,14 +16,14 @@ from django.contrib import admin, messages
 from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, CHANGE
-from django.contrib.admin.views.main import ChangeList
+from django.contrib.admin.views.main import ChangeList, SEARCH_VAR
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import User, Group  # Importar os modelos User e Group
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core import signing
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.forms.models import BaseInlineFormSet
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -32,7 +33,7 @@ from django.db import connection, models, transaction
 from django.db.models import Count, Exists, FloatField, Max, Min, OuterRef, Q, Sum, Subquery, Prefetch, Window
 from django.db.models.query import prefetch_related_objects
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber
+from django.db.models.functions import Abs, Cast, Coalesce, Now, RowNumber, Upper
 from django.db.utils import IntegrityError, OperationalError, ProgrammingError
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse, QueryDict
 from django.middleware.csrf import get_token
@@ -42,7 +43,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext_lazy as _, ngettext
 from decimal import Decimal, InvalidOperation
 from rq.job import Job
 
@@ -304,8 +305,9 @@ class EtiquetaFilter(admin.SimpleListFilter):
                 (etiqueta.id, etiqueta.nome)
                 for etiqueta in queryset
             ]
+        qs = _get_filter_count_queryset(model_admin, request)
         queryset = Etiqueta.objects.annotate(
-            processo_count=Count('processojudicial')
+            processo_count=Count('processojudicial', filter=Q(processojudicial__in=qs))
         ).order_by('ordem', 'nome')
         return [
             (etiqueta.id, f"{etiqueta.nome} ({etiqueta.processo_count})")
@@ -3370,13 +3372,27 @@ def _get_app_list(request, app_label=None):
             "perms": {"add": False, "change": False, "delete": False, "view": True},
             "view_only": True,
         }
-        if not any(model.get("object_name") == "Guardados" for model in filtered_models):
-            processo_index = next(
-                (idx for idx, model in enumerate(filtered_models) if model.get("object_name") == "ProcessoJudicial"),
-                None,
-            )
-            if processo_index is not None:
-                filtered_models.insert(processo_index + 1, guardados_entry)
+        lembretes_entry = {
+            "name": "Lembretes",
+            "object_name": "Lembretes",
+            "admin_url": reverse("admin:processo_lembretes"),
+            "add_url": None,
+            "perms": {"add": False, "change": False, "delete": False, "view": True},
+            "view_only": True,
+        }
+        guardados_exists = any(model.get("object_name") == "Guardados" for model in filtered_models)
+        lembretes_exists = any(model.get("object_name") == "Lembretes" for model in filtered_models)
+        processo_index = next(
+            (idx for idx, model in enumerate(filtered_models) if model.get("object_name") == "ProcessoJudicial"),
+            None,
+        )
+        if processo_index is not None:
+            insert_at = processo_index + 1
+            if not lembretes_exists:
+                filtered_models.insert(insert_at, lembretes_entry)
+                insert_at += 1
+            if not guardados_exists:
+                filtered_models.insert(insert_at, guardados_entry)
         app["models"] = filtered_models
     return app_list
 
@@ -3414,6 +3430,22 @@ def _show_filter_counts(request):
         pass
 
     return False
+
+
+def _get_filter_base_queryset(model_admin, request):
+    if hasattr(model_admin, "get_filter_base_queryset"):
+        try:
+            return model_admin.get_filter_base_queryset(request)
+        except Exception:
+            pass
+    return model_admin.get_queryset(request)
+
+
+def _get_filter_count_queryset(model_admin, request):
+    qs = getattr(model_admin, "lembretes_queryset", None)
+    if qs is not None:
+        return qs
+    return _get_filter_base_queryset(model_admin, request)
 
 class TerceiroInteressadoFilter(admin.SimpleListFilter):
     title = "⚠️ Terceiro Interessado"
@@ -3471,7 +3503,7 @@ class AtivoStatusProcessualFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             return [(s.id, s.nome) for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem')]
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         counts = {row['status__id']: row['total'] for row in qs.values('status__id').annotate(total=models.Count('id'))}
         items = []
         for s in StatusProcessual.objects.filter(ativo=True).order_by('ordem'):
@@ -3514,7 +3546,7 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
         label = "Enviados P/ Avaliar"
         if not _show_filter_counts(request):
             return (('1', label),)
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         count = qs.filter(analise_processo__para_supervisionar=True).count()
         label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
         return (('1', label_html),)
@@ -3607,13 +3639,18 @@ class UFCountFilter(admin.SimpleListFilter):
         return cls._parse_selected(request.GET.getlist('uf'))
 
     def lookups(self, request, model_admin):
-        qs = model_admin.get_queryset(request)
+        qs_base = _get_filter_base_queryset(model_admin, request)
+        qs_count = _get_filter_count_queryset(model_admin, request)
         if not _show_filter_counts(request):
-            ufs = sorted({row for row in qs.values_list('uf', flat=True) if row})
+            ufs = sorted({str(row).strip().upper() for row in qs_base.values_list('uf', flat=True) if str(row).strip()})
             # Inclui um wrapper identificável para que JS/CSS possa mirar apenas este filtro,
             # sem "pegar" links de outros filtros (o Django preserva `uf=...` nas URLs).
             return [(uf, mark_safe(f"<span class='uf-choice'>{uf}</span>")) for uf in ufs]
-        counts = {row['uf']: row['total'] for row in qs.values('uf').annotate(total=models.Count('id')) if row['uf']}
+        counts = {
+            row['uf_upper']: row['total']
+            for row in qs_count.annotate(uf_upper=Upper('uf')).values('uf_upper').annotate(total=models.Count('id'))
+            if row['uf_upper']
+        }
         return [
             (
                 uf,
@@ -3622,7 +3659,7 @@ class UFCountFilter(admin.SimpleListFilter):
                     f"<span class='filter-count'>({counts.get(uf, 0)})</span>"
                 ),
             )
-            for uf in sorted(counts.keys())
+            for uf in sorted({str(row).strip().upper() for row in qs_base.values_list('uf', flat=True) if str(row).strip()})
         ]
 
     def choices(self, changelist):
@@ -3664,7 +3701,7 @@ class UFCountFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         values = self._get_selected_ufs(request)
         if values:
-            return queryset.filter(uf__in=values)
+            return queryset.annotate(uf_upper=Upper('uf')).filter(uf_upper__in=values)
         return queryset
 
 
@@ -3675,7 +3712,7 @@ class CarteiraCountFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             return [(cart.id, cart.nome) for cart in Carteira.objects.order_by('nome')]
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         items = []
         for cart in Carteira.objects.order_by('nome'):
             total = qs.filter(
@@ -3906,7 +3943,7 @@ class AprovacaoFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             return list(self.OPTIONS)
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         items = []
         for value, label in self.OPTIONS:
             condition = self.MATCH_CONDITIONS.get(value)
@@ -4219,7 +4256,7 @@ class ProtocoladosFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             return list(self.OPTIONS)
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         items = []
         for value, label in self.OPTIONS:
             count = self._protocolados_qs(qs, value).count()
@@ -4343,7 +4380,7 @@ class ViabilidadeFinanceiraFilter(admin.SimpleListFilter):
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
             return list(self.OPTIONS)
-        qs = model_admin.get_queryset(request)
+        qs = _get_filter_count_queryset(model_admin, request)
         items = []
         for value, label_html_original in self.OPTIONS:
             label_text = label_html_original.split('>')[1].split('<')[0]
@@ -7276,7 +7313,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
-    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk']
+    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk', 'inserir_lembrete']
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
@@ -8300,6 +8337,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'carteira': entry.carteira_id,
                 'vara': entry.vara or '',
                 'tribunal': entry.tribunal or '',
+                'pertinencia_status': entry.pertinencia_status or ProcessoJudicialNumeroCnj.PERTINENCIA_NEUTRO,
+                'pertinencia_periodicidade_dias': entry.pertinencia_periodicidade_dias or '',
+                'pertinencia_proximo_em': entry.pertinencia_proximo_em.isoformat() if entry.pertinencia_proximo_em else '',
             })
         if not entries and obj.cnj:
             entries.append({
@@ -8311,6 +8351,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'carteira': obj.carteira_id,
                 'vara': obj.vara or '',
                 'tribunal': obj.tribunal or '',
+                'pertinencia_status': ProcessoJudicialNumeroCnj.PERTINENCIA_NEUTRO,
+                'pertinencia_periodicidade_dias': '',
+                'pertinencia_proximo_em': '',
             })
         return entries
 
@@ -8348,6 +8391,26 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             cnj_val = (item.get('cnj') or '').strip()
             if not cnj_val:
                 continue
+            pertinencia_raw = (item.get('pertinencia_status') or item.get('pertinencia') or '').strip().upper()
+            if pertinencia_raw not in (
+                ProcessoJudicialNumeroCnj.PERTINENCIA_NEUTRO,
+                ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE,
+                ProcessoJudicialNumeroCnj.PERTINENCIA_IMPERTINENTE,
+            ):
+                pertinencia_raw = ProcessoJudicialNumeroCnj.PERTINENCIA_NEUTRO
+            periodicidade_raw = item.get('pertinencia_periodicidade_dias') or item.get('pertinencia_periodicidade')
+            periodicidade_dias = None
+            if periodicidade_raw not in (None, ''):
+                try:
+                    periodicidade_dias = int(periodicidade_raw)
+                except (TypeError, ValueError):
+                    periodicidade_dias = None
+            if periodicidade_dias is not None and periodicidade_dias <= 0:
+                periodicidade_dias = None
+            renovar_raw = item.get('pertinencia_renovar')
+            renovar_flag = False
+            if renovar_raw not in (None, ''):
+                renovar_flag = str(renovar_raw).strip().lower() in ('1', 'true', 'yes', 'sim')
             status_raw = item.get('status')
             carteira_raw = item.get('carteira')
             status_id = None
@@ -8399,6 +8462,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'carteira': carteira_id,
                 'vara': (item.get('vara') or '').strip(),
                 'tribunal': (item.get('tribunal') or '').strip(),
+                'pertinencia_status': pertinencia_raw,
+                'pertinencia_periodicidade_dias': periodicidade_dias,
+                'pertinencia_renovar': renovar_flag,
             })
         return sanitized
 
@@ -8512,6 +8578,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if not target:
                 target = ProcessoJudicialNumeroCnj(processo=processo)
 
+            previous_pertinencia_status = target.pertinencia_status
+            previous_pertinencia_days = target.pertinencia_periodicidade_dias
             target.cnj = cnj_value
             target.uf = (entry_data.get('uf') or '').strip()
             target.valor_causa = self._decimal_from_string(entry_data.get('valor_causa'))
@@ -8519,6 +8587,32 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             target.carteira_id = entry_data.get('carteira')
             target.vara = (entry_data.get('vara') or '').strip()
             target.tribunal = (entry_data.get('tribunal') or '').strip()
+            pertinencia_status = entry_data.get('pertinencia_status') or ProcessoJudicialNumeroCnj.PERTINENCIA_NEUTRO
+            pertinencia_days = entry_data.get('pertinencia_periodicidade_dias')
+            if pertinencia_days is not None:
+                try:
+                    pertinencia_days = int(pertinencia_days)
+                except (TypeError, ValueError):
+                    pertinencia_days = None
+            if pertinencia_days is not None and pertinencia_days <= 0:
+                pertinencia_days = None
+
+            if pertinencia_status != ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE:
+                target.pertinencia_status = pertinencia_status
+                target.pertinencia_periodicidade_dias = None
+                target.pertinencia_proximo_em = None
+            else:
+                target.pertinencia_status = ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE
+                target.pertinencia_periodicidade_dias = pertinencia_days
+                should_renew = bool(entry_data.get('pertinencia_renovar'))
+                should_initialize = (
+                    previous_pertinencia_status != ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE
+                    or not target.pertinencia_proximo_em
+                )
+                if pertinencia_days and (should_renew or should_initialize or previous_pertinencia_days != pertinencia_days):
+                    target.pertinencia_proximo_em = timezone.localdate() + datetime.timedelta(days=pertinencia_days)
+                if not pertinencia_days:
+                    target.pertinencia_proximo_em = None
             target.save()
 
             kept_ids.add(target.pk)
@@ -9076,6 +9170,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if passivas_redirect:
             return passivas_redirect
         extra_context = extra_context or {}
+        extra_context['lembretes_url'] = reverse('admin:processo_lembretes')
+        extra_context['lembretes_total'] = ProcessoJudicialNumeroCnj.objects.filter(
+            pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE
+        ).count()
         extra_context['delegar_users'] = User.objects.order_by('username')
         badge = self._build_changelist_context_badge(request)
         extra_context['changelist_context_badge'] = badge
@@ -9166,6 +9264,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('<path:object_id>/checagem-sistemas/', self.admin_site.admin_view(self.checagem_sistemas_view), name='processo_checagem_sistemas'),
             path('<path:object_id>/online-presence/', self.admin_site.admin_view(self.online_presence_heartbeat_view), name='processo_online_presence_heartbeat'),
             path('etiquetas/criar/', self.admin_site.admin_view(self.criar_etiqueta_view), name='etiqueta_criar'),
+            path('lembretes/', self.admin_site.admin_view(self.lembretes_view), name='processo_lembretes'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
@@ -9511,6 +9610,68 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return HttpResponseRedirect(f'delegate-select-user/?ids={selected_ids}')
     delegate_processes.short_description = "Delegar processos selecionados"
 
+    def inserir_lembrete(self, request, queryset):
+        raw_days = str(request.POST.get('pertinencia_dias') or request.POST.get('lembrete_dias') or '').strip()
+        try:
+            dias = int(raw_days)
+        except (TypeError, ValueError):
+            dias = 0
+        if dias <= 0:
+            self.message_user(request, "Informe a periodicidade em dias para aplicar o lembrete.", messages.ERROR)
+            return None
+
+        today = timezone.localdate()
+        proximo = today + datetime.timedelta(days=dias)
+        processos = queryset.only(
+            'id',
+            'cnj',
+            'uf',
+            'valor_causa',
+            'status_id',
+            'carteira_id',
+            'vara',
+            'tribunal',
+        )
+        existing_ids = set(
+            ProcessoJudicialNumeroCnj.objects.filter(processo__in=processos)
+            .values_list('processo_id', flat=True)
+        )
+        to_create = []
+        for processo in processos:
+            if processo.id in existing_ids:
+                continue
+            if not processo.cnj:
+                continue
+            to_create.append(
+                ProcessoJudicialNumeroCnj(
+                    processo=processo,
+                    cnj=processo.cnj,
+                    uf=processo.uf or '',
+                    valor_causa=processo.valor_causa,
+                    status_id=processo.status_id,
+                    carteira_id=processo.carteira_id,
+                    vara=processo.vara,
+                    tribunal=processo.tribunal,
+                    pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE,
+                    pertinencia_periodicidade_dias=dias,
+                    pertinencia_proximo_em=proximo,
+                )
+            )
+        if to_create:
+            ProcessoJudicialNumeroCnj.objects.bulk_create(to_create)
+        entries_qs = ProcessoJudicialNumeroCnj.objects.filter(processo__in=processos)
+        updated = entries_qs.update(
+            pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE,
+            pertinencia_periodicidade_dias=dias,
+            pertinencia_proximo_em=proximo,
+        )
+        if updated:
+            self.message_user(request, f"Lembrete aplicado em {updated} CNJ(s).", messages.SUCCESS)
+        else:
+            self.message_user(request, "Nenhum CNJ encontrado para aplicar o lembrete.", messages.WARNING)
+        return None
+    inserir_lembrete.short_description = "Inserir Lembrete"
+
     def change_carteira_bulk(self, request, queryset):
         if not request.user.is_superuser and not is_user_supervisor(request.user):
             self.message_user(request, "Ação disponível apenas para Supervisor.", messages.ERROR)
@@ -9547,6 +9708,422 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         }
         return render(request, 'admin/contratos/processojudicial/change_carteira_bulk.html', context)
     change_carteira_bulk.short_description = "Alterar carteira (Supervisor)"
+
+    def lembretes_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        today = timezone.localdate()
+        search_term = str(request.GET.get(SEARCH_VAR) or '').strip()
+        filter_param_names = [
+            'ord_ultima_edicao',
+            'viabilidade_financeira',
+            'valor_causa_order',
+            'obito',
+            'acordo_status',
+            'busca_ativa',
+            'status',
+            'carteira',
+            'uf',
+            'etiquetas',
+        ]
+        base_processos = filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user)
+        cpf_info = self._get_cpf_lote_info(request)
+        if cpf_info.get('cpfs'):
+            process_ids = cpf_info.get('process_ids') or set()
+            if not process_ids:
+                base_processos = base_processos.none()
+            else:
+                base_processos = base_processos.filter(pk__in=process_ids)
+        lembretes_processos_qs = base_processos.filter(
+            numeros_cnj__pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE
+        ).distinct()
+        entries_qs = (
+            ProcessoJudicialNumeroCnj.objects
+            .filter(pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE)
+            .filter(processo__in=base_processos)
+            .select_related('processo', 'carteira', 'status')
+            .prefetch_related(
+                Prefetch(
+                    'processo__partes_processuais',
+                    queryset=Parte.objects.only('id', 'nome', 'tipo_polo', 'numero_cnj_id', 'processo_id').order_by('id'),
+                    to_attr='_prefetched_partes_processuais',
+                )
+            )
+        )
+
+        # --- filtros ---
+        ord_ultima_edicao = str(request.GET.get('ord_ultima_edicao') or '').strip().lower()
+        viabilidade_filter = str(request.GET.get('viabilidade_financeira') or '').strip().upper()
+        valor_causa_order = str(request.GET.get('valor_causa_order') or '').strip().lower()
+        obito_filter = str(request.GET.get('obito') or '').strip().lower()
+        acordo_filter = str(request.GET.get('acordo_status') or '').strip()
+        busca_filter = str(request.GET.get('busca_ativa') or '').strip()
+        status_filter = str(request.GET.get('status') or '').strip()
+        carteira_filter = str(request.GET.get('carteira') or request.GET.get('carteira__id__exact') or '').strip()
+        uf_values = UFCountFilter._parse_selected(request.GET.getlist('uf'))
+        etiquetas_values = request.GET.getlist('etiquetas')
+        if len(etiquetas_values) == 1 and ',' in etiquetas_values[0]:
+            etiquetas_values = [val.strip() for val in etiquetas_values[0].split(',') if val.strip()]
+        etiquetas_raw = ','.join(etiquetas_values)
+
+        if viabilidade_filter:
+            if viabilidade_filter == '0':
+                entries_qs = entries_qs.filter(
+                    Q(processo__viabilidade="") | Q(processo__viabilidade__isnull=True)
+                )
+            else:
+                entries_qs = entries_qs.filter(processo__viabilidade=viabilidade_filter)
+
+        if obito_filter == 'sim':
+            entries_qs = entries_qs.filter(processo__partes_processuais__obito=True).distinct()
+        elif obito_filter == 'nao':
+            entries_qs = entries_qs.exclude(processo__partes_processuais__obito=True).distinct()
+
+        if acordo_filter:
+            if acordo_filter == "sem":
+                entries_qs = entries_qs.filter(
+                    Q(processo__advogados_passivos__acordo_status__isnull=True)
+                    | Q(processo__advogados_passivos__acordo_status="")
+                ).distinct()
+            else:
+                entries_qs = entries_qs.filter(processo__advogados_passivos__acordo_status=acordo_filter).distinct()
+
+        if busca_filter == '1':
+            entries_qs = entries_qs.filter(processo__busca_ativa=True)
+        elif busca_filter == '0':
+            entries_qs = entries_qs.filter(processo__busca_ativa=False)
+
+        if status_filter:
+            entries_qs = entries_qs.filter(
+                Q(status_id=status_filter) | Q(processo__status_id=status_filter)
+            )
+
+        if carteira_filter:
+            entries_qs = entries_qs.filter(
+                Q(carteira_id=carteira_filter)
+                | Q(processo__carteira_id=carteira_filter)
+                | Q(processo__carteiras_vinculadas__id=carteira_filter)
+            ).distinct()
+
+        if uf_values:
+            entries_qs = entries_qs.annotate(
+                uf_upper=Upper('uf'),
+                processo_uf_upper=Upper('processo__uf'),
+            ).filter(
+                Q(uf_upper__in=uf_values) | Q(processo_uf_upper__in=uf_values)
+            )
+
+        if etiquetas_raw:
+            etiqueta_ids = [val for val in etiquetas_raw.split(',') if val]
+            for etiqueta_id in etiqueta_ids:
+                entries_qs = entries_qs.filter(processo__etiquetas__id=etiqueta_id)
+            entries_qs = entries_qs.distinct()
+
+        entries_qs_full = entries_qs
+        if search_term:
+            search_qs, use_distinct = self.get_search_results(request, lembretes_processos_qs, search_term)
+            entries_qs = entries_qs.filter(
+                processo_id__in=search_qs.values_list('pk', flat=True)
+            )
+
+        # Ordenação
+        if valor_causa_order:
+            entries_qs = entries_qs.annotate(
+                valor_causa_effective=Coalesce('valor_causa', 'processo__valor_causa', output_field=models.DecimalField(max_digits=14, decimal_places=2))
+            )
+            if valor_causa_order == 'desc':
+                entries_qs = entries_qs.filter(valor_causa_effective__gt=0).order_by(
+                    models.F('valor_causa_effective').desc(nulls_last=True),
+                    '-pk'
+                )
+            elif valor_causa_order == 'asc':
+                entries_qs = entries_qs.filter(valor_causa_effective__gt=0).order_by(
+                    models.F('valor_causa_effective').asc(nulls_first=True),
+                    'pk'
+                )
+            elif valor_causa_order == 'zerados':
+                entries_qs = entries_qs.filter(
+                    Q(valor_causa_effective__lte=0) | Q(valor_causa_effective__isnull=True)
+                ).order_by('pk')
+
+        if ord_ultima_edicao in {'recente', 'antigo'}:
+            ct = ContentType.objects.get_for_model(ProcessoJudicial)
+            last_logs = LogEntry.objects.filter(
+                content_type=ct,
+                object_id=Cast(OuterRef('processo_id'), models.CharField()),
+                action_flag=CHANGE
+            ).order_by('-action_time')
+            entries_qs = entries_qs.annotate(
+                last_edit_time=Subquery(last_logs.values('action_time')[:1])
+            )
+            if ord_ultima_edicao == 'recente':
+                entries_qs = entries_qs.order_by(models.F('last_edit_time').desc(nulls_last=True), '-pk')
+            else:
+                entries_qs = entries_qs.order_by(models.F('last_edit_time').asc(nulls_last=True), 'pk')
+
+        if not ord_ultima_edicao and not valor_causa_order:
+            entries_qs = entries_qs.order_by('pertinencia_proximo_em', '-criado_em')
+
+        full_result_count = entries_qs_full.count()
+        result_count = entries_qs.count()
+
+        if request.method == 'POST' and request.POST.get('action'):
+            action_queryset = base_processos.filter(
+                pk__in=entries_qs.values_list('processo_id', flat=True).distinct()
+            )
+            response = self.response_action(request, action_queryset)
+            if response:
+                return response
+
+        lembretes = []
+        class _LembretesFilterChangeList:
+            def __init__(self, request):
+                self.filter_params = dict(request.GET.lists())
+                self.params = dict(request.GET.items())
+                self.is_facets_optional = True
+                self.add_facets = _show_filter_counts(request)
+                self.has_active_filters = any(key in request.GET for key in filter_param_names)
+                self.remove_facet_link = self.get_query_string(remove=['_facets', 'show_counts'])
+                self.add_facet_link = self.get_query_string({'_facets': '1'}, remove=['show_counts'])
+                self.clear_all_filters_qs = self.get_query_string(remove=filter_param_names + ['_facets', 'show_counts'])
+
+            def get_query_string(self, new_params=None, remove=None):
+                if new_params is None:
+                    new_params = {}
+                if remove is None:
+                    remove = []
+                params = self.filter_params.copy()
+                for r in remove:
+                    for key in list(params):
+                        if key.startswith(r):
+                            del params[key]
+                for key, value in new_params.items():
+                    if value is None:
+                        if key in params:
+                            del params[key]
+                    else:
+                        params[key] = value
+                return "?%s" % urlencode(sorted(params.items()), doseq=True)
+
+        def _pick_polo_nome(partes, tipo, entry_id=None):
+            if not partes:
+                return ''
+            if entry_id:
+                for parte in partes:
+                    if parte.tipo_polo == tipo and parte.numero_cnj_id == entry_id:
+                        return parte.nome or ''
+            for parte in partes:
+                if parte.tipo_polo == tipo and not parte.numero_cnj_id:
+                    return parte.nome or ''
+            for parte in partes:
+                if parte.tipo_polo == tipo:
+                    return parte.nome or ''
+            return ''
+        for entry in entries_qs:
+            processo = entry.processo
+            admin_url = reverse('admin:contratos_processojudicial_change', args=[processo.pk])
+            proximo = entry.pertinencia_proximo_em
+            dias_restantes = None
+            if proximo:
+                dias_restantes = (proximo - today).days
+            dias_abs = abs(dias_restantes) if dias_restantes is not None else None
+            partes = getattr(processo, '_prefetched_partes_processuais', [])
+            polo_passivo = format_polo_name(_pick_polo_nome(partes, 'PASSIVO', entry.id))
+            polo_ativo = format_polo_name(_pick_polo_nome(partes, 'ATIVO', entry.id))
+            status_label = ''
+            if entry.status:
+                status_label = entry.status.nome
+            elif processo.status:
+                status_label = processo.status.nome
+            lembretes.append({
+                'cnj': entry.cnj,
+                'processo_id': processo.pk,
+                'processo_label': str(processo),
+                'carteira': entry.carteira.nome if entry.carteira else (processo.carteira.nome if processo.carteira else ''),
+                'status': status_label,
+                'uf': entry.uf or processo.uf or '',
+                'polo_passivo': polo_passivo,
+                'polo_ativo': polo_ativo,
+                'busca_ativa': processo.busca_ativa,
+                'periodicidade': entry.pertinencia_periodicidade_dias,
+                'proximo_em': proximo,
+                'dias_restantes': dias_restantes,
+                'dias_abs': dias_abs,
+                'is_overdue': bool(proximo and proximo <= today),
+                'admin_url': admin_url,
+            })
+
+        result_list = lembretes
+        cl = SimpleNamespace(
+            search_fields=self.search_fields,
+            query=search_term,
+            params=dict(request.GET.items()),
+            result_count=result_count,
+            full_result_count=full_result_count,
+            result_list=result_list,
+            is_popup=False,
+            add_facets=_show_filter_counts(request),
+            show_full_result_count=getattr(self, 'show_full_result_count', False),
+        )
+        actions = self.get_actions(request)
+        if actions:
+            action_form = self.action_form(auto_id=None)
+            action_form.fields["action"].choices = self.get_action_choices(request)
+        else:
+            action_form = None
+        selection_note = _("0 of %(cnt)s selected") % {"cnt": len(result_list)}
+        selection_note_all = ngettext(
+            "%(total_count)s selected",
+            "All %(total_count)s selected",
+            result_count,
+        ) % {"total_count": result_count}
+        class _LembretesFilterAdmin:
+            def __init__(self, base_qs, lembretes_qs):
+                self._base_qs = base_qs
+                self.lembretes_queryset = lembretes_qs
+
+            def get_queryset(self, request):
+                return self._base_qs
+
+            def get_filter_base_queryset(self, request):
+                return self._base_qs
+
+        filter_params = dict(request.GET.lists())
+        filter_classes = [
+            LastEditOrderFilter,
+            ViabilidadeFinanceiraFilter,
+            ValorCausaOrderFilter,
+            ObitoFilter,
+            AcordoStatusFilter,
+            BuscaAtivaFilter,
+            AtivoStatusProcessualFilter,
+            CarteiraCountFilter,
+            UFCountFilter,
+            EtiquetaFilter,
+        ]
+        filter_admin = _LembretesFilterAdmin(base_processos, lembretes_processos_qs)
+        filter_specs = []
+        for filter_class in filter_classes:
+            spec = filter_class(request, filter_params, ProcessoJudicial, filter_admin)
+            if spec.has_output():
+                filter_specs.append(spec)
+        filter_changelist = _LembretesFilterChangeList(request)
+        if cpf_info.get('cpfs'):
+            max_items = 50
+            found_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('found', set())]
+            missing_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('missing', [])]
+            found_list_sorted = sorted(found_list)
+            missing_list_sorted = sorted(missing_list)
+            cpf_lote_summary = {
+                'total': len(cpf_info['cpfs']),
+                'found': len(cpf_info.get('found', set())),
+                'missing': len(cpf_info.get('missing', [])),
+                'found_list': found_list_sorted[:max_items],
+                'missing_list': missing_list_sorted[:max_items],
+                'found_more': max(len(found_list_sorted) - max_items, 0),
+                'missing_more': max(len(missing_list_sorted) - max_items, 0),
+            }
+            cpf_lote_input = cpf_info.get('raw', '')
+        else:
+            cpf_lote_summary = None
+            cpf_lote_input = ''
+        badge = self._build_changelist_context_badge(request)
+        if badge and badge.get('kind') == 'carteira':
+            changelist_carteira_options = list(
+                Carteira.objects.order_by('nome').values('id', 'nome')
+            )
+        else:
+            changelist_carteira_options = []
+        context = admin.site.each_context(request)
+        context.update(
+            {
+                'title': 'Lembretes',
+                'opts': self.model._meta,
+                'app_label': self.model._meta.app_label,
+                'lembretes': lembretes,
+                'action_form': action_form,
+                'actions_on_top': self.actions_on_top,
+                'actions_on_bottom': self.actions_on_bottom,
+                'actions_selection_counter': self.actions_selection_counter,
+                'selection_note': selection_note,
+                'selection_note_all': selection_note_all,
+                'module_name': str(self.opts.verbose_name_plural),
+                'action_checkbox_name': ACTION_CHECKBOX_NAME,
+                'cl': cl,
+                'media': self.media,
+                'today': today,
+                'cpf_lote_summary': cpf_lote_summary,
+                'cpf_lote_input': cpf_lote_input,
+                'changelist_context_badge': badge,
+                'changelist_carteira_options': changelist_carteira_options,
+                'filter_specs': filter_specs,
+                'filter_changelist': filter_changelist,
+                'filters': {
+                    'ord_ultima_edicao': ord_ultima_edicao,
+                    'viabilidade_financeira': viabilidade_filter,
+                    'valor_causa_order': valor_causa_order,
+                    'obito': obito_filter,
+                    'acordo_status': acordo_filter,
+                    'busca_ativa': busca_filter,
+                    'status': status_filter,
+                    'carteira': carteira_filter,
+                    'uf': uf_values,
+                    'etiquetas': etiquetas_raw.split(',') if etiquetas_raw else [],
+                },
+                'filter_options': {
+                    'ord_ultima_edicao': [
+                        ('', 'Todos'),
+                        ('recente', 'Mais recente primeiro'),
+                        ('antigo', 'Mais distante primeiro'),
+                    ],
+                    'viabilidade': [
+                        ('', 'Todos'),
+                        ('0', 'Sem viabilidade'),
+                        (ProcessoJudicial.VIABILIDADE_VIAVEL, 'Viável'),
+                        (ProcessoJudicial.VIABILIDADE_INVIAVEL, 'Inviável'),
+                        (ProcessoJudicial.VIABILIDADE_INCONCLUSIVO, 'Inconclusivo'),
+                    ],
+                    'valor_causa': [
+                        ('', 'Todos'),
+                        ('desc', 'Maior primeiro'),
+                        ('asc', 'Menor primeiro'),
+                        ('zerados', 'Zerados'),
+                    ],
+                    'obito': [
+                        ('', 'Todos'),
+                        ('sim', 'Com óbito'),
+                        ('nao', 'Sem óbito'),
+                    ],
+                    'acordo': [
+                        ('', 'Todos'),
+                        (AdvogadoPassivo.AcordoChoices.PROPOR, 'Propor'),
+                        (AdvogadoPassivo.AcordoChoices.PROPOSTO, 'Proposto'),
+                        (AdvogadoPassivo.AcordoChoices.FIRMADO, 'Firmado'),
+                        (AdvogadoPassivo.AcordoChoices.RECUSADO, 'Recusado'),
+                        ('sem', 'Sem acordo'),
+                    ],
+                    'busca_ativa': [
+                        ('', 'Todos'),
+                        ('1', 'Com busca ativa'),
+                        ('0', 'Sem busca ativa'),
+                    ],
+                    'status_list': list(StatusProcessual.objects.filter(ativo=True).order_by('ordem').values('id', 'nome')),
+                    'carteiras': list(
+                        (
+                            Carteira.objects.filter(id__in=get_user_allowed_carteira_ids(request.user))
+                            if get_user_allowed_carteira_ids(request.user)
+                            else Carteira.objects
+                        )
+                        .order_by('nome')
+                        .values('id', 'nome')
+                    ),
+                    'ufs': sorted({str(uf).strip().upper() for uf in entries_qs.values_list('uf', flat=True) if str(uf).strip()})
+                    or sorted({str(uf).strip().upper() for uf in base_processos.values_list('uf', flat=True) if str(uf).strip()}),
+                    'etiquetas': list(Etiqueta.objects.order_by('ordem', 'nome').values('id', 'nome')),
+                },
+            }
+        )
+        return render(request, 'admin/contratos/processojudicial/lembretes.html', context)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "status":

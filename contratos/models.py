@@ -250,6 +250,14 @@ class ProcessoJudicialNumeroCnj(models.Model):
         related_name='numeros_cnj',
         verbose_name="Processo Judicial"
     )
+    PERTINENCIA_NEUTRO = 'NEUTRO'
+    PERTINENCIA_PERTINENTE = 'PERTINENTE'
+    PERTINENCIA_IMPERTINENTE = 'IMPERTINENTE'
+    PERTINENCIA_CHOICES = [
+        (PERTINENCIA_NEUTRO, 'Pertinência'),
+        (PERTINENCIA_PERTINENTE, 'Pertinente Atuar'),
+        (PERTINENCIA_IMPERTINENTE, 'Impertinente Atuar'),
+    ]
     cnj = models.CharField(max_length=30, verbose_name="Número CNJ")
     uf = models.CharField(max_length=2, blank=True, verbose_name="UF")
     valor_causa = models.DecimalField(
@@ -276,6 +284,23 @@ class ProcessoJudicialNumeroCnj(models.Model):
     )
     vara = models.CharField(max_length=255, blank=True, null=True, verbose_name="Vara")
     tribunal = models.CharField(max_length=50, blank=True, verbose_name="Tribunal")
+    pertinencia_status = models.CharField(
+        max_length=15,
+        choices=PERTINENCIA_CHOICES,
+        default=PERTINENCIA_NEUTRO,
+        blank=True,
+        verbose_name="Pertinência"
+    )
+    pertinencia_periodicidade_dias = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Periodicidade (dias)"
+    )
+    pertinencia_proximo_em = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Próxima revisita"
+    )
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
     atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
 

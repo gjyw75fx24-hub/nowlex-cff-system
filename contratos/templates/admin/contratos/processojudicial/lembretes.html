@@ -1,0 +1,1204 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_list %}
+
+{% block extrahead %}
+{{ block.super }}
+{% if action_form %}
+<script src="{% url 'admin:jsi18n' %}"></script>
+{% endif %}
+{{ media.js }}
+<link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+<link rel="stylesheet" href="{% static 'admin/css/changelists.css' %}">
+<script src="{% static 'admin/js/filters.js' %}" defer></script>
+<script src="{% static 'admin/js/filter_search.js' %}" defer></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const filterRoot = document.getElementById('changelist-filter');
+    if (!filterRoot) return;
+    const detailsList = Array.from(filterRoot.querySelectorAll('details'));
+    if (!detailsList.length) return;
+    const normalize = (value) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    const targetDetails = detailsList.find(details => {
+      const summary = details.querySelector('summary');
+      return summary && normalize(summary.textContent) === 'por uf';
+    });
+    if (!targetDetails) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const hasUf = String(params.get('uf') || '').split(',').map(v => v.trim()).filter(Boolean).length > 0;
+    if (!hasUf) {
+      targetDetails.open = false;
+    }
+
+    const mapaUrl = "{% static 'admin/js/mapa_interativo.js' %}";
+    let mapaLoaded = false;
+    const loadMapa = () => {
+      if (mapaLoaded) return;
+      mapaLoaded = true;
+      const script = document.createElement('script');
+      script.src = mapaUrl;
+      script.async = true;
+      document.head.appendChild(script);
+    };
+
+    if (targetDetails.open) {
+      loadMapa();
+    }
+    targetDetails.addEventListener('toggle', () => {
+      if (targetDetails.open) {
+        loadMapa();
+      }
+    });
+  });
+</script>
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .lembretes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .lembretes-header .button {
+    padding: 6px 12px;
+    font-weight: 600;
+  }
+  body.change-list #changelist .changelist-form-container {
+    zoom: 0.8;
+  }
+  body.change-list #changelist .changelist-form-container {
+    transform: none;
+    width: 100%;
+  }
+  body.change-list #content-main {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  body.change-list #changelist .changelist-form-container .results {
+    max-height: calc(100vh - 180px);
+    overflow: auto;
+  }
+  .processo-search-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    box-sizing: border-box;
+    padding-right: 6px;
+    margin-bottom: 6px;
+  }
+  .processo-search-main {
+    flex: 1;
+    min-width: 0;
+  }
+  .processo-search-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+  }
+  .processo-search-inline #toolbar,
+  .processo-search-inline #changelist-search {
+    margin-bottom: 0;
+  }
+  .processo-search-inline #toolbar {
+    margin-top: 0;
+  }
+  .processo-search-inline #toolbar {
+    margin: 0;
+  }
+  .processo-search-inline #changelist-search {
+    margin-bottom: 0;
+  }
+  .processo-cpf-lote-inline {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: #6b7280;
+  }
+  .processo-cpf-lote-inline__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .processo-cpf-lote-inline__value {
+    font-weight: 600;
+    color: #2f435b;
+  }
+  .processo-cpf-lote-summary {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+    flex-basis: 100%;
+  }
+  .processo-cpf-lote-summary__header {
+    font-size: 0.78rem;
+    color: #2f435b;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .processo-cpf-lote-summary__lists {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .processo-cpf-lote-summary__label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #4a5568;
+    margin-bottom: 4px;
+  }
+  .processo-cpf-lote-summary__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .processo-cpf-lote-summary__chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    border: 1px solid #e2e8f0;
+    background: #f7fafc;
+    color: #2d3748;
+  }
+  .processo-cpf-lote-summary__chip--miss {
+    background: #fff5f5;
+    border-color: #fed7d7;
+    color: #9b2c2c;
+  }
+  .processo-cpf-lote-summary__chip--more {
+    background: #edf2f7;
+    color: #4a5568;
+  }
+  .processo-search-side {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    align-self: flex-start;
+  }
+  .processo-context-badge {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 0;
+    padding: 6px 10px;
+    border: 1px solid #d8e1ea;
+    border-radius: 9px;
+    background: #f8fbff;
+    color: #2f435b;
+    text-align: right;
+    min-width: 160px;
+    max-width: 300px;
+    line-height: 1.2;
+    align-self: center;
+  }
+  .processo-context-badge--clickable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .processo-context-badge.is-open {
+    box-shadow: 0 0 0 2px rgba(63, 112, 138, 0.14);
+  }
+  .processo-context-badge--intersection {
+    background: #fff8ec;
+    border-color: #ecd8b6;
+  }
+  .processo-context-badge__title {
+    font-size: 8px;
+    line-height: 1.15;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+    font-weight: 600;
+  }
+  .processo-context-badge__value {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1f2f40;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .processo-context-badge__subtitle {
+    font-size: 10px;
+    opacity: 0.82;
+  }
+  .processo-context-badge__switch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(73, 98, 126, 0.22);
+  }
+  .processo-context-badge__switch[hidden] {
+    display: none !important;
+  }
+  .processo-context-badge__switch-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    padding: 2px 6px;
+    border-radius: 5px;
+    border: 1px solid #c6d3e0;
+  }
+  .processo-context-badge__switch-apply {
+    border: 1px solid #c6d3e0;
+    border-radius: 6px;
+    background: #eef5ff;
+    color: #2f435b;
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  @media (max-width: 1200px) {
+    .processo-search-row {
+      flex-direction: column;
+    }
+    .processo-search-side {
+      width: 100%;
+      align-items: flex-start;
+    }
+    .processo-context-badge {
+      text-align: left;
+      max-width: 100%;
+      width: fit-content;
+    }
+  }
+  #changelist-filter li.selected a {
+    font-weight: bold;
+    text-decoration: underline;
+  }
+  #changelist-filter h2,
+  #changelist-filter label,
+  #changelist-filter a,
+  #changelist-filter button,
+  #changelist-filter select {
+    font-size: 0.8rem;
+  }
+  #changelist-filter {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    float: none;
+    clear: none;
+    position: relative;
+    z-index: 8;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  #changelist-filter .custom-filters-header {
+    background: #3f708a;
+    color: #fff;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    margin: 0;
+  }
+  #changelist-filter .custom-filters-toggle {
+    color: #d9e6ef;
+    font-weight: 400;
+  }
+  #changelist-filter .custom-filters-panel {
+    display: block;
+    padding: 8px 10px;
+    background: #f4f7f9;
+    border-bottom: 1px solid #d9d9d9;
+    border-left: 1px solid #d9d9d9;
+    border-right: 1px solid #d9d9d9;
+  }
+  #changelist-filter .custom-filters-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  #changelist-filter .custom-filters-actions button,
+  #changelist-filter .custom-filters-actions select {
+    font-size: 11px;
+    padding: 3px 8px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fff;
+  }
+  #changelist-filter .custom-filters-saved {
+    font-size: 11px;
+    color: #417690;
+    display: none;
+  }
+  #custom-clear-all {
+    margin: 8px 0 6px 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #f7f7f7;
+    cursor: pointer;
+    transform: translateY(-20%);
+  }
+  .lembretes-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  .lembretes-table th,
+  .lembretes-table td {
+    padding: 8px 8px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    font-size: 0.85rem;
+    vertical-align: top;
+  }
+  .lembretes-table th {
+    background: #f8fafc;
+    font-weight: 600;
+    color: #1f2937;
+    font-size: 0.78rem;
+    line-height: 1.1;
+  }
+  .lembretes-table th .text span {
+    white-space: normal;
+    display: block;
+  }
+  .lembretes-table th,
+  .lembretes-table td {
+    overflow-wrap: anywhere;
+  }
+  .lembretes-table th.action-checkbox-column,
+  .lembretes-table td:nth-child(1) {
+    width: 28px;
+  }
+  .lembretes-table th.column-uf,
+  .lembretes-table td:nth-child(2) {
+    width: 42px;
+  }
+  .lembretes-table th.column-cnj,
+  .lembretes-table td:nth-child(3) {
+    width: 150px;
+  }
+  .lembretes-table th.column-polo-passivo,
+  .lembretes-table td:nth-child(4),
+  .lembretes-table th.column-polo-ativo,
+  .lembretes-table td:nth-child(5) {
+    width: 140px;
+  }
+  .lembretes-table th.column-busca-ativa,
+  .lembretes-table td:nth-child(6),
+  .lembretes-table th.column-carteira,
+  .lembretes-table td:nth-child(7) {
+    width: 90px;
+  }
+  .lembretes-table th.column-classe,
+  .lembretes-table td:nth-child(8) {
+    width: 140px;
+  }
+  .lembretes-table th.column-periodicidade,
+  .lembretes-table td:nth-child(9),
+  .lembretes-table th.column-proxima,
+  .lembretes-table td:nth-child(10),
+  .lembretes-table th.column-prazo,
+  .lembretes-table td:nth-child(11) {
+    width: 110px;
+  }
+  .lembrete-overdue {
+    background: #fef2f2;
+  }
+  .lembrete-overdue td {
+    color: #991b1b;
+  }
+  .lembretes-empty {
+    text-align: center;
+    color: #64748b;
+    padding: 20px;
+  }
+  .lembrete-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    background: #e0f2fe;
+    color: #0369a1;
+    text-align: center;
+  }
+  .lembrete-chip.overdue {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+  #mapa-brasil svg {
+    width: 100%;
+    height: auto;
+    stroke: #fff;
+    stroke-width: 1;
+  }
+  #mapa-brasil svg path {
+    fill: #ccc;
+    cursor: pointer;
+    transition: fill 0.2s ease-in-out, transform 0.2s ease-in-out;
+  }
+  #mapa-brasil svg path:hover {
+    fill: #999;
+    transform: none !important;
+  }
+  #mapa-brasil svg path.highlighted {
+    fill: #417690;
+    transform: none !important;
+  }
+  #mapa-brasil svg path.estado-vazio {
+    cursor: not-allowed;
+  }
+  #mapa-brasil svg path.highlighted-vazio {
+    fill: #ffcccc;
+    transform: none !important;
+  }
+  #mapa-brasil {
+    margin-top: 30%;
+  }
+</style>
+{% endblock %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-list{% endblock %}
+
+{% block content %}
+{% block content_title %}{% endblock %}
+<div id="content-main">
+  <div class="lembretes-header">
+    <h1 style="margin:0;">{{ title }}</h1>
+    <a class="button" href="{% url 'admin:contratos_processojudicial_changelist' %}">{% trans "Voltar à lista" %}</a>
+  </div>
+
+  <div class="module filtered" id="changelist">
+    <div class="changelist-form-container">
+      <div class="processo-search-row">
+        <div class="processo-search-main">
+          <div class="processo-search-inline">
+            {% search_form cl %}
+            <div class="processo-cpf-lote-inline" id="cpf-lote-inline">
+              <span class="processo-cpf-lote-inline__item" id="cpf-lote-count" hidden>
+                CPFs no lote:
+                <span class="processo-cpf-lote-inline__value">0</span>
+              </span>
+              {% if cpf_lote_summary %}
+                <span class="processo-cpf-lote-inline__item">
+                  Encontrados:
+                  <span class="processo-cpf-lote-inline__value">{{ cpf_lote_summary.found }}</span>
+                </span>
+                <span class="processo-cpf-lote-inline__item">
+                  Não encontrados:
+                  <span class="processo-cpf-lote-inline__value">{{ cpf_lote_summary.missing }}</span>
+                </span>
+              {% endif %}
+            </div>
+          </div>
+          {% if cpf_lote_summary %}
+            <div class="processo-cpf-lote-summary">
+              <div class="processo-cpf-lote-summary__header">
+                <strong>Consulta em lote</strong>
+                <span>Consultados: {{ cpf_lote_summary.total }}</span>
+                <span>Encontrados: {{ cpf_lote_summary.found }}</span>
+                <span>Não encontrados: {{ cpf_lote_summary.missing }}</span>
+              </div>
+              <div class="processo-cpf-lote-summary__lists">
+                <div>
+                  <span class="processo-cpf-lote-summary__label">Encontrados</span>
+                  <div class="processo-cpf-lote-summary__chips">
+                    {% for cpf in cpf_lote_summary.found_list %}
+                      <span class="processo-cpf-lote-summary__chip">{{ cpf }}</span>
+                    {% empty %}
+                      <span class="processo-cpf-lote-summary__chip">—</span>
+                    {% endfor %}
+                    {% if cpf_lote_summary.found_more %}
+                      <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.found_more }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div>
+                  <span class="processo-cpf-lote-summary__label">Não encontrados</span>
+                  <div class="processo-cpf-lote-summary__chips">
+                    {% for cpf in cpf_lote_summary.missing_list %}
+                      <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--miss">{{ cpf }}</span>
+                    {% empty %}
+                      <span class="processo-cpf-lote-summary__chip">—</span>
+                    {% endfor %}
+                    {% if cpf_lote_summary.missing_more %}
+                      <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.missing_more }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+        {% if changelist_context_badge %}
+          <div class="processo-search-side">
+            <div
+              class="processo-context-badge processo-context-badge--{{ changelist_context_badge.kind }}{% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %} processo-context-badge--clickable{% endif %}"
+              {% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %}
+                data-carteira-switch="1"
+                role="button"
+                tabindex="0"
+                aria-expanded="false"
+              {% endif %}
+            >
+              <span class="processo-context-badge__title">{{ changelist_context_badge.title }}</span>
+              <strong class="processo-context-badge__value">{{ changelist_context_badge.value }}</strong>
+              <span class="processo-context-badge__subtitle">{{ changelist_context_badge.subtitle }}</span>
+              {% if changelist_context_badge.kind == 'carteira' and changelist_carteira_options %}
+                <div class="processo-context-badge__switch" hidden>
+                  <select class="processo-context-badge__switch-select" aria-label="Selecionar carteira">
+                    {% for carteira_opt in changelist_carteira_options %}
+                      <option value="{{ carteira_opt.id }}"{% if carteira_opt.id == changelist_context_badge.carteira_id %} selected{% endif %}>
+                        {{ carteira_opt.nome }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <button type="button" class="processo-context-badge__switch-apply">Ir</button>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      <form id="changelist-form" method="post" novalidate>
+        {% csrf_token %}
+        {% if action_form and actions_on_top and cl.result_count %}
+          {% admin_actions %}
+        {% endif %}
+        <div class="results">
+          <table id="result_list" class="lembretes-table">
+            <thead>
+              <tr>
+                <th scope="col" class="action-checkbox-column">
+                  <div class="text"><span><input type="checkbox" id="action-toggle" aria-label="Selecionar todos"></span></div>
+                </th>
+                <th scope="col" class="column-uf"><div class="text"><span>UF</span></div></th>
+                <th scope="col" class="column-cnj"><div class="text"><span>Processo CNJ</span></div></th>
+                <th scope="col" class="column-polo-passivo"><div class="text"><span>Polo Passivo</span></div></th>
+                <th scope="col" class="column-polo-ativo"><div class="text"><span>Polo Ativo</span></div></th>
+                <th scope="col" class="column-busca-ativa"><div class="text"><span>Busca Ativa</span></div></th>
+                <th scope="col" class="column-carteira"><div class="text"><span>Carteira</span></div></th>
+                <th scope="col" class="column-classe"><div class="text"><span>Classe Processual</span></div></th>
+                <th scope="col" class="column-periodicidade"><div class="text"><span>Periodicidade (dias)</span></div></th>
+                <th scope="col" class="column-proxima"><div class="text"><span>Próxima revisita</span></div></th>
+                <th scope="col" class="column-prazo"><div class="text"><span>Prazo</span></div></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if lembretes %}
+                {% for item in lembretes %}
+                  <tr{% if item.is_overdue %} class="lembrete-overdue"{% endif %}>
+                    <td><input type="checkbox" name="{{ action_checkbox_name }}" value="{{ item.processo_id }}" class="action-select"></td>
+                    <td>{{ item.uf|default:"-" }}</td>
+                    <td><a href="{{ item.admin_url }}">{{ item.cnj }}</a></td>
+                    <td>{{ item.polo_passivo|default:"-" }}</td>
+                    <td>{{ item.polo_ativo|default:"-" }}</td>
+                    <td>{% if item.busca_ativa %}Sim{% else %}Não{% endif %}</td>
+                    <td>{{ item.carteira|default:"-" }}</td>
+                    <td>{{ item.status|default:"-" }}</td>
+                    <td>{{ item.periodicidade|default:"-" }}</td>
+                    <td>
+                      {% if item.proximo_em %}
+                        {{ item.proximo_em|date:"d/m/Y" }}
+                      {% else %}
+                        -
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if item.dias_restantes is not None %}
+                        {% if item.dias_restantes <= 0 %}
+                          <span class="lembrete-chip overdue">Atrasado {{ item.dias_abs }}d</span>
+                        {% else %}
+                          <span class="lembrete-chip">Faltam {{ item.dias_restantes }}d</span>
+                        {% endif %}
+                      {% else %}
+                        -
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="11" class="lembretes-empty">Nenhum processo marcado como pertinente.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        {% if action_form and actions_on_bottom and cl.result_count %}
+          {% admin_actions %}
+        {% endif %}
+      </form>
+    </div>
+
+    {% if filter_specs %}
+    <nav id="changelist-filter" aria-labelledby="changelist-filter-header">
+      <h2 id="changelist-filter-header">{% trans "Filter" %}</h2>
+      {% if filter_changelist.is_facets_optional or filter_changelist.has_active_filters %}
+        <div id="changelist-filter-extra-actions">
+          {% if filter_changelist.is_facets_optional %}
+            <h3>
+              {% if filter_changelist.add_facets %}
+                <a href="{{ filter_changelist.remove_facet_link }}" class="hidelink">{% trans "Hide counts" %}</a>
+              {% else %}
+                <a href="{{ filter_changelist.add_facet_link }}" class="viewlink">{% trans "Show counts" %}</a>
+              {% endif %}
+            </h3>
+          {% endif %}
+          {% if filter_changelist.has_active_filters %}
+            <h3>
+              <a href="{{ filter_changelist.clear_all_filters_qs }}">&#10006; {% trans "Clear all filters" %}</a>
+            </h3>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% for spec in filter_specs %}
+        {% admin_list_filter filter_changelist spec %}
+      {% endfor %}
+    </nav>
+    {% endif %}
+  </div>
+  <div id="mapa-brasil-wrapper" style="display: none;">
+    {% include "admin/contratos/processojudicial/mapa_uf_interativo.html" %}
+  </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const filterDiv = document.getElementById('changelist-filter');
+  if (filterDiv && !filterDiv.querySelector('.custom-filters-wrapper')) {
+    const filterTitle = filterDiv.querySelector('h2');
+    if (filterTitle && !filterTitle.querySelector('#filter-toggle')) {
+      const toggleButton = document.createElement('span');
+      toggleButton.id = 'filter-toggle';
+      toggleButton.textContent = ' [–]';
+      filterTitle.appendChild(toggleButton);
+    }
+  }
+
+  const carteiraBadge = document.querySelector('.processo-context-badge[data-carteira-switch="1"]');
+  if (carteiraBadge) {
+    const switchWrap = carteiraBadge.querySelector('.processo-context-badge__switch');
+    const selectEl = carteiraBadge.querySelector('.processo-context-badge__switch-select');
+    const applyBtn = carteiraBadge.querySelector('.processo-context-badge__switch-apply');
+
+    const closeSwitch = () => {
+      if (!switchWrap) return;
+      switchWrap.hidden = true;
+      carteiraBadge.classList.remove('is-open');
+      carteiraBadge.setAttribute('aria-expanded', 'false');
+    };
+
+    const openSwitch = () => {
+      if (!switchWrap) return;
+      switchWrap.hidden = false;
+      carteiraBadge.classList.add('is-open');
+      carteiraBadge.setAttribute('aria-expanded', 'true');
+      if (selectEl) {
+        window.setTimeout(() => selectEl.focus(), 0);
+      }
+    };
+
+    const toggleSwitch = () => {
+      if (!switchWrap) return;
+      if (switchWrap.hidden) {
+        openSwitch();
+      } else {
+        closeSwitch();
+      }
+    };
+
+    carteiraBadge.addEventListener('click', (event) => {
+      if (event.target.closest('.processo-context-badge__switch')) {
+        return;
+      }
+      toggleSwitch();
+    });
+
+    carteiraBadge.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleSwitch();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSwitch();
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!carteiraBadge.contains(event.target)) {
+        closeSwitch();
+      }
+    });
+
+    const applySelection = () => {
+      if (!selectEl || !selectEl.value) return;
+      const params = new URLSearchParams(window.location.search);
+      params.set('carteira', String(selectEl.value));
+      params.delete('carteira__id__exact');
+      params.delete('intersection_carteira_a');
+      params.delete('intersection_carteira_b');
+      params.delete('p');
+      const nextQuery = params.toString();
+      window.location.href = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
+    };
+
+    if (applyBtn) {
+      applyBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        applySelection();
+      });
+    }
+    if (selectEl) {
+      selectEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          applySelection();
+        }
+      });
+    }
+  }
+  if (filterDiv) {
+    const STORAGE_KEY = 'processo_filtros_salvos';
+    const header = document.createElement('div');
+    header.className = 'custom-filters-header';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = 'FILTROS PERSONALIZADOS';
+    const toggleSpan = document.createElement('span');
+    toggleSpan.className = 'custom-filters-toggle';
+    toggleSpan.id = 'custom-filters-toggle';
+    toggleSpan.textContent = '[+]';
+    header.appendChild(titleSpan);
+    header.appendChild(toggleSpan);
+
+    const panel = document.createElement('div');
+    panel.className = 'custom-filters-panel';
+    panel.id = 'custom-filters-panel';
+
+    const savedLabel = document.createElement('span');
+    savedLabel.id = 'custom-filters-saved';
+    savedLabel.className = 'custom-filters-saved';
+
+    const actions = document.createElement('div');
+    actions.className = 'custom-filters-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.id = 'custom-save';
+    saveBtn.textContent = 'Salvar combinação atual';
+
+    const select = document.createElement('select');
+    select.id = 'custom-select';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = 'Selecione um filtro salvo...';
+    select.appendChild(opt0);
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.id = 'custom-apply';
+    applyBtn.textContent = 'Aplicar';
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.id = 'custom-clear';
+    clearBtn.textContent = 'Limpar';
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(select);
+    actions.appendChild(applyBtn);
+    actions.appendChild(clearBtn);
+
+    panel.appendChild(actions);
+    panel.appendChild(savedLabel);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'custom-filters-wrapper';
+    wrapper.appendChild(header);
+    wrapper.appendChild(panel);
+
+    filterDiv.insertBefore(wrapper, filterDiv.firstChild);
+
+    function loadSaved() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+      catch(e){ return []; }
+    }
+    function saveSaved(list) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+    function refreshSelect() {
+      const list = loadSaved();
+      select.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Selecione um filtro salvo...';
+      select.appendChild(opt);
+      list.forEach(item => {
+        const o = document.createElement('option');
+        o.value = item.qs;
+        o.textContent = item.name;
+        select.appendChild(o);
+      });
+    }
+    refreshSelect();
+
+    toggleSpan.addEventListener('click', () => {
+      const isOpen = panel.style.display === 'block';
+      panel.style.display = isOpen ? 'none' : 'block';
+      toggleSpan.textContent = isOpen ? '[+]' : '[–]';
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const name = prompt('Nome do filtro:');
+      if (!name) return;
+      const qs = window.location.search || '';
+      const list = loadSaved();
+      const idx = list.findIndex(i => i.name === name);
+      if (idx >= 0) list[idx] = { name, qs }; else list.push({ name, qs });
+      saveSaved(list);
+      refreshSelect();
+      savedLabel.textContent = `Filtro salvo: ${name}`;
+      savedLabel.style.display = 'inline';
+    });
+
+    applyBtn.addEventListener('click', () => {
+      const qs = select.value;
+      if (!qs) return;
+      window.location.search = qs;
+    });
+
+    clearBtn.addEventListener('click', () => {
+      const list = loadSaved().filter(i => i.qs !== select.value);
+      saveSaved(list);
+      refreshSelect();
+      select.value = '';
+      savedLabel.textContent = '';
+      savedLabel.style.display = 'none';
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('_skip_saved_filters', '1');
+      window.location.href = url.pathname + url.search;
+    });
+
+    const filterToggle = document.getElementById('filter-toggle');
+    if (filterToggle) {
+      const collapsible = Array.from(filterDiv.children).filter(el => {
+        return el.tagName !== 'H2' &&
+               !el.classList.contains('custom-filters-wrapper') &&
+               !el.classList.contains('custom-filters-header') &&
+               !el.classList.contains('custom-filters-panel');
+      });
+      let collapsed = false;
+      const applyCollapse = () => {
+        collapsible.forEach(el => { el.style.display = collapsed ? 'none' : ''; });
+        filterToggle.textContent = collapsed ? ' [+]' : ' [–]';
+      };
+      applyCollapse();
+      filterToggle.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        collapsed = !collapsed;
+        applyCollapse();
+      });
+    }
+
+    const facetToggle = Array.from(filterDiv.querySelectorAll('h3 a.hidelink')).find((el) => {
+      return /contagem/i.test((el.textContent || '').trim());
+    });
+    if (facetToggle) {
+      facetToggle.style.cursor = 'pointer';
+      const initialUrl = new URL(window.location.href);
+      const initialFacetsValue = (initialUrl.searchParams.get('_facets') || '1').toLowerCase();
+      const initialEnabled =
+        (
+          initialUrl.searchParams.has('_facets') &&
+          !['0', 'false', 'off', 'no'].includes(initialFacetsValue)
+        ) ||
+        filterDiv.querySelectorAll('.filter-count').length > 0;
+      facetToggle.textContent = initialEnabled ? 'Esconder contagem' : 'Mostrar contagem';
+      facetToggle.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const url = new URL(window.location.href);
+        const facetsValue = (url.searchParams.get('_facets') || '1').toLowerCase();
+        const enabled =
+          url.searchParams.has('_facets') &&
+          !['0', 'false', 'off', 'no'].includes(facetsValue);
+        if (enabled) {
+          url.searchParams.delete('_facets');
+        } else {
+          url.searchParams.set('_facets', '1');
+        }
+        window.location.href = url.pathname + url.search;
+      });
+    }
+
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.type = 'button';
+    clearAllBtn.id = 'custom-clear-all';
+    clearAllBtn.textContent = 'Limpar filtros';
+    clearAllBtn.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.search = '';
+      window.location.href = url.pathname;
+    });
+    if (facetToggle && facetToggle.parentNode) {
+      facetToggle.parentNode.insertBefore(clearAllBtn, facetToggle);
+    } else {
+      filterDiv.insertBefore(clearAllBtn, filterDiv.firstChild);
+    }
+  }
+  const navSidebar = document.getElementById('nav-sidebar');
+  if (!navSidebar || navSidebar.querySelector('.agenda-placeholder-row')) {
+    return;
+  }
+  const processoRow = navSidebar.querySelector('tr.model-processojudicial');
+  if (!processoRow || !processoRow.parentNode) {
+    return;
+  }
+  const placeholderRow = document.createElement('tr');
+  placeholderRow.className = 'agenda-placeholder-row';
+  const placeholderCell = document.createElement('td');
+  placeholderCell.setAttribute('colspan', '3');
+  placeholderCell.setAttribute('aria-hidden', 'true');
+  placeholderCell.innerHTML = `
+    <div class="agenda-placeholder-card" role="presentation">
+      <div class="agenda-placeholder-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 36 36" role="presentation" focusable="false">
+          <rect x="2" y="4" width="32" height="28" rx="4" ry="4" stroke="rgba(255,255,255,0.6)" stroke-width="1.8" fill="none"></rect>
+          <line x1="2" y1="10" x2="34" y2="10" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"></line>
+          <line x1="10" y1="2" x2="10" y2="8" stroke="#e2f1ff" stroke-width="2"></line>
+          <line x1="26" y1="2" x2="26" y2="8" stroke="#e2f1ff" stroke-width="2"></line>
+          <rect x="5" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+          <rect x="15" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+          <rect x="25" y="12" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+          <rect x="5" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+          <rect x="15" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+          <rect x="25" y="22" width="6" height="6" rx="1.2" ry="1.2" fill="#e2f1ff"></rect>
+        </svg>
+      </div>
+      <div class="agenda-placeholder-card__body">
+        <p class="agenda-placeholder-card__title">Agenda Geral</p>
+        <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
+        <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
+      </div>
+      <div class="agenda-placeholder-card__actions">
+        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
+        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="prazos">Prazos</button>
+        <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="etiquetas">Etiquetas</button>
+      </div>
+    </div>
+  `;
+  placeholderRow.appendChild(placeholderCell);
+  processoRow.parentNode.insertBefore(placeholderRow, processoRow.nextSibling);
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const searchForm = document.getElementById('changelist-search');
+  if (!searchForm) return;
+  const input = searchForm.querySelector('input[name="q"]');
+  if (!input) return;
+  const countWrap = document.getElementById('cpf-lote-count');
+  const countValue = countWrap ? countWrap.querySelector('.processo-cpf-lote-inline__value') : null;
+
+  if (!input.placeholder || !input.placeholder.trim()) {
+    input.placeholder = 'Pesquisar (nome, CPF, CNJ ou vários CPFs)';
+  }
+
+  const parseCpfs = (raw) => {
+    const matches = String(raw || '').match(/\\b\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}\\b/g) || [];
+    const cpfs = [];
+    const seen = new Set();
+    matches.forEach(match => {
+      const digits = match.replace(/\\D/g, '');
+      if (digits.length !== 11) return;
+      if (seen.has(digits)) return;
+      seen.add(digits);
+      cpfs.push(digits);
+    });
+    return cpfs;
+  };
+
+  const formatCpf = (digits) => {
+    if (!digits || digits.length !== 11) return digits || '';
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  };
+
+  const updateCount = (rawValue) => {
+    const cpfs = parseCpfs(rawValue);
+    const hasBatchSeparator = /[\\n,;]/.test(rawValue || '');
+    if (countWrap) {
+      if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
+        countWrap.hidden = false;
+        if (countValue) {
+          countValue.textContent = String(cpfs.length);
+        }
+      } else {
+        countWrap.hidden = true;
+      }
+    }
+    return cpfs;
+  };
+
+  const normalizeInput = () => {
+    const rawValue = (input.value || '').trim();
+    if (!rawValue) {
+      updateCount('');
+      return;
+    }
+    const cpfs = parseCpfs(rawValue);
+    const hasBatchSeparator = /[\\n,;]/.test(rawValue);
+    if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
+      input.value = cpfs.map(formatCpf).join(', ');
+      updateCount(input.value);
+    } else {
+      updateCount(rawValue);
+    }
+  };
+
+  const cpfLoteRaw = '{{ cpf_lote_input|escapejs }}';
+  if (cpfLoteRaw && !input.value) {
+    input.value = cpfLoteRaw;
+  }
+  if (cpfLoteRaw) {
+    normalizeInput();
+  } else {
+    updateCount(input.value);
+  }
+
+  const applyCpfLote = (rawValue) => {
+    const url = new URL(window.location.href);
+    if (rawValue) {
+      url.searchParams.set('cpf_lote', rawValue);
+    } else {
+      url.searchParams.delete('cpf_lote');
+    }
+    url.searchParams.delete('q');
+    url.searchParams.delete('p');
+    window.location.href = url.toString();
+  };
+
+  searchForm.addEventListener('submit', (event) => {
+    const rawValue = (input.value || '').trim();
+    const url = new URL(window.location.href);
+    const hasCpfLote = url.searchParams.has('cpf_lote');
+
+    if (!rawValue) {
+      if (hasCpfLote) {
+        event.preventDefault();
+        applyCpfLote('');
+      }
+      return;
+    }
+
+    const cpfs = parseCpfs(rawValue);
+    const hasBatchSeparator = /[\\n,;]/.test(rawValue);
+    if (!cpfs.length) return;
+    if (cpfs.length < 2 && !hasBatchSeparator) return;
+
+    event.preventDefault();
+    applyCpfLote(rawValue);
+  });
+
+  input.addEventListener('input', normalizeInput);
+  input.addEventListener('blur', normalizeInput);
+  input.addEventListener('paste', () => setTimeout(normalizeInput, 0));
+
+  const clearSearch = (event) => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('cpf_lote')) return;
+    event.preventDefault();
+    url.searchParams.delete('cpf_lote');
+    url.searchParams.delete('q');
+    url.searchParams.delete('p');
+    window.location.href = url.toString();
+  };
+
+  const clearLink = searchForm.querySelector('#searchbar-clear');
+  if (clearLink) {
+    clearLink.addEventListener('click', clearSearch);
+  }
+  const resetBtn = searchForm.querySelector('input[type="reset"], button[type="reset"]');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', clearSearch);
+  }
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const searchForm = document.getElementById('changelist-search');
+  if (!searchForm) return;
+  const searchInput = searchForm.querySelector('input[name=q]');
+  if (!searchInput) return;
+  if (searchForm.querySelector('[data-clear-search="true"]')) return;
+
+  const submitInput = searchForm.querySelector('input[type=submit], button[type=submit]');
+  let clearBtn;
+  if (submitInput) {
+    clearBtn = submitInput.cloneNode(true);
+    clearBtn.type = submitInput.tagName.toLowerCase() === 'button' ? 'button' : submitInput.type;
+    clearBtn.value = 'Limpar';
+    clearBtn.textContent = 'Limpar';
+    clearBtn.removeAttribute('id');
+    clearBtn.removeAttribute('name');
+  } else {
+    clearBtn = document.createElement('input');
+    clearBtn.type = 'submit';
+    clearBtn.value = 'Limpar';
+  }
+  clearBtn.dataset.clearSearch = 'true';
+  clearBtn.style.marginLeft = '4px';
+  clearBtn.addEventListener('click', function(event) {
+    event.preventDefault();
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('cpf_lote')) {
+      url.searchParams.delete('cpf_lote');
+      url.searchParams.delete('q');
+      url.searchParams.delete('p');
+      window.location.href = url.toString();
+      return;
+    }
+    if (!searchInput.value) {
+      searchInput.focus();
+      return;
+    }
+    searchInput.value = '';
+    searchForm.submit();
+  });
+
+  if (submitInput && submitInput.parentNode) {
+    submitInput.parentNode.insertBefore(clearBtn, submitInput.nextSibling);
+  } else {
+    searchInput.insertAdjacentElement('afterend', clearBtn);
+  }
+});
+</script>
+{% endblock %}

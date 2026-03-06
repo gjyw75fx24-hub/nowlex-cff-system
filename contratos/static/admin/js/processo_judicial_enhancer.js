@@ -20,6 +20,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let updateCarteirasHighlight = null;
     let resetCarteirasVinculadas = null;
     let carteiraBadge = null;
+    let pertinenciaButton = null;
+    let pertinenciaControl = null;
+    let pertinenciaDaysInput = null;
+    let pertinenciaDaysWrapper = null;
     const entryStates = [];
     let currentEntryIndex = -1;
     const ensureHiddenInput = (name) => {
@@ -80,6 +84,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 carteira: entry.carteira || '',
                 vara: entry.vara || '',
                 tribunal: entry.tribunal || '',
+                pertinencia_status: normalizePertinenciaStatus(entry.pertinencia_status || entry.pertinencia),
+                pertinencia_periodicidade_dias: normalizePertinenciaDays(entry.pertinencia_periodicidade_dias || entry.pertinencia_periodicidade),
             });
         });
         dedupeEntryStates();
@@ -110,6 +116,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 carteira: entry.carteira || '',
                 vara: entry.vara || '',
                 tribunal: entry.tribunal || '',
+                pertinencia_status: normalizePertinenciaStatus(entry.pertinencia_status || entry.pertinencia),
+                pertinencia_periodicidade_dias: normalizePertinenciaDays(entry.pertinencia_periodicidade_dias || entry.pertinencia_periodicidade),
             });
         });
         dedupeEntryStates();
@@ -121,9 +129,39 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const normalizeCnjDigits = (value) => String(value || '').replace(/\D/g, '');
+    const normalizePertinenciaStatus = (value) => {
+        const raw = String(value || '').trim().toUpperCase();
+        if (raw === 'PERTINENTE' || raw === 'IMPERTINENTE') {
+            return raw;
+        }
+        return 'NEUTRO';
+    };
+    const normalizePertinenciaDays = (value) => {
+        if (value === null || value === undefined || value === '') {
+            return '';
+        }
+        const parsed = parseInt(String(value).trim(), 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            return '';
+        }
+        return parsed;
+    };
+    const getPertinenciaStateKey = () => {
+        if (!pertinenciaButton) {
+            return 'NEUTRO';
+        }
+        return normalizePertinenciaStatus(pertinenciaButton.dataset.state || '');
+    };
+    const getPertinenciaDaysValue = () => {
+        if (!pertinenciaDaysInput) {
+            return '';
+        }
+        return normalizePertinenciaDays(pertinenciaDaysInput.value || '');
+    };
 
     const buildEntryState = () => {
-        const currentId = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex].id : null;
+        const currentEntry = currentEntryIndex >= 0 && entryStates[currentEntryIndex] ? entryStates[currentEntryIndex] : null;
+        const currentId = currentEntry ? currentEntry.id : null;
         return {
             id: currentId,
             cnj: cnjInput.value.trim(),
@@ -133,6 +171,9 @@ document.addEventListener('DOMContentLoaded', function() {
             carteira: carteiraSelect ? carteiraSelect.value : '',
             vara: varaInput ? varaInput.value.trim() : '',
             tribunal: tribunalInput ? tribunalInput.value.trim() : '',
+            pertinencia_status: getPertinenciaStateKey(),
+            pertinencia_periodicidade_dias: getPertinenciaDaysValue(),
+            pertinencia_renovar: currentEntry?.pertinencia_renovar ? true : false,
         };
     };
 
@@ -198,6 +239,70 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (originalText) {
             cnjDisplayHeading.textContent = originalText;
         }
+    };
+
+    const PERTINENCIA_LABELS = {
+        NEUTRO: 'Pertinência',
+        PERTINENTE: 'Pertinente Atuar',
+        IMPERTINENTE: 'Impertinente Atuar',
+    };
+
+    const PERTINENCIA_STYLE_MAP = {
+        NEUTRO: { background: '#f5f7fa', color: '#3f4a5a', borderColor: '#c7d3e6' },
+        PERTINENTE: { background: '#16a34a', color: '#fff', borderColor: '#15803d' },
+        IMPERTINENTE: { background: '#dc2626', color: '#fff', borderColor: '#b91c1c' },
+    };
+
+    const applyPertinenciaButtonStyle = (stateKey) => {
+        if (!pertinenciaButton) {
+            return;
+        }
+        const normalized = normalizePertinenciaStatus(stateKey);
+        const style = PERTINENCIA_STYLE_MAP[normalized] || PERTINENCIA_STYLE_MAP.NEUTRO;
+        pertinenciaButton.style.background = style.background;
+        pertinenciaButton.style.color = style.color;
+        pertinenciaButton.style.borderColor = style.borderColor;
+    };
+
+    const setPertinenciaUIState = (stateKey, daysValue) => {
+        if (!pertinenciaButton) {
+            return;
+        }
+        const normalized = normalizePertinenciaStatus(stateKey);
+        pertinenciaButton.dataset.state = normalized;
+        pertinenciaButton.textContent = PERTINENCIA_LABELS[normalized] || PERTINENCIA_LABELS.NEUTRO;
+        applyPertinenciaButtonStyle(normalized);
+        if (pertinenciaDaysWrapper && pertinenciaDaysInput) {
+            if (normalized === 'PERTINENTE') {
+                pertinenciaDaysWrapper.style.display = 'inline-flex';
+                pertinenciaDaysInput.disabled = false;
+                const normalizedDays = normalizePertinenciaDays(daysValue);
+                if (normalizedDays !== '') {
+                    pertinenciaDaysInput.value = normalizedDays;
+                } else {
+                    pertinenciaDaysInput.value = '';
+                }
+            } else {
+                pertinenciaDaysWrapper.style.display = 'none';
+                pertinenciaDaysInput.disabled = true;
+                pertinenciaDaysInput.value = '';
+            }
+        }
+    };
+
+    const syncPertinenciaFromEntry = (entry) => {
+        const stateKey = normalizePertinenciaStatus(entry?.pertinencia_status);
+        const daysValue = normalizePertinenciaDays(entry?.pertinencia_periodicidade_dias);
+        setPertinenciaUIState(stateKey, daysValue);
+    };
+
+    const updatePertinenciaEntryState = (patch = {}) => {
+        const entry = getActiveEntryState() || ensureDraftEntryState();
+        if (!entry) {
+            return;
+        }
+        Object.assign(entry, patch);
+        syncHiddenEntries();
     };
 
     const HEADER_TITLE = 'Dados do Processo';
@@ -1277,6 +1382,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (varaInput) varaInput.value = entry.vara;
         if (tribunalInput) tribunalInput.value = entry.tribunal;
+        syncPertinenciaFromEntry(entry);
         cnjInput.focus();
         setActiveCnjText();
         refreshCnjScopedInlines();
@@ -1390,6 +1496,59 @@ document.addEventListener('DOMContentLoaded', function() {
         deleteButton.style.height = '32px';
         inlineGroup.appendChild(deleteButton);
 
+        pertinenciaControl = document.createElement('div');
+        pertinenciaControl.className = 'pertinencia-control';
+        pertinenciaControl.style.display = 'inline-flex';
+        pertinenciaControl.style.alignItems = 'center';
+        pertinenciaControl.style.gap = '6px';
+
+        pertinenciaButton = document.createElement('button');
+        pertinenciaButton.id = 'btn_pertinencia_cnj';
+        pertinenciaButton.type = 'button';
+        pertinenciaButton.className = 'button';
+        pertinenciaButton.dataset.state = 'NEUTRO';
+        pertinenciaButton.textContent = PERTINENCIA_LABELS.NEUTRO;
+        pertinenciaButton.title = 'Definir pertinência do processo';
+        pertinenciaButton.setAttribute('aria-label', 'Definir pertinência do processo');
+        pertinenciaButton.style.padding = '0 .75rem';
+        pertinenciaButton.style.minWidth = '140px';
+        pertinenciaButton.style.height = '32px';
+        pertinenciaButton.style.borderRadius = '6px';
+        pertinenciaButton.style.borderWidth = '1px';
+        pertinenciaButton.style.borderStyle = 'solid';
+        pertinenciaButton.style.fontWeight = '600';
+
+        pertinenciaDaysWrapper = document.createElement('span');
+        pertinenciaDaysWrapper.style.display = 'none';
+        pertinenciaDaysWrapper.style.alignItems = 'center';
+        pertinenciaDaysWrapper.style.gap = '6px';
+
+        pertinenciaDaysInput = document.createElement('input');
+        pertinenciaDaysInput.type = 'number';
+        pertinenciaDaysInput.min = '1';
+        pertinenciaDaysInput.step = '1';
+        pertinenciaDaysInput.placeholder = 'dias';
+        pertinenciaDaysInput.style.width = '70px';
+        pertinenciaDaysInput.style.height = '32px';
+        pertinenciaDaysInput.style.padding = '0 8px';
+        pertinenciaDaysInput.style.border = '1px solid #c7d3e6';
+        pertinenciaDaysInput.style.borderRadius = '6px';
+        pertinenciaDaysInput.style.fontSize = '0.9rem';
+        pertinenciaDaysInput.style.textAlign = 'center';
+        pertinenciaDaysInput.disabled = true;
+
+        const pertinenciaDaysLabel = document.createElement('span');
+        pertinenciaDaysLabel.textContent = 'dias';
+        pertinenciaDaysLabel.style.fontSize = '0.85rem';
+        pertinenciaDaysLabel.style.color = '#475569';
+
+        pertinenciaDaysWrapper.appendChild(pertinenciaDaysInput);
+        pertinenciaDaysWrapper.appendChild(pertinenciaDaysLabel);
+        pertinenciaControl.appendChild(pertinenciaButton);
+        pertinenciaControl.appendChild(pertinenciaDaysWrapper);
+        inlineGroup.appendChild(pertinenciaControl);
+        applyPertinenciaButtonStyle('NEUTRO');
+
         carteiraBadge = document.createElement('span');
         carteiraBadge.className = 'cnj-carteira-badge';
         carteiraBadge.style.display = 'none';
@@ -1409,6 +1568,7 @@ document.addEventListener('DOMContentLoaded', function() {
             carteiraSelect.selectedIndex = 0;
             carteiraSelect.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        setPertinenciaUIState('NEUTRO', '');
         if (typeof resetCarteirasVinculadas === 'function') {
             resetCarteirasVinculadas();
         }
@@ -1452,6 +1612,32 @@ document.addEventListener('DOMContentLoaded', function() {
             syncHiddenEntries();
             updateNavButtons();
             refreshCnjScopedInlines();
+        });
+
+        const cyclePertinenciaState = () => {
+            const currentState = getPertinenciaStateKey();
+            const nextState = currentState === 'NEUTRO'
+                ? 'PERTINENTE'
+                : (currentState === 'PERTINENTE' ? 'IMPERTINENTE' : 'NEUTRO');
+            setPertinenciaUIState(nextState, getPertinenciaDaysValue());
+            updatePertinenciaEntryState({ pertinencia_status: nextState });
+            if (nextState !== 'PERTINENTE') {
+                updatePertinenciaEntryState({ pertinencia_renovar: false });
+            }
+            if (nextState === 'PERTINENTE' && pertinenciaDaysInput && !normalizePertinenciaDays(pertinenciaDaysInput.value)) {
+                pertinenciaDaysInput.focus();
+            }
+        };
+
+        pertinenciaButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            cyclePertinenciaState();
+        });
+
+        pertinenciaDaysInput.addEventListener('input', () => {
+            updatePertinenciaEntryState({
+                pertinencia_periodicidade_dias: getPertinenciaDaysValue(),
+            });
         });
 
         addButton.addEventListener('click', () => {
@@ -1516,7 +1702,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 event.preventDefault();
             }
         });
-        form.addEventListener('submit', function() {
+        const finalizeCnjSubmit = () => {
             const digits = normalizeCnjDigits(cnjInput?.value || '');
             if (digits) {
                 const idx = entryStates.findIndex((entry) => normalizeCnjDigits(entry?.cnj) === digits);
@@ -1527,6 +1713,151 @@ document.addEventListener('DOMContentLoaded', function() {
             storeCurrentEntry();
             syncHiddenEntries();
             console.debug('cnj_entries submit', entryStates);
+        };
+
+        const createPertinenciaRenewOverlay = (days) => {
+            const existing = document.getElementById('pertinencia-renew-overlay');
+            if (existing) {
+                existing.remove();
+            }
+            const overlay = document.createElement('div');
+            overlay.id = 'pertinencia-renew-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.backgroundColor = 'rgba(15, 23, 42, 0.45)';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '10050';
+
+            const card = document.createElement('div');
+            card.style.background = '#fff';
+            card.style.padding = '18px 20px';
+            card.style.borderRadius = '12px';
+            card.style.maxWidth = '420px';
+            card.style.boxShadow = '0 20px 45px rgba(15, 23, 42, 0.25)';
+
+            const title = document.createElement('h3');
+            title.textContent = 'Atualizar prazo de revisita?';
+            title.style.margin = '0 0 8px 0';
+            title.style.color = '#0f172a';
+            title.style.fontSize = '1rem';
+
+            const text = document.createElement('p');
+            text.textContent = `Você realizou uma atuação ou revisão neste processo. Deseja renovar o prazo para que ele volte a aparecer em Lembretes após mais ${days} dias?`;
+            text.style.margin = '0 0 16px 0';
+            text.style.color = '#475569';
+            text.style.fontSize = '0.9rem';
+
+            const actions = document.createElement('div');
+            actions.style.display = 'flex';
+            actions.style.gap = '8px';
+            actions.style.flexWrap = 'wrap';
+            actions.style.justifyContent = 'flex-end';
+
+            const btnRenew = document.createElement('button');
+            btnRenew.type = 'button';
+            btnRenew.className = 'button default';
+            btnRenew.textContent = 'Renovar prazo';
+
+            const btnKeep = document.createElement('button');
+            btnKeep.type = 'button';
+            btnKeep.className = 'button';
+            btnKeep.textContent = 'Manter prazo atual';
+
+            const btnRemove = document.createElement('button');
+            btnRemove.type = 'button';
+            btnRemove.className = 'button';
+            btnRemove.textContent = 'Remover de Lembretes';
+            btnRemove.style.background = '#dc2626';
+            btnRemove.style.borderColor = '#b91c1c';
+            btnRemove.style.color = '#fff';
+
+            actions.appendChild(btnKeep);
+            actions.appendChild(btnRemove);
+            actions.appendChild(btnRenew);
+
+            card.appendChild(title);
+            card.appendChild(text);
+            card.appendChild(actions);
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+
+            return { overlay, btnRenew, btnKeep, btnRemove };
+        };
+
+        const submitFormWithFlag = (submitter) => {
+            form.dataset.pertinenciaRenewHandled = '1';
+            if (submitter && typeof form.requestSubmit === 'function') {
+                form.requestSubmit(submitter);
+            } else {
+                finalizeCnjSubmit();
+                form.submit();
+            }
+        };
+
+        const maybePromptPertinenciaRenew = (submitter) => {
+            const activeEntry = getActiveEntryState() || ensureDraftEntryState();
+            const stateKey = normalizePertinenciaStatus(activeEntry?.pertinencia_status || getPertinenciaStateKey());
+            if (stateKey !== 'PERTINENTE') {
+                return false;
+            }
+            const days = normalizePertinenciaDays(
+                activeEntry?.pertinencia_periodicidade_dias || getPertinenciaDaysValue()
+            );
+            if (!days) {
+                alert('Informe a periodicidade em dias para manter o lembrete.');
+                return true;
+            }
+            const { overlay, btnRenew, btnKeep, btnRemove } = createPertinenciaRenewOverlay(days);
+            const cleanup = () => {
+                overlay.remove();
+            };
+
+            btnRenew.addEventListener('click', () => {
+                updatePertinenciaEntryState({
+                    pertinencia_status: 'PERTINENTE',
+                    pertinencia_periodicidade_dias: days,
+                    pertinencia_renovar: true,
+                });
+                cleanup();
+                submitFormWithFlag(submitter);
+            });
+
+            btnKeep.addEventListener('click', () => {
+                updatePertinenciaEntryState({
+                    pertinencia_status: 'PERTINENTE',
+                    pertinencia_periodicidade_dias: days,
+                    pertinencia_renovar: false,
+                });
+                cleanup();
+                submitFormWithFlag(submitter);
+            });
+
+            btnRemove.addEventListener('click', () => {
+                setPertinenciaUIState('IMPERTINENTE', days);
+                updatePertinenciaEntryState({
+                    pertinencia_status: 'IMPERTINENTE',
+                    pertinencia_renovar: false,
+                });
+                cleanup();
+                submitFormWithFlag(submitter);
+            });
+
+            return true;
+        };
+
+        form.addEventListener('submit', function(event) {
+            if (form.dataset.pertinenciaRenewHandled === '1') {
+                delete form.dataset.pertinenciaRenewHandled;
+                finalizeCnjSubmit();
+                return;
+            }
+            if (maybePromptPertinenciaRenew(event.submitter)) {
+                event.preventDefault();
+                return;
+            }
+            finalizeCnjSubmit();
         });
     }
 
@@ -12416,6 +12747,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         carteira: entry?.carteira ?? '',
         vara: entry?.vara ?? '',
         tribunal: entry?.tribunal ?? '',
+        pertinencia_status: entry?.pertinencia_status ?? 'NEUTRO',
+        pertinencia_periodicidade_dias: entry?.pertinencia_periodicidade_dias ?? '',
     });
 
     window.__getCnjEntriesState = () => entryStates.map(exportEntryState);
