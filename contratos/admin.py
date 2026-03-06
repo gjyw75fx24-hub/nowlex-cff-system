@@ -7154,6 +7154,24 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 processo.partes_processuais.filter(tipo_polo="PASSIVO").order_by("id")
             )
         contratos = list(processo.contratos.all().order_by("id"))
+
+        def _digits(value):
+            return re.sub(r"\D", "", str(value or ""))
+
+        contrato_docs = {
+            _digits(getattr(contrato, "documento_titular", ""))
+            for contrato in contratos
+            if _digits(getattr(contrato, "documento_titular", ""))
+        }
+        if len(contrato_docs) > 1:
+            partes_por_doc = [
+                parte
+                for parte in processo.partes_processuais.all().order_by("id")
+                if _digits(getattr(parte, "documento", "")) in contrato_docs
+            ]
+            if partes_por_doc:
+                partes = partes_por_doc
+
         if len(partes) <= 1:
             for parte in partes:
                 parte.info_card_contratos = list(contratos)
@@ -7173,9 +7191,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if candidate_rank > current_rank:
                 grouped[key] = parte
         cards = [grouped[key] for key in key_order]
-
-        def _digits(value):
-            return re.sub(r"\D", "", str(value or ""))
 
         mapped_by_doc = {}
         unmapped = []
@@ -9649,6 +9664,36 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if parsed_date or cidade or uf or idade is not None:
             parte.obito = True
         parte.save(update_fields=['obito', 'obito_data', 'obito_cidade', 'obito_uf', 'obito_idade'])
+
+        # Propaga status global do CPF (Pessoa) e replica para outras partes.
+        pessoa = parte.pessoa
+        if pessoa:
+            updates = []
+            if parte.obito and not pessoa.obito:
+                pessoa.obito = True
+                updates.append('obito')
+            if parte.obito_data and not pessoa.obito_data:
+                pessoa.obito_data = parte.obito_data
+                updates.append('obito_data')
+            if parte.obito_cidade and not pessoa.obito_cidade:
+                pessoa.obito_cidade = parte.obito_cidade
+                updates.append('obito_cidade')
+            if parte.obito_uf and not pessoa.obito_uf:
+                pessoa.obito_uf = parte.obito_uf
+                updates.append('obito_uf')
+            if parte.obito_idade is not None and pessoa.obito_idade is None:
+                pessoa.obito_idade = parte.obito_idade
+                updates.append('obito_idade')
+            if updates:
+                pessoa.save(update_fields=updates)
+
+            Parte.objects.filter(pessoa_id=pessoa.id).exclude(pk=parte.pk).update(
+                obito=parte.obito,
+                obito_data=parte.obito_data,
+                obito_cidade=parte.obito_cidade or '',
+                obito_uf=parte.obito_uf or '',
+                obito_idade=parte.obito_idade,
+            )
         return JsonResponse({
             'status': 'ok',
             'obito_data': parte.obito_data.isoformat() if parte.obito_data else '',

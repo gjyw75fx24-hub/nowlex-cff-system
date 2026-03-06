@@ -421,6 +421,27 @@ class Pessoa(models.Model):
         editable=False,
         verbose_name="CPF / CNPJ (normalizado)",
     )
+    obito = models.BooleanField(default=False, verbose_name="Óbito")
+    obito_data = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Data do Óbito",
+    )
+    obito_cidade = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Cidade do Óbito",
+    )
+    obito_uf = models.CharField(
+        max_length=2,
+        blank=True,
+        verbose_name="UF do Óbito",
+    )
+    obito_idade = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        verbose_name="Idade no Óbito",
+    )
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
     atualizado_em = models.DateTimeField(auto_now=True, verbose_name="Atualizado em")
 
@@ -531,8 +552,38 @@ class Parte(models.Model):
             if documento and documento != pessoa.documento:
                 pessoa.documento = documento
                 update_fields.append("documento")
+            # Sincroniza dados de óbito do CPF (global) quando a parte já estiver marcada.
+            if self.obito and not pessoa.obito:
+                pessoa.obito = True
+                update_fields.append("obito")
+            if self.obito:
+                if self.obito_data and not pessoa.obito_data:
+                    pessoa.obito_data = self.obito_data
+                    update_fields.append("obito_data")
+                if self.obito_cidade and not pessoa.obito_cidade:
+                    pessoa.obito_cidade = self.obito_cidade
+                    update_fields.append("obito_cidade")
+                if self.obito_uf and not pessoa.obito_uf:
+                    pessoa.obito_uf = self.obito_uf
+                    update_fields.append("obito_uf")
+                if self.obito_idade is not None and pessoa.obito_idade is None:
+                    pessoa.obito_idade = self.obito_idade
+                    update_fields.append("obito_idade")
             if update_fields:
                 pessoa.save(update_fields=update_fields)
+
+        # Se o CPF já estiver marcado como óbito, espelha na parte atual.
+        if pessoa.obito and not self.obito:
+            self.obito = True
+        if pessoa.obito:
+            if pessoa.obito_data and not self.obito_data:
+                self.obito_data = pessoa.obito_data
+            if pessoa.obito_cidade and not self.obito_cidade:
+                self.obito_cidade = pessoa.obito_cidade
+            if pessoa.obito_uf and not self.obito_uf:
+                self.obito_uf = pessoa.obito_uf
+            if pessoa.obito_idade is not None and self.obito_idade is None:
+                self.obito_idade = pessoa.obito_idade
 
         self.pessoa = pessoa
 
