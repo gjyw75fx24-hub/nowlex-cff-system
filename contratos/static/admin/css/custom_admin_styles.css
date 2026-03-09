@@ -4836,13 +4836,17 @@ a.historylink {
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cpf {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     margin: 0 auto;
     padding: 4px 14px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.65);
     color: #475569;
     font-weight: 400;
+    white-space: nowrap;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    font-size: clamp(11px, 1.35vw, 14px);
 }
 
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cpf-label {
@@ -4854,9 +4858,9 @@ a.historylink {
 }
 
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cpf-value {
-    font-size: 14px;
     font-weight: 400;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cpf-sep {
@@ -4865,8 +4869,8 @@ a.historylink {
 
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cnj-label,
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cnj-value {
-    font-size: 13px;
     font-weight: 400;
+    white-space: nowrap;
 }
 
 .agenda-panel__details-item--ap .agenda-panel__details-item-ap-cnj-value {
