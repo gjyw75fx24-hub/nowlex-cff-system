@@ -4786,6 +4786,46 @@ a.historylink {
     align-items: center;
 }
 
+.agenda-panel__details-item--ap {
+    display: grid;
+    grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    justify-content: initial;
+}
+
+.agenda-panel__details-item--ap .agenda-panel__details-item-ap-left,
+.agenda-panel__details-item--ap .agenda-panel__details-item-ap-right {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.agenda-panel__details-item--ap .agenda-panel__details-item-title {
+    align-items: flex-start;
+    text-align: left;
+    margin-bottom: 2px;
+}
+
+.agenda-panel__details-item--ap .agenda-panel__details-item-title-name,
+.agenda-panel__details-item--ap .agenda-panel__details-item-title-cpf {
+    text-align: left;
+}
+
+.agenda-panel__details-item--ap .agenda-panel__details-item-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.25;
+}
+
+.agenda-panel__details-item--ap .agenda-panel__details-original {
+    margin-left: 0;
+    align-self: flex-end;
+}
+
 @keyframes pulse-blue {
     0% {
         box-shadow: 0 0 0 0 rgba(0, 116, 255, 0.25);

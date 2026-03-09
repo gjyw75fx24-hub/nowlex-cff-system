@@ -3680,11 +3680,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 return roundedValue;
             }
         };
+        const buildAgendaSummary = (entryData, entryType) => {
+            if (!entryData) return '';
+            const candidates = [
+                entryData.title,
+                entryData.titulo,
+                entryData.summary,
+                entryData.description,
+                entryData.detail,
+                entryData.texto_bruto,
+            ];
+            const raw = candidates.find(value => value && String(value).trim());
+            if (!raw) return '';
+            const normalized = String(raw).replace(/\s+/g, ' ').trim();
+            if (entryType !== 'AP') {
+                return normalized;
+            }
+            let summary = normalized;
+            const sentence = normalized
+                .split(/[.!?]/)
+                .map(part => part.trim())
+                .filter(Boolean)[0];
+            if (sentence && sentence.length >= 20) {
+                summary = sentence;
+            }
+            const maxLen = 160;
+            if (summary.length > maxLen) {
+                let cut = summary.slice(0, maxLen);
+                const lastSpace = cut.lastIndexOf(' ');
+                if (lastSpace > 80) {
+                    cut = cut.slice(0, lastSpace);
+                }
+                summary = `${cut}...`;
+            }
+            return summary;
+        };
+
         entries.forEach(entryData => {
             const entry = document.createElement('div');
             entry.className = 'agenda-panel__details-item';
             entry.tabIndex = 0;
             const isTaskOrPrazo = type === 'T' || type === 'P';
+            const isAndamento = type === 'AP';
+            let apLeftColumn = null;
+            let apRightColumn = null;
             if (type === 'T' || type === 'P') {
                 entry.classList.add('agenda-panel__details-item--task');
             }
@@ -3741,18 +3780,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 label.textContent = entryData.label;
-                entry.appendChild(label);
             }
             const titleRow = buildEntryTitleRow(entryData);
-            if (titleRow) {
-                entry.appendChild(titleRow);
-            }
             let footer = null;
+            if (isAndamento) {
+                entry.classList.add('agenda-panel__details-item--ap');
+                apLeftColumn = document.createElement('div');
+                apLeftColumn.className = 'agenda-panel__details-item-ap-left';
+                apLeftColumn.appendChild(label);
+                if (titleRow) {
+                    apLeftColumn.appendChild(titleRow);
+                }
+                apRightColumn = document.createElement('div');
+                apRightColumn.className = 'agenda-panel__details-item-ap-right';
+                entry.appendChild(apLeftColumn);
+            } else {
+                if (!isSupervision) {
+                    entry.appendChild(label);
+                }
+                if (titleRow) {
+                    entry.appendChild(titleRow);
+                }
+            }
             if (type !== 'S') {
                 const text = document.createElement('span');
                 text.className = 'agenda-panel__details-item-text';
-                text.textContent = entryData.description || entryData.detail || entryData.label || '';
-                entry.appendChild(text);
+                text.textContent = isAndamento
+                    ? buildAgendaSummary(entryData, type)
+                    : (entryData.description || entryData.detail || entryData.label || '');
+                if (apRightColumn) {
+                    apRightColumn.appendChild(text);
+                    entry.appendChild(apRightColumn);
+                } else {
+                    entry.appendChild(text);
+                }
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
                 const analysisTypeShort = resolveEntryAnalysisTypeShort(entryData);
@@ -3928,6 +3989,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
                 if (footer) {
                     footer.appendChild(original);
+                } else if (apRightColumn) {
+                    apRightColumn.appendChild(original);
                 } else {
                     entry.appendChild(original);
                 }
