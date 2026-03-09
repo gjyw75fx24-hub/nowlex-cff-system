@@ -1026,6 +1026,34 @@ class DemandaAnaliseLoteSalvo(models.Model):
         return f'{self.nome} ({self.usuario})'
 
 
+class ProcessoCpfLoteSalvo(models.Model):
+    criado_por = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='processo_cpf_lotes_salvos',
+        verbose_name='Criado por',
+    )
+    nome = models.CharField(max_length=140, verbose_name='Nome da lista')
+    cpfs = models.TextField(verbose_name='CPFs')
+    compartilhado = models.BooleanField(default=False, verbose_name='Compartilhado')
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
+
+    class Meta:
+        verbose_name = 'Lista salva de CPFs'
+        verbose_name_plural = 'Listas salvas de CPFs'
+        ordering = ['-atualizado_em', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['criado_por', 'nome'],
+                name='uniq_processo_cpf_lote_criado_por_nome',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.nome} ({self.criado_por})'
+
+
 class Tarefa(models.Model):
     PRIORIDADE_CHOICES = [
         ('B', 'Baixa'),

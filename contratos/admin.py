@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AndamentoProcessualPendente, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
-    KpiGlobalConfig,
+    KpiGlobalConfig, ProcessoCpfLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
@@ -5133,6 +5133,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'peticao_kind',
         'peticao_pendente',
         'cpf_lote',
+        'cpf_lote_id',
         'priority_kpi_tag_id',
         'priority_kpi_status',
         'priority_kpi_uf',
@@ -5166,6 +5167,7 @@ class ProcessoJudicialChangeList(ChangeList):
             "peticao_carteira_id",
             "peticao_pendente",
             "cpf_lote",
+            "cpf_lote_id",
             "priority_kpi_tag_id",
         )
         if any(request.GET.get(param) for param in scoped_params):
@@ -7365,7 +7367,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
-    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk', 'inserir_lembrete', 'ligar_busca_ativa_em_lote']
+    actions = [
+        'excluir_andamentos_selecionados',
+        'delegate_processes',
+        'change_carteira_bulk',
+        'inserir_lembrete',
+        'ligar_busca_ativa_em_lote',
+        'cpf_lote_manage',
+    ]
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
@@ -7401,6 +7410,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'peticao_kind',
             'peticao_pendente',
             'cpf_lote',
+            'cpf_lote_id',
             'priority_kpi_tag_id',
             'priority_kpi_status',
             'priority_kpi_uf',
@@ -7796,8 +7806,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
 
-    def _parse_cpf_lote_param(self, request):
-        raw = str(request.GET.get('cpf_lote') or '').strip()
+    def _parse_cpf_lote_text(self, raw_text):
+        raw = str(raw_text or '').strip()
         if not raw:
             return []
         matches = re.findall(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b', raw)
@@ -7813,6 +7823,36 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             cpfs.append(digits)
         return cpfs
 
+    def _get_cpf_lote_obj(self, request, lote_id):
+        lote_id = str(lote_id or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return None
+        try:
+            lote_pk = int(lote_id)
+        except (TypeError, ValueError):
+            return None
+        return (
+            ProcessoCpfLoteSalvo.objects
+            .filter(
+                Q(compartilhado=True) | Q(criado_por=request.user),
+                id=lote_pk,
+            )
+            .select_related('criado_por')
+            .first()
+        )
+
+    def _parse_cpf_lote_param(self, request):
+        raw = str(request.GET.get('cpf_lote') or '').strip()
+        if raw:
+            return self._parse_cpf_lote_text(raw)
+        lote_id = request.GET.get('cpf_lote_id')
+        if lote_id:
+            lote_obj = self._get_cpf_lote_obj(request, lote_id)
+            if lote_obj:
+                request._cpf_lote_obj = lote_obj
+                return self._parse_cpf_lote_text(lote_obj.cpfs)
+        return []
+
     def _format_cpf_display(self, cpf_digits):
         digits = re.sub(r'\D', '', str(cpf_digits or ''))
         if len(digits) == 11:
@@ -7824,12 +7864,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if cached is not None:
             return cached
         cpfs = self._parse_cpf_lote_param(request)
+        lote_obj = getattr(request, '_cpf_lote_obj', None)
         info = {
             'raw': str(request.GET.get('cpf_lote') or ''),
             'cpfs': cpfs,
             'process_ids': set(),
             'found': set(),
             'missing': [],
+            'lote_id': getattr(lote_obj, 'id', None),
+            'lote_label': getattr(lote_obj, 'nome', ''),
         }
         if not cpfs:
             request._cpf_lote_cache = info
@@ -9255,9 +9298,17 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'missing_more': max(len(missing_list_sorted) - max_items, 0),
             }
             extra_context['cpf_lote_input'] = cpf_info.get('raw', '')
+            extra_context['cpf_lote_label'] = cpf_info.get('lote_label', '')
+            extra_context['cpf_lote_id'] = cpf_info.get('lote_id')
         else:
             extra_context['cpf_lote_summary'] = None
             extra_context['cpf_lote_input'] = ''
+            extra_context['cpf_lote_label'] = ''
+            extra_context['cpf_lote_id'] = None
+        extra_context['cpf_lote_list_url'] = reverse('admin:processo_cpf_lote_list')
+        extra_context['cpf_lote_save_url'] = reverse('admin:processo_cpf_lote_save')
+        extra_context['cpf_lote_delete_url'] = reverse('admin:processo_cpf_lote_delete')
+        extra_context['cpf_lote_share_url'] = reverse('admin:processo_cpf_lote_share')
         response = super().changelist_view(request, extra_context=extra_context)
         context_data = getattr(response, 'context_data', None)
         if not context_data:
@@ -9322,12 +9373,117 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('lembretes/', self.admin_site.admin_view(self.lembretes_view), name='processo_lembretes'),
             path('delegate-select-user/', self.admin_site.admin_view(self.delegate_select_user_view), name='processo_delegate_select_user'), # NEW PATH
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
+            path('cpf-lote/listar/', self.admin_site.admin_view(self.cpf_lote_list_view), name='processo_cpf_lote_list'),
+            path('cpf-lote/salvar/', self.admin_site.admin_view(self.cpf_lote_save_view), name='processo_cpf_lote_save'),
+            path('cpf-lote/remover/', self.admin_site.admin_view(self.cpf_lote_delete_view), name='processo_cpf_lote_delete'),
+            path('cpf-lote/compartilhar/', self.admin_site.admin_view(self.cpf_lote_share_view), name='processo_cpf_lote_share'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
             path('<path:object_id>/remover-andamentos-duplicados/', self.admin_site.admin_view(self.remover_andamentos_duplicados_view), name='processo_remover_andamentos_duplicados'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
             path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
+
+    def _cpf_lote_accessible_qs(self, request):
+        return (
+            ProcessoCpfLoteSalvo.objects
+            .filter(Q(compartilhado=True) | Q(criado_por=request.user))
+            .select_related('criado_por')
+        )
+
+    def _cpf_lote_count(self, raw_text):
+        return len(self._parse_cpf_lote_text(raw_text))
+
+    def cpf_lote_list_view(self, request):
+        if request.method != 'GET':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        data = []
+        for item in self._cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
+            data.append({
+                'id': item.id,
+                'nome': item.nome,
+                'compartilhado': bool(item.compartilhado),
+                'criado_por': item.criado_por.get_username() if item.criado_por else '',
+                'is_owner': item.criado_por_id == request.user.id,
+                'quantidade': self._cpf_lote_count(item.cpfs),
+                'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M'),
+            })
+        return JsonResponse({'lists': data})
+
+    def cpf_lote_save_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        nome = str(payload.get('nome') or '').strip()
+        if not nome:
+            return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        raw_cpfs = str(payload.get('cpfs') or '').strip()
+        source_id = str(payload.get('source_id') or '').strip()
+        if not raw_cpfs and source_id:
+            source_obj = self._get_cpf_lote_obj(request, source_id)
+            if source_obj:
+                raw_cpfs = source_obj.cpfs
+        cpfs = self._parse_cpf_lote_text(raw_cpfs)
+        if not cpfs:
+            return JsonResponse({'error': 'Informe ao menos um CPF válido.'}, status=400)
+        normalized = ', '.join(cpfs)
+        existing = ProcessoCpfLoteSalvo.objects.filter(criado_por=request.user, nome=nome).first()
+        created = False
+        if existing:
+            lote = existing
+        else:
+            lote = ProcessoCpfLoteSalvo(criado_por=request.user, nome=nome)
+            created = True
+        lote.cpfs = normalized
+        lote.compartilhado = compartilhado
+        lote.save()
+        return JsonResponse({'id': lote.id, 'created': created})
+
+    def cpf_lote_delete_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.delete()
+        return JsonResponse({'ok': True})
+
+    def cpf_lote_share_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.compartilhado = compartilhado
+        lote.save(update_fields=['compartilhado', 'atualizado_em'])
+        return JsonResponse({'ok': True, 'compartilhado': lote.compartilhado})
 
     def online_presence_heartbeat_view(self, request, object_id):
         if request.method != 'POST':
@@ -9726,6 +9882,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             self.message_user(request, "Nenhum CNJ encontrado para aplicar o lembrete.", messages.WARNING)
         return None
     inserir_lembrete.short_description = "Inserir Lembrete"
+
+    def cpf_lote_manage(self, request, queryset):
+        self.message_user(
+            request,
+            "Use a opção 'Listas salvas de CPF (lote)' com o gerenciador aberto.",
+            messages.INFO,
+        )
+        return None
+    cpf_lote_manage.short_description = "Listas salvas de CPF (lote)"
 
     def ligar_busca_ativa_em_lote(self, request, queryset):
         updated = queryset.filter(busca_ativa=False).update(busca_ativa=True)
