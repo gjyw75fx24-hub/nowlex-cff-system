@@ -458,6 +458,10 @@
             min-width: 88px;
             white-space: nowrap;
         }
+        #result_list thead th.column-importado_em_lista {
+            position: relative;
+            overflow: visible;
+        }
         #result_list.show-importado-em .column-importado_em_lista,
         #result_list.show-importado-em .field-importado_em_lista {
             display: table-cell;
@@ -478,6 +482,69 @@
             border-color: #7fa8d6;
             color: #1f3f63;
             font-weight: 600;
+        }
+        .importado-date-popover {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            background: #fff;
+            border: 1px solid #c7d3e6;
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 16px 32px rgba(15, 58, 118, 0.18);
+            z-index: 40;
+            display: grid;
+            gap: 8px;
+            min-width: 200px;
+        }
+        .importado-date-popover[hidden] {
+            display: none;
+        }
+        .importado-date-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .importado-date-input {
+            flex: 1;
+            border: 1px solid #c7d3e6;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 0.78rem;
+            color: #1f2f3f;
+        }
+        .importado-date-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        .importado-date-actions button {
+            border: 1px solid #c7d3e6;
+            background: #f7fbff;
+            color: #1f3f68;
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 0.72rem;
+            cursor: pointer;
+        }
+        .importado-date-actions button:hover {
+            background: #e7effc;
+        }
+        .importado-date-hint {
+            font-size: 0.7rem;
+            color: #64748b;
+        }
+        .importado-date-reset {
+            border: 1px solid #c6d3e0;
+            background: #f7fbff;
+            color: #1f3f68;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 0.72rem;
+            cursor: pointer;
+        }
+        .importado-date-reset:hover {
+            background: #e7effc;
         }
         #result_list thead th.column-proxima_prescricao_lista .text {
             z-index: 7;
@@ -930,7 +997,7 @@
                         };
 
                         const params = new URLSearchParams(window.location.search);
-                        if (params.get('show_importado') === '1') {
+                        if (params.get('show_importado') === '1' || params.get('importado_em')) {
                             table.classList.add('show-importado-em');
                         }
                         refreshState(true);
@@ -955,6 +1022,101 @@
                         });
                     }
                 }
+            }
+
+            const importadoHeader = document.querySelector('#result_list thead th.column-importado_em_lista');
+            if (importadoHeader && !importadoHeader.querySelector('.importado-date-popover')) {
+                const importadoParams = new URLSearchParams(window.location.search);
+                const activeImportado = importadoParams.get('importado_em') || '';
+
+                const popover = document.createElement('div');
+                popover.className = 'importado-date-popover';
+                popover.hidden = true;
+
+                const input = document.createElement('input');
+                input.type = 'date';
+                input.className = 'importado-date-input';
+                if (activeImportado) {
+                    input.value = activeImportado;
+                }
+
+                const actions = document.createElement('div');
+                actions.className = 'importado-date-actions';
+
+                const applyBtn = document.createElement('button');
+                applyBtn.type = 'button';
+                applyBtn.textContent = 'Aplicar';
+
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.textContent = 'Limpar';
+
+                actions.appendChild(clearBtn);
+                actions.appendChild(applyBtn);
+
+                const hint = document.createElement('div');
+                hint.className = 'importado-date-hint';
+                hint.textContent = 'Shift + clique no título para abrir.';
+
+                popover.appendChild(input);
+                popover.appendChild(actions);
+                popover.appendChild(hint);
+                importadoHeader.appendChild(popover);
+
+                const applyDate = (value) => {
+                    const nextParams = new URLSearchParams(window.location.search);
+                    if (value) {
+                        nextParams.set('importado_em', value);
+                        nextParams.set('show_importado', '1');
+                    } else {
+                        nextParams.delete('importado_em');
+                    }
+                    nextParams.delete('p');
+                    const nextQuery = nextParams.toString();
+                    window.location.href = nextQuery
+                        ? `${window.location.pathname}?${nextQuery}`
+                        : window.location.pathname;
+                };
+
+                applyBtn.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    applyDate(input.value);
+                });
+
+                clearBtn.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    input.value = '';
+                    applyDate('');
+                });
+
+                input.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyDate(input.value);
+                    }
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        popover.hidden = true;
+                    }
+                });
+
+                importadoHeader.addEventListener('click', (event) => {
+                    if (!event.shiftKey) {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    popover.hidden = !popover.hidden;
+                    if (!popover.hidden) {
+                        input.focus();
+                    }
+                });
+
+                document.addEventListener('click', (event) => {
+                    if (!importadoHeader.contains(event.target)) {
+                        popover.hidden = true;
+                    }
+                });
             }
 
             const globalParams = new URLSearchParams(window.location.search);
@@ -986,6 +1148,30 @@
                         : window.location.pathname;
                 });
                 resetMount.appendChild(resetBtn);
+            }
+
+            const importadoDateValue = globalParams.get('importado_em') || '';
+            if (importadoDateValue && resetMount && !resetMount.querySelector('.importado-date-reset')) {
+                const [year, month, day] = importadoDateValue.split('-');
+                const formattedDate = (day && month && year)
+                    ? `${day}/${month}/${year}`
+                    : importadoDateValue;
+                const importadoReset = document.createElement('button');
+                importadoReset.type = 'button';
+                importadoReset.className = 'importado-date-reset';
+                importadoReset.textContent = `Importado em: ${formattedDate} ×`;
+                importadoReset.title = 'Remover filtro de importação';
+                importadoReset.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    const nextParams = new URLSearchParams(window.location.search);
+                    nextParams.delete('importado_em');
+                    nextParams.delete('p');
+                    const nextQuery = nextParams.toString();
+                    window.location.href = nextQuery
+                        ? `${window.location.pathname}?${nextQuery}`
+                        : window.location.pathname;
+                });
+                resetMount.appendChild(importadoReset);
             }
         });
     </script>

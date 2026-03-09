@@ -610,8 +610,8 @@
                                     {% for row in preview_rows %}
                                         <div class="checagem-question">
                                             <div class="checagem-question-top">
-                                                <label class="checagem-question-checkbox{% if row.already_imported %} is-disabled{% endif %}">
-                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}" {% if row.already_imported %}disabled{% endif %}>
+                                                <label class="checagem-question-checkbox{% if row.already_imported and not replace_primary_carteira %} is-disabled{% endif %}">
+                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}" {% if row.already_imported and not replace_primary_carteira %}disabled{% endif %}>
                                                     <span></span>
                                                 </label>
                                                 <span class="checagem-question-uf checagem-question-uf--left">{{ row.uf_endereco|default:'SEM_UF' }}</span>

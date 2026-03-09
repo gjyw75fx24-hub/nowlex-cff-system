@@ -1306,6 +1306,7 @@ def demandas_analise_view(request):
         "antes de confirmar a importação."
     )
     form_is_valid = False
+    replace_primary_carteira = False
 
     def _normalize_preview_uf(value: Optional[str]) -> str:
         uf = (value or '').strip().upper()
@@ -1388,7 +1389,7 @@ def demandas_analise_view(request):
             key=lambda item: (item["uf"] == 'SEM_UF', item["uf"])
         )
         for item in ordered:
-            item["disabled"] = item["pending"] == 0
+            item["disabled"] = item["pending"] == 0 and not replace_primary_carteira
         return ordered
 
     def _get_imported_cnjs_for_carteira(valid_cnjs, carteira_obj):
@@ -1465,7 +1466,7 @@ def demandas_analise_view(request):
                 "imported": imported_total,
                 "pending": pending_total,
                 "valid_total": valid_total,
-                "disabled": pending_total == 0,
+                "disabled": pending_total == 0 and not replace_primary_carteira,
             })
         return options
 
@@ -1638,7 +1639,10 @@ def demandas_analise_view(request):
                                 for row in preview_rows
                                 if str(row.get('cpf_raw') or '').strip()
                                 and _normalize_preview_uf(row.get('uf_endereco')) in selected_ufs_set
-                                and not bool(row.get('already_imported'))
+                                and (
+                                    replace_primary_carteira
+                                    or not bool(row.get('already_imported'))
+                                )
                             })
                             if filtered_cpfs and selected_ufs_set:
                                 import_scope_label = "UFs: " + ", ".join(sorted(selected_ufs_set))
@@ -1849,6 +1853,7 @@ def demandas_analise_view(request):
         "preview_uf_explainer": preview_uf_explainer,
         "import_feedback_text": import_feedback_text,
         "import_feedback_level": import_feedback_level,
+        "replace_primary_carteira": replace_primary_carteira,
         "selected_ufs": selected_ufs,
         "selected_mode": selected_mode,
         "saved_lotes": saved_lotes,
@@ -7626,6 +7631,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             ),
             importado_em=models.Min('numeros_cnj__criado_em'),
         )
+        importado_em_filter = parse_date(request.GET.get('importado_em') or '')
+        if importado_em_filter:
+            qs = qs.filter(importado_em__date=importado_em_filter)
         prescricao_mes = self._safe_positive_int(request.GET.get('prescricao_mes'))
         if prescricao_mes and 1 <= prescricao_mes <= 12:
             qs = qs.filter(proxima_prescricao_futura__month=prescricao_mes)
