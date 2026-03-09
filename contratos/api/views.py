@@ -452,6 +452,7 @@ class AgendaGeralAPIView(APIView):
                 ),
                 'processo_id': processo.pk if processo else None,
                 'cnj_label': (processo.cnj if processo else '') or 'CNJ não informado',
+                'uf': (processo.uf if processo else '') or '',
                 'nome': meta.get('nome', ''),
                 'parte_nome': meta.get('nome', ''),
                 'cpf': meta.get('cpf', ''),

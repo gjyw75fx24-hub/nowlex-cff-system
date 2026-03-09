@@ -2889,7 +2889,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     const getTypePrefix = (type) => {
-        if (type === 'AP') return 'Andamento';
+        if (type === 'AP') return 'Andamento Processual';
         if (type === 'P') return 'Prazo';
         if (type === 'S') return 'Supervisão';
         return 'Tarefa';
@@ -2927,7 +2927,15 @@ document.addEventListener('DOMContentLoaded', function() {
         list.forEach((entry, index) => {
             const prefix = getTypePrefix(type);
             entry.id = entry.id || `${type.toLowerCase()}-${dayInfo.day}-${index + 1}`;
-            entry.label = type === 'S' ? 'S' : (type === 'AP' ? 'AP' : `${index + 1}`);
+            const ufCode = type === 'AP'
+                ? (entry.uf || '').toString().trim().toUpperCase()
+                : '';
+            entry.label = type === 'S'
+                ? 'S'
+                : (type === 'AP' ? (ufCode || 'AP') : `${index + 1}`);
+            if (type === 'AP' && ufCode) {
+                entry.uf = ufCode;
+            }
             const baseDescription = entry.description || entry.descricao || entry.titulo || entry.title;
             entry.description = baseDescription || `${prefix} ${dayInfo.day}.${index + 1}`;
             entry.originalDay = entry.originalDay || dayInfo.day;
@@ -3715,6 +3723,25 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             return summary;
         };
+        const resolveEntryNameCpf = (entryData) => {
+            if (!entryData) {
+                return { name: '', normalizedCpf: '' };
+            }
+            hydrateEntryProcessMeta(entryData);
+            const cardMeta = entryData.processo_id ? getParteInfoFromCard(entryData.processo_id) : {};
+            const name = entryData.nome || entryData.name || entryData.parte_nome || cardMeta.name || '';
+            const cpfCandidates = [
+                entryData.cpf,
+                entryData.parte_cpf,
+                entryData.documento,
+                entryData.cpf_falecido,
+                entryData.cpf_representante,
+                cardMeta.cpf,
+            ];
+            const cpfRaw = cpfCandidates.find(Boolean) || '';
+            const normalizedCpf = normalizeCpf(cpfRaw);
+            return { name, normalizedCpf };
+        };
 
         entries.forEach(entryData => {
             const entry = document.createElement('div');
@@ -3722,8 +3749,6 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.tabIndex = 0;
             const isTaskOrPrazo = type === 'T' || type === 'P';
             const isAndamento = type === 'AP';
-            let apLeftColumn = null;
-            let apRightColumn = null;
             if (type === 'T' || type === 'P') {
                 entry.classList.add('agenda-panel__details-item--task');
             }
@@ -3781,19 +3806,64 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 label.textContent = entryData.label;
             }
-            const titleRow = buildEntryTitleRow(entryData);
+            const titleRow = isAndamento ? null : buildEntryTitleRow(entryData);
             let footer = null;
             if (isAndamento) {
                 entry.classList.add('agenda-panel__details-item--ap');
-                apLeftColumn = document.createElement('div');
-                apLeftColumn.className = 'agenda-panel__details-item-ap-left';
-                apLeftColumn.appendChild(label);
-                if (titleRow) {
-                    apLeftColumn.appendChild(titleRow);
+                label.classList.add('agenda-panel__details-item-ap-badge');
+                const { name, normalizedCpf } = resolveEntryNameCpf(entryData);
+                const header = document.createElement('div');
+                header.className = 'agenda-panel__details-item-ap-header';
+                header.appendChild(label);
+                if (name) {
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'agenda-panel__details-item-ap-name';
+                    nameSpan.textContent = name;
+                    header.appendChild(nameSpan);
                 }
-                apRightColumn = document.createElement('div');
-                apRightColumn.className = 'agenda-panel__details-item-ap-right';
-                entry.appendChild(apLeftColumn);
+                entry.appendChild(header);
+                if (normalizedCpf) {
+                    const cpfRow = document.createElement('div');
+                    cpfRow.className = 'agenda-panel__details-item-ap-cpf';
+                    const cpfLabel = document.createElement('span');
+                    cpfLabel.className = 'agenda-panel__details-item-ap-cpf-label';
+                    cpfLabel.textContent = 'CPF:';
+                    const cpfValue = document.createElement('span');
+                    cpfValue.className = 'agenda-panel__details-item-ap-cpf-value';
+                    cpfValue.textContent = formatCpfValue(normalizedCpf);
+                    cpfValue.setAttribute('title', 'Clique para copiar o CPF sem formatação');
+                    cpfValue.addEventListener('click', () => {
+                        navigator.clipboard?.writeText(normalizedCpf)?.then(() => {
+                            cpfValue.classList.add('copied');
+                            setTimeout(() => cpfValue.classList.remove('copied'), 1000);
+                        }).catch(() => {});
+                    });
+                    cpfRow.append(cpfLabel, cpfValue);
+                    const cnjLabel = (entryData.cnj_label || entryData.cnj || '').toString().trim();
+                    if (cnjLabel && !/não informado/i.test(cnjLabel)) {
+                        const separator = document.createElement('span');
+                        separator.className = 'agenda-panel__details-item-ap-cpf-sep';
+                        separator.textContent = '|';
+                        const cnjText = document.createElement('span');
+                        cnjText.className = 'agenda-panel__details-item-ap-cnj-label';
+                        cnjText.textContent = 'CNJ:';
+                        const cnjValue = document.createElement('span');
+                        cnjValue.className = 'agenda-panel__details-item-ap-cnj-value';
+                        cnjValue.textContent = cnjLabel;
+                        cnjValue.setAttribute('title', 'Clique para copiar o CNJ');
+                        cnjValue.addEventListener('click', () => {
+                            navigator.clipboard?.writeText(cnjLabel)?.then(() => {
+                                cnjValue.classList.add('copied');
+                                setTimeout(() => cnjValue.classList.remove('copied'), 1000);
+                            }).catch(() => {});
+                        });
+                        cpfRow.append(separator, cnjText, cnjValue);
+                    }
+                    entry.appendChild(cpfRow);
+                }
+                const divider = document.createElement('div');
+                divider.className = 'agenda-panel__details-item-ap-divider';
+                entry.appendChild(divider);
             } else {
                 if (!isSupervision) {
                     entry.appendChild(label);
@@ -3808,12 +3878,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 text.textContent = isAndamento
                     ? buildAgendaSummary(entryData, type)
                     : (entryData.description || entryData.detail || entryData.label || '');
-                if (apRightColumn) {
-                    apRightColumn.appendChild(text);
-                    entry.appendChild(apRightColumn);
-                } else {
-                    entry.appendChild(text);
-                }
+                entry.appendChild(text);
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
                 const analysisTypeShort = resolveEntryAnalysisTypeShort(entryData);
@@ -3987,10 +4052,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     ? 'agenda-panel__details-item-origin'
                     : 'agenda-panel__details-original';
                 original.textContent = `Origem: ${formatDateLabel(entryData.originalDate)}`;
-                if (footer) {
+                if (isAndamento) {
+                    const apFooter = document.createElement('div');
+                    apFooter.className = 'agenda-panel__details-item-ap-footer';
+                    apFooter.appendChild(original);
+                    entry.appendChild(apFooter);
+                } else if (footer) {
                     footer.appendChild(original);
-                } else if (apRightColumn) {
-                    apRightColumn.appendChild(original);
                 } else {
                     entry.appendChild(original);
                 }
@@ -5463,7 +5531,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     : type === 'S'
                         ? 'Supervisão'
                         : type === 'AP'
-                            ? 'Andamento'
+                            ? 'Andamento Processual'
                             : '';
             detailTitleType.textContent = typeLabel;
             detailTitleType.dataset.type = type || '';
