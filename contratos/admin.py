@@ -1718,9 +1718,15 @@ def demandas_analise_view(request):
                             request.session[lote_selected_session_key] = lote_obj_for_import.id
                         summary = []
                         if import_result.get("imported"):
-                            summary.append(f"{import_result['imported']} importados")
+                            if replace_primary_carteira:
+                                summary.append(f"{import_result['imported']} corrigidos")
+                            else:
+                                summary.append(f"{import_result['imported']} importados")
                         if import_result.get("skipped"):
-                            summary.append(f"{import_result['skipped']} ignorados")
+                            if replace_primary_carteira:
+                                summary.append(f"{import_result['skipped']} sem alteração")
+                            else:
+                                summary.append(f"{import_result['skipped']} ignorados")
                         minimal_created = int(import_result.get("minimal_created") or 0)
                         minimal_linked = int(import_result.get("minimal_linked") or 0)
                         if minimal_created:
@@ -1731,20 +1737,29 @@ def demandas_analise_view(request):
                         if ignored_invalid_count:
                             summary.append(f"{ignored_invalid_count} inválidos ignorados")
                         if summary:
+                            prefix = "Correção de carteira concluída" if replace_primary_carteira else "Importação concluída"
                             if import_scope_label:
-                                messages.success(request, f"Importação concluída ({import_scope_label}): " + ", ".join(summary))
-                                import_feedback_text = f"Importação concluída ({import_scope_label}): " + ", ".join(summary)
+                                messages.success(request, f"{prefix} ({import_scope_label}): " + ", ".join(summary))
+                                import_feedback_text = f"{prefix} ({import_scope_label}): " + ", ".join(summary)
                             else:
-                                messages.success(request, "Importação concluída: " + ", ".join(summary))
-                                import_feedback_text = "Importação concluída: " + ", ".join(summary)
+                                messages.success(request, f"{prefix}: " + ", ".join(summary))
+                                import_feedback_text = f"{prefix}: " + ", ".join(summary)
                             import_feedback_level = "success"
+                        else:
+                            if replace_primary_carteira:
+                                messages.info(request, "Nenhum cadastro foi corrigido.")
+                                import_feedback_text = "Nenhum cadastro foi corrigido."
+                            else:
+                                messages.info(request, "Nenhum cadastro foi importado.")
+                                import_feedback_text = "Nenhum cadastro foi importado."
+                            import_feedback_level = "info"
+                    elif import_action in ("import_all", "import_selected") and not import_feedback_text:
+                        if replace_primary_carteira:
+                            messages.info(request, "Nenhum cadastro foi corrigido.")
+                            import_feedback_text = "Nenhum cadastro foi corrigido."
                         else:
                             messages.info(request, "Nenhum cadastro foi importado.")
                             import_feedback_text = "Nenhum cadastro foi importado."
-                            import_feedback_level = "info"
-                    elif import_action in ("import_all", "import_selected") and not import_feedback_text:
-                        messages.info(request, "Nenhum cadastro foi importado.")
-                        import_feedback_text = "Nenhum cadastro foi importado."
                         import_feedback_level = "info"
             else:
                 data_de = form.cleaned_data['data_de']
@@ -1785,13 +1800,23 @@ def demandas_analise_view(request):
                     if import_result:
                         summary = []
                         if import_result.get("imported"):
-                            summary.append(f"{import_result['imported']} importados")
+                            if replace_primary_carteira:
+                                summary.append(f"{import_result['imported']} corrigidos")
+                            else:
+                                summary.append(f"{import_result['imported']} importados")
                         if import_result.get("skipped"):
-                            summary.append(f"{import_result['skipped']} ignorados")
+                            if replace_primary_carteira:
+                                summary.append(f"{import_result['skipped']} sem alteração")
+                            else:
+                                summary.append(f"{import_result['skipped']} ignorados")
                         if summary:
-                            messages.success(request, "Importação concluída: " + ", ".join(summary))
+                            prefix = "Correção de carteira concluída" if replace_primary_carteira else "Importação concluída"
+                            messages.success(request, f"{prefix}: " + ", ".join(summary))
                         else:
-                            messages.info(request, "Nenhum CPF foi importado.")
+                            if replace_primary_carteira:
+                                messages.info(request, "Nenhum cadastro foi corrigido.")
+                            else:
+                                messages.info(request, "Nenhum CPF foi importado.")
         except DemandasImportError as exc:
             messages.error(request, str(exc))
 
