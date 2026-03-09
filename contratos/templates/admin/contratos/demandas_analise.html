@@ -585,6 +585,7 @@
                                                            name="selected_ufs"
                                                            value="{{ uf_item.uf }}"
                                                            {% if uf_item.disabled %}disabled{% endif %}
+                                                           data-initial-disabled="{% if uf_item.disabled %}1{% else %}0{% endif %}"
                                                            {% if uf_item.uf in selected_ufs and not uf_item.disabled %}checked{% endif %}>
                                                     <strong>{{ uf_item.uf }}</strong>
                                                     <small>{{ uf_item.pending }} pend. / {{ uf_item.total }} total</small>
@@ -611,7 +612,12 @@
                                         <div class="checagem-question">
                                             <div class="checagem-question-top">
                                                 <label class="checagem-question-checkbox{% if row.already_imported and not replace_primary_carteira %} is-disabled{% endif %}">
-                                                    <input type="checkbox" name="selected_cpfs" value="{{ row.cpf_raw }}" {% if row.already_imported and not replace_primary_carteira %}disabled{% endif %}>
+                                                    <input
+                                                        type="checkbox"
+                                                        name="selected_cpfs"
+                                                        value="{{ row.cpf_raw }}"
+                                                        {% if row.already_imported and not replace_primary_carteira %}disabled{% endif %}
+                                                        data-initial-disabled="{% if row.already_imported %}1{% else %}0{% endif %}">
                                                     <span></span>
                                                 </label>
                                                 <span class="checagem-question-uf checagem-question-uf--left">{{ row.uf_endereco|default:'SEM_UF' }}</span>
@@ -763,6 +769,9 @@ document.addEventListener('DOMContentLoaded', function () {
         const savedNameInput = demandasForm.querySelector('input[name="lote_salvo_nome"]');
         const savedIdSelect = demandasForm.querySelector('select[name="lote_salvo_id"]');
         const loteIdentifiersInput = demandasForm.querySelector('textarea[name="lote_identificadores"]');
+        const correctionToggle = demandasForm.querySelector('#id_replace_primary_carteira');
+        const ufCheckboxes = Array.from(demandasForm.querySelectorAll('.demandas-uf-option input[name="selected_ufs"]'));
+        const cpfCheckboxes = Array.from(demandasForm.querySelectorAll('input[name="selected_cpfs"]'));
         actionButtons.forEach((button) => {
             button.addEventListener('click', () => {
                 if (actionOverrideField) {
@@ -770,6 +779,42 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
         });
+
+        const syncCorrectionState = () => {
+            if (!correctionToggle) return;
+            const enableCorrection = correctionToggle.checked;
+            ufCheckboxes.forEach((input) => {
+                if (!input.dataset || input.dataset.initialDisabled !== '1') {
+                    return;
+                }
+                if (enableCorrection) {
+                    input.disabled = false;
+                    input.closest('.demandas-uf-option')?.classList.remove('is-disabled');
+                } else {
+                    input.disabled = true;
+                    input.checked = false;
+                    input.closest('.demandas-uf-option')?.classList.add('is-disabled');
+                }
+            });
+            cpfCheckboxes.forEach((input) => {
+                if (!input.dataset || input.dataset.initialDisabled !== '1') {
+                    return;
+                }
+                if (enableCorrection) {
+                    input.disabled = false;
+                    input.closest('.checagem-question-checkbox')?.classList.remove('is-disabled');
+                } else {
+                    input.disabled = true;
+                    input.checked = false;
+                    input.closest('.checagem-question-checkbox')?.classList.add('is-disabled');
+                }
+            });
+        };
+
+        if (correctionToggle) {
+            correctionToggle.addEventListener('change', syncCorrectionState);
+            syncCorrectionState();
+        }
 
         let submitting = false;
         demandasForm.addEventListener('submit', (event) => {
