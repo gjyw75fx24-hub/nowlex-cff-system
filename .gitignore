@@ -24,6 +24,11 @@ carteira_consignado_dump_*.dump
 E - PASSIVAS - Modelo.xlsx
 erp_contratos_status3_CANCELADOS.xlsx
 
+# Arquivos locais de monitoria / relatórios
+01 - Monitoria Inicial - *.docx
+01 - Monitoria Inicial - *.pdf
+produtividade-por-usuario-*.jpg
+
 # Arquivos de ambiente (NUNCA commitar!)
 .env
 .env.*

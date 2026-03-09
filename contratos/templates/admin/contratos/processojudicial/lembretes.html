@@ -7,6 +7,7 @@
 <script src="{% url 'admin:jsi18n' %}"></script>
 {% endif %}
 {{ media.js }}
+<script defer src="{% static 'admin/js/processo_judicial_enhancer.js' %}?v=20260217c"></script>
 <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
 <link rel="stylesheet" href="{% static 'admin/css/changelists.css' %}">
 <script src="{% static 'admin/js/filters.js' %}" defer></script>
@@ -691,8 +692,23 @@
     {% include "admin/contratos/processojudicial/mapa_uf_interativo.html" %}
   </div>
 </div>
+<!-- Modal de lembrete em massa -->
+<div id="lembrete-modal" style="display:none; position: fixed; z-index: 2000; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.2); align-items: center; justify-content: center;">
+  <div style="background:#fff; padding:16px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.2); min-width:280px; max-width:90%;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="margin:0;">Inserir lembrete em lote</h3>
+      <button type="button" id="lembrete-close" style="border:none; background:transparent; font-size:20px; cursor:pointer;">×</button>
+    </div>
+    <label for="lembrete-dias" style="display:block; margin-bottom:8px; font-weight:bold;">Periodicidade (dias)</label>
+    <input type="number" id="lembrete-dias" min="1" step="1" style="width:100%; padding:6px; margin-bottom:12px;" placeholder="Ex.: 30">
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button type="button" id="lembrete-cancel" class="button">Cancelar</button>
+      <button type="button" id="lembrete-confirm" class="button default">Aplicar</button>
+    </div>
+  </div>
+</div>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+const insertAgendaPlaceholder = () => {
   const filterDiv = document.getElementById('changelist-filter');
   if (filterDiv && !filterDiv.querySelector('.custom-filters-wrapper')) {
     const filterTitle = filterDiv.querySelector('h2');
@@ -977,11 +993,11 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   const navSidebar = document.getElementById('nav-sidebar');
   if (!navSidebar || navSidebar.querySelector('.agenda-placeholder-row')) {
-    return;
+    return false;
   }
   const processoRow = navSidebar.querySelector('tr.model-processojudicial');
   if (!processoRow || !processoRow.parentNode) {
-    return;
+    return false;
   }
   const placeholderRow = document.createElement('tr');
   placeholderRow.className = 'agenda-placeholder-row';
@@ -1018,6 +1034,86 @@ document.addEventListener('DOMContentLoaded', function() {
   `;
   placeholderRow.appendChild(placeholderCell);
   processoRow.parentNode.insertBefore(placeholderRow, processoRow.nextSibling);
+  return true;
+};
+const insertedAgenda = insertAgendaPlaceholder();
+if (!insertedAgenda) {
+  document.addEventListener('DOMContentLoaded', insertAgendaPlaceholder);
+}
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const form = document.getElementById('changelist-form');
+  const actionSelect = form ? form.querySelector('select[name="action"]') : null;
+  const lembreteModal = document.getElementById('lembrete-modal');
+  const lembreteInput = document.getElementById('lembrete-dias');
+  const lembreteConfirm = document.getElementById('lembrete-confirm');
+  const lembreteCancel = document.getElementById('lembrete-cancel');
+  const lembreteClose = document.getElementById('lembrete-close');
+
+  if (!form || !actionSelect || !lembreteModal) return;
+
+  const getSelectedIds = () => {
+    return Array.from(form.querySelectorAll('input.action-select:checked')).map(el => el.value);
+  };
+
+  const showLembreteModal = () => {
+    lembreteModal.style.display = 'flex';
+    if (lembreteInput) {
+      lembreteInput.focus();
+    }
+  };
+
+  const hideLembreteModal = () => {
+    lembreteModal.style.display = 'none';
+    if (lembreteInput) {
+      lembreteInput.value = '';
+    }
+    form.dataset.lembreteSubmitting = '0';
+  };
+
+  form.addEventListener('submit', function(e) {
+    if (!actionSelect) return;
+    if (actionSelect.value !== 'inserir_lembrete') return;
+    if (form.dataset.lembreteSubmitting === '1') return;
+    e.preventDefault();
+    const ids = getSelectedIds();
+    if (!ids.length) {
+      alert('Selecione ao menos um processo para inserir lembrete.');
+      return;
+    }
+    showLembreteModal();
+  });
+
+  [lembreteCancel, lembreteClose].forEach(btn => {
+    if (btn) btn.addEventListener('click', hideLembreteModal);
+  });
+
+  if (lembreteConfirm) {
+    lembreteConfirm.addEventListener('click', function() {
+      const ids = getSelectedIds();
+      if (!ids.length) {
+        hideLembreteModal();
+        return;
+      }
+      const dias = parseInt((lembreteInput && lembreteInput.value) ? lembreteInput.value : '', 10);
+      if (!dias || dias <= 0) {
+        alert('Informe a periodicidade em dias.');
+        if (lembreteInput) lembreteInput.focus();
+        return;
+      }
+      let hidden = form.querySelector('input[name="pertinencia_dias"]');
+      if (!hidden) {
+        hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'pertinencia_dias';
+        form.appendChild(hidden);
+      }
+      hidden.value = String(dias);
+      form.dataset.lembreteSubmitting = '1';
+      form.submit();
+    });
+  }
 });
 </script>
 <script>
