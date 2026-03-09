@@ -7313,7 +7313,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     change_form_template = "admin/contratos/processojudicial/change_form_navegacao.html"
     history_template = "admin/contratos/processojudicial/object_history.html"
     change_list_template = "admin/contratos/processojudicial/change_list_mapa.html"
-    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk', 'inserir_lembrete']
+    actions = ['excluir_andamentos_selecionados', 'delegate_processes', 'change_carteira_bulk', 'inserir_lembrete', 'ligar_busca_ativa_em_lote']
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
@@ -9671,6 +9671,23 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             self.message_user(request, "Nenhum CNJ encontrado para aplicar o lembrete.", messages.WARNING)
         return None
     inserir_lembrete.short_description = "Inserir Lembrete"
+
+    def ligar_busca_ativa_em_lote(self, request, queryset):
+        updated = queryset.filter(busca_ativa=False).update(busca_ativa=True)
+        if updated:
+            self.message_user(
+                request,
+                f"Busca Ativa ligada em {updated} cadastro(s).",
+                messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                "Nenhum cadastro precisava ligar Busca Ativa.",
+                messages.WARNING,
+            )
+        return None
+    ligar_busca_ativa_em_lote.short_description = "Ligar Busca Ativa em Lote"
 
     def change_carteira_bulk(self, request, queryset):
         if not request.user.is_superuser and not is_user_supervisor(request.user):
