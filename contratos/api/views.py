@@ -313,10 +313,26 @@ class AgendaGeralAPIView(APIView):
                 | Q(processo__carteiras_vinculadas__id__in=allowed_carteiras)
             ).distinct()
 
+        # Andamentos pendentes podem conter múltiplos registros do mesmo processo.
+        # Na Agenda Geral, exibimos apenas o andamento mais recente por processo.
+        andamentos_pendentes_list = list(andamentos_pendentes)
+        latest_andamentos = {}
+        for andamento in andamentos_pendentes_list:
+            processo_id = andamento.processo_id
+            current = latest_andamentos.get(processo_id)
+            if not current:
+                latest_andamentos[processo_id] = andamento
+                continue
+            current_key = (current.data_andamento, current.data_deteccao, current.pk or 0)
+            new_key = (andamento.data_andamento, andamento.data_deteccao, andamento.pk or 0)
+            if new_key > current_key:
+                latest_andamentos[processo_id] = andamento
+        andamentos_pendentes = list(latest_andamentos.values())
+
         processo_ids = set(
             list(tarefas.values_list('processo_id', flat=True))
             + list(prazos.values_list('processo_id', flat=True))
-            + list(andamentos_pendentes.values_list('processo_id', flat=True))
+            + [andamento.processo_id for andamento in andamentos_pendentes]
         )
         processo_meta = {}
         if processo_ids:
