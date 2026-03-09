@@ -1580,6 +1580,7 @@ def demandas_analise_view(request):
     if form.is_valid():
         form_is_valid = True
         carteira = form.cleaned_data['carteira']
+        replace_primary_carteira = bool(form.cleaned_data.get("replace_primary_carteira"))
         alias = (carteira.fonte_alias or '').strip() or DemandasImportService.SOURCE_ALIAS
         preview_service = DemandasImportService(db_alias=alias)
         selected_mode = form.cleaned_data.get('modo_busca') or DemandasAnaliseForm.MODO_PERIODO
@@ -1588,10 +1589,16 @@ def demandas_analise_view(request):
             if selected_mode == DemandasAnaliseForm.MODO_LOTE:
                 identifiers_text = (form.cleaned_data.get('lote_identificadores') or '').strip()
                 period_label = "CNJ/CPF (lote)"
-                preview_hint = (
-                    "Use CNJ ou CPF (com/sem formatação). Se o cadastro já existir em outra carteira, "
-                    "a importação apenas vincula a nova carteira indicada."
-                )
+                if replace_primary_carteira:
+                    preview_hint = (
+                        "Use CNJ ou CPF (com/sem formatação). Se o cadastro já existir em outra carteira, "
+                        "a importação troca a carteira principal para a indicada."
+                    )
+                else:
+                    preview_hint = (
+                        "Use CNJ ou CPF (com/sem formatação). Se o cadastro já existir em outra carteira, "
+                        "a importação apenas vincula a nova carteira indicada."
+                    )
                 if identifiers_text:
                     request.session[lote_session_key] = {
                         "modo_busca": DemandasAnaliseForm.MODO_LOTE,
@@ -1654,6 +1661,7 @@ def demandas_analise_view(request):
                                     link_only_existing=True,
                                     allow_minimal_missing_cnjs=False,
                                     allowed_ufs=selected_ufs_set or None,
+                                    replace_primary_carteira=replace_primary_carteira,
                                 )
                             elif selected_ufs and not preview_rows:
                                 if selected_ufs_set:
@@ -1665,6 +1673,7 @@ def demandas_analise_view(request):
                                     link_only_existing=True,
                                     allow_minimal_missing_cnjs=False,
                                     allowed_ufs=selected_ufs_set,
+                                    replace_primary_carteira=replace_primary_carteira,
                                 )
                                 if not import_result or (
                                     not int(import_result.get("imported") or 0)
@@ -1683,6 +1692,7 @@ def demandas_analise_view(request):
                                 filtered_cpfs,
                                 etiqueta_nome,
                                 carteira,
+                                replace_primary_carteira=replace_primary_carteira,
                             )
                     else:
                         import_result = preview_service.import_identifiers(
@@ -1691,6 +1701,7 @@ def demandas_analise_view(request):
                             carteira,
                             link_only_existing=True,
                             allow_minimal_missing_cnjs=False,
+                            replace_primary_carteira=replace_primary_carteira,
                         )
 
                     if import_result:
@@ -1751,10 +1762,21 @@ def demandas_analise_view(request):
                             messages.warning(request, "Selecione pelo menos um CPF para importar.")
                         else:
                             import_result = preview_service.import_selected_cpfs(
-                                data_de, data_ate, filtered_cpfs, etiqueta_nome, carteira
+                                data_de,
+                                data_ate,
+                                filtered_cpfs,
+                                etiqueta_nome,
+                                carteira,
+                                replace_primary_carteira=replace_primary_carteira,
                             )
                     else:
-                        import_result = preview_service.import_period(data_de, data_ate, etiqueta_nome, carteira)
+                        import_result = preview_service.import_period(
+                            data_de,
+                            data_ate,
+                            etiqueta_nome,
+                            carteira,
+                            replace_primary_carteira=replace_primary_carteira,
+                        )
 
                     if import_result:
                         summary = []
@@ -9700,10 +9722,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             form = CarteiraBulkForm(request.POST)
             if form.is_valid():
                 carteira = form.cleaned_data.get('carteira')
+                processo_ids = list(queryset.values_list('id', flat=True))
                 updated = queryset.update(carteira=carteira)
                 if carteira:
-                    for processo in queryset.only('id'):
-                        processo.carteiras_vinculadas.add(carteira)
+                    if processo_ids:
+                        for processo in ProcessoJudicial.objects.filter(id__in=processo_ids).only('id').iterator():
+                            processo.carteiras_vinculadas.add(carteira)
                 carteira_label = carteira.nome if carteira else "Sem carteira"
                 self.message_user(
                     request,

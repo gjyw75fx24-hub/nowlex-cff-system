@@ -367,12 +367,21 @@ class DemandasImportService:
         rows, total = self._build_preview_rows(grouped)
         return rows, total, parsed
 
-    def import_period(self, data_de, data_ate, etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
+    def import_period(
+        self,
+        data_de,
+        data_ate,
+        etiqueta_nome: str,
+        carteira: Optional[Carteira] = None,
+        *,
+        replace_primary_carteira: bool = False,
+    ) -> Dict[str, int]:
         grouped = self._load_contracts_grouped_by_cpf(data_de, data_ate)
         return self._apply_import(
             grouped,
             etiqueta_nome,
             carteira,
+            replace_primary_carteira=replace_primary_carteira,
             apply_litis_sim_label=True,
         )
 
@@ -383,6 +392,8 @@ class DemandasImportService:
         selected_cpfs: List[str],
         etiqueta_nome: str,
         carteira: Optional[Carteira] = None,
+        *,
+        replace_primary_carteira: bool = False,
     ) -> Dict[str, int]:
         if not selected_cpfs:
             return {"imported": 0, "skipped": 0}
@@ -392,6 +403,7 @@ class DemandasImportService:
             grouped,
             etiqueta_nome,
             carteira,
+            replace_primary_carteira=replace_primary_carteira,
             apply_litis_sim_label=True,
         )
 
@@ -403,6 +415,7 @@ class DemandasImportService:
         *,
         link_only_existing: bool = False,
         apply_litis_sim_label: bool = False,
+        replace_primary_carteira: bool = False,
     ) -> Dict[str, int]:
         if not grouped:
             return {"imported": 0, "skipped": 0}
@@ -425,9 +438,19 @@ class DemandasImportService:
                 changed = False
                 if processo:
                     if link_only_existing:
-                        changed = self._ensure_carteira_link(processo, carteira)
+                        changed = self._ensure_carteira_link(
+                            processo,
+                            carteira,
+                            replace_primary_carteira=replace_primary_carteira,
+                        )
                     else:
-                        changed = self._upsert_existing_processo(processo, cpf, contracts, carteira)
+                        changed = self._upsert_existing_processo(
+                            processo,
+                            cpf,
+                            contracts,
+                            carteira,
+                            replace_primary_carteira=replace_primary_carteira,
+                        )
                 else:
                     processo = self._build_processo(cpf, contracts, carteira)
                     changed = True
@@ -528,6 +551,8 @@ class DemandasImportService:
         cnjs: Iterable[str],
         carteira: Optional[Carteira] = None,
         etiqueta_nome: str = "",
+        *,
+        replace_primary_carteira: bool = False,
     ) -> Dict[str, int]:
         unique_cnjs = []
         for cnj in cnjs:
@@ -565,13 +590,21 @@ class DemandasImportService:
                 if uf and not (processo.uf or '').strip():
                     processo.uf = uf
                     update_fields.append('uf')
-                if carteira and carteira.id and not processo.carteira_id:
-                    processo.carteira = carteira
-                    update_fields.append('carteira')
+                if carteira and carteira.id:
+                    if replace_primary_carteira and processo.carteira_id != carteira.id:
+                        processo.carteira = carteira
+                        update_fields.append('carteira')
+                    elif not processo.carteira_id:
+                        processo.carteira = carteira
+                        update_fields.append('carteira')
                 if update_fields:
                     processo.save(update_fields=update_fields)
                     changed = True
-                if self._ensure_carteira_link(processo, carteira):
+                if self._ensure_carteira_link(
+                    processo,
+                    carteira,
+                    replace_primary_carteira=replace_primary_carteira,
+                ):
                     changed = True
                 if self._ensure_numero_cnj_entry(processo, cnj_digits, carteira):
                     changed = True
@@ -620,11 +653,21 @@ class DemandasImportService:
                 return preferred
         return base_qs.first()
 
-    def _ensure_carteira_link(self, processo: ProcessoJudicial, carteira: Optional[Carteira]) -> bool:
+    def _ensure_carteira_link(
+        self,
+        processo: ProcessoJudicial,
+        carteira: Optional[Carteira],
+        *,
+        replace_primary_carteira: bool = False,
+    ) -> bool:
         if not carteira or not carteira.id:
             return False
         changed = False
-        if not processo.carteira_id:
+        if replace_primary_carteira and processo.carteira_id != carteira.id:
+            processo.carteira = carteira
+            processo.save(update_fields=['carteira'])
+            changed = True
+        elif not processo.carteira_id:
             processo.carteira = carteira
             processo.save(update_fields=['carteira'])
             changed = True
@@ -815,9 +858,15 @@ class DemandasImportService:
         cpf: str,
         contracts: List[Dict],
         carteira: Optional[Carteira],
+        *,
+        replace_primary_carteira: bool = False,
     ) -> bool:
         changed = False
-        if self._ensure_carteira_link(processo, carteira):
+        if self._ensure_carteira_link(
+            processo,
+            carteira,
+            replace_primary_carteira=replace_primary_carteira,
+        ):
             changed = True
         if self._upsert_passivo_parte(processo, cpf, contracts):
             changed = True
@@ -1130,7 +1179,14 @@ class DemandasImportService:
         grouped = self._group_contracts_by_cpf(contratos)
         return self._build_preview_rows(grouped)
 
-    def import_cpfs(self, cpfs: Iterable[str], etiqueta_nome: str, carteira: Optional[Carteira] = None) -> Dict[str, int]:
+    def import_cpfs(
+        self,
+        cpfs: Iterable[str],
+        etiqueta_nome: str,
+        carteira: Optional[Carteira] = None,
+        *,
+        replace_primary_carteira: bool = False,
+    ) -> Dict[str, int]:
         normalized = [_normalize_digits(cpf) for cpf in cpfs if _normalize_digits(cpf)]
         if not normalized:
             return {"imported": 0, "skipped": 0}
@@ -1152,6 +1208,7 @@ class DemandasImportService:
             grouped,
             etiqueta_nome,
             carteira,
+            replace_primary_carteira=replace_primary_carteira,
             apply_litis_sim_label=True,
         )
 
@@ -1164,6 +1221,7 @@ class DemandasImportService:
         link_only_existing: bool = True,
         allow_minimal_missing_cnjs: bool = False,
         allowed_ufs: Optional[Iterable[str]] = None,
+        replace_primary_carteira: bool = False,
     ) -> Dict[str, int]:
         parsed = self.parse_batch_identifiers(identifiers)
         cpfs = list(parsed["cpfs"])
@@ -1208,6 +1266,7 @@ class DemandasImportService:
                 carteira,
                 link_only_existing=link_only_existing,
                 apply_litis_sim_label=bool(cpfs) and not bool(cnjs),
+                replace_primary_carteira=replace_primary_carteira,
             )
             result["imported"] += int(base_result.get("imported") or 0)
             result["skipped"] += int(base_result.get("skipped") or 0)
@@ -1223,6 +1282,7 @@ class DemandasImportService:
                 missing_cnjs,
                 carteira=carteira,
                 etiqueta_nome=etiqueta_nome,
+                replace_primary_carteira=replace_primary_carteira,
             )
             result["imported"] += int(minimal_result.get("imported") or 0)
             result["skipped"] += int(minimal_result.get("skipped") or 0)

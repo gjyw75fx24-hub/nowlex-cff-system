@@ -202,6 +202,13 @@
             margin-top: 0.75rem;
         }
 
+        .demandas-form__footer-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
         .demandas-form__footer-label {
             font-size: 0.78rem;
             color: #5b6c8a;
@@ -488,10 +495,16 @@
                     </div>
                 </div>
                 <div class="demandas-form__footer">
-                    <label class="demandas-form__footer-label">
-                        {{ form.preview_only }}
-                        {{ form.preview_only.label }}
-                    </label>
+                    <div class="demandas-form__footer-left">
+                        <label class="demandas-form__footer-label">
+                            {{ form.preview_only }}
+                            {{ form.preview_only.label }}
+                        </label>
+                        <label class="demandas-form__footer-label">
+                            {{ form.replace_primary_carteira }}
+                            {{ form.replace_primary_carteira.label }}
+                        </label>
+                    </div>
                     <div class="demandas-form__actions">
                         <a class="button" href="{% url 'admin:index' %}">Cancelar</a>
                         <button type="submit" class="button button-primary" name="import_action" value="preview">

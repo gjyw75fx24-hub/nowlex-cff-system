@@ -63,6 +63,12 @@ class DemandasAnaliseForm(forms.Form):
         initial=True,
         widget=forms.CheckboxInput(attrs={'class': 'form-check-input'})
     )
+    replace_primary_carteira = forms.BooleanField(
+        label="Trocar carteira principal dos cadastros já existentes",
+        required=False,
+        initial=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'})
+    )
 
     carteira = forms.ModelChoiceField(
         queryset=Carteira.objects.order_by('nome'),
