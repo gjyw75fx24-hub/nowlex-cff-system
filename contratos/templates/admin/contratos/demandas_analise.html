@@ -202,17 +202,19 @@
             margin-top: 0.75rem;
         }
 
-        .demandas-form__footer-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-
         .demandas-form__footer-label {
             font-size: 0.78rem;
             color: #5b6c8a;
             font-weight: 500;
+        }
+        .demandas-uf-option-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            color: #475569;
+            font-weight: 600;
+            margin-bottom: 8px;
         }
 
         .demandas-form__actions {
@@ -495,16 +497,10 @@
                     </div>
                 </div>
                 <div class="demandas-form__footer">
-                    <div class="demandas-form__footer-left">
-                        <label class="demandas-form__footer-label">
-                            {{ form.preview_only }}
-                            {{ form.preview_only.label }}
-                        </label>
-                        <label class="demandas-form__footer-label">
-                            {{ form.replace_primary_carteira }}
-                            {{ form.replace_primary_carteira.label }}
-                        </label>
-                    </div>
+                    <label class="demandas-form__footer-label">
+                        {{ form.preview_only }}
+                        {{ form.preview_only.label }}
+                    </label>
                     <div class="demandas-form__actions">
                         <a class="button" href="{% url 'admin:index' %}">Cancelar</a>
                         <button type="submit" class="button button-primary" name="import_action" value="preview">
@@ -576,10 +572,14 @@
                             {% endif %}
                             {% if preview_uf_options %}
                                 <div class="checagem-question" style="margin-bottom: 12px;">
-                                    <div class="checagem-question-title">Selecionar UFs para importar</div>
-                                    <div class="checagem-question-body">
-                                        <div class="demandas-uf-selector">
-                                            {% for uf_item in preview_uf_options %}
+                            <div class="checagem-question-title">Selecionar UFs para importar</div>
+                            <div class="checagem-question-body">
+                                <label class="demandas-uf-option-toggle">
+                                    {{ form.replace_primary_carteira }}
+                                    Corrigir importação
+                                </label>
+                                <div class="demandas-uf-selector">
+                                    {% for uf_item in preview_uf_options %}
                                                 <label class="demandas-uf-option{% if uf_item.disabled %} is-disabled{% endif %}">
                                                     <input type="checkbox"
                                                            name="selected_ufs"
