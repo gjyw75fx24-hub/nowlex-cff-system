@@ -723,6 +723,11 @@ def _build_card_payload(
 ) -> Dict[str, Any]:
     responses = _build_row_question_responses(row, tipo_analise, question_maps, contract_refs)
     now_iso = timezone.now().isoformat()
+    contract_numbers = [
+        str(contract.numero_contrato or "").strip()
+        for contract in processo.contratos.filter(id__in=contract_refs)
+        if str(contract.numero_contrato or "").strip()
+    ] or [str(item).strip() for item in row.contratos if str(item).strip()]
     return {
         "cnj": row.cnj or format_cnj(row.cnj_digits) or "Não informado",
         "valor_causa": float(row.valor_causa) if row.valor_causa is not None else None,
@@ -746,6 +751,7 @@ def _build_card_payload(
         "analysis_author": _resolve_user_label(analista),
         "saved_at": now_iso,
         "updated_at": now_iso,
+        "result_entries": _build_summary_entries(row, tipo_analise, responses, question_maps, contract_numbers),
         "general_card_snapshot": False,
     }
 

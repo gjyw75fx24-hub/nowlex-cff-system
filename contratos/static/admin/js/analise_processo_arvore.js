@@ -4847,6 +4847,44 @@ function formatCnjDigits(raw) {
 	                contratos_para_monitoria: 'Contratos para monitória',
 	                ativar_botao_monitoria: 'Ativar botão monitória'
 	            };
+            const responsePatterns = {
+                judicializado_pela_massa: ['JUDICIALIZADO', 'MASSA'],
+                tipo_de_acao: ['TIPO', 'ACAO'],
+                julgamento: ['JULGAMENTO'],
+                transitado: ['TRANSITADO'],
+                procedencia: ['PROCEDENCIA'],
+	                data_de_transito: ['DATA', 'TRANSIT'],
+	                cumprimento_de_sentenca: ['CUMPRIMENTO', 'SENTEN'],
+	                habilitacao: ['HABILIT'],
+	                repropor_monitoria: ['REPROPOR', 'MONITOR'],
+	                contratos_para_monitoria: ['CONTRAT', 'MONITOR'],
+	                ativar_botao_monitoria: ['ATIVAR', 'BOTAO', 'MONITOR']
+            };
+            const findFallbackResponseValue = (responses, canonicalKey) => {
+                if (!responses || typeof responses !== 'object') {
+                    return undefined;
+                }
+                const patterns = Array.isArray(responsePatterns[canonicalKey]) ? responsePatterns[canonicalKey] : [];
+                if (!patterns.length) {
+                    return undefined;
+                }
+                const normalizedPatterns = patterns
+                    .map(pattern => normalizeDecisionText(pattern))
+                    .filter(Boolean);
+                const entries = Object.entries(responses);
+                for (const [rawKey, rawValue] of entries) {
+                    const normalizedKey = normalizeDecisionText(rawKey);
+                    if (!normalizedKey || normalizedKey === normalizeDecisionText(canonicalKey)) {
+                        continue;
+                    }
+                    const matches = normalizedPatterns.every(pattern => normalizedKey.includes(pattern));
+                    if (!matches || !hasMeaningfulResponseValue(rawValue)) {
+                        continue;
+                    }
+                    return rawValue;
+                }
+                return undefined;
+            };
             const entries = [];
             responseOrder.forEach(key => {
                 let value = undefined;
@@ -4855,6 +4893,9 @@ function formatCnjDigits(raw) {
                 }
                 if ((value === undefined || value === null) && processo.tipo_de_acao_respostas) {
                     value = processo.tipo_de_acao_respostas[key];
+                }
+                if ((value === undefined || value === null || value === '') && processo.tipo_de_acao_respostas) {
+                    value = findFallbackResponseValue(processo.tipo_de_acao_respostas, key);
                 }
                 if (value === undefined || value === null || value === '') {
                     return;
@@ -4870,6 +4911,23 @@ function formatCnjDigits(raw) {
                 });
             });
             return entries;
+        }
+
+        function getPersistedSummaryEntries(processo) {
+            if (!processo || typeof processo !== 'object' || !Array.isArray(processo.result_entries)) {
+                return [];
+            }
+            return processo.result_entries
+                .filter(entry => entry && typeof entry === 'object')
+                .map(entry => {
+                    const label = String(entry.label || '').trim();
+                    const value = String(entry.value || '').trim();
+                    if (!label || !value) {
+                        return null;
+                    }
+                    return { label, value };
+                })
+                .filter(Boolean);
         }
 
 		        function buildProcessoDetailsSnapshot(processo, options = {}) {
@@ -5105,12 +5163,15 @@ function formatCnjDigits(raw) {
 	                    excludeFields: options.excludeFields || [],
 	                    contractInfos: monitoriaInfos
 	                });
-	            if (fieldEntries.length) {
+                const effectiveFieldEntries = fieldEntries.length
+                    ? fieldEntries
+                    : getPersistedSummaryEntries(processo);
+	            if (effectiveFieldEntries.length) {
 	                const $liAcao = $(
 	                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`
 	                );
                 const $ulAcao = $liAcao.find('ul');
-                fieldEntries.forEach(entry => {
+                effectiveFieldEntries.forEach(entry => {
                     $ulAcao.append(
                         `<li>${entry.label}: ${entry.value}</li>`
                     );
