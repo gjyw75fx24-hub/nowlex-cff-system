@@ -2093,38 +2093,76 @@
             window.location.href = url.toString();
         }
 
+        function renderCpfLoteTable(lists) {
+            if (!cpfLoteTableBody) return;
+            cpfLoteTableBody.innerHTML = '';
+            if (!lists.length) {
+                cpfLoteTableBody.innerHTML = '<tr><td colspan=\"5\" class=\"cpf-lote-modal__empty\">Nenhuma lista salva.</td></tr>';
+                return;
+            }
+            lists.forEach(item => {
+                const row = document.createElement('tr');
+                const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
+                const shareCell = item.is_owner
+                    ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
+                    : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
+                const deleteBtn = item.is_owner
+                    ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-id=\"${item.id}\">Excluir</button>`
+                    : '';
+                row.innerHTML = `
+                    <td>${escapeHtml(item.nome)}</td>
+                    <td>${item.quantidade || 0}</td>
+                    <td>${escapeHtml(item.criado_por || '-')}</td>
+                    <td>${shareCell}</td>
+                    <td class=\"actions\">
+                        <button type=\"button\" class=\"button\" data-action=\"load\" data-id=\"${item.id}\">Carregar</button>
+                        ${deleteBtn}
+                    </td>
+                `;
+                cpfLoteTableBody.appendChild(row);
+            });
+        }
+
+        function upsertCpfLoteTableItem(item) {
+            if (!item || !item.id || !cpfLoteTableBody) return;
+            const rows = Array.from(cpfLoteTableBody.querySelectorAll('tr'));
+            const existingRow = rows.find((row) => {
+                const actionBtn = row.querySelector('button[data-id]');
+                return actionBtn && String(actionBtn.dataset.id) === String(item.id);
+            });
+            if (existingRow) {
+                existingRow.remove();
+            }
+            const currentRows = Array.from(cpfLoteTableBody.querySelectorAll('tr'))
+                .filter((row) => !row.querySelector('.cpf-lote-modal__empty'));
+            const normalized = [item];
+            currentRows.forEach((row) => {
+                const loadBtn = row.querySelector('button[data-action=\"load\"]');
+                if (!loadBtn || String(loadBtn.dataset.id) === String(item.id)) return;
+                normalized.push({
+                    id: loadBtn.dataset.id,
+                    nome: row.children[0] ? row.children[0].textContent.trim() : '',
+                    quantidade: row.children[1] ? row.children[1].textContent.trim() : '',
+                    criado_por: row.children[2] ? row.children[2].textContent.trim() : '',
+                    compartilhado: Boolean(row.querySelector('button[data-action=\"toggle\"][data-shared=\"1\"]') || row.textContent.includes('Pública')),
+                    is_owner: Boolean(row.querySelector('button[data-action=\"delete\"]')),
+                });
+            });
+            renderCpfLoteTable(normalized);
+        }
+
         function refreshCpfLoteTable() {
             if (!cpfLoteTableBody || !cpfLoteListUrl) return;
-            fetch(cpfLoteListUrl, { credentials: 'same-origin' })
+            const requestUrl = new URL(cpfLoteListUrl, window.location.origin);
+            requestUrl.searchParams.set('_ts', String(Date.now()));
+            return fetch(requestUrl.toString(), {
+                credentials: 'same-origin',
+                cache: 'no-store',
+            })
                 .then(res => res.json())
                 .then(data => {
                     const lists = Array.isArray(data.lists) ? data.lists : [];
-                    cpfLoteTableBody.innerHTML = '';
-                    if (!lists.length) {
-                        cpfLoteTableBody.innerHTML = '<tr><td colspan=\"5\" class=\"cpf-lote-modal__empty\">Nenhuma lista salva.</td></tr>';
-                        return;
-                    }
-                    lists.forEach(item => {
-                        const row = document.createElement('tr');
-                        const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
-                        const shareCell = item.is_owner
-                            ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
-                            : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
-                        const deleteBtn = item.is_owner
-                            ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-id=\"${item.id}\">Excluir</button>`
-                            : '';
-                        row.innerHTML = `
-                            <td>${escapeHtml(item.nome)}</td>
-                            <td>${item.quantidade || 0}</td>
-                            <td>${escapeHtml(item.criado_por || '-')}</td>
-                            <td>${shareCell}</td>
-                            <td class=\"actions\">
-                                <button type=\"button\" class=\"button\" data-action=\"load\" data-id=\"${item.id}\">Carregar</button>
-                                ${deleteBtn}
-                            </td>
-                        `;
-                        cpfLoteTableBody.appendChild(row);
-                    });
+                    renderCpfLoteTable(lists);
                 })
                 .catch(() => {
                     cpfLoteTableBody.innerHTML = '<tr><td colspan=\"5\" class=\"cpf-lote-modal__empty\">Não foi possível carregar as listas.</td></tr>';
@@ -2163,9 +2201,12 @@
                     throw new Error(data.error || 'Não foi possível renomear a lista.');
                 }
                 if (String(cpfLoteRenameId) === String(cpfLoteActiveId)) {
-                    cpfLoteResolvedActiveLabel = data.nome || nome;
+                    cpfLoteResolvedActiveLabel = data.item?.nome || nome;
                 }
                 resetCpfLoteEditor();
+                if (data.item) {
+                    upsertCpfLoteTableItem(data.item);
+                }
                 refreshCpfLoteTable();
                 updateCpfLoteCurrentInfo();
                 showCpfLoteMessage('Lista renomeada com sucesso.');
@@ -2213,6 +2254,9 @@
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || data.error) {
                     throw new Error(data.error || 'Não foi possível salvar a lista.');
+                }
+                if (data.item) {
+                    upsertCpfLoteTableItem(data.item);
                 }
                 refreshCpfLoteTable();
                 resetCpfLoteEditor();

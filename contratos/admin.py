@@ -9406,6 +9406,17 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def _cpf_lote_count(self, raw_text):
         return len(self._parse_cpf_lote_text(raw_text))
 
+    def _cpf_lote_payload(self, request, item):
+        return {
+            'id': item.id,
+            'nome': item.nome,
+            'compartilhado': bool(item.compartilhado),
+            'criado_por': item.criado_por.get_username() if item.criado_por else '',
+            'is_owner': item.criado_por_id == request.user.id,
+            'quantidade': self._cpf_lote_count(item.cpfs),
+            'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
+        }
+
     def cpf_lote_list_view(self, request):
         if request.method != 'GET':
             return JsonResponse({'error': 'Método não permitido.'}, status=405)
@@ -9414,15 +9425,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         data = []
         try:
             for item in self._cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
-                data.append({
-                    'id': item.id,
-                    'nome': item.nome,
-                    'compartilhado': bool(item.compartilhado),
-                    'criado_por': item.criado_por.get_username() if item.criado_por else '',
-                    'is_owner': item.criado_por_id == request.user.id,
-                    'quantidade': self._cpf_lote_count(item.cpfs),
-                    'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M'),
-                })
+                data.append(self._cpf_lote_payload(request, item))
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao listar lotes.', exc_info=True)
             return JsonResponse({
@@ -9468,7 +9471,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao salvar lote.', exc_info=True)
             return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
-        return JsonResponse({'id': lote.id, 'created': created})
+        return JsonResponse({
+            'id': lote.id,
+            'created': created,
+            'item': self._cpf_lote_payload(request, lote),
+        })
 
     def cpf_lote_delete_view(self, request):
         if request.method != 'POST':
@@ -9528,12 +9535,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             lote.save(update_fields=['nome', 'compartilhado', 'atualizado_em'])
         except IntegrityError:
             return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
-        return JsonResponse({
-            'ok': True,
-            'id': lote.id,
-            'nome': lote.nome,
-            'compartilhado': bool(lote.compartilhado),
-        })
+        return JsonResponse({'ok': True, 'item': self._cpf_lote_payload(request, lote)})
 
     def cpf_lote_share_view(self, request):
         if request.method != 'POST':
