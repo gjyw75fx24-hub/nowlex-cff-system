@@ -1623,8 +1623,16 @@
         if (!form || !actionSelect) return;
 
         function getCsrfToken() {
-            const match = document.cookie.match(/csrftoken=([^;]+)/);
-            return match ? match[1] : '';
+            const match = document.cookie.match(/(?:^|;)\s*csrftoken=([^;]+)/);
+            if (match && match[1]) {
+                return match[1];
+            }
+            const input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (input && input.value) {
+                return input.value;
+            }
+            const meta = document.querySelector('meta[name="csrf-token"], meta[name="csrfmiddlewaretoken"]');
+            return meta ? (meta.getAttribute('content') || '') : '';
         }
         function getSelectedIds() {
             return Array.from(form.querySelectorAll('input.action-select:checked')).map(el => el.value);
@@ -1891,12 +1899,13 @@
                 return;
             }
             const raw = getCpfLoteRawFromSearch();
+            const parsedCpfs = parseCpfs(raw);
             const payload = {
                 nome: nome,
                 compartilhado: Boolean(cpfLoteShared && cpfLoteShared.checked),
             };
-            if (raw) {
-                payload.cpfs = raw;
+            if (parsedCpfs.length) {
+                payload.cpfs = parsedCpfs.join(', ');
             } else if (cpfLoteActiveId) {
                 payload.source_id = cpfLoteActiveId;
             } else {
