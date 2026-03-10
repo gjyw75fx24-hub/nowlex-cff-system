@@ -1803,11 +1803,11 @@
         }
 
         function parseCpfs(raw) {
-            const matches = String(raw || '').match(/\\b\\d{3}\\.?(\\d{3})\\.?(\\d{3})-?(\\d{2})\\b/g) || [];
+            const matches = String(raw || '').match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g) || [];
             const cpfs = [];
             const seen = new Set();
             matches.forEach(match => {
-                const digits = match.replace(/\\D/g, '');
+                const digits = match.replace(/\D/g, '');
                 if (digits.length !== 11) return;
                 if (seen.has(digits)) return;
                 seen.add(digits);
@@ -1818,8 +1818,10 @@
 
         function getCpfLoteRawFromSearch() {
             const searchInput = document.querySelector('#changelist-search input[name=\"q\"]');
-            if (!searchInput) return '';
-            return (searchInput.value || '').trim();
+            const rawValue = (searchInput && searchInput.value ? searchInput.value : '').trim();
+            if (rawValue) return rawValue;
+            const url = new URL(window.location.href);
+            return String(url.searchParams.get('cpf_lote') || '').trim();
         }
 
         function updateCpfLoteCurrentInfo() {
