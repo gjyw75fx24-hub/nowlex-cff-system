@@ -1,6 +1,10 @@
 from django import forms
+from django.contrib.auth import get_user_model
 
 from .models import Carteira, TipoAnaliseObjetiva
+
+
+User = get_user_model()
 
 
 class AndamentoSearchForm(forms.Form):
@@ -100,6 +104,20 @@ class DemandasAnaliseForm(forms.Form):
 
 
 class DemandasAnalisePlanilhaForm(forms.Form):
+    MODO_PASSIVAS = "passivas"
+    MODO_ANALISE_LOTE = "analise_lote"
+    MODO_CHOICES = (
+        (MODO_PASSIVAS, "Passivas"),
+        (MODO_ANALISE_LOTE, "Importar Análises em Lote"),
+    )
+
+    modo_importacao = forms.ChoiceField(
+        label="Modo",
+        choices=MODO_CHOICES,
+        initial=MODO_PASSIVAS,
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+
     arquivo = forms.FileField(
         label="Planilha (.xlsx ou .csv)",
         required=False,
@@ -123,6 +141,14 @@ class DemandasAnalisePlanilhaForm(forms.Form):
         label="Tipo de Análise",
         required=True,
         empty_label="Escolha um tipo",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+
+    analista = forms.ModelChoiceField(
+        queryset=User.objects.filter(is_active=True).order_by("first_name", "username"),
+        label="Analista",
+        required=False,
+        empty_label="Escolha um analista",
         widget=forms.Select(attrs={"class": "form-control"}),
     )
 
@@ -151,16 +177,20 @@ class DemandasAnalisePlanilhaForm(forms.Form):
         help_text="0 = sem limite.",
     )
 
+    def clean(self):
+        cleaned = super().clean()
+        modo_importacao = cleaned.get("modo_importacao")
+        analista = cleaned.get("analista")
+        arquivo = cleaned.get("arquivo")
+        token = (cleaned.get("upload_token") or "").strip()
+        if modo_importacao == self.MODO_ANALISE_LOTE and not analista:
+            self.add_error("analista", "Selecione o analista responsável pela análise em lote.")
+        if not arquivo and not token:
+            raise forms.ValidationError("Envie a planilha .xlsx/.csv (ou gere a prévia para habilitar o import).")
+        return cleaned
+
     def clean_uf(self):
         uf = (self.cleaned_data.get("uf") or "").strip().upper()
         if uf and len(uf) != 2:
             raise forms.ValidationError("UF deve ter 2 letras (ex.: RS).")
         return uf
-
-    def clean(self):
-        cleaned = super().clean()
-        arquivo = cleaned.get("arquivo")
-        token = (cleaned.get("upload_token") or "").strip()
-        if not arquivo and not token:
-            raise forms.ValidationError("Envie a planilha .xlsx/.csv (ou gere a prévia para habilitar o import).")
-        return cleaned

@@ -83,8 +83,14 @@ from .services.passivas_planilha import (
     normalize_header,
     validate_planilha_upload,
 )
+from .services.analise_lote_planilha import (
+    AnaliseLotePlanilhaError,
+    build_analise_lote_preview,
+    build_analise_lote_rows_from_file_bytes,
+    import_analise_lote_rows,
+)
 from .queue import get_passivas_import_queue, get_queue_connection
-from .tasks import run_passivas_planilha_import_job
+from .tasks import run_passivas_planilha_import_job, run_analise_lote_planilha_import_job
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
 
@@ -1893,13 +1899,22 @@ def demandas_analise_planilha_view(request):
         messages.error(request, "Acesso restrito a supervisores.")
         return HttpResponseRedirect(reverse('admin:index'))
 
-    import_modal_session_key = "passivas_planilha_last_import_modal"
     form = DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
+    modo_importacao = (
+        request.POST.get("modo_importacao")
+        or request.GET.get("modo_importacao")
+        or form.initial.get("modo_importacao")
+        or DemandasAnalisePlanilhaForm.MODO_PASSIVAS
+    )
+    import_modal_session_key = f"demandas_planilha_last_import_modal_{modo_importacao}"
+    background_job_session_key = f"demandas_planilha_last_job_id_{modo_importacao}"
     preview = None
     import_result = None
     import_modal_data = request.session.pop(import_modal_session_key, None)
     selected_cpfs = []
     selected_cpfs_payload = ""
+    selected_row_ids = []
+    selected_row_ids_payload = ""
     background_job = None
 
     action = (request.POST.get("action") or request.POST.get("action_override")) if request.method == "POST" else None
@@ -1916,10 +1931,10 @@ def demandas_analise_planilha_view(request):
     priority_options = []
 
     def _uploads_session_key() -> str:
-        return "passivas_planilha_uploads"
+        return f"demandas_planilha_uploads_{modo_importacao}"
 
     def _pending_actions_session_key() -> str:
-        return "passivas_planilha_pending_actions"
+        return f"demandas_planilha_pending_actions_{modo_importacao}"
 
     def _cleanup_old_uploads(session_dict: dict) -> dict:
         # Remove itens antigos e arquivos inexistentes (best-effort).
@@ -1986,6 +2001,18 @@ def demandas_analise_planilha_view(request):
         storage_path = f"passivas_imports/{uuid.uuid4().hex}{ext}"
         default_storage.save(storage_path, ContentFile(file_bytes))
         return storage_path
+
+    def _parse_selected_row_ids_from_request() -> list[str]:
+        raw_payload = (request.POST.get("selected_row_ids_payload") or "").strip()
+        if raw_payload == "__none__":
+            return ["__force_none__"]
+        if raw_payload:
+            return list(dict.fromkeys([value for value in raw_payload.split(",") if str(value).strip()]))
+        return list(
+            dict.fromkeys(
+                [str(value).strip() for value in request.POST.getlist("selected_row_ids") if str(value).strip()]
+            )
+        )
 
     def _build_imported_status_map(rows, carteira_obj, tipo_analise_obj):
         cpfs = {normalize_cpf(getattr(r, "cpf", "")) for r in rows if getattr(r, "cpf", "")}
@@ -2232,6 +2259,7 @@ def demandas_analise_planilha_view(request):
         return HttpResponseRedirect(reverse("admin:contratos_demandas_analise_planilha"))
 
     if request.method == "POST" and form.is_valid():
+        modo_importacao = form.cleaned_data.get("modo_importacao") or modo_importacao
         raw_selected_cpfs = (request.POST.get("selected_cpfs_payload") or "").strip()
         if raw_selected_cpfs:
             selected_cpfs = [
@@ -2248,6 +2276,8 @@ def demandas_analise_planilha_view(request):
             ]
             selected_cpfs = list(dict.fromkeys(selected_cpfs))
         selected_cpfs_payload = ",".join(selected_cpfs)
+        selected_row_ids = _parse_selected_row_ids_from_request()
+        selected_row_ids_payload = ",".join(selected_row_ids)
         upload = form.cleaned_data.get("arquivo")
         token = (form.cleaned_data.get("upload_token") or "").strip()
         file_bytes = b""
@@ -2274,28 +2304,161 @@ def demandas_analise_planilha_view(request):
 
         try:
             validate_planilha_upload(upload_name, file_bytes)
-            parsed_all = build_passivas_rows_from_file_bytes(
-                file_bytes,
-                upload_name=upload_name,
-                sheet_prefix=(form.cleaned_data.get("sheet_prefix") or "E - PASSIVAS"),
-                uf_filter=(form.cleaned_data.get("uf") or ""),
-                limit=int(form.cleaned_data.get("limit") or 0),
-            )
-            priority_options = _extract_priority_options(parsed_all)
-            if consider_priority and selected_priority_keys:
-                selected_keys = set(selected_priority_keys)
-                parsed = [
-                    row
-                    for row in parsed_all
-                    if normalize_header(getattr(row, "prioridade", "")) in selected_keys
-                ]
-            else:
+            if modo_importacao == DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE:
+                parsed_all = build_analise_lote_rows_from_file_bytes(
+                    file_bytes,
+                    upload_name=upload_name,
+                    sheet_prefix=(form.cleaned_data.get("sheet_prefix") or ""),
+                    uf_filter=(form.cleaned_data.get("uf") or ""),
+                    limit=int(form.cleaned_data.get("limit") or 0),
+                )
                 parsed = parsed_all
-        except (ValidationError, PassivasPlanilhaError) as exc:
+                priority_options = []
+            else:
+                parsed_all = build_passivas_rows_from_file_bytes(
+                    file_bytes,
+                    upload_name=upload_name,
+                    sheet_prefix=(form.cleaned_data.get("sheet_prefix") or "E - PASSIVAS"),
+                    uf_filter=(form.cleaned_data.get("uf") or ""),
+                    limit=int(form.cleaned_data.get("limit") or 0),
+                )
+                priority_options = _extract_priority_options(parsed_all)
+                if consider_priority and selected_priority_keys:
+                    selected_keys = set(selected_priority_keys)
+                    parsed = [
+                        row
+                        for row in parsed_all
+                        if normalize_header(getattr(row, "prioridade", "")) in selected_keys
+                    ]
+                else:
+                    parsed = parsed_all
+        except (ValidationError, PassivasPlanilhaError, AnaliseLotePlanilhaError) as exc:
             messages.error(request, str(exc))
             parsed = []
             parsed_all = []
             priority_options = []
+
+        if parsed and modo_importacao == DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE:
+            should_persist_upload = bool(upload)
+            if should_persist_upload:
+                token = uuid.uuid4().hex
+                tmp_dir = "/tmp/nowlex_analise_lote_planilha"
+                try:
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    ext = os.path.splitext(upload_name or "")[1].lower()
+                    if ext not in {".xlsx", ".csv"}:
+                        ext = ".xlsx"
+                    tmp_path = os.path.join(tmp_dir, f"{token}{ext}")
+                    with open(tmp_path, "wb") as fp:
+                        fp.write(file_bytes)
+                    uploads[token] = {
+                        "path": tmp_path,
+                        "name": upload_name or f"planilha{ext}",
+                        "ts": timezone.now().isoformat(),
+                        "user_id": getattr(request.user, "id", None),
+                    }
+                    request.session[_uploads_session_key()] = uploads
+                    form.initial["upload_token"] = token
+                except Exception:
+                    messages.warning(request, "Não foi possível manter o anexo na sessão. Reenvie ao importar.")
+
+            analista = form.cleaned_data["analista"]
+            preview_result = build_analise_lote_preview(
+                parsed,
+                carteira=form.cleaned_data["carteira"],
+                tipo_analise=form.cleaned_data["tipo_analise"],
+                analista=analista,
+                selected_row_ids=selected_row_ids,
+            )
+            preview = {
+                "mode": "analise_lote",
+                "rows": preview_result.rows,
+                "matched_rows": preview_result.matched_rows,
+                "existing_cards": preview_result.existing_cards,
+                "new_cards": preview_result.new_cards,
+                "conflict_rows": preview_result.conflict_rows,
+                "missing_rows": preview_result.missing_rows,
+                "items": preview_result.items,
+                "ufs": preview_result.ufs,
+                "upload_token": token or "",
+                "analista_label": getattr(analista, "get_full_name", lambda: "")() or getattr(analista, "username", ""),
+            }
+
+            if action == "import":
+                try:
+                    import_result = import_analise_lote_rows(
+                        parsed,
+                        carteira=form.cleaned_data["carteira"],
+                        tipo_analise=form.cleaned_data["tipo_analise"],
+                        analista=form.cleaned_data["analista"],
+                        acting_user=request.user,
+                        selected_row_ids=selected_row_ids,
+                    )
+                    import_modal_data = {
+                        "created_cadastros": 0,
+                        "updated_cadastros": import_result.updated_processos,
+                        "created_cnjs": import_result.created_cnjs,
+                        "updated_cnjs": import_result.updated_cnjs,
+                        "created_cards": import_result.created_cards,
+                        "updated_cards": import_result.updated_cards,
+                        "reused_priority_tags": 0,
+                        "standardized_priority_tags": 0,
+                        "note": (
+                            f"Linhas importadas: {import_result.matched_rows}. "
+                            f"Linhas ignoradas: {import_result.skipped_rows}."
+                        ),
+                    }
+                    request.session[import_modal_session_key] = import_modal_data
+                    if import_result.errors:
+                        messages.warning(request, "Algumas linhas foram ignoradas durante a importação em lote.")
+                except Exception as exc:
+                    messages.error(request, f"Falha ao importar análises em lote: {exc}")
+                    import_modal_data = {
+                        "title": "Falha ao importar análises em lote",
+                        "error": str(exc),
+                    }
+            elif action == "import_async":
+                storage_path = ""
+                try:
+                    storage_path = _persist_upload_to_storage(file_bytes, upload_name or "analises_lote.xlsx")
+                    queue = get_passivas_import_queue()
+                    job = queue.enqueue(
+                        run_analise_lote_planilha_import_job,
+                        kwargs={
+                            "storage_path": storage_path,
+                            "upload_name": upload_name or "analises_lote.xlsx",
+                            "carteira_id": form.cleaned_data["carteira"].id,
+                            "tipo_analise_id": form.cleaned_data["tipo_analise"].id,
+                            "analista_id": form.cleaned_data["analista"].id,
+                            "sheet_prefix": form.cleaned_data.get("sheet_prefix") or "",
+                            "uf": form.cleaned_data.get("uf") or "",
+                            "limit": int(form.cleaned_data.get("limit") or 0),
+                            "selected_row_ids": selected_row_ids,
+                            "user_id": getattr(request.user, "id", None),
+                        },
+                        result_ttl=86400,
+                    )
+                    request.session[background_job_session_key] = job.id
+                    background_job = {
+                        "id": job.id,
+                        "status": job.get_status(),
+                        "result": None,
+                        "error": None,
+                    }
+                    messages.success(
+                        request,
+                        "Importação de análises em lote iniciada em background.",
+                    )
+                except Exception as exc:
+                    if storage_path:
+                        try:
+                            if default_storage.exists(storage_path):
+                                default_storage.delete(storage_path)
+                        except Exception:
+                            pass
+                    messages.error(request, f"Falha ao iniciar importação em background: {exc}")
+
+            parsed = []
 
         if parsed:
             def _has_analysis_fields(row):
@@ -2683,7 +2846,7 @@ def demandas_analise_planilha_view(request):
                         },
                         result_ttl=86400,
                     )
-                    request.session["passivas_planilha_last_job_id"] = job.id
+                    request.session[background_job_session_key] = job.id
                     background_job = {
                         "id": job.id,
                         "status": job.get_status(),
@@ -2751,12 +2914,12 @@ def demandas_analise_planilha_view(request):
     if import_action_requested and import_modal_data is None:
         if import_result is not None:
             import_modal_data = {
-                "created_cadastros": import_result.created_cadastros,
-                "updated_cadastros": import_result.updated_cadastros,
-                "created_cnjs": import_result.created_cnjs,
-                "updated_cnjs": import_result.updated_cnjs,
-                "created_cards": import_result.created_cards,
-                "updated_cards": import_result.updated_cards,
+                "created_cadastros": getattr(import_result, "created_cadastros", 0),
+                "updated_cadastros": getattr(import_result, "updated_cadastros", getattr(import_result, "updated_processos", 0)),
+                "created_cnjs": getattr(import_result, "created_cnjs", 0),
+                "updated_cnjs": getattr(import_result, "updated_cnjs", 0),
+                "created_cards": getattr(import_result, "created_cards", 0),
+                "updated_cards": getattr(import_result, "updated_cards", 0),
                 "reused_priority_tags": getattr(import_result, "reused_priority_tags", 0),
                 "standardized_priority_tags": getattr(import_result, "standardized_priority_tags", 0),
             }
@@ -2767,7 +2930,7 @@ def demandas_analise_planilha_view(request):
             }
 
     if background_job is None:
-        job_id = request.session.get("passivas_planilha_last_job_id")
+        job_id = request.session.get(background_job_session_key)
         if job_id:
             try:
                 connection = get_queue_connection()
@@ -2806,9 +2969,10 @@ def demandas_analise_planilha_view(request):
         kept_name = ""
 
     context = admin.site.each_context(request)
+    is_analise_lote_mode = modo_importacao == DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE
     context.update(
         {
-            "title": "Demandas P/ Análise (Modo Planilha)",
+            "title": "Demandas P/ Análise (Importar Análises em Lote)" if is_analise_lote_mode else "Demandas P/ Análise (Modo Planilha)",
             "form": form,
             "preview": preview,
             "import_result": import_result,
@@ -2820,7 +2984,10 @@ def demandas_analise_planilha_view(request):
             "priority_options": priority_options,
             "selected_priority_keys": selected_priority_keys,
             "selected_cpfs_payload": selected_cpfs_payload,
+            "selected_row_ids_payload": selected_row_ids_payload,
             "background_job": background_job,
+            "modo_importacao": modo_importacao,
+            "is_analise_lote_mode": is_analise_lote_mode,
         }
     )
     return render(request, "admin/contratos/demandas_analise_planilha.html", context)

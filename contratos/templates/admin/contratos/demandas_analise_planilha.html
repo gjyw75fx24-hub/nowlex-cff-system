@@ -43,6 +43,156 @@
       padding: 12px 16px 16px 16px;
       text-align: right;
     }
+    .demandas-preview-toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 10px 0 14px 0;
+    }
+    .demandas-preview-toolbar__spacer {
+      flex: 1 1 auto;
+    }
+    .analise-lote-preview-list {
+      display: grid;
+      gap: 16px;
+      margin-top: 14px;
+    }
+    .analise-lote-card {
+      border: 1px solid #d7dee8;
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(28, 53, 78, 0.08);
+    }
+    .analise-lote-card[data-selectable="0"] {
+      opacity: .78;
+      background: #fbfcfd;
+    }
+    .analise-lote-card__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 16px;
+      border-bottom: 1px solid #e5edf3;
+      background: #f7fafc;
+    }
+    .analise-lote-card__header-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      flex: 1 1 420px;
+      min-width: 280px;
+    }
+    .analise-lote-card__title {
+      font-size: 1.02rem;
+      font-weight: 700;
+      color: #1f2d3d;
+      margin-bottom: 4px;
+    }
+    .analise-lote-card__meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: .9rem;
+      color: #4a647d;
+    }
+    .analise-lote-card__actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .analise-lote-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: .84rem;
+      font-weight: 700;
+      border: 1px solid #cfd9e6;
+      background: #eef3f8;
+      color: #27415c;
+    }
+    .analise-lote-badge--matched {
+      background: #e8f8ef;
+      border-color: #a7d8b7;
+      color: #1f6a39;
+    }
+    .analise-lote-badge--conflict {
+      background: #fff4df;
+      border-color: #f1cf87;
+      color: #8f5c00;
+    }
+    .analise-lote-badge--missing {
+      background: #fdecec;
+      border-color: #efb2b2;
+      color: #922f2f;
+    }
+    .analise-lote-card__body {
+      padding: 16px;
+    }
+    .analise-lote-summary {
+      border: 1px solid #dde7f0;
+      border-radius: 12px;
+      background: #fbfdff;
+      padding: 14px 16px;
+    }
+    .analise-lote-summary__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+      color: #667b91;
+      font-size: .9rem;
+    }
+    .analise-lote-summary__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px 16px;
+      margin-bottom: 12px;
+    }
+    .analise-lote-summary__cell strong {
+      display: block;
+      font-size: .82rem;
+      color: #58708a;
+      margin-bottom: 2px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .analise-lote-summary__contracts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .analise-lote-summary__contract {
+      display: inline-flex;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #edf4ff;
+      border: 1px solid #c8dcff;
+      color: #214c91;
+      font-size: .88rem;
+      font-weight: 600;
+    }
+    .analise-lote-summary__results {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .analise-lote-summary__results li + li {
+      margin-top: 4px;
+    }
+    [data-import-mode-section] {
+      display: none;
+    }
+    [data-import-mode-section].is-active {
+      display: block;
+    }
   </style>
 {% endblock %}
 
@@ -52,15 +202,15 @@
     {% if import_modal_data %}
       <div class="import-result-modal-overlay" id="import-result-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="import-result-modal-title">
         <div class="import-result-modal">
-          <div class="import-result-modal__header" id="import-result-modal-title">{{ import_modal_data.title|default:"Importação concluída" }}</div>
+          <div class="import-result-modal__header" id="import-result-modal-title">{{ import_modal_data.title|default:"Importacao concluida" }}</div>
           <div class="import-result-modal__body">
             {% if import_modal_data.error %}
               <div>{{ import_modal_data.error }}</div>
             {% elif import_modal_data.mode == "remove" %}
-              <div>Resumo da remoção:</div>
+              <div>Resumo da remocao:</div>
               <ul class="import-result-modal__list">
                 {% if import_modal_data.carteira_nome %}
-                  <li>Carteira da operação: {{ import_modal_data.carteira_nome }}</li>
+                  <li>Carteira da operacao: {{ import_modal_data.carteira_nome }}</li>
                 {% endif %}
                 <li>CPFs selecionados: {{ import_modal_data.selected_cpfs|default:0 }}</li>
                 <li>CPFs afetados: {{ import_modal_data.affected_cpfs|default:0 }}</li>
@@ -69,25 +219,23 @@
                 <li>CNJs removidos: {{ import_modal_data.removed_cnjs|default:0 }}</li>
                 <li>Cards removidos: {{ import_modal_data.removed_cards|default:0 }}</li>
               </ul>
-              {% if import_modal_data.note %}
-                <div style="margin-top:10px; opacity:.85;">{{ import_modal_data.note }}</div>
-              {% endif %}
             {% else %}
               <div>Resumo do processamento:</div>
               <ul class="import-result-modal__list">
-                <li>Cadastros: {{ import_modal_data.created_cadastros|default:0 }} novo(s), {{ import_modal_data.updated_cadastros|default:0 }} atualizado(s)</li>
+                {% if is_analise_lote_mode %}
+                  <li>Processos atualizados: {{ import_modal_data.updated_cadastros|default:0 }}</li>
+                {% else %}
+                  <li>Cadastros: {{ import_modal_data.created_cadastros|default:0 }} novo(s), {{ import_modal_data.updated_cadastros|default:0 }} atualizado(s)</li>
+                {% endif %}
                 <li>CNJs: {{ import_modal_data.created_cnjs|default:0 }} novo(s), {{ import_modal_data.updated_cnjs|default:0 }} atualizado(s)</li>
                 <li>Cards: {{ import_modal_data.created_cards|default:0 }} novo(s), {{ import_modal_data.updated_cards|default:0 }} atualizado(s)</li>
                 {% if import_modal_data.reused_priority_tags or import_modal_data.standardized_priority_tags %}
                   <li>Etiquetas prioridade: {{ import_modal_data.reused_priority_tags }} reaproveitada(s), {{ import_modal_data.standardized_priority_tags }} padronizada(s)</li>
                 {% endif %}
-                {% if import_modal_data.applied_tasks %}
-                  <li>Agenda Geral: {{ import_modal_data.applied_tasks }} tarefa(s) aplicada(s) em {{ import_modal_data.applied_tasks_targets }} processo(s)</li>
-                {% endif %}
               </ul>
-              {% if import_modal_data.note %}
-                <div style="margin-top:10px; opacity:.85;">{{ import_modal_data.note }}</div>
-              {% endif %}
+            {% endif %}
+            {% if import_modal_data.note %}
+              <div style="margin-top:10px; opacity:.85;">{{ import_modal_data.note }}</div>
             {% endif %}
           </div>
           <div class="import-result-modal__actions">
@@ -100,9 +248,7 @@
           const overlay = document.getElementById('import-result-modal-overlay');
           const closeBtn = document.getElementById('import-result-modal-close');
           if (!overlay || !closeBtn) return;
-          const closeModal = () => {
-            overlay.style.display = 'none';
-          };
+          const closeModal = () => { overlay.style.display = 'none'; };
           closeBtn.addEventListener('click', closeModal);
           overlay.addEventListener('click', (event) => {
             if (event.target === overlay) closeModal();
@@ -114,8 +260,12 @@
 
     <div class="demandas-header">
       <div>
-        <div style="opacity: .8;">
-          Importa planilha Passivas (.xlsx/.csv) criando cadastros/CNJs e salvando cards no caderno.
+        <div style="opacity:.8;">
+          {% if is_analise_lote_mode %}
+            Importa cards de analise em lote a partir de planilha, com preview por linha, selecao por UF e atribuicao de analista responsavel.
+          {% else %}
+            Importa planilha Passivas (.xlsx/.csv) criando cadastros/CNJs e salvando cards no caderno.
+          {% endif %}
         </div>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
@@ -124,64 +274,73 @@
     </div>
 
     {% if background_job %}
-      <div class="mini-postit" style="margin-top: 12px; padding: 10px 12px;">
+      <div class="mini-postit" style="margin-top:12px; padding:10px 12px;">
         <div>
-          <strong>Importação em background:</strong>
+          <strong>Importacao em background:</strong>
           {% if background_job.status == "queued" or background_job.status == "deferred" %}
             Na fila
           {% elif background_job.status == "started" %}
             Processando
           {% elif background_job.status == "finished" %}
-            Concluída
+            Concluida
           {% elif background_job.status == "failed" %}
             Falhou
           {% elif background_job.status == "indisponivel" %}
-            Status indisponível
+            Status indisponivel
           {% else %}
             {{ background_job.status }}
           {% endif %}
         </div>
         {% if background_job.status == "finished" and background_job.result %}
-          <div style="margin-top: 6px; opacity: .85;">
-            Cadastros: {{ background_job.result.created_cadastros|default:0 }} novo(s),
-            {{ background_job.result.updated_cadastros|default:0 }} atualizado(s).
-            CNJs: {{ background_job.result.created_cnjs|default:0 }} novo(s),
-            {{ background_job.result.updated_cnjs|default:0 }} atualizado(s).
-            Cards: {{ background_job.result.created_cards|default:0 }} novo(s),
-            {{ background_job.result.updated_cards|default:0 }} atualizado(s).
-            {% if background_job.result.applied_tasks %}
-              Agenda Geral: {{ background_job.result.applied_tasks }} tarefa(s) aplicada(s)
-              em {{ background_job.result.applied_tasks_targets|default:0 }} processo(s).
+          <div style="margin-top:6px; opacity:.85;">
+            {% if is_analise_lote_mode %}
+              Processos atualizados: {{ background_job.result.updated_cadastros|default:0 }}.
+            {% else %}
+              Cadastros: {{ background_job.result.created_cadastros|default:0 }} novo(s), {{ background_job.result.updated_cadastros|default:0 }} atualizado(s).
             {% endif %}
+            CNJs: {{ background_job.result.created_cnjs|default:0 }} novo(s), {{ background_job.result.updated_cnjs|default:0 }} atualizado(s).
+            Cards: {{ background_job.result.created_cards|default:0 }} novo(s), {{ background_job.result.updated_cards|default:0 }} atualizado(s).
           </div>
         {% elif background_job.error %}
-          <div style="margin-top: 6px; color: #8a1f1f;">{{ background_job.error }}</div>
+          <div style="margin-top:6px; color:#8a1f1f;">{{ background_job.error }}</div>
         {% endif %}
-        <div style="margin-top: 6px; opacity: .7;">Atualize a página para acompanhar.</div>
+        <div style="margin-top:6px; opacity:.7;">Atualize a pagina para acompanhar.</div>
       </div>
     {% endif %}
 
-	    <form method="post" enctype="multipart/form-data" style="margin-top: 16px;">
-		      {% csrf_token %}
-		      {{ form.upload_token }}
-		      <input type="hidden" name="selected_cpfs_payload" id="id_selected_cpfs_payload" value="{{ selected_cpfs_payload|default:'' }}">
-		      <input type="hidden" name="action_override" id="id_action_override" value="">
-		      <input type="hidden" name="supervisor_password" id="id_supervisor_password" value="">
-		      <script>
-		        (function () {
-		          const el = document.getElementsByName('upload_token')[0];
-		          if (el && "{{ upload_token_value|escapejs }}") el.value = "{{ upload_token_value|escapejs }}";
-	        })();
-	      </script>
+    <form method="post" enctype="multipart/form-data" style="margin-top:16px;">
+      {% csrf_token %}
+      {{ form.upload_token }}
+      <input type="hidden" name="selected_cpfs_payload" id="id_selected_cpfs_payload" value="{{ selected_cpfs_payload|default:'' }}">
+      <input type="hidden" name="selected_row_ids_payload" id="id_selected_row_ids_payload" value="{{ selected_row_ids_payload|default:'' }}">
+      <input type="hidden" name="action_override" id="id_action_override" value="">
+      <input type="hidden" name="supervisor_password" id="id_supervisor_password" value="">
+      <script>
+        (function () {
+          const uploadToken = document.getElementsByName('upload_token')[0];
+          if (uploadToken && "{{ upload_token_value|escapejs }}") {
+            uploadToken.value = "{{ upload_token_value|escapejs }}";
+          }
+        })();
+      </script>
 
-      <div class="demandas-form__row demandas-form__row--stacked">
+      {% if form.non_field_errors %}
+        <div class="errornote">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="demandas-form__row">
+        <div class="demandas-form__group">
+          <label class="demandas-form__label">{{ form.modo_importacao.label }}</label>
+          {{ form.modo_importacao }}
+          {% if form.modo_importacao.errors %}<div class="errornote">{{ form.modo_importacao.errors }}</div>{% endif %}
+        </div>
         <div class="demandas-form__group demandas-form__group--wide">
           <label class="demandas-form__label">{{ form.arquivo.label }}</label>
           {{ form.arquivo }}
           {% if kept_upload_name %}
-            <div class="help" style="margin-top: 6px;">
-              Arquivo mantido para importação: <strong>{{ kept_upload_name }}</strong>
-              <span style="opacity: .8;">(não precisa anexar novamente)</span>
+            <div class="help" style="margin-top:6px;">
+              Arquivo mantido para importacao: <strong>{{ kept_upload_name }}</strong>
+              <span style="opacity:.8;">(nao precisa anexar novamente)</span>
             </div>
           {% endif %}
           {% if form.arquivo.errors %}<div class="errornote">{{ form.arquivo.errors }}</div>{% endif %}
@@ -198,6 +357,11 @@
           <label class="demandas-form__label">{{ form.tipo_analise.label }}</label>
           {{ form.tipo_analise }}
           {% if form.tipo_analise.errors %}<div class="errornote">{{ form.tipo_analise.errors }}</div>{% endif %}
+        </div>
+        <div class="demandas-form__group{% if not is_analise_lote_mode %} is-hidden{% endif %}" data-import-mode-section="analise_lote">
+          <label class="demandas-form__label">{{ form.analista.label }}</label>
+          {{ form.analista }}
+          {% if form.analista.errors %}<div class="errornote">{{ form.analista.errors }}</div>{% endif %}
         </div>
       </div>
 
@@ -222,381 +386,505 @@
         </div>
       </div>
 
-      <div class="demandas-form__row">
+      <div class="demandas-form__row{% if is_analise_lote_mode %} is-hidden{% endif %}" data-import-mode-section="passivas">
         <div class="demandas-form__group demandas-form__group--wide">
           <label class="demandas-form__label" for="id_considerar_prioridade" style="display:flex; gap:8px; align-items:center;">
-            <input
-              type="checkbox"
-              id="id_considerar_prioridade"
-              name="considerar_prioridade"
-              value="1"
-              {% if consider_priority %}checked{% endif %}
-            >
+            <input type="checkbox" id="id_considerar_prioridade" name="considerar_prioridade" value="1" {% if consider_priority %}checked{% endif %}>
             Considerar Prioridade
           </label>
-          <div
-            id="prioridade-select-wrapper"
-            style="{% if not consider_priority %}display:none;{% endif %} margin-top: 8px;"
-          >
-            <label class="demandas-form__label" for="id_selected_prioridades">Prioridades (uma ou várias)</label>
-            <select
-              id="id_selected_prioridades"
-              name="selected_prioridades"
-              multiple
-              size="6"
-              class="form-control"
-              style="min-height: 120px;"
-            >
+          <div id="prioridade-select-wrapper" style="{% if not consider_priority %}display:none;{% endif %} margin-top:8px;">
+            <label class="demandas-form__label" for="id_selected_prioridades">Prioridades (uma ou varias)</label>
+            <select id="id_selected_prioridades" name="selected_prioridades" multiple size="6" class="form-control" style="min-height:120px;">
               {% for opt in priority_options %}
-                <option value="{{ opt.value }}" {% if opt.value in selected_priority_keys %}selected{% endif %}>
-                  {{ opt.label }}
-                </option>
+                <option value="{{ opt.value }}" {% if opt.value in selected_priority_keys %}selected{% endif %}>{{ opt.label }}</option>
               {% endfor %}
             </select>
             {% if not priority_options %}
-              <div class="help">Gere a pré-visualização para carregar as prioridades da planilha.</div>
+              <div class="help">Gere a pre-visualizacao para carregar as prioridades da planilha.</div>
             {% else %}
-              <div class="help">Quando selecionadas, a prévia/importação foca nessas prioridades.</div>
+              <div class="help">Quando selecionadas, a previa/importacao foca nessas prioridades.</div>
             {% endif %}
           </div>
         </div>
       </div>
-      <script>
-        (function () {
-          const priorityToggle = document.getElementById('id_considerar_prioridade');
-          const priorityWrapper = document.getElementById('prioridade-select-wrapper');
-          if (!priorityToggle || !priorityWrapper) return;
-          const syncPriorityVisibility = () => {
-            priorityWrapper.style.display = priorityToggle.checked ? '' : 'none';
-          };
-          priorityToggle.addEventListener('change', syncPriorityVisibility);
-          syncPriorityVisibility();
-        })();
 
-	        (function () {
-	          const bindImportSubmitState = () => {
-	            const formEl = document.querySelector('.demandas-panel form');
-	            const importBtn = document.getElementById('planilha-import-btn');
-	            const asyncBtn = document.getElementById('planilha-import-async-btn');
-	            const removeBtn = document.getElementById('planilha-remove-btn');
-	            const actionOverrideInput = document.getElementById('id_action_override');
-	            const supervisorPasswordInput = document.getElementById('id_supervisor_password');
-	            if (!formEl || !importBtn) return;
+      <div class="demandas-form__footer">
+        <div class="demandas-form__actions">
+          <button class="button" type="submit" name="action" value="preview">Pre-visualizar</button>
+          <button class="button default" type="submit" name="action" value="import" id="planilha-import-btn">Importar</button>
+          <button class="button" type="submit" name="action" value="import_async" id="planilha-import-async-btn">Importar em background</button>
+          <button class="button" type="submit" name="action" value="cancel" formnovalidate>Cancelar importacao</button>
+        </div>
+      </div>
 
-	            formEl.addEventListener('submit', (event) => {
-	              const submitter = event.submitter || document.activeElement;
-	              const submitterName = submitter ? submitter.name : '';
-	              const submitterValue = submitter ? submitter.value : '';
-	              const isImportAction = Boolean(
-	                submitter
-	                && submitterName === 'action'
-	                && submitterValue === 'import'
-	              );
-	              const isImportAsyncAction = Boolean(
-	                submitter
-	                && submitterName === 'action'
-	                && submitterValue === 'import_async'
-	              );
-	              const isRemoveAction = Boolean(
-	                submitter
-	                && submitterName === 'action'
-	                && submitterValue === 'remove'
-	              );
-	              if (actionOverrideInput) {
-	                actionOverrideInput.value = '';
-	              }
-	              if (!isRemoveAction && supervisorPasswordInput) {
-	                supervisorPasswordInput.value = '';
-	              }
-	              if (!isImportAction && !isImportAsyncAction && !isRemoveAction) return;
+      {% if preview %}
+        <hr style="margin:18px 0;">
+        <h2>Previa</h2>
 
-	              if (isImportAction && importBtn.dataset.importing === '1') {
-	                event.preventDefault();
-	                return;
-	              }
-	              if (isImportAsyncAction && asyncBtn && asyncBtn.dataset.importing === '1') {
-	                event.preventDefault();
-	                return;
-	              }
+        {% if preview.mode == "analise_lote" %}
+          <ul style="margin-top:6px;">
+            <li><strong>Linhas:</strong> {{ preview.rows }}</li>
+            <li><strong>Cadastros encontrados:</strong> {{ preview.matched_rows }}</li>
+            <li><strong>Cards novos:</strong> {{ preview.new_cards }}</li>
+            <li><strong>Cards existentes:</strong> {{ preview.existing_cards }}</li>
+            <li><strong>Conflitos:</strong> {{ preview.conflict_rows }}</li>
+            <li><strong>Sem match:</strong> {{ preview.missing_rows }}</li>
+            <li><strong>Analista atribuido:</strong> {{ preview.analista_label }}</li>
+          </ul>
 
-	              if (isRemoveAction) {
-	                if (formEl.dataset.removeSubmitting === '1') {
-	                  event.preventDefault();
-	                  return;
-	                }
+          <div class="demandas-preview-toolbar">
+            <button type="button" class="button" id="analise-lote-filter-reset">Mostrar todas</button>
+            <label for="analise-lote-uf-filter"><strong>UF:</strong></label>
+            <select id="analise-lote-uf-filter" class="form-control" style="width:140px; min-width:140px;">
+              <option value="">Todas</option>
+              {% for uf in preview.ufs %}
+                <option value="{{ uf }}">{{ uf }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="button" id="analise-lote-select-all">Selecionar todas</button>
+            <button type="button" class="button" id="analise-lote-select-uf">Selecionar UF</button>
+            <button type="button" class="button" id="analise-lote-clear">Limpar selecao</button>
+            <span class="demandas-preview-toolbar__spacer"></span>
+            <span id="analise-lote-selection-summary" style="opacity:.75;">0 selecionadas</span>
+          </div>
 
-	                if (formEl.dataset.removeConfirmed !== '1') {
-	                  const password = window.prompt('Informe sua senha de Supervisor para confirmar a remoção:');
-	                  if (!password) {
-	                    event.preventDefault();
-	                    return;
-	                  }
-	                  if (supervisorPasswordInput) {
-	                    supervisorPasswordInput.value = password;
-	                  }
-	                  formEl.dataset.removeConfirmed = '1';
-	                }
-	                if (actionOverrideInput) {
-	                  actionOverrideInput.value = 'remove';
-	                }
-	                formEl.dataset.removeSubmitting = '1';
-	                if (removeBtn) {
-	                  removeBtn.dataset.removing = '1';
-	                  removeBtn.style.pointerEvents = 'none';
-	                  removeBtn.setAttribute('aria-disabled', 'true');
-	                  removeBtn.classList.add('disabled');
-	                  removeBtn.textContent = 'Removendo...';
-	                }
-	                return;
-	              }
+          <div class="analise-lote-preview-list" id="analise-lote-preview-list">
+            {% for item in preview.items %}
+              <article class="analise-lote-card" data-row-id="{{ item.row_id }}" data-uf="{{ item.uf }}" data-selectable="{{ item.selectable|yesno:'1,0' }}">
+                <div class="analise-lote-card__header">
+                  <div class="analise-lote-card__header-main">
+                    <div>
+                      {% if item.selectable %}
+                        <input type="checkbox" class="js-analise-lote-box" data-row-id="{{ item.row_id }}" data-uf="{{ item.uf }}" {% if item.checked %}checked{% endif %}>
+                      {% else %}
+                        <input type="checkbox" disabled>
+                      {% endif %}
+                    </div>
+                    <div>
+                      <div class="analise-lote-card__title">Linha {{ item.row_id }} · {{ item.parte_contraria }}</div>
+                      <div class="analise-lote-card__meta">
+                        <span><strong>UF:</strong> {{ item.uf }}</span>
+                        <span><strong>CPF:</strong> {{ item.cpf }}</span>
+                        <span><strong>CNJ:</strong> {{ item.cnj }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="analise-lote-card__actions">
+                    <span class="analise-lote-badge {% if item.match_status == 'matched' %}analise-lote-badge--matched{% elif item.match_status == 'conflict' %}analise-lote-badge--conflict{% else %}analise-lote-badge--missing{% endif %}">{{ item.match_label }}</span>
+                    <span class="analise-lote-badge">{{ item.action_label }}</span>
+                    {% if item.process_admin_url %}
+                      <a class="button" href="{{ item.process_admin_url }}" target="_blank" rel="noopener noreferrer">Abrir cadastro</a>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="analise-lote-card__body">
+                  <div style="margin-bottom:10px; color:#536b82; font-size:.92rem;">
+                    {{ item.existing_card_summary }}
+                  </div>
+                  <div class="analise-lote-summary">
+                    <div class="analise-lote-summary__meta">
+                      <span><strong>Analista:</strong> {{ item.summary.analyst_label }}</span>
+                      <span><strong>Data:</strong> {{ item.summary.date_label }}</span>
+                      {% if item.summary.tipo_nome %}<span class="analise-lote-badge">{{ item.summary.tipo_nome }}</span>{% endif %}
+                      {% if item.summary.hashtag %}<span class="analise-lote-badge">{{ item.summary.hashtag }}</span>{% endif %}
+                    </div>
+                    <div class="analise-lote-summary__grid">
+                      <div class="analise-lote-summary__cell">
+                        <strong>Classe processual</strong>
+                        <div>{{ item.summary.classe_processual }}</div>
+                      </div>
+                      <div class="analise-lote-summary__cell">
+                        <strong>Saldo devedor</strong>
+                        <div>{{ item.summary.saldo_devedor }}</div>
+                      </div>
+                      <div class="analise-lote-summary__cell">
+                        <strong>Saldo atualizado</strong>
+                        <div>{{ item.summary.saldo_atualizado }}</div>
+                      </div>
+                      <div class="analise-lote-summary__cell">
+                        <strong>Valor da causa</strong>
+                        <div>{{ item.summary.valor_causa }}</div>
+                      </div>
+                    </div>
+                    <div class="analise-lote-summary__cell" style="margin-bottom:12px;">
+                      <strong>Contratos vinculados</strong>
+                      <div class="analise-lote-summary__contracts">
+                        {% for contract_number in item.summary.contract_numbers %}
+                          <span class="analise-lote-summary__contract">{{ contract_number }}</span>
+                        {% empty %}
+                          <span style="opacity:.7;">Nenhum contrato informado</span>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div>
+                      <strong style="display:block; margin-bottom:6px; color:#58708a; text-transform:uppercase; letter-spacing:.03em; font-size:.82rem;">Resultado da Analise</strong>
+                      <ul class="analise-lote-summary__results">
+                        {% for entry in item.summary.result_entries %}
+                          <li><strong>{{ entry.label }}:</strong> {{ entry.value }}</li>
+                        {% empty %}
+                          <li>Sem respostas mapeadas para o resumo.</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+          <script>
+            (function () {
+              const payloadEl = document.getElementById('id_selected_row_ids_payload');
+              const formEl = document.querySelector('.demandas-panel form');
+              const filterEl = document.getElementById('analise-lote-uf-filter');
+              const resetBtn = document.getElementById('analise-lote-filter-reset');
+              const selectAllBtn = document.getElementById('analise-lote-select-all');
+              const selectUfBtn = document.getElementById('analise-lote-select-uf');
+              const clearBtn = document.getElementById('analise-lote-clear');
+              const selectionSummary = document.getElementById('analise-lote-selection-summary');
+              const cards = () => Array.from(document.querySelectorAll('.analise-lote-card'));
+              const visibleCards = () => cards().filter((card) => card.style.display !== 'none');
+              const visibleBoxes = () => visibleCards().map((card) => card.querySelector('.js-analise-lote-box')).filter((box) => box && !box.disabled);
+              const boxes = () => Array.from(document.querySelectorAll('.js-analise-lote-box')).filter((box) => !box.disabled);
+              const syncPayload = () => {
+                if (!payloadEl) return;
+                const ids = boxes().filter((box) => box.checked).map((box) => box.dataset.rowId).filter(Boolean);
+                const normalized = Array.from(new Set(ids));
+                payloadEl.value = normalized.length ? normalized.join(',') : '__none__';
+                if (selectionSummary) {
+                  selectionSummary.textContent = `${normalized.length} selecionada(s)`;
+                }
+              };
+              const applyFilter = () => {
+                const targetUf = String(filterEl ? filterEl.value : '').trim().toUpperCase();
+                cards().forEach((card) => {
+                  const cardUf = String(card.dataset.uf || '').trim().toUpperCase();
+                  card.style.display = (!targetUf || cardUf === targetUf) ? '' : 'none';
+                });
+              };
+              const setVisible = (checked) => {
+                visibleBoxes().forEach((box) => {
+                  box.checked = checked;
+                });
+                syncPayload();
+              };
+              const setVisibleByUf = () => {
+                const targetUf = String(filterEl ? filterEl.value : '').trim().toUpperCase();
+                if (!targetUf) return;
+                visibleBoxes().forEach((box) => {
+                  box.checked = String(box.dataset.uf || '').trim().toUpperCase() === targetUf;
+                });
+                syncPayload();
+              };
+              boxes().forEach((box) => box.addEventListener('change', syncPayload));
+              if (formEl) formEl.addEventListener('submit', syncPayload);
+              if (filterEl) filterEl.addEventListener('change', () => {
+                applyFilter();
+                syncPayload();
+              });
+              if (resetBtn) resetBtn.addEventListener('click', () => {
+                if (filterEl) filterEl.value = '';
+                applyFilter();
+                syncPayload();
+              });
+              if (selectAllBtn) selectAllBtn.addEventListener('click', () => setVisible(true));
+              if (selectUfBtn) selectUfBtn.addEventListener('click', setVisibleByUf);
+              if (clearBtn) clearBtn.addEventListener('click', () => setVisible(false));
+              applyFilter();
+              syncPayload();
+            })();
+          </script>
+        {% else %}
+          <ul style="margin-top:6px;">
+            <li><strong>Linhas:</strong> {{ preview.rows }}</li>
+            <li><strong>Analisados:</strong> {{ preview.analysed_cpfs }} CPF(s)</li>
+            <li><strong>Ja importados:</strong> {{ preview.imported_cpfs }} CPF(s)</li>
+            <li><strong>Nao importados:</strong> {{ preview.not_imported_cpfs|default:0 }} CPF(s)</li>
+            <li><strong>CPFs:</strong> {{ preview.cpfs }}</li>
+            <li><strong>CNJs:</strong> {{ preview.cnjs }}</li>
+            <li><strong>UFs:</strong> {{ preview.ufs }}</li>
+            {% if preview.priority_options_count %}
+              <li><strong>Prioridades na previa:</strong> {{ preview.priority_options_count }}</li>
+            {% endif %}
+          </ul>
 
-	              if (isImportAsyncAction) {
-	                if (actionOverrideInput) {
-	                  actionOverrideInput.value = 'import_async';
-	                }
-	                if (asyncBtn) {
-	                  asyncBtn.dataset.importing = '1';
-	                  asyncBtn.style.pointerEvents = 'none';
-	                  asyncBtn.setAttribute('aria-disabled', 'true');
-	                  asyncBtn.classList.add('disabled');
-	                  asyncBtn.textContent = 'Enfileirando...';
-	                }
-	                return;
-	              }
+          {% if preview.not_imported_by_uf %}
+            <h3 style="margin-top:14px;">Nao importados por UF (filtros atuais)</h3>
+            <div style="display:grid; gap:8px; margin:8px 0 12px 0;">
+              {% for uf_item in preview.not_imported_by_uf %}
+                <details class="mini-postit" style="padding:8px 10px;">
+                  <summary style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer;">
+                    <span><strong>{{ uf_item.uf }}</strong>: {{ uf_item.total }} cadastro(s) nao importado(s)</span>
+                    <button type="button" class="button sel-not-imported-uf" data-uf="{{ uf_item.uf }}">Selecionar UF</button>
+                  </summary>
+                  <div style="margin-top:8px;">
+                    <ul style="margin:0; padding-left:18px;">
+                      {% for cadastro in uf_item.cadastros %}
+                        <li>
+                          {{ cadastro.cpf }} · {{ cadastro.parte_contraria }}
+                          (CNJs: {{ cadastro.imported_count }}/{{ cadastro.imported_total }})
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                </details>
+              {% endfor %}
+            </div>
+          {% endif %}
 
-	              if (actionOverrideInput) {
-	                actionOverrideInput.value = 'import';
-	              }
-	              importBtn.dataset.importing = '1';
-	              importBtn.style.pointerEvents = 'none';
-	              importBtn.setAttribute('aria-disabled', 'true');
-	              importBtn.classList.add('disabled');
-	              importBtn.textContent = 'Importando...';
-            });
-          };
+          {% if preview.cpf_rows %}
+            <h3 style="margin-top:14px;">Selecionar CPFs para importar</h3>
+            <div class="demandas-preview-toolbar">
+              <button type="button" class="button" id="filter-only-other-carteira">Mostrar so ja em outras carteiras</button>
+              <button type="button" class="button" id="filter-show-all">Mostrar todos</button>
+              <button type="button" class="button" id="sel-all">Selecionar todos</button>
+              <button type="button" class="button" id="sel-not-imported">Selecionar nao importados</button>
+              <button type="button" class="button" id="sel-none">Limpar selecao</button>
+              <button type="button" class="button" id="sel-analysed">Selecionar ja analisados</button>
+              <button type="submit" class="button" name="action" value="remove" id="planilha-remove-btn">Remover selecionados</button>
+              <span id="preview-filter-info" style="opacity:.75;"></span>
+            </div>
+            <table class="adminlist" style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; width:44px;"></th>
+                  <th style="text-align:left;">UF</th>
+                  <th style="text-align:left;">Prioridade</th>
+                  <th style="text-align:left;">CPF</th>
+                  <th style="text-align:left;">Parte contraria</th>
+                  <th style="text-align:left;">CNJs</th>
+                  <th style="text-align:left;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in preview.cpf_rows %}
+                  <tr data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}">
+                    <td>
+                      <input type="checkbox" class="js-planilha-cpf-box" data-cpf="{{ row.cpf }}" data-uf="{{ row.uf }}" data-prechecked="{{ row.prechecked|yesno:'1,0' }}" data-imported-full="{{ row.imported_full|yesno:'1,0' }}" data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}" {% if row.checked %}checked{% endif %}>
+                    </td>
+                    <td>{{ row.uf }}</td>
+                    <td>{{ row.prioridade }}</td>
+                    <td>{{ row.cpf }}</td>
+                    <td>{{ row.parte_contraria }}</td>
+                    <td>{{ row.cnj_count }}</td>
+                    <td>
+                      {% if row.imported_full %}
+                        <span class="mini-postit">Ja importado ({{ row.imported_count }}/{{ row.imported_total }})</span>
+                      {% elif row.imported_partial %}
+                        <span class="mini-postit">Importacao parcial ({{ row.imported_count }}/{{ row.imported_total }})</span>
+                      {% else %}
+                        <span style="opacity:.75;">Nao importado</span>
+                      {% endif %}
+                      <br>
+                      {% if row.prechecked %}
+                        <span style="opacity:.75;">Ja analisado</span>
+                      {% else %}
+                        <span style="opacity:.65;">Sem respostas</span>
+                      {% endif %}
+                      {% if row.has_process %}
+                        <br>
+                        {% if row.exists_only_other_carteira %}
+                          <span style="opacity:.8;">Ja existe em outra carteira: {{ row.other_carteiras_display }}</span>
+                        {% else %}
+                          <span style="opacity:.8;">Carteira(s): {{ row.existing_carteiras_display }}</span>
+                        {% endif %}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <script>
+              (function () {
+                const formEl = document.querySelector('.demandas-panel form');
+                const payloadEl = document.getElementById('id_selected_cpfs_payload');
+                const tableRows = () => Array.from(document.querySelectorAll('tr[data-exists-other-carteira]'));
+                const visibleRows = () => tableRows().filter((row) => row.style.display !== 'none');
+                const boxes = () => Array.from(document.querySelectorAll('.js-planilha-cpf-box'));
+                const visibleBoxes = () => visibleRows().map((row) => row.querySelector('.js-planilha-cpf-box')).filter(Boolean);
+                const filterInfo = document.getElementById('preview-filter-info');
+                const syncSelectedCpfsPayload = () => {
+                  if (!payloadEl) return;
+                  const cpfs = boxes().filter((b) => b.checked).map((b) => (b.dataset.cpf || '').trim()).filter(Boolean);
+                  payloadEl.value = Array.from(new Set(cpfs)).join(',');
+                };
+                const updateFilterInfo = () => {
+                  if (!filterInfo) return;
+                  const total = tableRows().length;
+                  const visible = visibleRows().length;
+                  filterInfo.textContent = `Mostrando ${visible} de ${total} CPF(s) na previa`;
+                };
+                const applyOnlyOtherCarteiraFilter = (onlyOther) => {
+                  tableRows().forEach((row) => {
+                    const isOther = row.dataset.existsOtherCarteira === '1';
+                    row.style.display = (!onlyOther || isOther) ? '' : 'none';
+                  });
+                  updateFilterInfo();
+                };
+                const setAll = (checked) => {
+                  visibleBoxes().forEach((b) => {
+                    b.checked = checked;
+                  });
+                  syncSelectedCpfsPayload();
+                };
+                const setAnalysed = () => {
+                  visibleBoxes().forEach((b) => {
+                    b.checked = (b.dataset.prechecked === '1');
+                  });
+                  syncSelectedCpfsPayload();
+                };
+                const setNotImported = () => {
+                  visibleBoxes().forEach((b) => {
+                    b.checked = (b.dataset.importedFull !== '1');
+                  });
+                  syncSelectedCpfsPayload();
+                };
+                const setNotImportedByUf = (uf) => {
+                  const targetUf = String(uf || '').trim().toUpperCase();
+                  if (!targetUf) return;
+                  visibleBoxes().forEach((b) => {
+                    const sameUf = String(b.dataset.uf || '').trim().toUpperCase() === targetUf;
+                    b.checked = sameUf && b.dataset.importedFull !== '1';
+                  });
+                  syncSelectedCpfsPayload();
+                };
+                const allBtn = document.getElementById('sel-all');
+                const notImportedBtn = document.getElementById('sel-not-imported');
+                const noneBtn = document.getElementById('sel-none');
+                const analysedBtn = document.getElementById('sel-analysed');
+                const filterOnlyOtherBtn = document.getElementById('filter-only-other-carteira');
+                const filterShowAllBtn = document.getElementById('filter-show-all');
+                const notImportedByUfButtons = Array.from(document.querySelectorAll('.sel-not-imported-uf'));
+                boxes().forEach((b) => b.addEventListener('change', syncSelectedCpfsPayload));
+                if (formEl) formEl.addEventListener('submit', syncSelectedCpfsPayload);
+                if (allBtn) allBtn.addEventListener('click', () => setAll(true));
+                if (notImportedBtn) notImportedBtn.addEventListener('click', setNotImported);
+                if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
+                if (analysedBtn) analysedBtn.addEventListener('click', setAnalysed);
+                if (notImportedByUfButtons.length) {
+                  notImportedByUfButtons.forEach((btn) => {
+                    btn.addEventListener('click', (event) => {
+                      event.preventDefault();
+                      setNotImportedByUf(btn.dataset.uf);
+                    });
+                  });
+                }
+                if (filterOnlyOtherBtn) filterOnlyOtherBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(true));
+                if (filterShowAllBtn) filterShowAllBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(false));
+                applyOnlyOtherCarteiraFilter(false);
+                syncSelectedCpfsPayload();
+              })();
+            </script>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </form>
+  </div>
+</div>
 
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', bindImportSubmitState);
+<script>
+  (function () {
+    const modeSelect = document.getElementById('id_modo_importacao');
+    const priorityToggle = document.getElementById('id_considerar_prioridade');
+    const priorityWrapper = document.getElementById('prioridade-select-wrapper');
+    const formEl = document.querySelector('.demandas-panel form');
+    const importBtn = document.getElementById('planilha-import-btn');
+    const asyncBtn = document.getElementById('planilha-import-async-btn');
+    const removeBtn = document.getElementById('planilha-remove-btn');
+    const actionOverrideInput = document.getElementById('id_action_override');
+    const supervisorPasswordInput = document.getElementById('id_supervisor_password');
+
+    const syncModeSections = () => {
+      const mode = modeSelect ? modeSelect.value : 'passivas';
+      document.querySelectorAll('[data-import-mode-section]').forEach((section) => {
+        const sectionMode = section.getAttribute('data-import-mode-section');
+        section.classList.toggle('is-active', sectionMode === mode);
+      });
+    };
+
+    const syncPriorityVisibility = () => {
+      if (!priorityToggle || !priorityWrapper) return;
+      priorityWrapper.style.display = priorityToggle.checked ? '' : 'none';
+    };
+
+    const bindImportSubmitState = () => {
+      if (!formEl || !importBtn) return;
+      formEl.addEventListener('submit', (event) => {
+        const submitter = event.submitter || document.activeElement;
+        const submitterName = submitter ? submitter.name : '';
+        const submitterValue = submitter ? submitter.value : '';
+        const isImportAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'import');
+        const isImportAsyncAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'import_async');
+        const isRemoveAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'remove');
+
+        if (actionOverrideInput) actionOverrideInput.value = '';
+        if (!isRemoveAction && supervisorPasswordInput) supervisorPasswordInput.value = '';
+        if (!isImportAction && !isImportAsyncAction && !isRemoveAction) return;
+
+        if (isImportAction && importBtn.dataset.importing === '1') {
+          event.preventDefault();
+          return;
+        }
+        if (isImportAsyncAction && asyncBtn && asyncBtn.dataset.importing === '1') {
+          event.preventDefault();
+          return;
+        }
+
+        if (isRemoveAction) {
+          if (formEl.dataset.removeSubmitting === '1') {
+            event.preventDefault();
             return;
           }
-          bindImportSubmitState();
-        })();
-      </script>
+          if (formEl.dataset.removeConfirmed !== '1') {
+            const password = window.prompt('Informe sua senha de Supervisor para confirmar a remocao:');
+            if (!password) {
+              event.preventDefault();
+              return;
+            }
+            if (supervisorPasswordInput) supervisorPasswordInput.value = password;
+            formEl.dataset.removeConfirmed = '1';
+          }
+          if (actionOverrideInput) actionOverrideInput.value = 'remove';
+          formEl.dataset.removeSubmitting = '1';
+          if (removeBtn) {
+            removeBtn.dataset.removing = '1';
+            removeBtn.style.pointerEvents = 'none';
+            removeBtn.setAttribute('aria-disabled', 'true');
+            removeBtn.classList.add('disabled');
+            removeBtn.textContent = 'Removendo...';
+          }
+          return;
+        }
 
-	      <div class="demandas-form__footer">
-		        <div class="demandas-form__actions">
-		          <button class="button" type="submit" name="action" value="preview">Pré-visualizar</button>
-		          <button class="button default" type="submit" name="action" value="import" id="planilha-import-btn">Importar</button>
-		          <button class="button" type="submit" name="action" value="import_async" id="planilha-import-async-btn">Importar em background</button>
-		          <button class="button" type="submit" name="action" value="cancel" formnovalidate>Cancelar importação</button>
-		        </div>
-	      </div>
+        if (isImportAsyncAction) {
+          if (actionOverrideInput) actionOverrideInput.value = 'import_async';
+          if (asyncBtn) {
+            asyncBtn.dataset.importing = '1';
+            asyncBtn.style.pointerEvents = 'none';
+            asyncBtn.setAttribute('aria-disabled', 'true');
+            asyncBtn.classList.add('disabled');
+            asyncBtn.textContent = 'Enfileirando...';
+          }
+          return;
+        }
 
-	    {% if preview %}
-	      <hr style="margin: 18px 0;">
-	      <h2>Prévia</h2>
-	      <ul style="margin-top: 6px;">
-	        <li><strong>Linhas:</strong> {{ preview.rows }}</li>
-	        <li><strong>Analisados:</strong> {{ preview.analysed_cpfs }} CPF(s)</li>
-	        <li><strong>Já importados:</strong> {{ preview.imported_cpfs }} CPF(s)</li>
-	        <li><strong>Não importados:</strong> {{ preview.not_imported_cpfs|default:0 }} CPF(s)</li>
-	        <li><strong>CPFs:</strong> {{ preview.cpfs }}</li>
-	        <li><strong>CNJs:</strong> {{ preview.cnjs }}</li>
-	        <li><strong>UFs:</strong> {{ preview.ufs }}</li>
-	        {% if preview.priority_options_count %}
-	          <li><strong>Prioridades na prévia:</strong> {{ preview.priority_options_count }}</li>
-	        {% endif %}
-	      </ul>
+        if (actionOverrideInput) actionOverrideInput.value = 'import';
+        importBtn.dataset.importing = '1';
+        importBtn.style.pointerEvents = 'none';
+        importBtn.setAttribute('aria-disabled', 'true');
+        importBtn.classList.add('disabled');
+        importBtn.textContent = 'Importando...';
+      });
+    };
 
-	      {% if preview.not_imported_by_uf %}
-	        <h3 style="margin-top: 14px;">Não importados por UF (filtros atuais)</h3>
-	        <div style="display:grid; gap:8px; margin:8px 0 12px 0;">
-	          {% for uf_item in preview.not_imported_by_uf %}
-	            <details class="mini-postit" style="padding:8px 10px;">
-	              <summary style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer;">
-	                <span><strong>{{ uf_item.uf }}</strong>: {{ uf_item.total }} cadastro(s) não importado(s)</span>
-	                <button type="button" class="button sel-not-imported-uf" data-uf="{{ uf_item.uf }}">Selecionar UF</button>
-	              </summary>
-	              <div style="margin-top:8px;">
-	                <ul style="margin: 0; padding-left: 18px;">
-	                  {% for cadastro in uf_item.cadastros %}
-	                    <li>
-	                      {{ cadastro.cpf }} · {{ cadastro.parte_contraria }}
-	                      (CNJs: {{ cadastro.imported_count }}/{{ cadastro.imported_total }})
-	                    </li>
-	                  {% endfor %}
-	                </ul>
-	              </div>
-	            </details>
-	          {% endfor %}
-	        </div>
-	      {% endif %}
-	
-	      {% if preview.cpf_rows %}
-	        <h3 style="margin-top: 14px;">Selecionar CPFs para importar</h3>
-	        <div style="display:flex; gap:10px; margin: 8px 0 10px 0; flex-wrap:wrap;">
-		          <button type="button" class="button" id="filter-only-other-carteira">Mostrar só já em outras carteiras</button>
-		          <button type="button" class="button" id="filter-show-all">Mostrar todos</button>
-		          <button type="button" class="button" id="sel-all">Selecionar todos</button>
-		          <button type="button" class="button" id="sel-not-imported">Selecionar não importados</button>
-		          <button type="button" class="button" id="sel-none">Limpar seleção</button>
-		          <button type="button" class="button" id="sel-analysed">Selecionar “já analisados”</button>
-		          <button type="submit" class="button" name="action" value="remove" id="planilha-remove-btn">Remover selecionados</button>
-		          <span id="preview-filter-info" style="opacity:.75; align-self:center;"></span>
-		          <span style="opacity:.75; align-self:center;">(arquivo permanece salvo após importar; use “Cancelar importação” para descartar)</span>
-		        </div>
-	        <table class="adminlist" style="width: 100%; border-collapse: collapse;">
-	          <thead>
-	            <tr>
-	              <th style="text-align:left; width: 44px;"></th>
-	              <th style="text-align:left;">UF</th>
-	              <th style="text-align:left;">Prioridade</th>
-	              <th style="text-align:left;">CPF</th>
-	              <th style="text-align:left;">Parte contrária</th>
-	              <th style="text-align:left;">CNJs</th>
-	              <th style="text-align:left;">Status</th>
-	            </tr>
-	          </thead>
-	          <tbody>
-	            {% for row in preview.cpf_rows %}
-	              <tr data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}">
-	                <td>
-	                  <input
-	                    type="checkbox"
-	                    class="js-planilha-cpf-box"
-	                    data-cpf="{{ row.cpf }}"
-	                    data-uf="{{ row.uf }}"
-	                    data-prechecked="{{ row.prechecked|yesno:'1,0' }}"
-	                    data-imported-full="{{ row.imported_full|yesno:'1,0' }}"
-	                    data-exists-other-carteira="{{ row.exists_only_other_carteira|yesno:'1,0' }}"
-	                    {% if row.checked %}checked{% endif %}
-	                  >
-	                </td>
-	                <td>{{ row.uf }}</td>
-	                <td>{{ row.prioridade }}</td>
-	                <td>{{ row.cpf }}</td>
-	                <td>{{ row.parte_contraria }}</td>
-	                <td>{{ row.cnj_count }}</td>
-	                <td>
-	                  {% if row.imported_full %}
-	                    <span class="mini-postit">Já importado ({{ row.imported_count }}/{{ row.imported_total }})</span>
-	                  {% elif row.imported_partial %}
-	                    <span class="mini-postit">Importação parcial ({{ row.imported_count }}/{{ row.imported_total }})</span>
-	                  {% else %}
-	                    <span style="opacity:.75;">Não importado</span>
-	                  {% endif %}
-	                  <br>
-	                  {% if row.prechecked %}
-	                    <span style="opacity:.75;">Já analisado</span>
-	                  {% else %}
-	                    <span style="opacity:.65;">Sem respostas</span>
-	                  {% endif %}
-	                  {% if row.has_process %}
-	                    <br>
-	                    {% if row.exists_only_other_carteira %}
-	                      <span style="opacity:.8;">Já existe em outra carteira: {{ row.other_carteiras_display }}</span>
-	                    {% else %}
-	                      <span style="opacity:.8;">Carteira(s): {{ row.existing_carteiras_display }}</span>
-	                    {% endif %}
-	                  {% endif %}
-	                </td>
-	              </tr>
-	            {% endfor %}
-	          </tbody>
-	        </table>
-	        <script>
-	          (function () {
-	            const formEl = document.querySelector('.demandas-panel form');
-	            const payloadEl = document.getElementById('id_selected_cpfs_payload');
-	            const tableRows = () => Array.from(document.querySelectorAll('tr[data-exists-other-carteira]'));
-	            const visibleRows = () => tableRows().filter((row) => row.style.display !== 'none');
-	            const boxes = () => Array.from(document.querySelectorAll('.js-planilha-cpf-box'));
-	            const visibleBoxes = () => visibleRows()
-	              .map((row) => row.querySelector('.js-planilha-cpf-box'))
-	              .filter(Boolean);
-	            const filterInfo = document.getElementById('preview-filter-info');
-	            const syncSelectedCpfsPayload = () => {
-	              if (!payloadEl) return;
-	              const cpfs = boxes()
-	                .filter((b) => b.checked)
-	                .map((b) => (b.dataset.cpf || '').trim())
-	                .filter(Boolean);
-	              payloadEl.value = Array.from(new Set(cpfs)).join(',');
-	            };
-	            const updateFilterInfo = () => {
-	              if (!filterInfo) return;
-	              const total = tableRows().length;
-	              const visible = visibleRows().length;
-	              filterInfo.textContent = `Mostrando ${visible} de ${total} CPF(s) na prévia`;
-	            };
-	            const applyOnlyOtherCarteiraFilter = (onlyOther) => {
-	              tableRows().forEach((row) => {
-	                const isOther = row.dataset.existsOtherCarteira === '1';
-	                row.style.display = (!onlyOther || isOther) ? '' : 'none';
-	              });
-	              updateFilterInfo();
-	            };
-	            const setAll = (checked) => {
-	              visibleBoxes().forEach((b) => {
-	                b.checked = checked;
-	              });
-	              syncSelectedCpfsPayload();
-	            };
-	            const setAnalysed = () => {
-	              visibleBoxes().forEach((b) => {
-	                b.checked = (b.dataset.prechecked === '1');
-	              });
-	              syncSelectedCpfsPayload();
-	            };
-	            const setNotImported = () => {
-	              visibleBoxes().forEach((b) => {
-	                b.checked = (b.dataset.importedFull !== '1');
-	              });
-	              syncSelectedCpfsPayload();
-	            };
-	            const setNotImportedByUf = (uf) => {
-	              const targetUf = String(uf || '').trim().toUpperCase();
-	              if (!targetUf) return;
-	              visibleBoxes().forEach((b) => {
-	                const sameUf = String(b.dataset.uf || '').trim().toUpperCase() === targetUf;
-	                b.checked = sameUf && b.dataset.importedFull !== '1';
-	              });
-	              syncSelectedCpfsPayload();
-	            };
-	            const allBtn = document.getElementById('sel-all');
-	            const notImportedBtn = document.getElementById('sel-not-imported');
-	            const noneBtn = document.getElementById('sel-none');
-	            const analysedBtn = document.getElementById('sel-analysed');
-	            const filterOnlyOtherBtn = document.getElementById('filter-only-other-carteira');
-	            const filterShowAllBtn = document.getElementById('filter-show-all');
-	            const notImportedByUfButtons = Array.from(document.querySelectorAll('.sel-not-imported-uf'));
-	            boxes().forEach((b) => b.addEventListener('change', syncSelectedCpfsPayload));
-	            if (formEl) formEl.addEventListener('submit', syncSelectedCpfsPayload);
-	            if (allBtn) allBtn.addEventListener('click', () => setAll(true));
-	            if (notImportedBtn) notImportedBtn.addEventListener('click', () => setNotImported());
-	            if (noneBtn) noneBtn.addEventListener('click', () => setAll(false));
-	            if (analysedBtn) analysedBtn.addEventListener('click', () => setAnalysed());
-	            if (notImportedByUfButtons.length) {
-	              notImportedByUfButtons.forEach((btn) => {
-	                btn.addEventListener('click', (event) => {
-	                  event.preventDefault();
-	                  setNotImportedByUf(btn.dataset.uf);
-	                });
-	              });
-	            }
-	            if (filterOnlyOtherBtn) {
-	              filterOnlyOtherBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(true));
-	            }
-	            if (filterShowAllBtn) {
-	              filterShowAllBtn.addEventListener('click', () => applyOnlyOtherCarteiraFilter(false));
-	            }
-	            applyOnlyOtherCarteiraFilter(false);
-	            syncSelectedCpfsPayload();
-	          })();
-	        </script>
-	      {% endif %}
-	    {% endif %}
-	    </form>
-	  </div>
-	</div>
-	{% endblock %}
+    if (modeSelect) {
+      modeSelect.addEventListener('change', syncModeSections);
+      syncModeSections();
+    }
+    if (priorityToggle) {
+      priorityToggle.addEventListener('change', syncPriorityVisibility);
+      syncPriorityVisibility();
+    }
+    bindImportSubmitState();
+  })();
+</script>
+{% endblock %}

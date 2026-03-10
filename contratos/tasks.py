@@ -21,6 +21,10 @@ from contratos.services.passivas_planilha import (
     normalize_cpf,
     normalize_header,
 )
+from contratos.services.analise_lote_planilha import (
+    build_analise_lote_rows_from_file_bytes,
+    import_analise_lote_rows,
+)
 
 
 def _filter_rows_by_priority(rows: Iterable, selected_priority_keys: Iterable[str]) -> list:
@@ -225,4 +229,70 @@ def run_passivas_planilha_import_job(
         "rows_imported": len(parsed),
         "applied_tasks": applied_tasks,
         "applied_tasks_targets": applied_tasks_targets,
+    }
+
+
+def run_analise_lote_planilha_import_job(
+    *,
+    storage_path: str,
+    upload_name: str,
+    carteira_id: int,
+    tipo_analise_id: int,
+    analista_id: int,
+    sheet_prefix: str = "",
+    uf: str = "",
+    limit: int = 0,
+    selected_row_ids: Iterable[str] | None = None,
+    user_id: int | None = None,
+) -> dict:
+    file_bytes = b""
+    if storage_path:
+        with default_storage.open(storage_path, "rb") as fp:
+            file_bytes = fp.read()
+
+    parsed_all = build_analise_lote_rows_from_file_bytes(
+        file_bytes,
+        upload_name=upload_name,
+        sheet_prefix=sheet_prefix or "",
+        uf_filter=uf or "",
+        limit=int(limit or 0),
+    )
+
+    carteira = Carteira.objects.filter(pk=carteira_id).first()
+    tipo_analise = TipoAnaliseObjetiva.objects.filter(pk=tipo_analise_id).first()
+    analista = get_user_model().objects.filter(pk=analista_id).first()
+    acting_user = get_user_model().objects.filter(pk=user_id).first() if user_id else None
+    if not carteira or not tipo_analise or not analista:
+        raise ValueError("Carteira, Tipo de Análise ou Analista não encontrado.")
+
+    result = import_analise_lote_rows(
+        parsed_all,
+        carteira=carteira,
+        tipo_analise=tipo_analise,
+        analista=analista,
+        acting_user=acting_user,
+        selected_row_ids=selected_row_ids,
+    )
+
+    try:
+        if storage_path and default_storage.exists(storage_path):
+            default_storage.delete(storage_path)
+    except Exception:
+        pass
+
+    return {
+        "created_cadastros": 0,
+        "updated_cadastros": result.updated_processos,
+        "created_cnjs": result.created_cnjs,
+        "updated_cnjs": result.updated_cnjs,
+        "created_cards": result.created_cards,
+        "updated_cards": result.updated_cards,
+        "reused_priority_tags": 0,
+        "standardized_priority_tags": 0,
+        "skipped_rows": result.skipped_rows,
+        "errors": result.errors,
+        "rows": len(parsed_all),
+        "rows_imported": result.matched_rows,
+        "applied_tasks": 0,
+        "applied_tasks_targets": 0,
     }
