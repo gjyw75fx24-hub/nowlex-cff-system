@@ -9317,6 +9317,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cpf_lote_id'] = None
         extra_context['cpf_lote_list_url'] = reverse('admin:processo_cpf_lote_list')
         extra_context['cpf_lote_save_url'] = reverse('admin:processo_cpf_lote_save')
+        extra_context['cpf_lote_rename_url'] = reverse('admin:processo_cpf_lote_rename')
         extra_context['cpf_lote_delete_url'] = reverse('admin:processo_cpf_lote_delete')
         extra_context['cpf_lote_share_url'] = reverse('admin:processo_cpf_lote_share')
         response = super().changelist_view(request, extra_context=extra_context)
@@ -9385,6 +9386,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('delegate-bulk/', self.admin_site.admin_view(self.delegate_bulk_view), name='processo_delegate_bulk'),
             path('cpf-lote/listar/', self.admin_site.admin_view(self.cpf_lote_list_view), name='processo_cpf_lote_list'),
             path('cpf-lote/salvar/', self.admin_site.admin_view(self.cpf_lote_save_view), name='processo_cpf_lote_save'),
+            path('cpf-lote/renomear/', self.admin_site.admin_view(self.cpf_lote_rename_view), name='processo_cpf_lote_rename'),
             path('cpf-lote/remover/', self.admin_site.admin_view(self.cpf_lote_delete_view), name='processo_cpf_lote_delete'),
             path('cpf-lote/compartilhar/', self.admin_site.admin_view(self.cpf_lote_share_view), name='processo_cpf_lote_share'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
@@ -9489,6 +9491,49 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.delete()
         return JsonResponse({'ok': True})
+
+    def cpf_lote_rename_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        nome = str(payload.get('nome') or '').strip()
+        if not nome:
+            return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        try:
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao renomear lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        if (
+            ProcessoCpfLoteSalvo.objects
+            .filter(criado_por=request.user, nome=nome)
+            .exclude(id=lote.id)
+            .exists()
+        ):
+            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+        lote.nome = nome
+        lote.compartilhado = compartilhado
+        try:
+            lote.save(update_fields=['nome', 'compartilhado', 'atualizado_em'])
+        except IntegrityError:
+            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+        return JsonResponse({
+            'ok': True,
+            'id': lote.id,
+            'nome': lote.nome,
+            'compartilhado': bool(lote.compartilhado),
+        })
 
     def cpf_lote_share_view(self, request):
         if request.method != 'POST':

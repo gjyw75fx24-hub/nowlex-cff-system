@@ -414,6 +414,18 @@
             font-size: 0.85rem;
             color: #475569;
         }
+        .cpf-lote-modal__share-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .cpf-lote-modal__editor-note {
+            margin-top: 6px;
+            font-size: 0.8rem;
+            color: #8a6211;
+            font-weight: 600;
+        }
         .cpf-lote-modal__note {
             font-size: 0.8rem;
             color: #64748b;
@@ -454,6 +466,67 @@
             text-align: center;
             color: #6b7280;
             padding: 14px 0;
+        }
+        .cpf-lote-feedback-dialog {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(15, 23, 42, 0.3);
+            z-index: 2400;
+        }
+        .cpf-lote-feedback-dialog__box {
+            width: min(880px, calc(100vw - 48px));
+            background: #efe7c8;
+            border: 2px solid #e1c86c;
+            border-radius: 26px;
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.24);
+            padding: 28px 32px 34px;
+            color: #4a3410;
+        }
+        .cpf-lote-feedback-dialog__title {
+            margin: 0 0 18px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #4a3410;
+        }
+        .cpf-lote-feedback-dialog__body {
+            font-size: 1rem;
+            line-height: 1.55;
+            color: #4a3410;
+        }
+        .cpf-lote-feedback-dialog__body p {
+            margin: 0;
+        }
+        .cpf-lote-feedback-dialog__body p + p {
+            margin-top: 10px;
+        }
+        .cpf-lote-feedback-dialog__actions {
+            margin-top: 26px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .cpf-lote-feedback-dialog__button {
+            min-width: 160px;
+            padding: 12px 20px;
+            border-radius: 18px;
+            border: 2px solid #d0b15a;
+            background: #fff;
+            color: #4a3410;
+            font-size: 0.98rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .cpf-lote-feedback-dialog__button--primary {
+            background: #efc54e;
+            border-color: #d9aa29;
+        }
+        .cpf-lote-feedback-dialog__button:hover {
+            filter: brightness(0.98);
         }
         .processo-context-badge {
             display: inline-flex;
@@ -1339,6 +1412,7 @@
                             Compartilhar com todos
                         </label>
                     </div>
+                    <div id="cpf-lote-editor-note" class="cpf-lote-modal__editor-note" hidden></div>
                 </div>
                 <button type="button" id="cpf-lote-save" class="button default">Salvar lista atual</button>
             </div>
@@ -1610,15 +1684,20 @@
         const cpfLoteSave = document.getElementById('cpf-lote-save');
         const cpfLoteName = document.getElementById('cpf-lote-name');
         const cpfLoteShared = document.getElementById('cpf-lote-shared');
+        const cpfLoteEditorNote = document.getElementById('cpf-lote-editor-note');
         const cpfLoteTableBody = document.getElementById('cpf-lote-table-body');
         const cpfLoteCurrentLabel = document.getElementById('cpf-lote-current-label');
         const cpfLoteCurrentCount = document.getElementById('cpf-lote-current-count');
         const cpfLoteListUrl = "{{ cpf_lote_list_url|escapejs }}";
         const cpfLoteSaveUrl = "{{ cpf_lote_save_url|escapejs }}";
+        const cpfLoteRenameUrl = "{{ cpf_lote_rename_url|escapejs }}";
         const cpfLoteDeleteUrl = "{{ cpf_lote_delete_url|escapejs }}";
         const cpfLoteShareUrl = "{{ cpf_lote_share_url|escapejs }}";
         const cpfLoteActiveId = "{{ cpf_lote_id|default:'' }}";
-        const cpfLoteActiveLabel = "{{ cpf_lote_label|default:''|escapejs }}";
+        let cpfLoteResolvedActiveLabel = "{{ cpf_lote_label|default:''|escapejs }}";
+        let cpfLoteRenameId = '';
+        let cpfLoteRenameOriginalName = '';
+        let cpfLoteRenameOriginalShared = false;
 
         if (!form || !actionSelect) return;
 
@@ -1669,6 +1748,7 @@
         function showCpfLoteModal() {
             if (!cpfLoteModal) return;
             cpfLoteModal.style.display = 'flex';
+            resetCpfLoteEditor();
             if (cpfLoteName) {
                 cpfLoteName.focus();
             }
@@ -1678,6 +1758,7 @@
         function hideCpfLoteModal() {
             if (!cpfLoteModal) return;
             cpfLoteModal.style.display = 'none';
+            resetCpfLoteEditor();
         }
         function applyDelegation(ids, userId) {
             if (delegateConfirm) {
@@ -1802,6 +1883,105 @@
                 .replace(/'/g, '&#39;');
         }
 
+        function showCpfLoteDialog({ title, message, confirmText, cancelText }) {
+            return new Promise((resolve) => {
+                const existing = document.getElementById('cpf-lote-feedback-dialog');
+                if (existing) {
+                    existing.remove();
+                }
+                const overlay = document.createElement('div');
+                overlay.id = 'cpf-lote-feedback-dialog';
+                overlay.className = 'cpf-lote-feedback-dialog';
+
+                const box = document.createElement('div');
+                box.className = 'cpf-lote-feedback-dialog__box';
+                box.setAttribute('role', 'dialog');
+                box.setAttribute('aria-modal', 'true');
+
+                const titleEl = document.createElement('h3');
+                titleEl.className = 'cpf-lote-feedback-dialog__title';
+                titleEl.textContent = title || 'Listas salvas de CPF';
+
+                const bodyEl = document.createElement('div');
+                bodyEl.className = 'cpf-lote-feedback-dialog__body';
+                String(message || '')
+                    .split(/\n+/)
+                    .filter(Boolean)
+                    .forEach((line) => {
+                        const paragraph = document.createElement('p');
+                        paragraph.textContent = line;
+                        bodyEl.appendChild(paragraph);
+                    });
+
+                const actionsEl = document.createElement('div');
+                actionsEl.className = 'cpf-lote-feedback-dialog__actions';
+
+                const closeDialog = (result) => {
+                    document.removeEventListener('keydown', onKeyDown, true);
+                    overlay.remove();
+                    resolve(result);
+                };
+
+                const onKeyDown = (event) => {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeDialog(false);
+                    }
+                };
+
+                if (cancelText) {
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.type = 'button';
+                    cancelBtn.className = 'cpf-lote-feedback-dialog__button';
+                    cancelBtn.textContent = cancelText;
+                    cancelBtn.addEventListener('click', () => closeDialog(false));
+                    actionsEl.appendChild(cancelBtn);
+                }
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.type = 'button';
+                confirmBtn.className = 'cpf-lote-feedback-dialog__button cpf-lote-feedback-dialog__button--primary';
+                confirmBtn.textContent = confirmText || 'OK';
+                confirmBtn.addEventListener('click', () => closeDialog(true));
+                actionsEl.appendChild(confirmBtn);
+
+                overlay.addEventListener('click', (event) => {
+                    if (event.target === overlay) {
+                        closeDialog(false);
+                    }
+                });
+
+                box.appendChild(titleEl);
+                box.appendChild(bodyEl);
+                box.appendChild(actionsEl);
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+                document.addEventListener('keydown', onKeyDown, true);
+                window.requestAnimationFrame(() => confirmBtn.focus());
+            });
+        }
+
+        function showCpfLoteMessage(message, title = 'Listas salvas de CPF') {
+            return showCpfLoteDialog({
+                title,
+                message,
+                confirmText: 'OK',
+            });
+        }
+
+        function showCpfLoteConfirm(message, {
+            title = 'Listas salvas de CPF',
+            confirmText = 'Confirmar',
+            cancelText = 'Cancelar',
+        } = {}) {
+            return showCpfLoteDialog({
+                title,
+                message,
+                confirmText,
+                cancelText,
+            });
+        }
+
         function parseCpfs(raw) {
             const matches = String(raw || '').match(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g) || [];
             const cpfs = [];
@@ -1824,12 +2004,71 @@
             return String(url.searchParams.get('cpf_lote') || '').trim();
         }
 
+        function updateCpfLoteSaveButtonState() {
+            if (!cpfLoteSave) return;
+            const currentName = (cpfLoteName && cpfLoteName.value || '').trim();
+            if (cpfLoteRenameId) {
+                const hasChanged = Boolean(currentName) && currentName !== cpfLoteRenameOriginalName;
+                cpfLoteSave.textContent = hasChanged ? 'Salvar renomeação' : 'Renomear lista';
+                cpfLoteSave.dataset.mode = 'rename';
+                cpfLoteSave.disabled = !currentName;
+                return;
+            }
+            cpfLoteSave.textContent = 'Salvar lista atual';
+            cpfLoteSave.dataset.mode = 'save';
+            cpfLoteSave.disabled = false;
+        }
+
+        function updateCpfLoteEditorNote() {
+            if (!cpfLoteEditorNote) return;
+            if (!cpfLoteRenameId || !cpfLoteRenameOriginalName) {
+                cpfLoteEditorNote.hidden = true;
+                cpfLoteEditorNote.textContent = '';
+                return;
+            }
+            cpfLoteEditorNote.hidden = false;
+            cpfLoteEditorNote.textContent = `Renomeando lista: ${cpfLoteRenameOriginalName}`;
+        }
+
+        function resetCpfLoteEditor() {
+            cpfLoteRenameId = '';
+            cpfLoteRenameOriginalName = '';
+            cpfLoteRenameOriginalShared = false;
+            if (cpfLoteName) {
+                cpfLoteName.value = '';
+            }
+            if (cpfLoteShared) {
+                cpfLoteShared.checked = false;
+            }
+            updateCpfLoteEditorNote();
+            updateCpfLoteSaveButtonState();
+        }
+
+        function startCpfLoteRename(id, nome, compartilhado) {
+            cpfLoteRenameId = String(id || '').trim();
+            cpfLoteRenameOriginalName = String(nome || '').trim();
+            cpfLoteRenameOriginalShared = Boolean(compartilhado);
+            if (cpfLoteName) {
+                cpfLoteName.value = cpfLoteRenameOriginalName;
+                cpfLoteName.focus();
+                const end = cpfLoteName.value.length;
+                if (typeof cpfLoteName.setSelectionRange === 'function') {
+                    cpfLoteName.setSelectionRange(end, end);
+                }
+            }
+            if (cpfLoteShared) {
+                cpfLoteShared.checked = cpfLoteRenameOriginalShared;
+            }
+            updateCpfLoteEditorNote();
+            updateCpfLoteSaveButtonState();
+        }
+
         function updateCpfLoteCurrentInfo() {
             if (!cpfLoteCurrentLabel || !cpfLoteCurrentCount) return;
             const raw = getCpfLoteRawFromSearch();
             const cpfs = parseCpfs(raw);
-            if (cpfLoteActiveId && cpfLoteActiveLabel) {
-                cpfLoteCurrentLabel.textContent = cpfLoteActiveLabel;
+            if (cpfLoteActiveId && cpfLoteResolvedActiveLabel) {
+                cpfLoteCurrentLabel.textContent = cpfLoteResolvedActiveLabel;
             } else if (cpfs.length) {
                 cpfLoteCurrentLabel.textContent = 'Lista digitada';
             } else {
@@ -1869,7 +2108,7 @@
                         const row = document.createElement('tr');
                         const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
                         const shareCell = item.is_owner
-                            ? `<button type=\"button\" class=\"button\" data-action=\"toggle\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button>`
+                            ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
                             : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
                         const deleteBtn = item.is_owner
                             ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-id=\"${item.id}\">Excluir</button>`
@@ -1892,11 +2131,58 @@
                 });
         }
 
+        function saveCpfLoteRename() {
+            if (!cpfLoteRenameUrl || !cpfLoteRenameId) return;
+            const nome = (cpfLoteName && cpfLoteName.value || '').trim();
+            if (!nome) {
+                showCpfLoteMessage('Informe o nome da lista.');
+                if (cpfLoteName) cpfLoteName.focus();
+                return;
+            }
+            if (nome === cpfLoteRenameOriginalName) {
+                showCpfLoteMessage('Edite o nome da lista antes de salvar a renomeação.');
+                if (cpfLoteName) cpfLoteName.focus();
+                return;
+            }
+            fetch(cpfLoteRenameUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    id: cpfLoteRenameId,
+                    nome,
+                    compartilhado: Boolean(cpfLoteShared && cpfLoteShared.checked),
+                }),
+            }).then(async (response) => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Não foi possível renomear a lista.');
+                }
+                if (String(cpfLoteRenameId) === String(cpfLoteActiveId)) {
+                    cpfLoteResolvedActiveLabel = data.nome || nome;
+                }
+                resetCpfLoteEditor();
+                refreshCpfLoteTable();
+                updateCpfLoteCurrentInfo();
+                showCpfLoteMessage('Lista renomeada com sucesso.');
+            }).catch((error) => {
+                showCpfLoteMessage(error?.message || 'Não foi possível renomear a lista.');
+            });
+        }
+
         function saveCpfLote() {
+            if (cpfLoteRenameId) {
+                saveCpfLoteRename();
+                return;
+            }
             if (!cpfLoteSaveUrl) return;
             const nome = (cpfLoteName && cpfLoteName.value || '').trim();
             if (!nome) {
-                alert('Informe o nome da lista.');
+                showCpfLoteMessage('Informe o nome da lista.');
                 if (cpfLoteName) cpfLoteName.focus();
                 return;
             }
@@ -1911,7 +2197,7 @@
             } else if (cpfLoteActiveId) {
                 payload.source_id = cpfLoteActiveId;
             } else {
-                alert('Informe os CPFs na busca ou carregue uma lista antes de salvar.');
+                showCpfLoteMessage('Informe os CPFs na busca ou carregue uma lista antes de salvar.');
                 return;
             }
             fetch(cpfLoteSaveUrl, {
@@ -1929,15 +2215,18 @@
                     throw new Error(data.error || 'Não foi possível salvar a lista.');
                 }
                 refreshCpfLoteTable();
-                if (cpfLoteName) cpfLoteName.value = '';
-                alert('Lista salva com sucesso.');
+                resetCpfLoteEditor();
+                showCpfLoteMessage('Lista salva com sucesso.');
             }).catch((error) => {
-                alert(error?.message || 'Não foi possível salvar a lista.');
+                showCpfLoteMessage(error?.message || 'Não foi possível salvar a lista.');
             });
         }
 
         if (cpfLoteSave) {
             cpfLoteSave.addEventListener('click', saveCpfLote);
+        }
+        if (cpfLoteName) {
+            cpfLoteName.addEventListener('input', updateCpfLoteSaveButtonState);
         }
         if (cpfLoteClose) {
             cpfLoteClose.addEventListener('click', hideCpfLoteModal);
@@ -1959,31 +2248,44 @@
                     applyCpfLoteId(id);
                     return;
                 }
+                if (action === 'rename') {
+                    startCpfLoteRename(id, btn.dataset.name || '', btn.dataset.shared === '1');
+                    refreshCpfLoteTable();
+                    return;
+                }
                 if (action === 'delete') {
-                    if (!confirm('Excluir esta lista?')) return;
-                    fetch(cpfLoteDeleteUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': getCsrfToken(),
-                            'Accept': 'application/json',
-                        },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ id }),
-                    }).then(async (response) => {
-                        const data = await response.json().catch(() => ({}));
-                        if (!response.ok || data.error) {
-                            throw new Error(data.error || 'Não foi possível excluir.');
-                        }
-                        if (id && String(id) === String(cpfLoteActiveId)) {
-                            const url = new URL(window.location.href);
-                            url.searchParams.delete('cpf_lote_id');
-                            window.location.href = url.toString();
-                            return;
-                        }
-                        refreshCpfLoteTable();
-                    }).catch((error) => {
-                        alert(error?.message || 'Não foi possível excluir.');
+                    showCpfLoteConfirm('Excluir esta lista?', {
+                        title: 'Excluir lista salva',
+                        confirmText: 'Excluir',
+                    }).then((confirmed) => {
+                        if (!confirmed) return;
+                        fetch(cpfLoteDeleteUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': getCsrfToken(),
+                                'Accept': 'application/json',
+                            },
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ id }),
+                        }).then(async (response) => {
+                            const data = await response.json().catch(() => ({}));
+                            if (!response.ok || data.error) {
+                                throw new Error(data.error || 'Não foi possível excluir.');
+                            }
+                            if (id && String(id) === String(cpfLoteRenameId)) {
+                                resetCpfLoteEditor();
+                            }
+                            if (id && String(id) === String(cpfLoteActiveId)) {
+                                const url = new URL(window.location.href);
+                                url.searchParams.delete('cpf_lote_id');
+                                window.location.href = url.toString();
+                                return;
+                            }
+                            refreshCpfLoteTable();
+                        }).catch((error) => {
+                            showCpfLoteMessage(error?.message || 'Não foi possível excluir.');
+                        });
                     });
                     return;
                 }
@@ -2003,14 +2305,19 @@
                         if (!response.ok || data.error) {
                             throw new Error(data.error || 'Não foi possível atualizar.');
                         }
+                        if (id && String(id) === String(cpfLoteRenameId) && cpfLoteShared) {
+                            cpfLoteShared.checked = Boolean(data.compartilhado);
+                            cpfLoteRenameOriginalShared = Boolean(data.compartilhado);
+                        }
                         refreshCpfLoteTable();
                     }).catch((error) => {
-                        alert(error?.message || 'Não foi possível atualizar.');
+                        showCpfLoteMessage(error?.message || 'Não foi possível atualizar.');
                     });
                 }
             });
         }
 
+        updateCpfLoteSaveButtonState();
         window.openCpfLoteModal = showCpfLoteModal;
     });
     </script>
@@ -2363,8 +2670,9 @@
         clearBtn.addEventListener('click', function(event) {
             event.preventDefault();
             const url = new URL(window.location.href);
-            if (url.searchParams.has('cpf_lote')) {
+            if (url.searchParams.has('cpf_lote') || url.searchParams.has('cpf_lote_id')) {
                 url.searchParams.delete('cpf_lote');
+                url.searchParams.delete('cpf_lote_id');
                 url.searchParams.delete('q');
                 url.searchParams.delete('p');
                 window.location.href = url.toString();
