@@ -2596,7 +2596,6 @@ a.historylink {
 .main.shifted > #nav-sidebar + .content {
     max-width: calc(100% - 220px);
 }
-}
 
 #nav-sidebar table {
     width: 100%;

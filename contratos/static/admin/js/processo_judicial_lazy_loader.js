@@ -2,7 +2,7 @@
     'use strict';
 
     const STATIC_BASE = window.__static_url || '/static/';
-    const CACHE_BUST = '20260310d';
+    const CACHE_BUST = '20260310e';
     const scriptRegistry = {
         analise: `${STATIC_BASE}admin/js/analise_processo_arvore.js?v=${CACHE_BUST}`,
         arquivos: `${STATIC_BASE}admin/js/arquivos_peticoes_tab.js`,

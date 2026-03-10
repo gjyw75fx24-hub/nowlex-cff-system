@@ -425,6 +425,7 @@
         const CARD_EXPANSION_STATE = {};
         let summaryCardsRefreshTimer = null;
         let summaryCardsInteractionUntil = 0;
+        let summaryCardsPointerInside = false;
 
         function getCardExpansionState(cardKey, defaultState = false) {
             if (Object.prototype.hasOwnProperty.call(CARD_EXPANSION_STATE, cardKey)) {
@@ -451,6 +452,55 @@
                 summaryCardsRefreshTimer = null;
                 displayFormattedResponses();
             }, waitMs);
+        }
+
+        function isSummaryCardsInteractionActive() {
+            if (summaryCardsPointerInside) {
+                return true;
+            }
+            const containerEl = $formattedResponsesContainer.get(0);
+            const activeEl = document.activeElement;
+            return Boolean(containerEl && activeEl && containerEl.contains(activeEl));
+        }
+
+        const formattedResponsesContainerEl = $formattedResponsesContainer.get(0);
+        if (formattedResponsesContainerEl) {
+            formattedResponsesContainerEl.addEventListener('pointerover', (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) {
+                    return;
+                }
+                if (!target.closest('.analise-summary-card')) {
+                    return;
+                }
+                summaryCardsPointerInside = true;
+                registerSummaryCardsInteraction(900);
+            });
+            formattedResponsesContainerEl.addEventListener('pointerout', (event) => {
+                const target = event.target;
+                if (!(target instanceof Element)) {
+                    return;
+                }
+                if (!target.closest('.analise-summary-card')) {
+                    return;
+                }
+                const related = event.relatedTarget;
+                if (related instanceof Element && related.closest('.analise-summary-card')) {
+                    return;
+                }
+                summaryCardsPointerInside = false;
+                scheduleFormattedResponsesRefresh();
+            });
+            formattedResponsesContainerEl.addEventListener('focusin', () => {
+                registerSummaryCardsInteraction(900);
+            });
+            formattedResponsesContainerEl.addEventListener('focusout', () => {
+                setTimeout(() => {
+                    if (!isSummaryCardsInteractionActive()) {
+                        scheduleFormattedResponsesRefresh();
+                    }
+                }, 0);
+            });
         }
 
         function getGeneralCardSnapshot() {
@@ -5493,7 +5543,11 @@ function formatCnjDigits(raw) {
             syncIndicatorToActive();
         }
 
-        function displayFormattedResponses() {
+        function displayFormattedResponses(options = {}) {
+            if (!options.force && isSummaryCardsInteractionActive()) {
+                scheduleFormattedResponsesRefresh();
+                return;
+            }
             $formattedResponsesContainer.empty();
             ensureUserResponsesShape();
             if (!Array.isArray(allAvailableContratos) || allAvailableContratos.length === 0) {
