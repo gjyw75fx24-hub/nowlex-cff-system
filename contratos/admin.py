@@ -9364,7 +9364,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'admin/js/jquery.init.js',
             'admin/js/processo_online_presence.js?v=20260218a',
             'admin/js/admin_tabs.js',
-            'admin/js/processo_judicial_lazy_loader.js?v=20260217c',
+            'admin/js/processo_judicial_lazy_loader.js?v=20260310a',
             'admin/js/etiqueta_interface.js',
             'admin/js/filter_search.js',
             'admin/js/soma_contratos.js',
