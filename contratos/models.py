@@ -12,6 +12,12 @@ from django.utils import timezone
 
 def _generate_tipo_peticao_key():
     return str(uuid.uuid4())
+
+
+def _generate_processo_cpf_lote_token():
+    return uuid.uuid4().hex
+
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 import datetime
@@ -1032,6 +1038,13 @@ class ProcessoCpfLoteSalvo(models.Model):
         on_delete=models.CASCADE,
         related_name='processo_cpf_lotes_salvos',
         verbose_name='Criado por',
+    )
+    token = models.CharField(
+        max_length=32,
+        unique=True,
+        default=_generate_processo_cpf_lote_token,
+        editable=False,
+        verbose_name='Token',
     )
     nome = models.CharField(max_length=140, verbose_name='Nome da lista')
     cpfs = models.TextField(verbose_name='CPFs')
