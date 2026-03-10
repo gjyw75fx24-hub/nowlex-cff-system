@@ -7831,14 +7831,24 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             lote_pk = int(lote_id)
         except (TypeError, ValueError):
             return None
-        return (
-            ProcessoCpfLoteSalvo.objects
-            .filter(
-                Q(compartilhado=True) | Q(criado_por=request.user),
-                id=lote_pk,
+        try:
+            return (
+                ProcessoCpfLoteSalvo.objects
+                .filter(
+                    Q(compartilhado=True) | Q(criado_por=request.user),
+                    id=lote_pk,
+                )
+                .select_related('criado_por')
+                .first()
             )
-            .select_related('criado_por')
-            .first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao carregar lote %s.', lote_pk, exc_info=True)
+            return None
+
+    def _cpf_lote_storage_error_message(self):
+        return (
+            'Listas salvas de CPF ainda nao estao disponiveis neste banco. '
+            'Finalize as migracoes para habilitar a funcionalidade.'
         )
 
     def _parse_cpf_lote_param(self, request):
@@ -9400,15 +9410,22 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Não autenticado.'}, status=401)
         data = []
-        for item in self._cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
-            data.append({
-                'id': item.id,
-                'nome': item.nome,
-                'compartilhado': bool(item.compartilhado),
-                'criado_por': item.criado_por.get_username() if item.criado_por else '',
-                'is_owner': item.criado_por_id == request.user.id,
-                'quantidade': self._cpf_lote_count(item.cpfs),
-                'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M'),
+        try:
+            for item in self._cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
+                data.append({
+                    'id': item.id,
+                    'nome': item.nome,
+                    'compartilhado': bool(item.compartilhado),
+                    'criado_por': item.criado_por.get_username() if item.criado_por else '',
+                    'is_owner': item.criado_por_id == request.user.id,
+                    'quantidade': self._cpf_lote_count(item.cpfs),
+                    'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M'),
+                })
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao listar lotes.', exc_info=True)
+            return JsonResponse({
+                'lists': [],
+                'warning': self._cpf_lote_storage_error_message(),
             })
         return JsonResponse({'lists': data})
 
@@ -9435,16 +9452,20 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not cpfs:
             return JsonResponse({'error': 'Informe ao menos um CPF válido.'}, status=400)
         normalized = ', '.join(cpfs)
-        existing = ProcessoCpfLoteSalvo.objects.filter(criado_por=request.user, nome=nome).first()
-        created = False
-        if existing:
-            lote = existing
-        else:
-            lote = ProcessoCpfLoteSalvo(criado_por=request.user, nome=nome)
-            created = True
-        lote.cpfs = normalized
-        lote.compartilhado = compartilhado
-        lote.save()
+        try:
+            existing = ProcessoCpfLoteSalvo.objects.filter(criado_por=request.user, nome=nome).first()
+            created = False
+            if existing:
+                lote = existing
+            else:
+                lote = ProcessoCpfLoteSalvo(criado_por=request.user, nome=nome)
+                created = True
+            lote.cpfs = normalized
+            lote.compartilhado = compartilhado
+            lote.save()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao salvar lote.', exc_info=True)
+            return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
         return JsonResponse({'id': lote.id, 'created': created})
 
     def cpf_lote_delete_view(self, request):
@@ -9459,7 +9480,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         lote_id = str(payload.get('id') or '').strip()
         if not lote_id or not lote_id.isdigit():
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
-        lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        try:
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao remover lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
         if not lote:
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.delete()
@@ -9478,7 +9503,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not lote_id or not lote_id.isdigit():
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
         compartilhado = bool(payload.get('compartilhado'))
-        lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        try:
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao compartilhar lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
         if not lote:
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.compartilhado = compartilhado
