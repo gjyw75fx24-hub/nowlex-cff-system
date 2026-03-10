@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 import unicodedata
+from dataclasses import asdict, is_dataclass
 from types import SimpleNamespace
 from urllib.parse import quote, unquote, urlparse, urlencode
 from typing import Optional
@@ -1899,15 +1900,21 @@ def demandas_analise_planilha_view(request):
         messages.error(request, "Acesso restrito a supervisores.")
         return HttpResponseRedirect(reverse('admin:index'))
 
-    form = DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
     modo_importacao = (
         request.POST.get("modo_importacao")
         or request.GET.get("modo_importacao")
-        or form.initial.get("modo_importacao")
+        or request.session.get(f"demandas_planilha_last_mode_{request.user.id}")
         or DemandasAnalisePlanilhaForm.MODO_PASSIVAS
     )
+    form = (
+        DemandasAnalisePlanilhaForm(request.POST or None, request.FILES or None)
+        if request.method == "POST"
+        else DemandasAnalisePlanilhaForm(initial={"modo_importacao": modo_importacao})
+    )
+    request.session[f"demandas_planilha_last_mode_{request.user.id}"] = modo_importacao
     import_modal_session_key = f"demandas_planilha_last_import_modal_{modo_importacao}"
     background_job_session_key = f"demandas_planilha_last_job_id_{modo_importacao}"
+    preview_session_key = f"demandas_planilha_last_preview_{modo_importacao}_{request.user.id}"
     preview = None
     import_result = None
     import_modal_data = request.session.pop(import_modal_session_key, None)
@@ -1916,6 +1923,7 @@ def demandas_analise_planilha_view(request):
     selected_row_ids = []
     selected_row_ids_payload = ""
     background_job = None
+    analise_lote_sync_limit = 80
 
     action = (request.POST.get("action") or request.POST.get("action_override")) if request.method == "POST" else None
     import_action_requested = request.method == "POST" and action == "import"
@@ -1935,6 +1943,104 @@ def demandas_analise_planilha_view(request):
 
     def _pending_actions_session_key() -> str:
         return f"demandas_planilha_pending_actions_{modo_importacao}"
+
+    def _analise_lote_status_group(status: str) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"created", "updated"}:
+            return "imported"
+        if normalized in {"blocked", "failed"}:
+            return "blocked"
+        if normalized == "pending":
+            return "pending"
+        if normalized == "unselected":
+            return "unselected"
+        return "ready"
+
+    def _normalize_analise_lote_preview(preview_payload):
+        if not isinstance(preview_payload, dict) or preview_payload.get("mode") != "analise_lote":
+            return preview_payload
+        normalized = dict(preview_payload)
+        items = []
+        for item in normalized.get("items", []) or []:
+            if is_dataclass(item):
+                item_data = asdict(item)
+            elif isinstance(item, dict):
+                item_data = dict(item)
+            else:
+                continue
+            summary = item_data.get("summary")
+            item_data["summary"] = summary if isinstance(summary, dict) else {}
+            item_data["import_status"] = str(item_data.get("import_status") or "ready")
+            item_data["import_status_label"] = str(item_data.get("import_status_label") or "Pronta para importar")
+            item_data["import_status_detail"] = str(item_data.get("import_status_detail") or "")
+            item_data["import_status_group"] = _analise_lote_status_group(item_data["import_status"])
+            items.append(item_data)
+        normalized["items"] = items
+        return normalized
+
+    def _update_analise_lote_status_counts(preview_payload):
+        if not isinstance(preview_payload, dict) or preview_payload.get("mode") != "analise_lote":
+            return preview_payload
+        counts = {
+            "ready": 0,
+            "pending": 0,
+            "imported": 0,
+            "blocked": 0,
+            "unselected": 0,
+        }
+        for item in preview_payload.get("items", []) or []:
+            group = str((item or {}).get("import_status_group") or "ready")
+            counts[group] = counts.get(group, 0) + 1
+        preview_payload["status_counts"] = counts
+        return preview_payload
+
+    def _store_preview(preview_payload):
+        if isinstance(preview_payload, dict) and preview_payload.get("mode") == "analise_lote":
+            request.session[preview_session_key] = _update_analise_lote_status_counts(
+                _normalize_analise_lote_preview(preview_payload)
+            )
+        else:
+            request.session.pop(preview_session_key, None)
+
+    def _apply_row_results_to_preview(preview_payload, row_results):
+        if not isinstance(preview_payload, dict) or preview_payload.get("mode") != "analise_lote":
+            return preview_payload
+        normalized = _normalize_analise_lote_preview(preview_payload)
+        result_map = {}
+        for row_result in row_results or []:
+            if not isinstance(row_result, dict):
+                continue
+            row_id = str(row_result.get("row_id") or "").strip()
+            if row_id:
+                result_map[row_id] = row_result
+        if not result_map:
+            return _update_analise_lote_status_counts(normalized)
+        for item in normalized.get("items", []) or []:
+            row_result = result_map.get(str(item.get("row_id") or "").strip())
+            if not row_result:
+                continue
+            status = str(row_result.get("status") or "").strip().lower() or "ready"
+            item["import_status"] = status
+            item["import_status_label"] = str(row_result.get("label") or item.get("import_status_label") or "").strip()
+            item["import_status_detail"] = str(row_result.get("message") or item.get("import_status_detail") or "").strip()
+            item["import_status_group"] = _analise_lote_status_group(status)
+        return _update_analise_lote_status_counts(normalized)
+
+    def _mark_selected_preview_items_as_pending(preview_payload):
+        if not isinstance(preview_payload, dict) or preview_payload.get("mode") != "analise_lote":
+            return preview_payload
+        normalized = _normalize_analise_lote_preview(preview_payload)
+        for item in normalized.get("items", []) or []:
+            if not item.get("selectable") or not item.get("checked"):
+                continue
+            status = str(item.get("import_status") or "").strip().lower()
+            if status in {"created", "updated", "failed", "blocked"}:
+                continue
+            item["import_status"] = "pending"
+            item["import_status_label"] = "Pendente"
+            item["import_status_detail"] = "Aguardando processamento da importação em background."
+            item["import_status_group"] = "pending"
+        return _update_analise_lote_status_counts(normalized)
 
     def _cleanup_old_uploads(session_dict: dict) -> dict:
         # Remove itens antigos e arquivos inexistentes (best-effort).
@@ -2001,6 +2107,57 @@ def demandas_analise_planilha_view(request):
         storage_path = f"passivas_imports/{uuid.uuid4().hex}{ext}"
         default_storage.save(storage_path, ContentFile(file_bytes))
         return storage_path
+
+    def _enqueue_analise_lote_import(
+        *,
+        file_bytes: bytes,
+        upload_name: str,
+        selected_row_ids: list[str],
+        auto_message: str = "",
+    ):
+        storage_path = ""
+        try:
+            storage_path = _persist_upload_to_storage(file_bytes, upload_name or "analises_lote.xlsx")
+            queue = get_passivas_import_queue()
+            job = queue.enqueue(
+                run_analise_lote_planilha_import_job,
+                kwargs={
+                    "storage_path": storage_path,
+                    "upload_name": upload_name or "analises_lote.xlsx",
+                    "carteira_id": form.cleaned_data["carteira"].id,
+                    "tipo_analise_id": form.cleaned_data["tipo_analise"].id,
+                    "analista_id": form.cleaned_data["analista"].id,
+                    "sheet_prefix": form.cleaned_data.get("sheet_prefix") or "",
+                    "uf": form.cleaned_data.get("uf") or "",
+                    "limit": int(form.cleaned_data.get("limit") or 0),
+                    "selected_row_ids": selected_row_ids,
+                    "user_id": getattr(request.user, "id", None),
+                },
+                result_ttl=86400,
+            )
+            request.session[background_job_session_key] = job.id
+            background_job_payload = {
+                "id": job.id,
+                "status": job.get_status(),
+                "result": None,
+                "error": None,
+            }
+            if auto_message:
+                messages.success(request, auto_message)
+            else:
+                messages.success(
+                    request,
+                    "Importação de análises em lote iniciada em background.",
+                )
+            return background_job_payload
+        except Exception as exc:
+            if storage_path:
+                try:
+                    if default_storage.exists(storage_path):
+                        default_storage.delete(storage_path)
+                except Exception:
+                    pass
+            raise exc
 
     def _parse_selected_row_ids_from_request() -> list[str]:
         raw_payload = (request.POST.get("selected_row_ids_payload") or "").strip()
@@ -2256,7 +2413,13 @@ def demandas_analise_planilha_view(request):
             messages.success(request, "Importação cancelada: anexo descartado e tela limpa.")
         else:
             messages.info(request, "Nada para cancelar (nenhum anexo mantido).")
+        request.session.pop(preview_session_key, None)
         return HttpResponseRedirect(reverse("admin:contratos_demandas_analise_planilha"))
+
+    if request.method != "POST" and modo_importacao == DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE:
+        preview = _normalize_analise_lote_preview(request.session.get(preview_session_key))
+        if preview:
+            preview = _update_analise_lote_status_counts(preview)
 
     if request.method == "POST" and form.is_valid():
         modo_importacao = form.cleaned_data.get("modo_importacao") or modo_importacao
@@ -2383,81 +2546,77 @@ def demandas_analise_planilha_view(request):
                 "upload_token": token or "",
                 "analista_label": getattr(analista, "get_full_name", lambda: "")() or getattr(analista, "username", ""),
             }
+            preview = _update_analise_lote_status_counts(_normalize_analise_lote_preview(preview))
+
+            rows_to_import_count = len(parsed)
+            if selected_row_ids:
+                selected_set = {str(value) for value in selected_row_ids if str(value).strip()}
+                rows_to_import_count = sum(1 for row in parsed if str(row.row_id) in selected_set)
 
             if action == "import":
+                if rows_to_import_count > analise_lote_sync_limit:
+                    try:
+                        background_job = _enqueue_analise_lote_import(
+                            file_bytes=file_bytes,
+                            upload_name=upload_name,
+                            selected_row_ids=selected_row_ids,
+                            auto_message=(
+                                f"Lote com {rows_to_import_count} linha(s) enviado automaticamente para "
+                                "importação em background para evitar timeout do servidor."
+                            ),
+                        )
+                        preview = _mark_selected_preview_items_as_pending(preview)
+                    except Exception as exc:
+                        messages.error(request, f"Falha ao iniciar importação em background: {exc}")
+                else:
+                    try:
+                        import_result = import_analise_lote_rows(
+                            parsed,
+                            carteira=form.cleaned_data["carteira"],
+                            tipo_analise=form.cleaned_data["tipo_analise"],
+                            analista=form.cleaned_data["analista"],
+                            acting_user=request.user,
+                            selected_row_ids=selected_row_ids,
+                        )
+                        import_modal_data = {
+                            "created_cadastros": 0,
+                            "updated_cadastros": import_result.updated_processos,
+                            "created_cnjs": import_result.created_cnjs,
+                            "updated_cnjs": import_result.updated_cnjs,
+                            "created_cards": import_result.created_cards,
+                            "updated_cards": import_result.updated_cards,
+                            "reused_priority_tags": 0,
+                            "standardized_priority_tags": 0,
+                            "note": (
+                                f"Linhas importadas: {import_result.matched_rows}. "
+                                f"Linhas ignoradas: {import_result.skipped_rows}."
+                            ),
+                        }
+                        request.session[import_modal_session_key] = import_modal_data
+                        if import_result.errors:
+                            messages.warning(request, "Algumas linhas foram ignoradas durante a importação em lote.")
+                        preview = _apply_row_results_to_preview(
+                            preview,
+                            getattr(import_result, "row_results", []),
+                        )
+                    except Exception as exc:
+                        messages.error(request, f"Falha ao importar análises em lote: {exc}")
+                        import_modal_data = {
+                            "title": "Falha ao importar análises em lote",
+                            "error": str(exc),
+                        }
+            elif action == "import_async":
                 try:
-                    import_result = import_analise_lote_rows(
-                        parsed,
-                        carteira=form.cleaned_data["carteira"],
-                        tipo_analise=form.cleaned_data["tipo_analise"],
-                        analista=form.cleaned_data["analista"],
-                        acting_user=request.user,
+                    background_job = _enqueue_analise_lote_import(
+                        file_bytes=file_bytes,
+                        upload_name=upload_name,
                         selected_row_ids=selected_row_ids,
                     )
-                    import_modal_data = {
-                        "created_cadastros": 0,
-                        "updated_cadastros": import_result.updated_processos,
-                        "created_cnjs": import_result.created_cnjs,
-                        "updated_cnjs": import_result.updated_cnjs,
-                        "created_cards": import_result.created_cards,
-                        "updated_cards": import_result.updated_cards,
-                        "reused_priority_tags": 0,
-                        "standardized_priority_tags": 0,
-                        "note": (
-                            f"Linhas importadas: {import_result.matched_rows}. "
-                            f"Linhas ignoradas: {import_result.skipped_rows}."
-                        ),
-                    }
-                    request.session[import_modal_session_key] = import_modal_data
-                    if import_result.errors:
-                        messages.warning(request, "Algumas linhas foram ignoradas durante a importação em lote.")
+                    preview = _mark_selected_preview_items_as_pending(preview)
                 except Exception as exc:
-                    messages.error(request, f"Falha ao importar análises em lote: {exc}")
-                    import_modal_data = {
-                        "title": "Falha ao importar análises em lote",
-                        "error": str(exc),
-                    }
-            elif action == "import_async":
-                storage_path = ""
-                try:
-                    storage_path = _persist_upload_to_storage(file_bytes, upload_name or "analises_lote.xlsx")
-                    queue = get_passivas_import_queue()
-                    job = queue.enqueue(
-                        run_analise_lote_planilha_import_job,
-                        kwargs={
-                            "storage_path": storage_path,
-                            "upload_name": upload_name or "analises_lote.xlsx",
-                            "carteira_id": form.cleaned_data["carteira"].id,
-                            "tipo_analise_id": form.cleaned_data["tipo_analise"].id,
-                            "analista_id": form.cleaned_data["analista"].id,
-                            "sheet_prefix": form.cleaned_data.get("sheet_prefix") or "",
-                            "uf": form.cleaned_data.get("uf") or "",
-                            "limit": int(form.cleaned_data.get("limit") or 0),
-                            "selected_row_ids": selected_row_ids,
-                            "user_id": getattr(request.user, "id", None),
-                        },
-                        result_ttl=86400,
-                    )
-                    request.session[background_job_session_key] = job.id
-                    background_job = {
-                        "id": job.id,
-                        "status": job.get_status(),
-                        "result": None,
-                        "error": None,
-                    }
-                    messages.success(
-                        request,
-                        "Importação de análises em lote iniciada em background.",
-                    )
-                except Exception as exc:
-                    if storage_path:
-                        try:
-                            if default_storage.exists(storage_path):
-                                default_storage.delete(storage_path)
-                        except Exception:
-                            pass
                     messages.error(request, f"Falha ao iniciar importação em background: {exc}")
 
+            _store_preview(preview)
             parsed = []
 
         if parsed:
@@ -2911,7 +3070,7 @@ def demandas_analise_planilha_view(request):
                             "error": str(exc),
                         }
 
-    if import_action_requested and import_modal_data is None:
+    if import_action_requested and import_modal_data is None and background_job is None:
         if import_result is not None:
             import_modal_data = {
                 "created_cadastros": getattr(import_result, "created_cadastros", 0),
@@ -2957,6 +3116,19 @@ def demandas_analise_planilha_view(request):
                     "result": None,
                     "error": str(exc),
                 }
+
+    if modo_importacao == DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE and preview:
+        if background_job and background_job.get("status") in {"queued", "deferred", "started"}:
+            preview = _mark_selected_preview_items_as_pending(preview)
+            _store_preview(preview)
+        elif background_job and background_job.get("status") == "finished" and background_job.get("result"):
+            preview = _apply_row_results_to_preview(
+                preview,
+                (background_job.get("result") or {}).get("row_results") or [],
+            )
+            _store_preview(preview)
+        else:
+            preview = _update_analise_lote_status_counts(_normalize_analise_lote_preview(preview))
 
     # Nome do arquivo mantido (quando já houve prévia)
     kept_name = ""

@@ -293,6 +293,7 @@ def run_analise_lote_planilha_import_job(
         "errors": result.errors,
         "rows": len(parsed_all),
         "rows_imported": result.matched_rows,
+        "row_results": result.row_results,
         "applied_tasks": 0,
         "applied_tasks_targets": 0,
     }

@@ -132,8 +132,44 @@
       border-color: #efb2b2;
       color: #922f2f;
     }
+    .analise-lote-badge--status-ready {
+      background: #edf5ff;
+      border-color: #bfd8ff;
+      color: #1f4f8b;
+    }
+    .analise-lote-badge--status-pending {
+      background: #fff4df;
+      border-color: #f1cf87;
+      color: #8f5c00;
+    }
+    .analise-lote-badge--status-imported {
+      background: #e8f8ef;
+      border-color: #a7d8b7;
+      color: #1f6a39;
+    }
+    .analise-lote-badge--status-blocked {
+      background: #fdecec;
+      border-color: #efb2b2;
+      color: #922f2f;
+    }
+    .analise-lote-badge--status-unselected {
+      background: #f0f3f7;
+      border-color: #d7dee8;
+      color: #5f7387;
+    }
     .analise-lote-card__body {
       padding: 16px;
+    }
+    .analise-lote-card__status-note {
+      margin: 0 0 10px 0;
+      color: #536b82;
+      font-size: .92rem;
+    }
+    .analise-lote-status-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 0 0;
     }
     .analise-lote-summary {
       border: 1px solid #dde7f0;
@@ -262,7 +298,7 @@
       <div>
         <div style="opacity:.8;">
           {% if is_analise_lote_mode %}
-            Importa cards de analise em lote a partir de planilha, com preview por linha, selecao por UF e atribuicao de analista responsavel.
+            Importa cards de analise em lote a partir de planilha, com preview por linha, selecao por UF e atribuicao de analista responsavel. Lotes grandes sao enviados automaticamente para background.
           {% else %}
             Importa planilha Passivas (.xlsx/.csv) criando cadastros/CNJs e salvando cards no caderno.
           {% endif %}
@@ -301,6 +337,11 @@
             CNJs: {{ background_job.result.created_cnjs|default:0 }} novo(s), {{ background_job.result.updated_cnjs|default:0 }} atualizado(s).
             Cards: {{ background_job.result.created_cards|default:0 }} novo(s), {{ background_job.result.updated_cards|default:0 }} atualizado(s).
           </div>
+          {% if is_analise_lote_mode and background_job.result.row_results %}
+            <div style="margin-top:6px; opacity:.85;">
+              Linhas processadas: {{ background_job.result.row_results|length }}.
+            </div>
+          {% endif %}
         {% elif background_job.error %}
           <div style="margin-top:6px; color:#8a1f1f;">{{ background_job.error }}</div>
         {% endif %}
@@ -431,6 +472,15 @@
             <li><strong>Sem match:</strong> {{ preview.missing_rows }}</li>
             <li><strong>Analista atribuido:</strong> {{ preview.analista_label }}</li>
           </ul>
+          {% if preview.status_counts %}
+            <div class="analise-lote-status-summary">
+              <span class="analise-lote-badge analise-lote-badge--status-ready">Prontas: {{ preview.status_counts.ready|default:0 }}</span>
+              <span class="analise-lote-badge analise-lote-badge--status-pending">Pendentes: {{ preview.status_counts.pending|default:0 }}</span>
+              <span class="analise-lote-badge analise-lote-badge--status-imported">Importadas: {{ preview.status_counts.imported|default:0 }}</span>
+              <span class="analise-lote-badge analise-lote-badge--status-blocked">Não importáveis: {{ preview.status_counts.blocked|default:0 }}</span>
+              <span class="analise-lote-badge analise-lote-badge--status-unselected">Não selecionadas: {{ preview.status_counts.unselected|default:0 }}</span>
+            </div>
+          {% endif %}
 
           <div class="demandas-preview-toolbar">
             <button type="button" class="button" id="analise-lote-filter-reset">Mostrar todas</button>
@@ -441,6 +491,15 @@
                 <option value="{{ uf }}">{{ uf }}</option>
               {% endfor %}
             </select>
+            <label for="analise-lote-status-filter"><strong>Status:</strong></label>
+            <select id="analise-lote-status-filter" class="form-control" style="width:180px; min-width:180px;">
+              <option value="">Todos</option>
+              <option value="pending">Pendentes</option>
+              <option value="imported">Importadas</option>
+              <option value="blocked">Não importáveis</option>
+              <option value="ready">Prontas</option>
+              <option value="unselected">Não selecionadas</option>
+            </select>
             <button type="button" class="button" id="analise-lote-select-all">Selecionar todas</button>
             <button type="button" class="button" id="analise-lote-select-uf">Selecionar UF</button>
             <button type="button" class="button" id="analise-lote-clear">Limpar selecao</button>
@@ -450,7 +509,7 @@
 
           <div class="analise-lote-preview-list" id="analise-lote-preview-list">
             {% for item in preview.items %}
-              <article class="analise-lote-card" data-row-id="{{ item.row_id }}" data-uf="{{ item.uf }}" data-selectable="{{ item.selectable|yesno:'1,0' }}">
+              <article class="analise-lote-card" data-row-id="{{ item.row_id }}" data-uf="{{ item.uf }}" data-selectable="{{ item.selectable|yesno:'1,0' }}" data-import-status="{{ item.import_status }}" data-import-status-group="{{ item.import_status_group|default:item.import_status }}">
                 <div class="analise-lote-card__header">
                   <div class="analise-lote-card__header-main">
                     <div>
@@ -471,6 +530,7 @@
                   </div>
                   <div class="analise-lote-card__actions">
                     <span class="analise-lote-badge {% if item.match_status == 'matched' %}analise-lote-badge--matched{% elif item.match_status == 'conflict' %}analise-lote-badge--conflict{% else %}analise-lote-badge--missing{% endif %}">{{ item.match_label }}</span>
+                    <span class="analise-lote-badge analise-lote-badge--status-{{ item.import_status_group|default:item.import_status }}">{{ item.import_status_label }}</span>
                     <span class="analise-lote-badge">{{ item.action_label }}</span>
                     {% if item.process_admin_url %}
                       <a class="button" href="{{ item.process_admin_url }}" target="_blank" rel="noopener noreferrer">Abrir cadastro</a>
@@ -478,6 +538,9 @@
                   </div>
                 </div>
                 <div class="analise-lote-card__body">
+                  {% if item.import_status_detail %}
+                    <div class="analise-lote-card__status-note">{{ item.import_status_detail }}</div>
+                  {% endif %}
                   <div style="margin-bottom:10px; color:#536b82; font-size:.92rem;">
                     {{ item.existing_card_summary }}
                   </div>
@@ -536,6 +599,7 @@
               const payloadEl = document.getElementById('id_selected_row_ids_payload');
               const formEl = document.querySelector('.demandas-panel form');
               const filterEl = document.getElementById('analise-lote-uf-filter');
+              const statusFilterEl = document.getElementById('analise-lote-status-filter');
               const resetBtn = document.getElementById('analise-lote-filter-reset');
               const selectAllBtn = document.getElementById('analise-lote-select-all');
               const selectUfBtn = document.getElementById('analise-lote-select-uf');
@@ -556,9 +620,13 @@
               };
               const applyFilter = () => {
                 const targetUf = String(filterEl ? filterEl.value : '').trim().toUpperCase();
+                const targetStatus = String(statusFilterEl ? statusFilterEl.value : '').trim().toLowerCase();
                 cards().forEach((card) => {
                   const cardUf = String(card.dataset.uf || '').trim().toUpperCase();
-                  card.style.display = (!targetUf || cardUf === targetUf) ? '' : 'none';
+                  const cardStatus = String(card.dataset.importStatusGroup || card.dataset.importStatus || '').trim().toLowerCase();
+                  const matchUf = (!targetUf || cardUf === targetUf);
+                  const matchStatus = (!targetStatus || cardStatus === targetStatus);
+                  card.style.display = (matchUf && matchStatus) ? '' : 'none';
                 });
               };
               const setVisible = (checked) => {
@@ -581,8 +649,13 @@
                 applyFilter();
                 syncPayload();
               });
+              if (statusFilterEl) statusFilterEl.addEventListener('change', () => {
+                applyFilter();
+                syncPayload();
+              });
               if (resetBtn) resetBtn.addEventListener('click', () => {
                 if (filterEl) filterEl.value = '';
+                if (statusFilterEl) statusFilterEl.value = '';
                 applyFilter();
                 syncPayload();
               });

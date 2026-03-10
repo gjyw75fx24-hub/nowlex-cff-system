@@ -85,6 +85,9 @@ class AnaliseLotePreviewItem:
     action_label: str
     existing_card_summary: str
     summary: Dict[str, Any]
+    import_status: str = "ready"
+    import_status_label: str = "Pronta para importar"
+    import_status_detail: str = ""
 
 
 @dataclass
@@ -109,6 +112,7 @@ class AnaliseLoteImportResult:
     skipped_rows: int = 0
     matched_rows: int = 0
     errors: List[str] = field(default_factory=list)
+    row_results: List[Dict[str, str]] = field(default_factory=list)
 
 
 def _normalize_contract_token(value: Any) -> str:
@@ -841,6 +845,18 @@ def build_analise_lote_preview(
 
         selectable = match["status"] == "matched"
         checked = selectable and (str(row.row_id) in selected_ids if selected_ids else True)
+        if not selectable:
+            import_status = "blocked"
+            import_status_label = "Não importável"
+            import_status_detail = match["label"]
+        elif checked:
+            import_status = "ready"
+            import_status_label = "Pronta para importar"
+            import_status_detail = action_label
+        else:
+            import_status = "unselected"
+            import_status_label = "Não selecionada"
+            import_status_detail = action_label
         preview.items.append(
             AnaliseLotePreviewItem(
                 row_id=row.row_id,
@@ -866,6 +882,9 @@ def build_analise_lote_preview(
                     question_maps=question_maps,
                     contract_refs=contract_refs,
                 ),
+                import_status=import_status,
+                import_status_label=import_status_label,
+                import_status_detail=import_status_detail,
             )
         )
 
@@ -873,7 +892,6 @@ def build_analise_lote_preview(
     return preview
 
 
-@transaction.atomic
 def import_analise_lote_rows(
     rows: Iterable[AnaliseLoteRow],
     *,
@@ -901,94 +919,134 @@ def import_analise_lote_rows(
         if not processo:
             result.skipped_rows += 1
             if match["status"] == "conflict":
-                result.errors.append(f"Linha {row.row_id}: conflito ao localizar cadastro para {row.cnj or row.cpf}.")
+                message = f"Linha {row.row_id}: conflito ao localizar cadastro para {row.cnj or row.cpf}."
+                result.errors.append(message)
             else:
-                result.errors.append(f"Linha {row.row_id}: nenhum cadastro localizado para {row.cnj or row.cpf}.")
+                message = f"Linha {row.row_id}: nenhum cadastro localizado para {row.cnj or row.cpf}."
+                result.errors.append(message)
+            result.row_results.append(
+                {
+                    "row_id": str(row.row_id),
+                    "status": "failed",
+                    "label": "Não importado",
+                    "message": message,
+                    "process_id": "",
+                }
+            )
             continue
 
-        result.matched_rows += 1
-        contract_refs = []
-        for raw_number in row.contratos:
-            token = str(raw_number or "").strip()
-            if not token:
-                continue
-            contrato = (
-                processo.contratos.filter(numero_contrato__iexact=token).order_by("id").first()
-                or processo.contratos.filter(numero_contrato__iregex=rf"^{re.escape(token)}$").order_by("id").first()
-            )
-            if not contrato:
-                contrato = Contrato.objects.create(processo=processo, numero_contrato=token)
-            contract_refs.append(str(contrato.id))
+        try:
+            with transaction.atomic():
+                result.matched_rows += 1
+                contract_refs = []
+                for raw_number in row.contratos:
+                    token = str(raw_number or "").strip()
+                    if not token:
+                        continue
+                    contrato = (
+                        processo.contratos.filter(numero_contrato__iexact=token).order_by("id").first()
+                        or processo.contratos.filter(numero_contrato__iregex=rf"^{re.escape(token)}$").order_by("id").first()
+                    )
+                    if not contrato:
+                        contrato = Contrato.objects.create(processo=processo, numero_contrato=token)
+                    contract_refs.append(str(contrato.id))
 
-        classe_processual = _get_or_create_status(row.classe_processual)
-        process_changed_fields: List[str] = []
-        if row.uf and processo.uf != row.uf:
-            processo.uf = row.uf
-            process_changed_fields.append("uf")
-        if row.valor_causa is not None and processo.valor_causa != row.valor_causa:
-            processo.valor_causa = row.valor_causa
-            process_changed_fields.append("valor_causa")
-        if classe_processual and processo.status_id != classe_processual.id:
-            processo.status = classe_processual
-            process_changed_fields.append("status")
-        if carteira and processo.carteira_id != carteira.id and not processo.carteira_id:
-            processo.carteira = carteira
-            process_changed_fields.append("carteira")
-        if process_changed_fields:
-            processo.save(update_fields=process_changed_fields)
-            result.updated_processos += 1
-        processo.carteiras_vinculadas.add(carteira)
+                classe_processual = _get_or_create_status(row.classe_processual)
+                process_changed_fields: List[str] = []
+                if row.uf and processo.uf != row.uf:
+                    processo.uf = row.uf
+                    process_changed_fields.append("uf")
+                if row.valor_causa is not None and processo.valor_causa != row.valor_causa:
+                    processo.valor_causa = row.valor_causa
+                    process_changed_fields.append("valor_causa")
+                if classe_processual and processo.status_id != classe_processual.id:
+                    processo.status = classe_processual
+                    process_changed_fields.append("status")
+                if carteira and processo.carteira_id != carteira.id and not processo.carteira_id:
+                    processo.carteira = carteira
+                    process_changed_fields.append("carteira")
+                if process_changed_fields:
+                    processo.save(update_fields=process_changed_fields)
+                    result.updated_processos += 1
+                processo.carteiras_vinculadas.add(carteira)
 
-        cnj_result = _ensure_numero_cnj(processo, row, carteira, classe_processual)
-        result.created_cnjs += cnj_result["created"]
-        result.updated_cnjs += cnj_result["updated"]
+                cnj_result = _ensure_numero_cnj(processo, row, carteira, classe_processual)
+                result.created_cnjs += cnj_result["created"]
+                result.updated_cnjs += cnj_result["updated"]
 
-        analise, _ = AnaliseProcesso.objects.get_or_create(processo_judicial=processo)
-        respostas = analise.respostas or {}
-        saved_cards = respostas.get("saved_processos_vinculados")
-        if not isinstance(saved_cards, list):
-            saved_cards = []
+                analise, _ = AnaliseProcesso.objects.get_or_create(processo_judicial=processo)
+                respostas = analise.respostas or {}
+                saved_cards = respostas.get("saved_processos_vinculados")
+                if not isinstance(saved_cards, list):
+                    saved_cards = []
 
-        card_payload = _build_card_payload(
-            processo=processo,
-            row=row,
-            carteira=carteira,
-            tipo_analise=tipo_analise,
-            analista=analista,
-            contract_refs=contract_refs,
-            question_maps=question_maps,
-        )
+                card_payload = _build_card_payload(
+                    processo=processo,
+                    row=row,
+                    carteira=carteira,
+                    tipo_analise=tipo_analise,
+                    analista=analista,
+                    contract_refs=contract_refs,
+                    question_maps=question_maps,
+                )
 
-        existing_idx = _existing_card_index(saved_cards, row, carteira, tipo_analise)
-        if existing_idx is None:
-            saved_cards.append(card_payload)
-            result.created_cards += 1
-        else:
-            existing = saved_cards[existing_idx]
-            if not isinstance(existing, dict):
-                saved_cards[existing_idx] = card_payload
-            else:
-                existing.update(
+                existing_idx = _existing_card_index(saved_cards, row, carteira, tipo_analise)
+                if existing_idx is None:
+                    saved_cards.append(card_payload)
+                    result.created_cards += 1
+                    row_status = "created"
+                    row_label = "Card criado"
+                else:
+                    existing = saved_cards[existing_idx]
+                    if not isinstance(existing, dict):
+                        saved_cards[existing_idx] = card_payload
+                    else:
+                        existing.update(
+                            {
+                                key: value
+                                for key, value in card_payload.items()
+                                if value not in (None, "", [])
+                            }
+                        )
+                        existing_responses = existing.get("tipo_de_acao_respostas")
+                        if not isinstance(existing_responses, dict):
+                            existing_responses = {}
+                        existing_responses.update(card_payload["tipo_de_acao_respostas"])
+                        existing["tipo_de_acao_respostas"] = existing_responses
+                    result.updated_cards += 1
+                    row_status = "updated"
+                    row_label = "Card atualizado"
+
+                respostas["saved_processos_vinculados"] = saved_cards
+                respostas.setdefault("processos_vinculados", [])
+                analise.respostas = respostas
+                if acting_user:
+                    analise.updated_by = acting_user
+                    analise.save(update_fields=["respostas", "updated_by"])
+                else:
+                    analise.save(update_fields=["respostas"])
+                result.row_results.append(
                     {
-                        key: value
-                        for key, value in card_payload.items()
-                        if value not in (None, "", [])
+                        "row_id": str(row.row_id),
+                        "status": row_status,
+                        "label": row_label,
+                        "message": f"{row_label} para o processo {row.cnj or processo.cnj or processo.id}.",
+                        "process_id": str(getattr(processo, "id", "") or ""),
                     }
                 )
-                existing_responses = existing.get("tipo_de_acao_respostas")
-                if not isinstance(existing_responses, dict):
-                    existing_responses = {}
-                existing_responses.update(card_payload["tipo_de_acao_respostas"])
-                existing["tipo_de_acao_respostas"] = existing_responses
-            result.updated_cards += 1
-
-        respostas["saved_processos_vinculados"] = saved_cards
-        respostas.setdefault("processos_vinculados", [])
-        analise.respostas = respostas
-        if acting_user:
-            analise.updated_by = acting_user
-            analise.save(update_fields=["respostas", "updated_by"])
-        else:
-            analise.save(update_fields=["respostas"])
+        except Exception as exc:
+            result.skipped_rows += 1
+            result.matched_rows = max(0, result.matched_rows - 1)
+            message = f"Linha {row.row_id}: falha ao salvar análise em lote ({exc})."
+            result.errors.append(message)
+            result.row_results.append(
+                {
+                    "row_id": str(row.row_id),
+                    "status": "failed",
+                    "label": "Não importado",
+                    "message": message,
+                    "process_id": str(getattr(processo, "id", "") or ""),
+                }
+            )
 
     return result
