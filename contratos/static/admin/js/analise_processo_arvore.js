@@ -490,20 +490,21 @@
             return 'Monitória Jurídica';
         }
 
-	        function restoreTreeFromGeneralSnapshot() {
-	            analysisHasStarted = true;
-	            const snapshot = getGeneralCardSnapshot();
-	            if (!snapshot || !snapshot.responses) {
-	                return;
-	            }
+        function restoreTreeFromGeneralSnapshot() {
+            analysisHasStarted = true;
+            const snapshot = getGeneralCardSnapshot();
+            if (!snapshot || !snapshot.responses) {
+                return;
+            }
             ensureUserResponsesShape();
+            const normalizedSnapshotResponses = normalizeResponsesForCurrentTree(snapshot.responses);
 
             const keysToRestore = Array.from(
                 new Set([...(GENERAL_CARD_FIELD_KEYS || []), ...(treeResponseKeys || [])])
             );
             keysToRestore.forEach(key => {
-                if (snapshot.responses.hasOwnProperty(key)) {
-                    userResponses[key] = snapshot.responses[key];
+                if (normalizedSnapshotResponses.hasOwnProperty(key)) {
+                    userResponses[key] = normalizedSnapshotResponses[key];
                 } else {
                     delete userResponses[key];
                 }
@@ -2791,6 +2792,57 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             });
         }
 
+        function syncNaoJudicializadoSupervisionBeforePersist() {
+            ensureUserResponsesShape();
+            const $toggleInput = $dynamicQuestionsContainer
+                .find('.nao-judicializado-supervision-toggle .supervision-toggle-input')
+                .first();
+            const $dateInput = $dynamicQuestionsContainer
+                .find('.nao-judicializado-supervisionize .supervision-date-input')
+                .first();
+            if (!$toggleInput.length && !$dateInput.length) {
+                return;
+            }
+
+            const checked = $toggleInput.length
+                ? Boolean($toggleInput.is(':checked'))
+                : Boolean(userResponses.supervisionado_nao_judicializado);
+            const normalizedDate = normalizeIsoDateValue(
+                $dateInput.length ? $dateInput.val() : userResponses.supervision_date_nao_judicializado
+            );
+
+            userResponses.supervisionado_nao_judicializado = checked;
+            userResponses.supervision_date_nao_judicializado = normalizedDate;
+            if (checked && !SUPERVISION_STATUS_SEQUENCE.includes(userResponses.supervisor_status_nao_judicializado)) {
+                userResponses.supervisor_status_nao_judicializado = 'pendente';
+            }
+            if (!checked) {
+                userResponses.awaiting_supervision_confirm = false;
+            }
+
+            if (!Array.isArray(userResponses.processos_vinculados)) {
+                return;
+            }
+            userResponses.processos_vinculados.forEach(card => {
+                if (!card || typeof card !== 'object') {
+                    return;
+                }
+                if (String(card.cnj || '').trim().toLowerCase() !== 'não judicializado') {
+                    return;
+                }
+                card.supervisionado = checked;
+                card.supervision_date = normalizedDate;
+                if (checked && !SUPERVISION_STATUS_SEQUENCE.includes(card.supervisor_status)) {
+                    card.supervisor_status = 'pendente';
+                }
+                if (!checked) {
+                    card.awaiting_supervision_confirm = false;
+                }
+                ensureSupervisionFields(card);
+                syncEditingCardWithSaved(card);
+            });
+        }
+
         function showEditModeIndicator(cnj, cardIndex) {
             // Remover indicador anterior se existir
             $('.edit-mode-indicator').remove();
@@ -3360,38 +3412,43 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     cardData && cardData.tipo_de_acao_respostas && typeof cardData.tipo_de_acao_respostas === 'object'
                         ? deepClone(cardData.tipo_de_acao_respostas)
                         : {};
+                savedResponses = normalizeResponsesForCurrentTree(savedResponses);
                 if (!Object.keys(savedResponses).length) {
                     GENERAL_CARD_FIELD_KEYS.forEach(key => {
                         if (hasMeaningfulResponseValue(cardData[key])) {
                             savedResponses[key] = deepClone(cardData[key]);
                         }
                     });
-                    cardData.tipo_de_acao_respostas = deepClone(savedResponses);
                 }
+                cardData.tipo_de_acao_respostas = deepClone(savedResponses);
                 const isMonitoria = isMonitoriaLikeAnalysisType();
 
                 if (isMonitoria) {
+                    const judicializadoKey = findJudicializadoPelaMassaQuestionKey() || 'judicializado_pela_massa';
+                    const tipoDeAcaoKey = findTipoDeAcaoQuestionKey() || 'tipo_de_acao';
+                    const proporMonitoriaKey = findProporMonitoriaQuestionKey() || 'propor_monitoria';
+                    const judicializadoValue = savedResponses[judicializadoKey] || savedResponses.judicializado_pela_massa;
                     console.log('🔍 Verificando primeira pergunta...');
-                    if (!savedResponses.hasOwnProperty('judicializado_pela_massa') || !savedResponses.judicializado_pela_massa) {
+                    if (!judicializadoValue) {
                         console.log('⚠️ Primeira pergunta faltando!');
-                        if (savedResponses.tipo_de_acao && savedResponses.tipo_de_acao.trim() !== '') {
-                            console.log('→ Tem tipo_de_acao =', savedResponses.tipo_de_acao);
+                        if (savedResponses[tipoDeAcaoKey] && savedResponses[tipoDeAcaoKey].trim() !== '') {
+                            console.log('→ Tem tipo_de_acao =', savedResponses[tipoDeAcaoKey]);
                             console.log('→ Inferindo: judicializado_pela_massa = "SIM"');
-                            savedResponses.judicializado_pela_massa = 'SIM';
-                            userResponses.judicializado_pela_massa = 'SIM';
-                        } else if (savedResponses.propor_monitoria) {
-                            console.log('→ Tem propor_monitoria =', savedResponses.propor_monitoria);
+                            savedResponses[judicializadoKey] = 'SIM';
+                            userResponses[judicializadoKey] = 'SIM';
+                        } else if (savedResponses[proporMonitoriaKey]) {
+                            console.log('→ Tem propor_monitoria =', savedResponses[proporMonitoriaKey]);
                             console.log('→ Inferindo: judicializado_pela_massa = "NÃO"');
-                            savedResponses.judicializado_pela_massa = 'NÃO';
-                            userResponses.judicializado_pela_massa = 'NÃO';
+                            savedResponses[judicializadoKey] = 'NÃO';
+                            userResponses[judicializadoKey] = 'NÃO';
                         } else {
                             console.log('→ Nenhuma pista, usando padrão = "NÃO"');
-                            savedResponses.judicializado_pela_massa = 'NÃO';
-                            userResponses.judicializado_pela_massa = 'NÃO';
+                            savedResponses[judicializadoKey] = 'NÃO';
+                            userResponses[judicializadoKey] = 'NÃO';
                         }
-                        console.log('✅ Primeira pergunta inferida:', savedResponses.judicializado_pela_massa);
+                        console.log('✅ Primeira pergunta inferida:', savedResponses[judicializadoKey]);
                     } else {
-                        console.log('✅ Primeira pergunta já existe:', savedResponses.judicializado_pela_massa);
+                        console.log('✅ Primeira pergunta já existe:', judicializadoValue);
                     }
                 }
 
@@ -3744,6 +3801,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 autoSaveTimer = null;
             }
             ensureUserResponsesShape();
+            syncRenderedProcessCardsBeforePersist();
+            syncNaoJudicializadoSupervisionBeforePersist();
             const treeSelectionIds = getMonitoriaContractIds();
             userResponses.contratos_para_monitoria = treeSelectionIds;
             const currentGeneralSnapshot = getGeneralCardSnapshot();
@@ -4468,7 +4527,7 @@ function formatCnjDigits(raw) {
 
         function formatAnsweredValue(key, value, options = {}) {
             if (Array.isArray(value)) {
-                if (key === 'contratos_para_monitoria') {
+                if (key === 'contratos_para_monitoria' || options.fieldType === 'CONTRATOS_MONITORIA') {
                     const contractNumbers =
                         options.contractInfos && options.contractInfos.length
                             ? options.contractInfos
@@ -4650,7 +4709,6 @@ function formatCnjDigits(raw) {
                     if (!q) return false;
                     if (excludeFields.includes(k)) return false;
                     if (q.tipo_campo === 'PROCESSO_VINCULADO') return false;
-                    if (q.tipo_campo === 'CONTRATOS_MONITORIA') return false;
                     // evita ruídos específicos de monitória
                     if (k === 'contratos_para_monitoria') return false;
                     if (k === 'ativar_botao_monitoria') return false;
@@ -4664,11 +4722,19 @@ function formatCnjDigits(raw) {
 
             const entries = [];
             keysOrdered.forEach(key => {
+                const q = treeData[key];
                 let value = responses[key];
+                if (q?.tipo_campo === 'CONTRATOS_MONITORIA') {
+                    if (!Array.isArray(value) || !value.length) {
+                        value = responses.contratos_para_monitoria;
+                    }
+                }
                 if (value === undefined || value === null || value === '') {
                     return;
                 }
-                const q = treeData[key];
+                if (Array.isArray(value) && !value.length) {
+                    return;
+                }
                 let displayValue = value;
                 if (q?.tipo_campo === 'DATA') {
                     displayValue = formatDateIsoToBr(value);
@@ -4676,7 +4742,8 @@ function formatCnjDigits(raw) {
                 entries.push({
                     label: q?.texto_pergunta || key,
                     value: formatAnsweredValue(key, displayValue, {
-                        contractInfos: options.contractInfos
+                        contractInfos: options.contractInfos,
+                        fieldType: q?.tipo_campo
                     })
                 });
             });
@@ -6864,6 +6931,189 @@ function formatCnjDigits(raw) {
             );
         }
 
+        function findTipoDeAcaoQuestionKey() {
+            if (treeConfig && treeConfig['tipo_de_acao']) {
+                return 'tipo_de_acao';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('tipo') && (label.includes('ação') || label.includes('acao'));
+            });
+            if (foundByLabel) {
+                return foundByLabel;
+            }
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const normalized = normalizeDecisionText(k);
+                    return normalized.includes('TIPO') && normalized.includes('ACAO');
+                }) || null
+            );
+        }
+
+        function findTransitadoQuestionKey() {
+            if (treeConfig && treeConfig['transitado']) {
+                return 'transitado';
+            }
+            return findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('transitad');
+            });
+        }
+
+        function findFaseRecursalQuestionKey() {
+            if (treeConfig && treeConfig['fase_recursal']) {
+                return 'fase_recursal';
+            }
+            return findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('fase') && label.includes('recursal');
+            });
+        }
+
+        function findReproporMonitoriaQuestionKey() {
+            if (treeConfig && treeConfig['repropor_monitoria']) {
+                return 'repropor_monitoria';
+            }
+            const foundByLabel = findQuestionKeyByLabelContains((label, q) => {
+                if (q?.tipo_campo !== 'OPCOES') return false;
+                return label.includes('repropor') && label.includes('monitor');
+            });
+            if (foundByLabel) {
+                return foundByLabel;
+            }
+            const keys = Object.keys(treeConfig || {});
+            return (
+                keys.find(k => {
+                    const normalized = normalizeDecisionText(k);
+                    return normalized.includes('REPROPOR') && normalized.includes('MONITOR');
+                }) || null
+            );
+        }
+
+        function applySemanticResponseAlias(targetResponses, finder, aliasKeys = []) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return;
+            }
+            const resolvedKey = typeof finder === 'function' ? finder() : null;
+            if (!resolvedKey || hasMeaningfulResponseValue(targetResponses[resolvedKey])) {
+                return;
+            }
+            const aliases = Array.isArray(aliasKeys) ? aliasKeys : [aliasKeys];
+            for (const aliasKey of aliases) {
+                if (!aliasKey || aliasKey === resolvedKey) {
+                    continue;
+                }
+                if (hasMeaningfulResponseValue(targetResponses[aliasKey])) {
+                    targetResponses[resolvedKey] = deepClone(targetResponses[aliasKey]);
+                    return;
+                }
+            }
+        }
+
+        function normalizeResponsesForCurrentTree(rawResponses) {
+            const normalizedResponses =
+                rawResponses && typeof rawResponses === 'object'
+                    ? deepClone(rawResponses)
+                    : {};
+
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findJudicializadoPelaMassaQuestionKey,
+                ['judicializado_pela_massa']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findProporMonitoriaQuestionKey,
+                ['propor_monitoria']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findTipoDeAcaoQuestionKey,
+                ['tipo_de_acao']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findJulgamentoQuestionKey,
+                ['julgamento']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findProcedenciaQuestionKey,
+                ['procedencia']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findTransitadoQuestionKey,
+                ['transitado']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findTransitDateQuestionKey,
+                ['data_de_transito']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findFaseRecursalQuestionKey,
+                ['fase_recursal']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findCumprimentoSentencaQuestionKey,
+                ['cumprimento_de_sentenca']
+            );
+            applySemanticResponseAlias(
+                normalizedResponses,
+                findReproporMonitoriaQuestionKey,
+                ['repropor_monitoria']
+            );
+
+            const processoListKey = getProcessoVinculadoQuestionKey();
+            if (
+                processoListKey &&
+                !Array.isArray(normalizedResponses[processoListKey]) &&
+                Array.isArray(normalizedResponses.processos_vinculados)
+            ) {
+                normalizedResponses[processoListKey] = deepClone(normalizedResponses.processos_vinculados);
+            }
+
+            const judicializadoKey = findJudicializadoPelaMassaQuestionKey();
+            if (judicializadoKey && !hasMeaningfulResponseValue(normalizedResponses[judicializadoKey])) {
+                const hasProcessCards =
+                    (processoListKey &&
+                        Array.isArray(normalizedResponses[processoListKey]) &&
+                        normalizedResponses[processoListKey].length > 0) ||
+                    (Array.isArray(normalizedResponses.processos_vinculados) &&
+                        normalizedResponses.processos_vinculados.length > 0);
+                const hasProcessFlowSignals = hasProcessCards || [
+                    findTipoDeAcaoQuestionKey(),
+                    findJulgamentoQuestionKey(),
+                    findProcedenciaQuestionKey(),
+                    findTransitadoQuestionKey(),
+                    findCumprimentoSentencaQuestionKey(),
+                    'habilitacao_e3',
+                    'habilitacao'
+                ].some(key => key && hasMeaningfulResponseValue(normalizedResponses[key]));
+                const hasMonitoriaSignals =
+                    hasMeaningfulResponseValue(
+                        normalizedResponses[findProporMonitoriaQuestionKey() || 'propor_monitoria']
+                    ) ||
+                    hasMeaningfulResponseValue(
+                        normalizedResponses[findReproporMonitoriaQuestionKey() || 'repropor_monitoria']
+                    ) ||
+                    (Array.isArray(normalizedResponses.contratos_para_monitoria) &&
+                        normalizedResponses.contratos_para_monitoria.length > 0);
+
+                if (hasProcessFlowSignals) {
+                    normalizedResponses[judicializadoKey] = 'SIM - EM ANDAMENTO';
+                } else if (hasMonitoriaSignals) {
+                    normalizedResponses[judicializadoKey] = 'NÃO';
+                }
+            }
+
+            return normalizedResponses;
+        }
+
         function getResponseBySemanticKey(responses, canonicalKey, keyFinder) {
             if (!responses || typeof responses !== 'object') {
                 return '';
@@ -7693,12 +7943,17 @@ function formatCnjDigits(raw) {
 
         function renderProcessoVinculadoEditor(questionKey, $container) {
             const nodeConfig = treeConfig[questionKey] || {};
+            const optionDrivenNext =
+                Array.isArray(nodeConfig.opcoes)
+                    ? (nodeConfig.opcoes.find(opt => opt && opt.proxima_questao_chave) || {}).proxima_questao_chave
+                    : null;
 
             const startQuestionKey =
                 'tipo_de_acao' in treeConfig
                     ? 'tipo_de_acao'
                     : nodeConfig.primeira_questao_vinculada ||
                     nodeConfig.proxima_questao_chave ||
+                    optionDrivenNext ||
                     null;
 
             const $editorDiv = $(
