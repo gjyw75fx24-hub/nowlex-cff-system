@@ -5963,8 +5963,22 @@ function formatCnjDigits(raw) {
                         $toggleBtnVinculado.text(' + ');
                     }
 
-                    $toggleBtnVinculado.on('click', function () {
-                        $bodyVinculado.slideToggle(200, function () {
+                    let isCardToggleAnimating = false;
+                    $toggleBtnVinculado.on('click', function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (typeof event.stopImmediatePropagation === 'function') {
+                            event.stopImmediatePropagation();
+                        }
+                        if (isCardToggleAnimating) {
+                            return;
+                        }
+                        const shouldExpand = !$bodyVinculado.is(':visible');
+                        isCardToggleAnimating = true;
+                        $toggleBtnVinculado.text(shouldExpand ? ' - ' : ' + ');
+                        setCardExpansionState(cardKey, shouldExpand);
+                        $bodyVinculado.stop(true, true)[shouldExpand ? 'slideDown' : 'slideUp'](200, function () {
+                            isCardToggleAnimating = false;
                             const expanded = $bodyVinculado.is(':visible');
                             $toggleBtnVinculado.text(expanded ? ' - ' : ' + ');
                             setCardExpansionState(cardKey, expanded);
