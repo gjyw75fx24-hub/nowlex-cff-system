@@ -423,6 +423,8 @@
         let hasUserActivatedCardSelection = false;
         const SAVED_PROCESSOS_KEY = 'saved_processos_vinculados';
         const CARD_EXPANSION_STATE = {};
+        let summaryCardsRefreshTimer = null;
+        let summaryCardsInteractionUntil = 0;
 
         function getCardExpansionState(cardKey, defaultState = false) {
             if (Object.prototype.hasOwnProperty.call(CARD_EXPANSION_STATE, cardKey)) {
@@ -434,6 +436,21 @@
 
         function setCardExpansionState(cardKey, expanded) {
             CARD_EXPANSION_STATE[cardKey] = Boolean(expanded);
+        }
+
+        function registerSummaryCardsInteraction(windowMs = 450) {
+            summaryCardsInteractionUntil = Date.now() + Math.max(0, Number(windowMs) || 0);
+        }
+
+        function scheduleFormattedResponsesRefresh() {
+            if (summaryCardsRefreshTimer) {
+                clearTimeout(summaryCardsRefreshTimer);
+            }
+            const waitMs = Math.max(0, summaryCardsInteractionUntil - Date.now()) + 60;
+            summaryCardsRefreshTimer = setTimeout(() => {
+                summaryCardsRefreshTimer = null;
+                displayFormattedResponses();
+            }, waitMs);
         }
 
         function getGeneralCardSnapshot() {
@@ -4681,14 +4698,13 @@ function formatCnjDigits(raw) {
 	            prefetchSnapshotTreesForCards(list)
 	                .always(() => {
 	                    snapshotTreesPrefetchScheduled = false;
-	                    // re-render para preencher rótulos/ordem do resumo
-	                    setTimeout(() => {
-	                        try {
-	                            displayFormattedResponses();
-	                        } catch (e) {
-	                            // ignore
-	                        }
-	                    }, 0);
+	                    // re-render para preencher rótulos/ordem do resumo,
+	                    // mas evita interromper o clique recente do usuário no toggle.
+	                    try {
+	                        scheduleFormattedResponsesRefresh();
+	                    } catch (e) {
+	                        // ignore
+	                    }
 	                });
 	        }
 
@@ -5978,6 +5994,7 @@ function formatCnjDigits(raw) {
                         if (isCardToggleAnimating) {
                             return;
                         }
+                        registerSummaryCardsInteraction();
                         const shouldExpand = !$bodyVinculado.is(':visible');
                         isCardToggleAnimating = true;
                         $toggleBtnVinculado.text(shouldExpand ? ' - ' : ' + ');
@@ -9261,7 +9278,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
         // Carrega imediatamente os cards de análises concluídas, mesmo antes de clicar em "Começar"
         loadExistingResponses();
         fetchAnalysisTypes().done(() => {
-            displayFormattedResponses();
+            scheduleFormattedResponsesRefresh();
         });
 
         if (document.readyState === 'loading') {
