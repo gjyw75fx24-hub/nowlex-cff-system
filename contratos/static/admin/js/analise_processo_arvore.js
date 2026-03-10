@@ -5712,6 +5712,11 @@ function formatCnjDigits(raw) {
                         : null;
                     const activeIndexAttr = Number.isFinite(activeCardIndex) ? String(activeCardIndex) : '';
                     const sourceAttr = String(processo.__source || '').trim().toLowerCase();
+                    const expansionCardKey = getSummaryCardIdentity(
+                        normalizeProcessCardForSummary(processo) || processo,
+                        cardIndex,
+                        sourceAttr || 'summary'
+                    );
                     $deleteBtn.attr('data-card-index', savedIndexAttr);
                     $editBtn.attr('data-saved-index', savedIndexAttr);
 	                    $editBtn.attr('data-cnj', snapshot.cnj || '');
@@ -5954,7 +5959,7 @@ function formatCnjDigits(raw) {
                     $cardVinculado.append($bodyVinculado);
                     $formattedResponsesContainer.append($cardVinculado);
 
-                    const cardExpanded = getCardExpansionState(cardKey, false);
+                    const cardExpanded = getCardExpansionState(expansionCardKey, false);
                     if (cardExpanded) {
                         $bodyVinculado.show();
                         $toggleBtnVinculado.text(' - ');
@@ -5976,12 +5981,12 @@ function formatCnjDigits(raw) {
                         const shouldExpand = !$bodyVinculado.is(':visible');
                         isCardToggleAnimating = true;
                         $toggleBtnVinculado.text(shouldExpand ? ' - ' : ' + ');
-                        setCardExpansionState(cardKey, shouldExpand);
+                        setCardExpansionState(expansionCardKey, shouldExpand);
                         $bodyVinculado.stop(true, true)[shouldExpand ? 'slideDown' : 'slideUp'](200, function () {
                             isCardToggleAnimating = false;
                             const expanded = $bodyVinculado.is(':visible');
                             $toggleBtnVinculado.text(expanded ? ' - ' : ' + ');
-                            setCardExpansionState(cardKey, expanded);
+                            setCardExpansionState(expansionCardKey, expanded);
                         });
                     });
                 });
