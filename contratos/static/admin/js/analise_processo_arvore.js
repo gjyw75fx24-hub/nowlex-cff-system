@@ -5153,19 +5153,22 @@ function formatCnjDigits(raw) {
 	            const snapshotTreeData = getTreeDataForSnapshotAnalysisType(processo?.analysis_type) || {};
 	            const hasSnapshotTreeData = Boolean(snapshotTreeData && Object.keys(snapshotTreeData).length);
 
-	            const fieldEntries = hasSnapshotTreeData
+	            const fieldEntriesFromTree = hasSnapshotTreeData
 	                ? getAnsweredFieldEntriesFromTree(processo, {
 	                    excludeFields: options.excludeFields || [],
 	                    contractInfos: monitoriaInfos,
 	                    treeData: snapshotTreeData
 	                })
-	                : getAnsweredFieldEntries(processo, {
-	                    excludeFields: options.excludeFields || [],
-	                    contractInfos: monitoriaInfos
-	                });
-                const effectiveFieldEntries = fieldEntries.length
-                    ? fieldEntries
-                    : getPersistedSummaryEntries(processo);
+	                : [];
+                const fieldEntriesFallback = getAnsweredFieldEntries(processo, {
+                    excludeFields: options.excludeFields || [],
+                    contractInfos: monitoriaInfos
+                });
+                const effectiveFieldEntries = fieldEntriesFromTree.length
+                    ? fieldEntriesFromTree
+                    : (fieldEntriesFallback.length
+                        ? fieldEntriesFallback
+                        : getPersistedSummaryEntries(processo));
 	            if (effectiveFieldEntries.length) {
 	                const $liAcao = $(
 	                    `<li><strong>${isPassivasSnapshot ? 'Respostas da Análise:' : 'Resultado da Análise:'}</strong><ul></ul></li>`

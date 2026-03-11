@@ -1028,9 +1028,9 @@ def import_analise_lote_rows(
                 analise.respostas = respostas
                 if acting_user:
                     analise.updated_by = acting_user
-                    analise.save(update_fields=["respostas", "updated_by"])
+                    analise.save(update_fields=["respostas", "updated_by", "updated_at", "para_supervisionar"])
                 else:
-                    analise.save(update_fields=["respostas"])
+                    analise.save(update_fields=["respostas", "updated_at", "para_supervisionar"])
                 result.row_results.append(
                     {
                         "row_id": str(row.row_id),
