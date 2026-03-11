@@ -480,6 +480,14 @@
               <span class="analise-lote-badge analise-lote-badge--status-imported">Importadas: {{ preview.status_counts.imported|default:0 }}</span>
               <span class="analise-lote-badge analise-lote-badge--status-blocked">Não importáveis: {{ preview.status_counts.blocked|default:0 }}</span>
               <span class="analise-lote-badge analise-lote-badge--status-unselected">Não selecionadas: {{ preview.status_counts.unselected|default:0 }}</span>
+              <input
+                type="search"
+                id="analise-lote-search"
+                class="form-control"
+                placeholder="Buscar linha, CPF ou CNJ"
+                aria-label="Buscar linha, CPF ou CNJ"
+                style="margin-left:10px; width:240px; min-width:240px; max-width:100%;"
+              >
             </div>
           {% endif %}
 
@@ -510,7 +518,7 @@
 
           <div class="analise-lote-preview-list" id="analise-lote-preview-list">
             {% for item in preview.items %}
-              <article class="analise-lote-card" data-row-id="{{ item.row_id }}" data-uf="{{ item.uf }}" data-selectable="{{ item.selectable|yesno:'1,0' }}" data-import-status="{{ item.import_status }}" data-import-status-group="{{ item.import_status_group|default:item.import_status }}">
+              <article class="analise-lote-card" data-row-id="{{ item.row_id }}" data-cpf="{{ item.cpf }}" data-cnj="{{ item.cnj }}" data-uf="{{ item.uf }}" data-selectable="{{ item.selectable|yesno:'1,0' }}" data-import-status="{{ item.import_status }}" data-import-status-group="{{ item.import_status_group|default:item.import_status }}">
                 <div class="analise-lote-card__header">
                   <div class="analise-lote-card__header-main">
                     <div>
@@ -606,6 +614,7 @@
               const formEl = document.querySelector('.demandas-panel form');
               const filterEl = document.getElementById('analise-lote-uf-filter');
               const statusFilterEl = document.getElementById('analise-lote-status-filter');
+              const searchEl = document.getElementById('analise-lote-search');
               const resetBtn = document.getElementById('analise-lote-filter-reset');
               const selectAllBtn = document.getElementById('analise-lote-select-all');
               const selectUfBtn = document.getElementById('analise-lote-select-uf');
@@ -627,12 +636,26 @@
               const applyFilter = () => {
                 const targetUf = String(filterEl ? filterEl.value : '').trim().toUpperCase();
                 const targetStatus = String(statusFilterEl ? statusFilterEl.value : '').trim().toLowerCase();
+                const searchRaw = String(searchEl ? searchEl.value : '').trim();
+                const searchDigits = searchRaw.replace(/\D/g, '');
+                const searchText = searchRaw.toUpperCase();
                 cards().forEach((card) => {
                   const cardUf = String(card.dataset.uf || '').trim().toUpperCase();
                   const cardStatus = String(card.dataset.importStatusGroup || card.dataset.importStatus || '').trim().toLowerCase();
+                  const rowId = String(card.dataset.rowId || '').trim();
+                  const cpfDigits = String(card.dataset.cpf || '').replace(/\D/g, '');
+                  const cnjDigits = String(card.dataset.cnj || '').replace(/\D/g, '');
                   const matchUf = (!targetUf || cardUf === targetUf);
                   const matchStatus = (!targetStatus || cardStatus === targetStatus);
-                  card.style.display = (matchUf && matchStatus) ? '' : 'none';
+                  const matchSearch = !searchRaw || (
+                    rowId.includes(searchRaw) ||
+                    (searchDigits && (cpfDigits.includes(searchDigits) || cnjDigits.includes(searchDigits))) ||
+                    (!searchDigits && (
+                      String(card.dataset.cpf || '').toUpperCase().includes(searchText) ||
+                      String(card.dataset.cnj || '').toUpperCase().includes(searchText)
+                    ))
+                  );
+                  card.style.display = (matchUf && matchStatus && matchSearch) ? '' : 'none';
                 });
               };
               const setVisible = (checked) => {
@@ -672,9 +695,14 @@
                 applyFilter();
                 syncPayload();
               });
+              if (searchEl) searchEl.addEventListener('input', () => {
+                applyFilter();
+                syncPayload();
+              });
               if (resetBtn) resetBtn.addEventListener('click', () => {
                 if (filterEl) filterEl.value = '';
                 if (statusFilterEl) statusFilterEl.value = '';
+                if (searchEl) searchEl.value = '';
                 applyFilter();
                 syncPayload();
               });
