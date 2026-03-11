@@ -354,6 +354,7 @@
       {{ form.upload_token }}
       <input type="hidden" name="selected_cpfs_payload" id="id_selected_cpfs_payload" value="{{ selected_cpfs_payload|default:'' }}">
       <input type="hidden" name="selected_row_ids_payload" id="id_selected_row_ids_payload" value="{{ selected_row_ids_payload|default:'' }}">
+      <input type="hidden" name="retry_row_id" id="id_retry_row_id" value="">
       <input type="hidden" name="action_override" id="id_action_override" value="">
       <input type="hidden" name="supervisor_password" id="id_supervisor_password" value="">
       <script>
@@ -532,6 +533,9 @@
                     <span class="analise-lote-badge {% if item.match_status == 'matched' %}analise-lote-badge--matched{% elif item.match_status == 'conflict' %}analise-lote-badge--conflict{% else %}analise-lote-badge--missing{% endif %}">{{ item.match_label }}</span>
                     <span class="analise-lote-badge analise-lote-badge--status-{{ item.import_status_group|default:item.import_status }}">{{ item.import_status_label }}</span>
                     <span class="analise-lote-badge">{{ item.action_label }}</span>
+                    {% if item.import_status_group == 'blocked' %}
+                      <button type="button" class="button js-analise-lote-retry-row" data-row-id="{{ item.row_id }}">Tentar importar novamente</button>
+                    {% endif %}
                     {% if item.process_admin_url %}
                       <a class="button" href="{{ item.process_admin_url }}" target="_blank" rel="noopener noreferrer">Abrir cadastro</a>
                     {% endif %}
@@ -597,6 +601,8 @@
           <script>
             (function () {
               const payloadEl = document.getElementById('id_selected_row_ids_payload');
+              const retryRowEl = document.getElementById('id_retry_row_id');
+              const actionOverrideEl = document.getElementById('id_action_override');
               const formEl = document.querySelector('.demandas-panel form');
               const filterEl = document.getElementById('analise-lote-uf-filter');
               const statusFilterEl = document.getElementById('analise-lote-status-filter');
@@ -645,6 +651,19 @@
               };
               boxes().forEach((box) => box.addEventListener('change', syncPayload));
               if (formEl) formEl.addEventListener('submit', syncPayload);
+              Array.from(document.querySelectorAll('.js-analise-lote-retry-row')).forEach((button) => {
+                button.addEventListener('click', () => {
+                  if (retryRowEl) {
+                    retryRowEl.value = String(button.dataset.rowId || '').trim();
+                  }
+                  if (actionOverrideEl) {
+                    actionOverrideEl.value = 'retry_row';
+                  }
+                  if (formEl) {
+                    formEl.requestSubmit ? formEl.requestSubmit() : formEl.submit();
+                  }
+                });
+              });
               if (filterEl) filterEl.addEventListener('change', () => {
                 applyFilter();
                 syncPayload();

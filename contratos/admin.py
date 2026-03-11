@@ -1922,6 +1922,7 @@ def demandas_analise_planilha_view(request):
     selected_cpfs_payload = ""
     selected_row_ids = []
     selected_row_ids_payload = ""
+    retry_row_id = ""
     background_job = None
     analise_lote_sync_limit = 80
 
@@ -2440,6 +2441,9 @@ def demandas_analise_planilha_view(request):
             selected_cpfs = list(dict.fromkeys(selected_cpfs))
         selected_cpfs_payload = ",".join(selected_cpfs)
         selected_row_ids = _parse_selected_row_ids_from_request()
+        retry_row_id = str(request.POST.get("retry_row_id") or "").strip()
+        if action == "retry_row" and retry_row_id:
+            selected_row_ids = [retry_row_id]
         selected_row_ids_payload = ",".join(selected_row_ids)
         upload = form.cleaned_data.get("arquivo")
         token = (form.cleaned_data.get("upload_token") or "").strip()
@@ -2553,7 +2557,67 @@ def demandas_analise_planilha_view(request):
                 selected_set = {str(value) for value in selected_row_ids if str(value).strip()}
                 rows_to_import_count = sum(1 for row in parsed if str(row.row_id) in selected_set)
 
-            if action == "import":
+            if action == "retry_row":
+                target_item = next(
+                    (
+                        item
+                        for item in (preview.get("items") or [])
+                        if str(item.get("row_id") or "").strip() == retry_row_id
+                    ),
+                    None,
+                )
+                if not retry_row_id:
+                    messages.error(request, "Linha para retentativa não informada.")
+                elif not target_item:
+                    messages.error(request, f"Linha {retry_row_id} não encontrada na prévia atual.")
+                elif not target_item.get("selectable"):
+                    messages.warning(
+                        request,
+                        f"Linha {retry_row_id} ainda não pode ser importada: {target_item.get('match_label') or 'cadastro não resolvido'}.",
+                    )
+                else:
+                    try:
+                        import_result = import_analise_lote_rows(
+                            parsed,
+                            carteira=form.cleaned_data["carteira"],
+                            tipo_analise=form.cleaned_data["tipo_analise"],
+                            analista=form.cleaned_data["analista"],
+                            acting_user=request.user,
+                            selected_row_ids=[retry_row_id],
+                        )
+                        import_modal_data = {
+                            "created_cadastros": 0,
+                            "updated_cadastros": import_result.updated_processos,
+                            "created_cnjs": import_result.created_cnjs,
+                            "updated_cnjs": import_result.updated_cnjs,
+                            "created_cards": import_result.created_cards,
+                            "updated_cards": import_result.updated_cards,
+                            "reused_priority_tags": 0,
+                            "standardized_priority_tags": 0,
+                            "note": (
+                                f"Linha {retry_row_id}: importadas {import_result.matched_rows}. "
+                                f"Ignoradas: {import_result.skipped_rows}."
+                            ),
+                        }
+                        request.session[import_modal_session_key] = import_modal_data
+                        if import_result.errors:
+                            messages.warning(
+                                request,
+                                f"A linha {retry_row_id} foi reavaliada, mas ainda houve problema na importação.",
+                            )
+                        else:
+                            messages.success(request, f"Linha {retry_row_id} importada novamente com sucesso.")
+                        preview = _apply_row_results_to_preview(
+                            preview,
+                            getattr(import_result, "row_results", []),
+                        )
+                    except Exception as exc:
+                        messages.error(request, f"Falha ao tentar importar novamente a linha {retry_row_id}: {exc}")
+                        import_modal_data = {
+                            "title": "Falha ao tentar importar novamente",
+                            "error": str(exc),
+                        }
+            elif action == "import":
                 if rows_to_import_count > analise_lote_sync_limit:
                     try:
                         background_job = _enqueue_analise_lote_import(
