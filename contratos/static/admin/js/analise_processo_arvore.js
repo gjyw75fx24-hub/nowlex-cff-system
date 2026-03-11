@@ -879,6 +879,93 @@
             return `${fallbackSource}:${fallbackIndex}`;
         }
 
+        function sortSummarySignatureValue(value) {
+            if (Array.isArray(value)) {
+                return value.map(item => sortSummarySignatureValue(item));
+            }
+            if (value && typeof value === 'object') {
+                const sorted = {};
+                Object.keys(value)
+                    .sort()
+                    .forEach(key => {
+                        sorted[key] = sortSummarySignatureValue(value[key]);
+                    });
+                return sorted;
+            }
+            return value;
+        }
+
+        function buildSummaryCardDuplicateSignature(card) {
+            const normalizedCard = normalizeProcessCardForSummary(card);
+            if (!normalizedCard) {
+                return '';
+            }
+            const cnjDigits = String(normalizedCard.cnj || '').replace(/\D/g, '');
+            const responses = normalizedCard.tipo_de_acao_respostas && typeof normalizedCard.tipo_de_acao_respostas === 'object'
+                ? normalizedCard.tipo_de_acao_respostas
+                : {};
+            const barrado = normalizedCard.barrado && typeof normalizedCard.barrado === 'object'
+                ? normalizedCard.barrado
+                : {};
+            const signaturePayload = {
+                cnj: cnjDigits || String(normalizedCard.cnj || '').trim(),
+                contratos: parseContractsField(normalizedCard.contratos).map(String).sort(),
+                valor_causa: parseCurrencyValue(normalizedCard.valor_causa),
+                observacoes: typeof normalizedCard.observacoes === 'string' ? normalizedCard.observacoes.trim() : '',
+                tipo_de_acao_respostas: sortSummarySignatureValue(responses),
+                supervisionado: Boolean(normalizedCard.supervisionado),
+                supervisor_status: String(normalizedCard.supervisor_status || '').trim(),
+                supervision_date: normalizeIsoDateValue(normalizedCard.supervision_date),
+                awaiting_supervision_confirm: Boolean(normalizedCard.awaiting_supervision_confirm),
+                barrado: sortSummarySignatureValue(barrado),
+            };
+            return JSON.stringify(signaturePayload);
+        }
+
+        function reconcileDuplicatedSummaryCards() {
+            ensureUserResponsesShape();
+            if (
+                Number.isFinite(userResponses._editing_card_index) &&
+                userResponses._editing_card_index >= 0
+            ) {
+                return false;
+            }
+            const savedCards = Array.isArray(userResponses[SAVED_PROCESSOS_KEY])
+                ? userResponses[SAVED_PROCESSOS_KEY]
+                : [];
+            const activeCards = Array.isArray(userResponses.processos_vinculados)
+                ? userResponses.processos_vinculados
+                : [];
+            if (!savedCards.length || !activeCards.length) {
+                return false;
+            }
+
+            const savedSignatures = new Set(
+                savedCards
+                    .map(card => buildSummaryCardDuplicateSignature(card))
+                    .filter(Boolean)
+            );
+            if (!savedSignatures.size) {
+                return false;
+            }
+
+            const filteredActiveCards = [];
+            let changed = false;
+            activeCards.forEach(card => {
+                const signature = buildSummaryCardDuplicateSignature(card);
+                if (signature && savedSignatures.has(signature)) {
+                    changed = true;
+                    return;
+                }
+                filteredActiveCards.push(card);
+            });
+
+            if (changed) {
+                userResponses.processos_vinculados = filteredActiveCards;
+            }
+            return changed;
+        }
+
         function ensureUserResponsesShape() {
             if (!userResponses || typeof userResponses !== 'object') {
                 userResponses = {};
@@ -3874,6 +3961,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ensureUserResponsesShape();
             syncRenderedProcessCardsBeforePersist();
             syncNaoJudicializadoSupervisionBeforePersist();
+            reconcileDuplicatedSummaryCards();
             const treeSelectionIds = getMonitoriaContractIds();
             userResponses.contratos_para_monitoria = treeSelectionIds;
             const currentGeneralSnapshot = getGeneralCardSnapshot();
@@ -5618,6 +5706,10 @@ function formatCnjDigits(raw) {
             }
             $formattedResponsesContainer.empty();
             ensureUserResponsesShape();
+            if (reconcileDuplicatedSummaryCards()) {
+                $responseField.val(JSON.stringify(userResponses, null, 2));
+                persistLocalResponses();
+            }
             if (!Array.isArray(allAvailableContratos) || allAvailableContratos.length === 0) {
                 loadContratosFromDOM();
             }
