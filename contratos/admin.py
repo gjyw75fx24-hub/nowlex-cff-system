@@ -7624,81 +7624,136 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def _build_passivo_info_cards(self, processo, use_ativo_polo=False):
         if not processo:
             return []
-        alvo_polo = "ATIVO" if use_ativo_polo else "PASSIVO"
-        partes = list(
-            processo.partes_processuais.filter(tipo_polo=alvo_polo).order_by("id")
-        )
-        if use_ativo_polo and not partes:
-            partes = list(
-                processo.partes_processuais.filter(tipo_polo="PASSIVO").order_by("id")
-            )
+
         contratos = list(processo.contratos.all().order_by("id"))
+        partes_todas = list(processo.partes_processuais.all().order_by("id"))
+        entradas_cnj = list(
+            processo.numeros_cnj.select_related("carteira").all().order_by("id")
+        )
 
         def _digits(value):
             return re.sub(r"\D", "", str(value or ""))
 
-        contrato_docs = {
-            _digits(getattr(contrato, "documento_titular", ""))
-            for contrato in contratos
-            if _digits(getattr(contrato, "documento_titular", ""))
-        }
-        if len(contrato_docs) > 1:
-            partes_por_doc = [
-                parte
-                for parte in processo.partes_processuais.all().order_by("id")
-                if _digits(getattr(parte, "documento", "")) in contrato_docs
-            ]
-            if partes_por_doc:
-                partes = partes_por_doc
+        def _build_cards_for_scope(partes_scope):
+            partes = list(partes_scope or [])
+            if not partes:
+                return []
 
-        if len(partes) <= 1:
+            contrato_docs = {
+                _digits(getattr(contrato, "documento_titular", ""))
+                for contrato in contratos
+                if _digits(getattr(contrato, "documento_titular", ""))
+            }
+            if len(contrato_docs) > 1:
+                partes_por_doc = [
+                    parte
+                    for parte in partes
+                    if _digits(getattr(parte, "documento", "")) in contrato_docs
+                ]
+                if partes_por_doc:
+                    partes = partes_por_doc
+
+            grouped = {}
+            key_order = []
             for parte in partes:
-                parte.info_card_contratos = list(contratos)
-            return partes
-
-        grouped = {}
-        key_order = []
-        for parte in partes:
-            key = self._build_parte_dedupe_key(parte)
-            if key not in grouped:
-                grouped[key] = parte
-                key_order.append(key)
-                continue
-            current = grouped[key]
-            candidate_rank = (self._parte_card_score(parte), -(parte.pk or 0))
-            current_rank = (self._parte_card_score(current), -(current.pk or 0))
-            if candidate_rank > current_rank:
-                grouped[key] = parte
-        cards = [grouped[key] for key in key_order]
-
-        mapped_by_doc = {}
-        unmapped = []
-        for contrato in contratos:
-            doc = _digits(getattr(contrato, "documento_titular", ""))
-            if doc:
-                mapped_by_doc.setdefault(doc, []).append(contrato)
-            else:
-                unmapped.append(contrato)
-
-        has_mapping = bool(mapped_by_doc)
-        for index, parte in enumerate(cards):
-            if not has_mapping:
-                parte.info_card_contratos = contratos if index == 0 else []
-                continue
-            doc = _digits(getattr(parte, "documento", ""))
-            parte.info_card_contratos = list(mapped_by_doc.get(doc, []))
-
-        if has_mapping and unmapped and cards:
-            base = list(getattr(cards[0], "info_card_contratos", []))
-            seen_ids = {item.pk for item in base}
-            for contrato in unmapped:
-                if contrato.pk in seen_ids:
+                key = self._build_parte_dedupe_key(parte)
+                if key not in grouped:
+                    grouped[key] = parte
+                    key_order.append(key)
                     continue
-                base.append(contrato)
-                seen_ids.add(contrato.pk)
-            cards[0].info_card_contratos = base
+                current = grouped[key]
+                candidate_rank = (self._parte_card_score(parte), -(parte.pk or 0))
+                current_rank = (self._parte_card_score(current), -(current.pk or 0))
+                if candidate_rank > current_rank:
+                    grouped[key] = parte
+            cards = [grouped[key] for key in key_order]
+            if not cards:
+                return []
 
-        return cards
+            mapped_by_doc = {}
+            unmapped = []
+            for contrato in contratos:
+                doc = _digits(getattr(contrato, "documento_titular", ""))
+                if doc:
+                    mapped_by_doc.setdefault(doc, []).append(contrato)
+                else:
+                    unmapped.append(contrato)
+
+            has_mapping = bool(mapped_by_doc)
+            for index, parte in enumerate(cards):
+                if not has_mapping:
+                    parte.info_card_contratos = contratos if index == 0 else []
+                    continue
+                doc = _digits(getattr(parte, "documento", ""))
+                parte.info_card_contratos = list(mapped_by_doc.get(doc, []))
+
+            if has_mapping and unmapped and cards:
+                base = list(getattr(cards[0], "info_card_contratos", []))
+                seen_ids = {item.pk for item in base}
+                for contrato in unmapped:
+                    if contrato.pk in seen_ids:
+                        continue
+                    base.append(contrato)
+                    seen_ids.add(contrato.pk)
+                cards[0].info_card_contratos = base
+
+            if len(cards) == 1 and not getattr(cards[0], "info_card_contratos", None):
+                cards[0].info_card_contratos = list(contratos)
+
+            return cards
+
+        if not entradas_cnj:
+            alvo_polo = "ATIVO" if use_ativo_polo else "PASSIVO"
+            partes = [parte for parte in partes_todas if parte.tipo_polo == alvo_polo]
+            if use_ativo_polo and not partes:
+                partes = [parte for parte in partes_todas if parte.tipo_polo == "PASSIVO"]
+            return _build_cards_for_scope(partes)
+
+        cards_final = []
+        used_card_keys = set()
+        unbound_consumed = False
+
+        for entrada in entradas_cnj:
+            entry_use_ativo_polo = self._is_passivas_carteira(getattr(entrada, "carteira_id", None))
+            alvo_polo = "ATIVO" if entry_use_ativo_polo else "PASSIVO"
+            partes_entrada = [
+                parte for parte in partes_todas
+                if getattr(parte, "numero_cnj_id", None) == entrada.id and parte.tipo_polo == alvo_polo
+            ]
+            if entry_use_ativo_polo and not partes_entrada:
+                partes_entrada = [
+                    parte for parte in partes_todas
+                    if getattr(parte, "numero_cnj_id", None) == entrada.id and parte.tipo_polo == "PASSIVO"
+                ]
+            if not partes_entrada and not unbound_consumed:
+                partes_entrada = [
+                    parte for parte in partes_todas
+                    if not getattr(parte, "numero_cnj_id", None) and parte.tipo_polo == alvo_polo
+                ]
+                if entry_use_ativo_polo and not partes_entrada:
+                    partes_entrada = [
+                        parte for parte in partes_todas
+                        if not getattr(parte, "numero_cnj_id", None) and parte.tipo_polo == "PASSIVO"
+                    ]
+                if partes_entrada:
+                    unbound_consumed = True
+
+            scoped_cards = _build_cards_for_scope(partes_entrada)
+            for parte in scoped_cards:
+                card_key = self._build_parte_dedupe_key(parte)
+                if card_key in used_card_keys:
+                    continue
+                used_card_keys.add(card_key)
+                cards_final.append(parte)
+
+        if cards_final:
+            return cards_final
+
+        alvo_polo = "ATIVO" if use_ativo_polo else "PASSIVO"
+        partes = [parte for parte in partes_todas if parte.tipo_polo == alvo_polo]
+        if use_ativo_polo and not partes:
+            partes = [parte for parte in partes_todas if parte.tipo_polo == "PASSIVO"]
+        return _build_cards_for_scope(partes)
 
     fieldsets = (
         ("Dados do Processo", {"fields": ("cnj", "uf", "valor_causa", "status", "viabilidade", "carteira", "carteiras_vinculadas", "vara", "tribunal", "busca_ativa")}),
