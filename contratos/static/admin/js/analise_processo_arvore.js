@@ -4898,6 +4898,7 @@ function formatCnjDigits(raw) {
                     displayValue = formatDateIsoToBr(value);
                 }
                 entries.push({
+                    key,
                     label: q?.texto_pergunta || key,
                     value: formatAnsweredValue(key, displayValue, {
                         contractInfos: options.contractInfos,
@@ -4905,8 +4906,36 @@ function formatCnjDigits(raw) {
                     })
                 });
             });
-            return entries;
-        }
+
+            const contractQuestionKeys = keysOrdered.filter(key => treeData[key]?.tipo_campo === 'CONTRATOS_MONITORIA');
+            contractQuestionKeys.forEach(contractKey => {
+                const contractIndex = entries.findIndex(entry => entry && entry.key === contractKey);
+                if (contractIndex < 0) {
+                    return;
+                }
+                const triggerKeys = keysOrdered.filter(key => {
+                    const question = treeData[key];
+                    return Array.isArray(question?.opcoes)
+                        && question.opcoes.some(option => option?.proxima_questao_chave === contractKey);
+                });
+                if (!triggerKeys.length) {
+                    return;
+                }
+                const answeredTriggerKeys = triggerKeys.filter(key => hasMeaningfulResponseValue(responses[key]));
+                const anchorKey = (answeredTriggerKeys.length ? answeredTriggerKeys : triggerKeys)
+                    .sort((a, b) => (treeData[a]?.ordem ?? 9999) - (treeData[b]?.ordem ?? 9999))
+                    .slice(-1)[0];
+                const anchorIndex = entries.findIndex(entry => entry && entry.key === anchorKey);
+                if (anchorIndex < 0 || contractIndex === anchorIndex + 1) {
+                    return;
+                }
+                const [contractEntry] = entries.splice(contractIndex, 1);
+                const nextAnchorIndex = entries.findIndex(entry => entry && entry.key === anchorKey);
+                entries.splice(nextAnchorIndex + 1, 0, contractEntry);
+            });
+
+            return entries.map(({ key, ...entry }) => entry);
+	        }
 
         function getAnsweredFieldEntries(processo, options = {}) {
             if (!processo || typeof processo !== 'object') {

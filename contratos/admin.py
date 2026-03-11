@@ -8426,6 +8426,77 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return active_cards
         return []
 
+    def _normalize_analysis_response_key(self, value):
+        normalized = self._normalize_kpi_text(value)
+        if not normalized:
+            return ''
+        normalized = normalized.replace('_', ' ').replace('-', ' ')
+        return re.sub(r'\s+', ' ', normalized).strip()
+
+    def _extract_tipo_acao_from_card(self, card):
+        if not isinstance(card, dict):
+            return ''
+        respostas_obj = card.get('tipo_de_acao_respostas')
+        if not isinstance(respostas_obj, dict):
+            respostas_obj = {}
+
+        direct_value = respostas_obj.get('tipo_de_acao')
+        if self._kpi_has_filled_value(direct_value):
+            return str(direct_value).strip()
+
+        for key, value in respostas_obj.items():
+            normalized_key = self._normalize_analysis_response_key(key)
+            if 'tipo' in normalized_key and 'acao' in normalized_key and self._kpi_has_filled_value(value):
+                return str(value).strip()
+
+        for fallback_key in ('tipo_de_acao', 'classe_processual'):
+            fallback_value = card.get(fallback_key)
+            if self._kpi_has_filled_value(fallback_value):
+                return str(fallback_value).strip()
+        return ''
+
+    def _resolve_lembrete_acao(self, entry):
+        processo = getattr(entry, 'processo', None)
+        analise_obj = getattr(processo, 'analise_processo', None) if processo else None
+        respostas = getattr(analise_obj, 'respostas', None)
+        cards = self._extract_kpi_cards(respostas)
+        if not cards:
+            return ''
+
+        target_cnj_digits = normalize_cnj_digits(getattr(entry, 'cnj', '') or getattr(processo, 'cnj', ''))
+        target_carteira_id = self._safe_positive_int(getattr(entry, 'carteira_id', None))
+        best_match = ''
+        best_score = -1
+        best_timestamp = None
+
+        for card in cards:
+            if not isinstance(card, dict):
+                continue
+            action_value = self._extract_tipo_acao_from_card(card)
+            if not action_value:
+                continue
+
+            score = 0
+            card_cnj_digits = normalize_cnj_digits(card.get('cnj'))
+            if target_cnj_digits and card_cnj_digits and card_cnj_digits == target_cnj_digits:
+                score += 100
+
+            card_carteira_id = self._safe_positive_int(card.get('carteira_id'))
+            if target_carteira_id and card_carteira_id and card_carteira_id == target_carteira_id:
+                score += 20
+
+            timestamp = (
+                parse_datetime(str(card.get('updated_at') or ''))
+                or parse_datetime(str(card.get('saved_at') or ''))
+                or getattr(analise_obj, 'updated_at', None)
+            )
+            if score > best_score or (score == best_score and timestamp and (best_timestamp is None or timestamp > best_timestamp)):
+                best_score = score
+                best_timestamp = timestamp
+                best_match = action_value
+
+        return best_match
+
     def _kpi_has_filled_value(self, value):
         if value is None:
             return False
@@ -10514,7 +10585,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             ProcessoJudicialNumeroCnj.objects
             .filter(pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE)
             .filter(processo__in=base_processos)
-            .select_related('processo', 'carteira', 'status')
+            .select_related('processo', 'processo__analise_processo', 'carteira', 'status')
             .prefetch_related(
                 Prefetch(
                     'processo__partes_processuais',
@@ -10708,12 +10779,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 status_label = entry.status.nome
             elif processo.status:
                 status_label = processo.status.nome
+            acao_label = self._resolve_lembrete_acao(entry)
             lembretes.append({
                 'cnj': entry.cnj,
                 'processo_id': processo.pk,
                 'processo_label': str(processo),
                 'carteira': entry.carteira.nome if entry.carteira else (processo.carteira.nome if processo.carteira else ''),
                 'status': status_label,
+                'acao': acao_label,
                 'uf': entry.uf or processo.uf or '',
                 'polo_passivo': polo_passivo,
                 'polo_ativo': polo_ativo,

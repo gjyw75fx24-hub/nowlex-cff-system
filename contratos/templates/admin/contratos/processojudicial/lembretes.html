@@ -421,12 +421,16 @@
   .lembretes-table td:nth-child(8) {
     width: 140px;
   }
+  .lembretes-table th.column-acao,
+  .lembretes-table td:nth-child(9) {
+    width: 120px;
+  }
   .lembretes-table th.column-periodicidade,
-  .lembretes-table td:nth-child(9),
-  .lembretes-table th.column-proxima,
   .lembretes-table td:nth-child(10),
+  .lembretes-table th.column-proxima,
+  .lembretes-table td:nth-child(11),
   .lembretes-table th.column-prazo,
-  .lembretes-table td:nth-child(11) {
+  .lembretes-table td:nth-child(12) {
     width: 110px;
   }
   .lembrete-overdue {
@@ -609,6 +613,7 @@
                 <th scope="col" class="column-busca-ativa"><div class="text"><span>Busca Ativa</span></div></th>
                 <th scope="col" class="column-carteira"><div class="text"><span>Carteira</span></div></th>
                 <th scope="col" class="column-classe"><div class="text"><span>Classe Processual</span></div></th>
+                <th scope="col" class="column-acao"><div class="text"><span>Ação</span></div></th>
                 <th scope="col" class="column-periodicidade"><div class="text"><span>Periodicidade (dias)</span></div></th>
                 <th scope="col" class="column-proxima"><div class="text"><span>Próxima revisita</span></div></th>
                 <th scope="col" class="column-prazo"><div class="text"><span>Prazo</span></div></th>
@@ -626,6 +631,7 @@
                     <td>{% if item.busca_ativa %}Sim{% else %}Não{% endif %}</td>
                     <td>{{ item.carteira|default:"-" }}</td>
                     <td>{{ item.status|default:"-" }}</td>
+                    <td>{{ item.acao|default:"-" }}</td>
                     <td>{{ item.periodicidade|default:"-" }}</td>
                     <td>
                       {% if item.proximo_em %}
@@ -649,7 +655,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="11" class="lembretes-empty">Nenhum processo marcado como pertinente.</td>
+                  <td colspan="12" class="lembretes-empty">Nenhum processo marcado como pertinente.</td>
                 </tr>
               {% endif %}
             </tbody>
