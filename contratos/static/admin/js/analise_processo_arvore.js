@@ -4948,9 +4948,9 @@ function formatCnjDigits(raw) {
 	                data_de_transito: ['DATA', 'TRANSIT'],
 	                cumprimento_de_sentenca: ['CUMPRIMENTO', 'SENTEN'],
 	                habilitacao: ['HABILIT'],
-	                repropor_monitoria: ['REPROPOR', 'MONITOR'],
-	                contratos_para_monitoria: ['CONTRAT', 'MONITOR'],
-	                ativar_botao_monitoria: ['ATIVAR', 'BOTAO', 'MONITOR']
+	                repropor_monitoria: ['REPROPOR', 'MONIT'],
+	                contratos_para_monitoria: ['CONTRAT', 'MONIT'],
+	                ativar_botao_monitoria: ['ATIVAR', 'BOTAO', 'MONIT']
             };
             const findFallbackResponseValue = (responses, canonicalKey) => {
                 if (!responses || typeof responses !== 'object') {
