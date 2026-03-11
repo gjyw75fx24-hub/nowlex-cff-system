@@ -949,9 +949,10 @@
             return null;
         }
 
-        function syncProcessoVinculadoResponseKey(questionKey) {
+        function syncProcessoVinculadoResponseKey(questionKey, options = {}) {
             const key = questionKey || getProcessoVinculadoQuestionKey();
             if (!key) return;
+            const preferKey = Boolean(options && options.preferKey);
 
             if (!Array.isArray(userResponses[key])) {
                 userResponses[key] = [];
@@ -963,10 +964,12 @@
             // Mantém um único array compartilhado, porque outras partes do sistema
             // assumem `userResponses.processos_vinculados` (resumo/edição/supervisão).
             if (key !== 'processos_vinculados') {
+                const keyHasData = userResponses[key].length > 0;
+                const processHasData = userResponses.processos_vinculados.length > 0;
                 const preferred =
-                    userResponses.processos_vinculados.length
-                        ? userResponses.processos_vinculados
-                        : userResponses[key];
+                    preferKey && keyHasData
+                        ? userResponses[key]
+                        : (processHasData ? userResponses.processos_vinculados : userResponses[key]);
                 userResponses[key] = preferred;
                 userResponses.processos_vinculados = preferred;
             }
@@ -2818,6 +2821,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
         function syncRenderedProcessCardsBeforePersist() {
             ensureUserResponsesShape();
+            syncProcessoVinculadoResponseKey(null, { preferKey: true });
             if (!Array.isArray(userResponses.processos_vinculados) || !userResponses.processos_vinculados.length) {
                 return;
             }
