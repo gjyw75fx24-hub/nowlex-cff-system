@@ -901,12 +901,18 @@
     const bindImportSubmitState = () => {
       if (!formEl || !importBtn) return;
       formEl.addEventListener('submit', (event) => {
+        const hasActionOverride = Boolean(actionOverrideInput && String(actionOverrideInput.value || '').trim());
         const submitter = event.submitter || document.activeElement;
         const submitterName = submitter ? submitter.name : '';
         const submitterValue = submitter ? submitter.value : '';
         const isImportAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'import');
         const isImportAsyncAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'import_async');
         const isRemoveAction = Boolean(submitter && submitterName === 'action' && submitterValue === 'remove');
+
+        if (hasActionOverride) {
+          if (!isRemoveAction && supervisorPasswordInput) supervisorPasswordInput.value = '';
+          return;
+        }
 
         if (actionOverrideInput) actionOverrideInput.value = '';
         if (!isRemoveAction && supervisorPasswordInput) supervisorPasswordInput.value = '';
