@@ -4074,6 +4074,22 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         return re.sub(r'\s+', ' ', text).strip()
 
     @classmethod
+    def _entry_requires_protocol(cls, normalized_label, normalized_value, protocol_type):
+        if not normalized_label or not normalized_value:
+            return False
+
+        if protocol_type == 'habilitacao':
+            if 'habilit' in normalized_label and normalized_value.startswith('habilitar'):
+                return True
+
+        if protocol_type == 'cumprimento_sentenca':
+            if 'cumprimento' in normalized_label and 'senten' in normalized_label:
+                if normalized_value in {'iniciar cs', 'iniciar c s', 'iniciar cumprimento de sentenca'}:
+                    return True
+
+        return False
+
+    @classmethod
     def _iter_cards(cls, respostas):
         if not isinstance(respostas, dict):
             return
@@ -4086,6 +4102,17 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
                     yield card
 
     @classmethod
+    def _iter_result_entries(cls, card):
+        if not isinstance(card, dict):
+            return
+        entries = card.get('result_entries')
+        if not isinstance(entries, list):
+            return
+        for entry in entries:
+            if isinstance(entry, dict):
+                yield entry
+
+    @classmethod
     def _card_requires_protocol(cls, card, protocol_type):
         respostas_obj = card.get('tipo_de_acao_respostas')
         if not isinstance(respostas_obj, dict):
@@ -4094,17 +4121,14 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         for raw_key, raw_value in respostas_obj.items():
             normalized_key = cls._normalize_text(raw_key)
             normalized_value = cls._normalize_text(raw_value)
-            if not normalized_key or not normalized_value:
-                continue
+            if cls._entry_requires_protocol(normalized_key, normalized_value, protocol_type):
+                return True
 
-            if protocol_type == 'habilitacao':
-                if 'habilit' in normalized_key and normalized_value.startswith('habilitar'):
-                    return True
-
-            if protocol_type == 'cumprimento_sentenca':
-                if 'cumprimento' in normalized_key and 'senten' in normalized_key:
-                    if normalized_value in {'iniciar cs', 'iniciar c s', 'iniciar cumprimento de sentenca'}:
-                        return True
+        for entry in cls._iter_result_entries(card):
+            normalized_label = cls._normalize_text(entry.get('label'))
+            normalized_value = cls._normalize_text(entry.get('value'))
+            if cls._entry_requires_protocol(normalized_label, normalized_value, protocol_type):
+                return True
 
         return False
 
