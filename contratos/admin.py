@@ -10117,7 +10117,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                             continue
 
                     try:
-                        bundle = build_zip_bundle(tipo_peticao.id, base_file.id)
+                        bundle = build_zip_bundle(
+                            tipo_peticao.id,
+                            base_file.id,
+                            convert_base_docx=False,
+                        )
                     except PreviewError as exc:
                         failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
                         continue

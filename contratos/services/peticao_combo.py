@@ -57,7 +57,7 @@ def build_preview(tipo_id, arquivo_base_id):
     }
 
 
-def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None):
+def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None, convert_base_docx=True):
     assets = _collect_combo_assets(tipo_id, arquivo_base_id)
     base_file = assets['base_file']
     files = assets['files']
@@ -94,13 +94,14 @@ def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None):
                     and arquivo.id == base_file.id
                     and (arquivo.arquivo.name or '').lower().endswith('.docx')
                 ):
-                    pdf_bytes = _convert_docx_to_pdf_bytes_for_zip(arquivo)
-                    if pdf_bytes:
-                        pdf_name = _swap_extension(entry_name, '.pdf')
-                        zip_file.writestr(pdf_name, pdf_bytes)
-                        entry['force_name'] = pdf_name
-                        entry['force_bytes'] = pdf_bytes
-                        continue
+                    if convert_base_docx:
+                        pdf_bytes = _convert_docx_to_pdf_bytes_for_zip(arquivo)
+                        if pdf_bytes:
+                            pdf_name = _swap_extension(entry_name, '.pdf')
+                            zip_file.writestr(pdf_name, pdf_bytes)
+                            entry['force_name'] = pdf_name
+                            entry['force_bytes'] = pdf_bytes
+                            continue
                     fallback_pdf = _find_matching_pdf(arquivo, files)
                     if fallback_pdf:
                         with fallback_pdf.arquivo.open('rb') as fh:
@@ -136,8 +137,8 @@ def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None):
     }
 
 
-def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
-    bundle = build_zip_bundle(tipo_id, arquivo_base_id, optional_ids)
+def generate_zip(tipo_id, arquivo_base_id, optional_ids=None, convert_base_docx=True):
+    bundle = build_zip_bundle(tipo_id, arquivo_base_id, optional_ids, convert_base_docx=convert_base_docx)
     tipo = bundle['tipo']
     processo = bundle['processo']
     base_file = bundle['base_file']
