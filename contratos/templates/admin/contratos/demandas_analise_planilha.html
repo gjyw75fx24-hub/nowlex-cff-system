@@ -977,6 +977,7 @@
     const analiseLoteSyncLimit = Number('{{ analise_lote_sync_limit|default:80 }}') || 80;
     const analiseLoteChunkSize = Number('{{ analise_lote_chunk_size|default:20 }}') || 20;
     const analiseLoteModeValue = 'analise_lote';
+    const importChunkUrl = '{{ import_chunk_url|default:''|escapejs }}';
 
     const ensureChunkOverlay = () => {
       let overlay = document.getElementById('analise-lote-import-overlay');
@@ -994,9 +995,21 @@
             <span data-role="result">Importadas: 0 | Ignoradas: 0</span>
           </div>
           <div class="analise-lote-import-overlay__error" data-role="error"></div>
+          <div style="margin-top:14px; text-align:right;"><button type="button" class="button" data-role="close">Fechar</button></div>
         </div>
       `;
       document.body.appendChild(overlay);
+      const closeBtn = overlay.querySelector('[data-role="close"]');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          overlay.classList.remove('is-visible');
+          setImportButtonsBusy(false);
+          if (importBtn) {
+            importBtn.dataset.importing = '0';
+            importBtn.textContent = 'Importar';
+          }
+        });
+      }
       return overlay;
     };
 
@@ -1083,7 +1096,7 @@
           formData.set('action_override', 'import_chunk');
           formData.set('selected_row_ids_payload', chunkIds.join(','));
           formData.set('retry_row_id', '');
-          const response = await fetch(formEl.action || window.location.href, {
+          const response = await fetch(importChunkUrl || formEl.action || window.location.href, {
             method: 'POST',
             body: formData,
             headers: {

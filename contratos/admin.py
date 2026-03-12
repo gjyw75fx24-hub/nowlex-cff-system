@@ -3286,9 +3286,136 @@ def demandas_analise_planilha_view(request):
             "is_analise_lote_mode": is_analise_lote_mode,
             "analise_lote_sync_limit": analise_lote_sync_limit,
             "analise_lote_chunk_size": analise_lote_chunk_size,
+            "import_chunk_url": reverse("admin:contratos_demandas_analise_planilha_import_chunk"),
         }
     )
     return render(request, "admin/contratos/demandas_analise_planilha.html", context)
+
+
+def demandas_analise_planilha_import_chunk_view(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if not is_user_supervisor(request.user):
+        return JsonResponse({"detail": "Acesso restrito a supervisores."}, status=403)
+
+    mode = str(request.POST.get("modo_importacao") or DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE).strip()
+    if mode != DemandasAnalisePlanilhaForm.MODO_ANALISE_LOTE:
+        return JsonResponse({"detail": "Modo de importação inválido para esta operação."}, status=400)
+
+    upload_token = str(request.POST.get("upload_token") or "").strip()
+    carteira_id = str(request.POST.get("carteira") or "").strip()
+    tipo_analise_id = str(request.POST.get("tipo_analise") or "").strip()
+    analista_id = str(request.POST.get("analista") or "").strip()
+    sheet_prefix = str(request.POST.get("sheet_prefix") or "").strip()
+    uf = str(request.POST.get("uf") or "").strip()
+    raw_limit = str(request.POST.get("limit") or "0").strip()
+    raw_selected = str(request.POST.get("selected_row_ids_payload") or "").strip()
+
+    if not upload_token:
+        return JsonResponse({"detail": "upload_token é obrigatório."}, status=400)
+    if not carteira_id or not tipo_analise_id or not analista_id:
+        return JsonResponse({"detail": "Carteira, tipo de análise e analista são obrigatórios."}, status=400)
+
+    try:
+        limit = int(raw_limit or 0)
+    except (TypeError, ValueError):
+        limit = 0
+
+    selected_row_ids = [value for value in raw_selected.split(",") if str(value).strip()]
+    if not selected_row_ids:
+        return JsonResponse({"detail": "Selecione ao menos uma linha para importar."}, status=400)
+
+    uploads_session_key = f"demandas_planilha_uploads_{mode}"
+    preview_session_key = f"demandas_planilha_last_preview_{mode}_{request.user.id}"
+    background_job_session_key = f"demandas_planilha_last_job_id_{mode}"
+
+    uploads = request.session.get(uploads_session_key, {}) or {}
+    upload_meta = uploads.get(upload_token)
+    if not isinstance(upload_meta, dict):
+        return JsonResponse({"detail": "Anexo não encontrado na sessão. Gere a prévia novamente."}, status=400)
+
+    upload_path = upload_meta.get("path") or ""
+    upload_name = upload_meta.get("name") or "planilha.xlsx"
+    if not upload_path or not os.path.exists(upload_path):
+        return JsonResponse({"detail": "Arquivo temporário da planilha não foi encontrado. Gere a prévia novamente."}, status=400)
+
+    try:
+        with open(upload_path, "rb") as fp:
+            file_bytes = fp.read()
+    except Exception as exc:
+        return JsonResponse({"detail": f"Falha ao ler a planilha mantida na sessão: {exc}"}, status=400)
+
+    try:
+        validate_planilha_upload(upload_name, file_bytes)
+        parsed = build_analise_lote_rows_from_file_bytes(
+            file_bytes,
+            upload_name=upload_name,
+            sheet_prefix=sheet_prefix,
+            uf_filter=uf,
+            limit=limit,
+        )
+    except (ValidationError, PassivasPlanilhaError, AnaliseLotePlanilhaError) as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    carteira = Carteira.objects.filter(pk=carteira_id).first()
+    tipo_analise = TipoAnaliseObjetiva.objects.filter(pk=tipo_analise_id).first()
+    analista = User.objects.filter(pk=analista_id, is_active=True).first()
+    if not carteira or not tipo_analise or not analista:
+        return JsonResponse({"detail": "Carteira, tipo de análise ou analista não encontrado."}, status=400)
+
+    request.session.pop(background_job_session_key, None)
+
+    try:
+        import_result = import_analise_lote_rows(
+            parsed,
+            carteira=carteira,
+            tipo_analise=tipo_analise,
+            analista=analista,
+            acting_user=request.user,
+            selected_row_ids=selected_row_ids,
+        )
+    except Exception as exc:
+        return JsonResponse({"detail": f"Falha ao importar o bloco do lote: {exc}"}, status=500)
+
+    preview_payload = request.session.get(preview_session_key)
+    if isinstance(preview_payload, dict) and preview_payload.get("mode") == "analise_lote":
+        result_map = {}
+        for row_result in import_result.row_results or []:
+            if not isinstance(row_result, dict):
+                continue
+            row_id = str(row_result.get("row_id") or "").strip()
+            if row_id:
+                result_map[row_id] = row_result
+        counts = {"ready": 0, "pending": 0, "imported": 0, "blocked": 0, "unselected": 0}
+        for item in preview_payload.get("items", []) or []:
+            if not isinstance(item, dict):
+                continue
+            row_result = result_map.get(str(item.get("row_id") or "").strip())
+            if row_result:
+                status = str(row_result.get("status") or "").strip().lower() or "ready"
+                status_group = "imported" if status in {"created", "updated"} else ("blocked" if status in {"blocked", "failed"} else ("pending" if status == "pending" else ("unselected" if status == "unselected" else "ready")))
+                item["import_status"] = status
+                item["import_status_label"] = str(row_result.get("label") or item.get("import_status_label") or "").strip()
+                item["import_status_detail"] = str(row_result.get("message") or item.get("import_status_detail") or "").strip()
+                item["import_status_group"] = status_group
+            group = str(item.get("import_status_group") or "ready")
+            counts[group] = counts.get(group, 0) + 1
+        preview_payload["status_counts"] = counts
+        request.session[preview_session_key] = preview_payload
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "processed_rows": len(import_result.row_results or []),
+            "imported_rows": import_result.matched_rows,
+            "skipped_rows": import_result.skipped_rows,
+            "created_cards": import_result.created_cards,
+            "updated_cards": import_result.updated_cards,
+            "errors": import_result.errors,
+            "row_results": import_result.row_results,
+            "status_counts": (request.session.get(preview_session_key) or {}).get("status_counts") or {},
+        }
+    )
 
 
 def demandas_analise_planilha_pending_tarefas_view(request):
@@ -3821,6 +3948,11 @@ def _get_admin_urls():
             "contratos/demandas-analise/planilha/",
             admin.site.admin_view(demandas_analise_planilha_view),
             name="contratos_demandas_analise_planilha",
+        ),
+        path(
+            "contratos/demandas-analise/planilha/import-chunk/",
+            admin.site.admin_view(demandas_analise_planilha_import_chunk_view),
+            name="contratos_demandas_analise_planilha_import_chunk",
         ),
         path(
             "contratos/demandas-analise/planilha/pending/tarefas/",
