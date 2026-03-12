@@ -10032,145 +10032,154 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     gerar_habilitacao_em_lote.short_description = "Gerar Habilitação em Lote"
 
     def baixar_combo_habilitacao_em_lote(self, request, queryset):
-        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
-        if protocol_type != 'habilitacao':
-            self.message_user(
-                request,
-                "A ação 'Baixar Combo ZIP de Habilitação em Lote' só fica disponível no filtro Para Protocolar > Habilitação.",
-                messages.ERROR,
-            )
-            return None
-
-        from .views import (
-            _build_habilitacao_base_filename,
-            _build_habilitacao_docx_bytes,
-            _collect_missing_habilitacao_fields,
-        )
-
-        tipo_peticao = self._resolve_tipo_peticao_for_kind('habilitacao')
-        if not tipo_peticao:
-            self.message_user(
-                request,
-                "Tipo de petição 'Habilitação' não configurado para geração de combo.",
-                messages.ERROR,
-            )
-            return None
-
-        generated = []
-        reused = []
-        failed = []
-        master_zip_buffer = io.BytesIO()
-        master_zip_name = timezone.localtime().strftime('combos_habilitacao_lote_%Y%m%d_%H%M%S.zip')
-
-        processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
-        with zipfile.ZipFile(master_zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as master_zip:
-            for processo in processos.iterator(chunk_size=100):
-                polo_passivo = next(
-                    (parte for parte in getattr(processo, '_prefetched_objects_cache', {}).get('partes_processuais', []) if parte.tipo_polo == 'PASSIVO'),
-                    None,
+        try:
+            protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+            if protocol_type != 'habilitacao':
+                self.message_user(
+                    request,
+                    "A ação 'Baixar Combo ZIP de Habilitação em Lote' só fica disponível no filtro Para Protocolar > Habilitação.",
+                    messages.ERROR,
                 )
-                if polo_passivo is None:
-                    polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
-                if not polo_passivo:
-                    failed.append(f"{processo.pk}: polo passivo não encontrado")
-                    continue
+                return None
 
-                cnj_entry = self._resolve_habilitacao_target_entry(processo)
-                processo_override = {}
-                if cnj_entry:
-                    processo_override = {
-                        'cnj': cnj_entry.cnj or '',
-                        'uf': cnj_entry.uf or '',
-                        'vara': cnj_entry.vara or '',
-                        'tribunal': cnj_entry.tribunal or '',
-                        'valor_causa': cnj_entry.valor_causa,
-                    }
+            from .views import (
+                _build_habilitacao_base_filename,
+                _build_habilitacao_docx_bytes,
+                _collect_missing_habilitacao_fields,
+            )
 
-                base_file = self._find_existing_piece_file(processo, 'habilitacao')
-                base_origin = 'reutilizada'
-                if base_file is None:
-                    missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override)
-                    if missing_fields:
-                        failed.append(
-                            f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(missing_fields)}"
-                        )
+            tipo_peticao = self._resolve_tipo_peticao_for_kind('habilitacao')
+            if not tipo_peticao:
+                self.message_user(
+                    request,
+                    "Tipo de petição 'Habilitação' não configurado para geração de combo.",
+                    messages.ERROR,
+                )
+                return None
+
+            generated = []
+            reused = []
+            failed = []
+            master_zip_buffer = io.BytesIO()
+            master_zip_name = timezone.localtime().strftime('combos_habilitacao_lote_%Y%m%d_%H%M%S.zip')
+
+            processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
+            with zipfile.ZipFile(master_zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as master_zip:
+                for processo in processos.iterator(chunk_size=100):
+                    polo_passivo = next(
+                        (parte for parte in getattr(processo, '_prefetched_objects_cache', {}).get('partes_processuais', []) if parte.tipo_polo == 'PASSIVO'),
+                        None,
+                    )
+                    if polo_passivo is None:
+                        polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+                    if not polo_passivo:
+                        failed.append(f"{processo.pk}: polo passivo não encontrado")
                         continue
+
+                    cnj_entry = self._resolve_habilitacao_target_entry(processo)
+                    processo_override = {}
+                    if cnj_entry:
+                        processo_override = {
+                            'cnj': cnj_entry.cnj or '',
+                            'uf': cnj_entry.uf or '',
+                            'vara': cnj_entry.vara or '',
+                            'tribunal': cnj_entry.tribunal or '',
+                            'valor_causa': cnj_entry.valor_causa,
+                        }
+
+                    base_file = self._find_existing_piece_file(processo, 'habilitacao')
+                    base_origin = 'reutilizada'
+                    if base_file is None:
+                        missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override)
+                        if missing_fields:
+                            failed.append(
+                                f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(missing_fields)}"
+                            )
+                            continue
+                        try:
+                            docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override)
+                            base_filename = _build_habilitacao_base_filename(
+                                polo_passivo,
+                                processo,
+                                cnj_reference=processo_override.get('cnj') if processo_override else None,
+                            )
+                            docx_name = f"{base_filename}.docx"
+                            base_file = ProcessoArquivo(
+                                processo=processo,
+                                nome=docx_name,
+                                enviado_por=request.user if request.user.is_authenticated else None,
+                            )
+                            base_file.arquivo.save(docx_name, ContentFile(docx_bytes), save=True)
+                            base_origin = 'gerada'
+                        except Exception as exc:
+                            logger.error("Erro ao gerar habilitação base para combo em lote no processo %s: %s", processo.pk, exc, exc_info=True)
+                            failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
+                            continue
+
                     try:
-                        docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override)
-                        base_filename = _build_habilitacao_base_filename(
-                            polo_passivo,
-                            processo,
-                            cnj_reference=processo_override.get('cnj') if processo_override else None,
-                        )
-                        docx_name = f"{base_filename}.docx"
-                        base_file = ProcessoArquivo(
-                            processo=processo,
-                            nome=docx_name,
-                            enviado_por=request.user if request.user.is_authenticated else None,
-                        )
-                        base_file.arquivo.save(docx_name, ContentFile(docx_bytes), save=True)
-                        base_origin = 'gerada'
+                        bundle = build_zip_bundle(tipo_peticao.id, base_file.id)
+                    except PreviewError as exc:
+                        failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
+                        continue
                     except Exception as exc:
-                        logger.error("Erro ao gerar habilitação base para combo em lote no processo %s: %s", processo.pk, exc, exc_info=True)
+                        logger.error("Erro ao montar combo ZIP de habilitação em lote para processo %s: %s", processo.pk, exc, exc_info=True)
                         failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
                         continue
 
-                try:
-                    bundle = build_zip_bundle(tipo_peticao.id, base_file.id)
-                except PreviewError as exc:
-                    failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
-                    continue
-                except Exception as exc:
-                    logger.error("Erro ao montar combo ZIP de habilitação em lote para processo %s: %s", processo.pk, exc, exc_info=True)
-                    failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
-                    continue
+                    if bundle.get('missing'):
+                        failed.append(
+                            f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(bundle['missing'])}"
+                        )
+                        continue
 
-                if bundle.get('missing'):
-                    failed.append(
-                        f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(bundle['missing'])}"
+                    cnj_label = normalize_cnj_digits(processo_override.get('cnj') or processo.cnj or '') or str(processo.pk)
+                    zip_name = os.path.basename(bundle.get('zip_name') or f'habilitacao_{cnj_label}.zip')
+                    folder_name = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{cnj_label}_{processo.pk}").strip('_') or str(processo.pk)
+                    master_zip.writestr(f"{folder_name}/{zip_name}", bundle['zip_bytes'])
+
+                    if base_origin == 'gerada':
+                        generated.append(cnj_label)
+                    else:
+                        reused.append(cnj_label)
+
+                report_lines = [
+                    "Relatório - Combo ZIP de Habilitação em Lote",
+                    "",
+                    f"Geradas agora: {len(generated)}",
+                    f"Peças reutilizadas: {len(reused)}",
+                    f"Falhas: {len(failed)}",
+                    "",
+                ]
+                if generated:
+                    report_lines.extend(["Geradas agora:"] + [f"- {item}" for item in generated] + [""])
+                if reused:
+                    report_lines.extend(["Peças reutilizadas:"] + [f"- {item}" for item in reused] + [""])
+                if failed:
+                    report_lines.extend(["Falhas:"] + [f"- {item}" for item in failed] + [""])
+                master_zip.writestr("relatorio_combo_habilitacao.txt", "\n".join(report_lines).encode('utf-8'))
+
+            if not generated and not reused:
+                if failed:
+                    self.message_user(
+                        request,
+                        f"Nenhum combo de habilitação foi gerado. Corrija os itens pendentes: {'; '.join(failed[:10])}{'...' if len(failed) > 10 else ''}",
+                        messages.ERROR,
                     )
-                    continue
-
-                cnj_label = normalize_cnj_digits(processo_override.get('cnj') or processo.cnj or '') or str(processo.pk)
-                zip_name = os.path.basename(bundle.get('zip_name') or f'habilitacao_{cnj_label}.zip')
-                folder_name = re.sub(r'[^A-Za-z0-9._-]+', '_', f"{cnj_label}_{processo.pk}").strip('_') or str(processo.pk)
-                master_zip.writestr(f"{folder_name}/{zip_name}", bundle['zip_bytes'])
-
-                if base_origin == 'gerada':
-                    generated.append(cnj_label)
                 else:
-                    reused.append(cnj_label)
+                    self.message_user(request, "Nenhum cadastro selecionado para baixar o combo de habilitação.", messages.WARNING)
+                return None
 
-            report_lines = [
-                "Relatório - Combo ZIP de Habilitação em Lote",
-                "",
-                f"Geradas agora: {len(generated)}",
-                f"Peças reutilizadas: {len(reused)}",
-                f"Falhas: {len(failed)}",
-                "",
-            ]
-            if generated:
-                report_lines.extend(["Geradas agora:"] + [f"- {item}" for item in generated] + [""])
-            if reused:
-                report_lines.extend(["Peças reutilizadas:"] + [f"- {item}" for item in reused] + [""])
-            if failed:
-                report_lines.extend(["Falhas:"] + [f"- {item}" for item in failed] + [""])
-            master_zip.writestr("relatorio_combo_habilitacao.txt", "\n".join(report_lines).encode('utf-8'))
-
-        if not generated and not reused:
-            if failed:
-                self.message_user(
-                    request,
-                    f"Nenhum combo de habilitação foi gerado. Corrija os itens pendentes: {'; '.join(failed[:10])}{'...' if len(failed) > 10 else ''}",
-                    messages.ERROR,
-                )
-            else:
-                self.message_user(request, "Nenhum cadastro selecionado para baixar o combo de habilitação.", messages.WARNING)
+            response = HttpResponse(master_zip_buffer.getvalue(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename="{master_zip_name}"'
+            return response
+        except Exception as exc:
+            logger.error("Falha ao baixar combo ZIP de habilitação em lote: %s", exc, exc_info=True)
+            self.message_user(
+                request,
+                f"Não foi possível montar o combo ZIP em lote. {exc}",
+                messages.ERROR,
+            )
             return None
-
-        response = HttpResponse(master_zip_buffer.getvalue(), content_type='application/zip')
-        response['Content-Disposition'] = f'attachment; filename="{master_zip_name}"'
-        return response
     baixar_combo_habilitacao_em_lote.short_description = "Baixar Combo ZIP de Habilitação em Lote"
 
     def _build_cnj_entries_context(self, obj):

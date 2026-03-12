@@ -2516,6 +2516,97 @@
         }
     });
     </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const changelistForm = document.getElementById('changelist-form');
+        if (!changelistForm) return;
+
+        const ensureOverlay = () => {
+            let overlay = document.getElementById('bulk-action-progress-overlay');
+            if (overlay) return overlay;
+
+            overlay = document.createElement('div');
+            overlay.id = 'bulk-action-progress-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.background = 'rgba(15, 23, 42, 0.35)';
+            overlay.style.zIndex = '9999';
+            overlay.style.display = 'none';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.innerHTML = `
+                <div style="width:min(520px, calc(100vw - 32px)); background:#fff; border-radius:18px; box-shadow:0 18px 50px rgba(15,23,42,0.22); padding:24px;">
+                    <div style="font-size:1.6rem; font-weight:700; color:#1e293b; margin-bottom:10px;">Processando ação em lote</div>
+                    <div id="bulk-action-progress-message" style="font-size:1rem; color:#475569; line-height:1.45;">
+                        Preparando a execução...
+                    </div>
+                    <div style="margin-top:18px; height:10px; border-radius:999px; background:#e2e8f0; overflow:hidden;">
+                        <div style="width:100%; height:100%; background:linear-gradient(90deg, #0f78f7, #38bdf8); animation:bulkActionPulse 1.2s ease-in-out infinite;"></div>
+                    </div>
+                    <div style="margin-top:16px; display:flex; justify-content:flex-end;">
+                        <button type="button" id="bulk-action-progress-close" class="button" style="display:none;">Fechar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes bulkActionPulse {
+                    0% { transform: translateX(-55%); opacity: 0.65; }
+                    50% { transform: translateX(0%); opacity: 1; }
+                    100% { transform: translateX(55%); opacity: 0.65; }
+                }
+            `;
+            document.head.appendChild(style);
+
+            const closeBtn = overlay.querySelector('#bulk-action-progress-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    overlay.style.display = 'none';
+                });
+            }
+            return overlay;
+        };
+
+        const showOverlay = (message, allowManualClose) => {
+            const overlay = ensureOverlay();
+            const messageEl = overlay.querySelector('#bulk-action-progress-message');
+            const closeBtn = overlay.querySelector('#bulk-action-progress-close');
+            if (messageEl) {
+                messageEl.textContent = message || 'Processando...';
+            }
+            if (closeBtn) {
+                closeBtn.style.display = allowManualClose ? 'inline-flex' : 'none';
+            }
+            overlay.style.display = 'flex';
+        };
+
+        window.addEventListener('pageshow', () => {
+            const overlay = document.getElementById('bulk-action-progress-overlay');
+            if (overlay) {
+                overlay.style.display = 'none';
+            }
+        });
+
+        changelistForm.addEventListener('submit', function() {
+            const actionSelect = changelistForm.querySelector('select[name="action"]');
+            if (!actionSelect) return;
+            const selectedAction = String(actionSelect.value || '').trim();
+            if (!selectedAction) return;
+            const checkedRows = changelistForm.querySelectorAll('input.action-select:checked');
+            if (!checkedRows.length) return;
+
+            if (selectedAction === 'gerar_habilitacao_em_lote') {
+                showOverlay('Gerando habilitações em lote. A página será atualizada ao concluir.', false);
+                return;
+            }
+            if (selectedAction === 'baixar_combo_habilitacao_em_lote') {
+                showOverlay('Montando o combo ZIP em lote. Quando o navegador iniciar o download, você pode fechar este aviso.', true);
+            }
+        });
+    });
+    </script>
 {% endblock %}
 
 {% block extrahead %}
