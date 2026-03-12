@@ -4032,6 +4032,130 @@ class ParaSupervisionarFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ParaProtocolarFilter(admin.SimpleListFilter):
+    title = 'Para Protocolar'
+    parameter_name = 'para_protocolar'
+
+    OPTIONS = [
+        ('habilitacao', 'Habilitação'),
+        ('cumprimento_sentenca', 'Cumprimento de Sentença'),
+    ]
+
+    PROTOCOL_KEYWORDS = {
+        'habilitacao': ['habilitacao', 'habilitação'],
+        'cumprimento_sentenca': ['cumprimento de sentenca', 'cumprimento de sentença', 'cumprimento sentenca', 'cumprimento sentença'],
+    }
+
+    @staticmethod
+    def _normalize_text(value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return ''
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace('_', ' ').replace('-', ' ')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    @classmethod
+    def _iter_cards(cls, respostas):
+        if not isinstance(respostas, dict):
+            return
+        for key in ('saved_processos_vinculados', 'processos_vinculados'):
+            cards = respostas.get(key)
+            if not isinstance(cards, list):
+                continue
+            for card in cards:
+                if isinstance(card, dict):
+                    yield card
+
+    @classmethod
+    def _card_requires_protocol(cls, card, protocol_type):
+        respostas_obj = card.get('tipo_de_acao_respostas')
+        if not isinstance(respostas_obj, dict):
+            respostas_obj = {}
+
+        for raw_key, raw_value in respostas_obj.items():
+            normalized_key = cls._normalize_text(raw_key)
+            normalized_value = cls._normalize_text(raw_value)
+            if not normalized_key or not normalized_value:
+                continue
+
+            if protocol_type == 'habilitacao':
+                if 'habilit' in normalized_key and normalized_value.startswith('habilitar'):
+                    return True
+
+            if protocol_type == 'cumprimento_sentenca':
+                if 'cumprimento' in normalized_key and 'senten' in normalized_key:
+                    if normalized_value in {'iniciar cs', 'iniciar c s', 'iniciar cumprimento de sentenca'}:
+                        return True
+
+        return False
+
+    @classmethod
+    def _process_requires_protocol(cls, respostas, protocol_type):
+        return any(cls._card_requires_protocol(card, protocol_type) for card in cls._iter_cards(respostas))
+
+    @classmethod
+    def _exclude_already_protocolado(cls, queryset, protocol_type):
+        keywords = cls.PROTOCOL_KEYWORDS.get(protocol_type) or []
+        if not keywords:
+            return queryset
+        protocol_q = models.Q(arquivos__protocolado_no_tribunal=True)
+        name_q = models.Q()
+        for keyword in keywords:
+            name_q |= models.Q(arquivos__nome__icontains=keyword) | models.Q(arquivos__arquivo__icontains=keyword)
+        return queryset.exclude(protocol_q & name_q).distinct()
+
+    @classmethod
+    def _matching_process_ids(cls, queryset, protocol_type):
+        candidate_qs = cls._exclude_already_protocolado(queryset, protocol_type)
+        process_ids = set()
+        for process_id, respostas in candidate_qs.values_list('id', 'analise_processo__respostas').iterator(chunk_size=200):
+            if cls._process_requires_protocol(respostas, protocol_type):
+                process_ids.add(int(process_id))
+        return process_ids
+
+    def lookups(self, request, model_admin):
+        if not _show_filter_counts(request):
+            return list(self.OPTIONS)
+        qs = _get_filter_count_queryset(model_admin, request)
+        items = []
+        for value, label in self.OPTIONS:
+            count = len(self._matching_process_ids(qs, value))
+            label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
+            items.append((value, label_html))
+        return items
+
+    def choices(self, changelist):
+        current = self.value()
+        for value, label in self.lookup_choices:
+            selected = current == value
+            if selected:
+                query_string = changelist.get_query_string(
+                    {'_skip_saved_filters': '1'},
+                    remove=[self.parameter_name, 'o', '_skip_saved_filters']
+                )
+            else:
+                query_string = changelist.get_query_string(
+                    {self.parameter_name: value},
+                    remove=['o', '_skip_saved_filters']
+                )
+            yield {
+                'selected': selected,
+                'query_string': query_string,
+                'display': label,
+            }
+
+    def queryset(self, request, queryset):
+        protocol_type = self.value()
+        if not protocol_type:
+            return queryset
+        process_ids = self._matching_process_ids(queryset, protocol_type)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
+
 class LastEditOrderFilter(admin.SimpleListFilter):
     title = 'Última Edição'
     parameter_name = 'ord_ultima_edicao'
@@ -6830,7 +6954,7 @@ class CarteiraAdmin(admin.ModelAdmin):
         if peticao_date_to:
             arquivo_qs = arquivo_qs.filter(criado_em__date__lte=peticao_date_to)
         arquivo_rows = arquivo_qs
-        for processo_id, nome_arquivo, arquivo_path, protocolado in arquivo_rows.iterator():
+        for processo_id, nome_arquivo, arquivo_path, protocolado in arquivo_rows.iterator(chunk_size=200):
             if not processo_id:
                 continue
             nome_str = str(nome_arquivo or "").strip().lower()
@@ -7207,7 +7331,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "processo__carteira__nome",
             )
         )
-        for tarefa in tarefas_concluidas.iterator():
+        for tarefa in tarefas_concluidas.iterator(chunk_size=200):
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "concluido_por", None))
             concluded_at = _parse_datetime_value(getattr(tarefa, "concluido_em", None))
             concluded_date = concluded_at.date().isoformat() if concluded_at else ""
@@ -7238,7 +7362,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "processo__carteira__nome",
             )
         )
-        for prazo in prazos_concluidos.iterator():
+        for prazo in prazos_concluidos.iterator(chunk_size=200):
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "concluido_por", None))
             concluded_at = _parse_datetime_value(getattr(prazo, "concluido_em", None))
             concluded_date = concluded_at.date().isoformat() if concluded_at else ""
@@ -7268,7 +7392,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "processo__carteira__nome",
             )
         )
-        for tarefa in tarefas_pendentes.iterator():
+        for tarefa in tarefas_pendentes.iterator(chunk_size=200):
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(tarefa, "responsavel", None))
             user_bucket = _ensure_productivity_user(actor_key, actor_label)
             processo_obj = getattr(tarefa, "processo", None)
@@ -7292,7 +7416,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "processo__carteira__nome",
             )
         )
-        for prazo in prazos_pendentes.iterator():
+        for prazo in prazos_pendentes.iterator(chunk_size=200):
             actor_key, actor_label = _resolve_actor_key_label("", fallback_user=getattr(prazo, "responsavel", None))
             user_bucket = _ensure_productivity_user(actor_key, actor_label)
             processo_obj = getattr(prazo, "processo", None)
@@ -7861,8 +7985,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     def get_list_filter(self, request):
         filters = list(self.BASE_LIST_FILTERS)
+        insert_at = 0
         if is_user_supervisor(request.user):
             filters.insert(0, ParaSupervisionarFilter)
+            insert_at = 1
+        filters.insert(insert_at, ParaProtocolarFilter)
         return filters
 
     def _sanitize_filter_qs(self, qs):
@@ -8384,7 +8511,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
         process_ids = set()
         found = set()
-        for processo_id, doc_digits in parte_qs.values_list('processo_id', '_doc_digits').distinct().iterator():
+        for processo_id, doc_digits in parte_qs.values_list('processo_id', '_doc_digits').distinct().iterator(chunk_size=200):
             if not doc_digits:
                 continue
             found.add(doc_digits)
@@ -8664,7 +8791,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             candidate_qs = candidate_qs.filter(uf__iexact=uf_code)
 
         process_ids = set()
-        for processo in candidate_qs.iterator():
+        for processo in candidate_qs.iterator(chunk_size=200):
             analisado = self._kpi_process_has_analysis_content(processo)
             if status == 'analisado' and not analisado:
                 continue
@@ -8787,7 +8914,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if date_to:
                 arquivo_qs = arquivo_qs.filter(criado_em__date__lte=date_to)
         arquivo_rows = arquivo_qs.values_list('processo_id', 'nome', 'arquivo')
-        for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator():
+        for processo_id, nome_arquivo, arquivo_path in arquivo_rows.iterator(chunk_size=200):
             tipo_slug = self._classify_peticao_kind(nome_arquivo, arquivo_path)
             if tipo_slug == target_tipo:
                 matched_ids.add(int(processo_id))
@@ -10551,7 +10678,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 updated = queryset.update(carteira=carteira)
                 if carteira:
                     if processo_ids:
-                        for processo in ProcessoJudicial.objects.filter(id__in=processo_ids).only('id').iterator():
+                        for processo in ProcessoJudicial.objects.filter(id__in=processo_ids).only('id').iterator(chunk_size=200):
                             processo.carteiras_vinculadas.add(carteira)
                 carteira_label = carteira.nome if carteira else "Sem carteira"
                 self.message_user(
