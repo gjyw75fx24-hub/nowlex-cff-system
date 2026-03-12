@@ -7579,9 +7579,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         LastEditOrderFilter,
         EquipeDelegadoFilter,
         AprovacaoFilter,
+        ProtocoladosFilter,
         TipoAnaliseConcluidaFilter,
         ContratoCanceladoFilter,
-        ProtocoladosFilter,
         PrescricaoOrderFilter,
         ViabilidadeFinanceiraFilter,
         ValorCausaOrderFilter,
@@ -10565,6 +10565,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'obito',
             'acordo_status',
             'busca_ativa',
+            'aprovacao',
+            'protocolados',
             'status',
             'carteira',
             'uf',
@@ -10602,6 +10604,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         obito_filter = str(request.GET.get('obito') or '').strip().lower()
         acordo_filter = str(request.GET.get('acordo_status') or '').strip()
         busca_filter = str(request.GET.get('busca_ativa') or '').strip()
+        aprovacao_filter = str(request.GET.get('aprovacao') or '').strip()
+        protocolados_filter = str(request.GET.get('protocolados') or '').strip()
         status_filter = str(request.GET.get('status') or '').strip()
         carteira_filter = str(request.GET.get('carteira') or request.GET.get('carteira__id__exact') or '').strip()
         uf_values = UFCountFilter._parse_selected(request.GET.getlist('uf'))
@@ -10636,6 +10640,34 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             entries_qs = entries_qs.filter(processo__busca_ativa=True)
         elif busca_filter == '0':
             entries_qs = entries_qs.filter(processo__busca_ativa=False)
+
+        if aprovacao_filter:
+            condition = AprovacaoFilter.MATCH_CONDITIONS.get(aprovacao_filter)
+            if condition:
+                match_q = None
+                for key in AprovacaoFilter.PATH_KEYS:
+                    alias = f'_lembrete_aprovacao_match_{key}'
+                    path = f'$.{key}[*] ? ({condition})'
+                    expr = models.Func(
+                        models.F('processo__analise_processo__respostas'),
+                        models.Value(path),
+                        function='jsonb_path_exists',
+                        output_field=models.BooleanField(),
+                    )
+                    entries_qs = entries_qs.annotate(**{alias: expr})
+                    current_q = models.Q(**{alias: True})
+                    match_q = current_q if match_q is None else match_q | current_q
+                if match_q is not None:
+                    entries_qs = entries_qs.filter(match_q)
+
+        if protocolados_filter:
+            keywords = ProtocoladosFilter.LOOKUP_KEYWORDS.get(protocolados_filter) or []
+            if keywords:
+                protocol_q = models.Q(processo__arquivos__protocolado_no_tribunal=True)
+                name_q = models.Q()
+                for keyword in keywords:
+                    name_q |= models.Q(processo__arquivos__nome__icontains=keyword)
+                entries_qs = entries_qs.filter(protocol_q & name_q).distinct()
 
         if status_filter:
             entries_qs = entries_qs.filter(
@@ -10842,6 +10874,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             ObitoFilter,
             AcordoStatusFilter,
             BuscaAtivaFilter,
+            AprovacaoFilter,
+            ProtocoladosFilter,
             AtivoStatusProcessualFilter,
             CarteiraCountFilter,
             UFCountFilter,
