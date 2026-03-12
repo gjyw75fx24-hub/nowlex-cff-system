@@ -5731,6 +5731,7 @@ class ProcessoJudicialChangeList(ChangeList):
         'peticao_pendente',
         'cpf_lote',
         'cpf_lote_id',
+        'lote_kpi_status',
         'priority_kpi_tag_id',
         'priority_kpi_status',
         'priority_kpi_uf',
@@ -5793,6 +5794,11 @@ class CarteiraAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
+            path(
+                'kpi-cpf-lote-summary/',
+                self.admin_site.admin_view(self.kpi_cpf_lote_summary_view),
+                name='contratos_carteira_kpi_cpf_lote_summary',
+            ),
             path(
                 'kpi-online-presence/',
                 self.admin_site.admin_view(self.kpi_online_presence_view),
@@ -5914,6 +5920,386 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "carteira_id": int(carteira_obj.id),
                 "carteira_nome": str(carteira_obj.nome or "").strip(),
                 "message": f"Carteira padrão global definida para {carteira_obj.nome}.",
+            }
+        )
+
+    def _kpi_parse_cpf_lote_text(self, raw_text):
+        raw = str(raw_text or '').strip()
+        if not raw:
+            return []
+        matches = re.findall(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b', raw)
+        cpfs = []
+        seen = set()
+        for match in matches:
+            digits = normalize_cpf(match)
+            if len(digits) != 11 or digits in seen:
+                continue
+            seen.add(digits)
+            cpfs.append(digits)
+        return cpfs
+
+    def _kpi_cpf_lote_accessible_qs(self, request):
+        return (
+            ProcessoCpfLoteSalvo.objects
+            .filter(Q(compartilhado=True) | Q(criado_por=request.user))
+            .select_related('criado_por')
+        )
+
+    def _kpi_normalize_text(self, value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return ''
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace('_', ' ').replace('-', ' ')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _kpi_normalize_filename_text(self, value):
+        text = str(value or '').strip().lower()
+        if not text:
+            return ''
+        text = unicodedata.normalize('NFKD', text)
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace('_', ' ').replace('-', ' ')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def _kpi_classify_piece_kind(self, nome, arquivo_nome):
+        joined = f"{self._kpi_normalize_filename_text(nome)} {self._kpi_normalize_filename_text(arquivo_nome)}".strip()
+        if not joined:
+            return ''
+        if 'monitoria inicial' in joined:
+            return 'monitoria_inicial'
+        if 'cobranca judicial' in joined:
+            return 'cobranca_judicial'
+        if 'habilitacao' in joined:
+            return 'habilitacao'
+        return ''
+
+    def _kpi_extract_cards(self, respostas):
+        if not isinstance(respostas, dict):
+            return []
+        saved_cards = respostas.get('saved_processos_vinculados')
+        if isinstance(saved_cards, list) and saved_cards:
+            return saved_cards
+        active_cards = respostas.get('processos_vinculados')
+        if isinstance(active_cards, list) and active_cards:
+            return active_cards
+        return []
+
+    def _kpi_has_filled_value_for_lote(self, value):
+        if value is None:
+            return False
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return False
+            if cleaned in {'---', '-', '—'}:
+                return False
+            return True
+        if isinstance(value, dict):
+            return any(self._kpi_has_filled_value_for_lote(item) for item in value.values())
+        if isinstance(value, (list, tuple, set)):
+            return any(self._kpi_has_filled_value_for_lote(item) for item in value)
+        return True
+
+    def _kpi_card_has_content_for_lote(self, card):
+        if not isinstance(card, dict):
+            return False
+        if self._kpi_has_filled_value_for_lote(card.get('observacoes')):
+            return True
+        respostas_obj = card.get('tipo_de_acao_respostas')
+        if not isinstance(respostas_obj, dict):
+            return False
+        return any(self._kpi_has_filled_value_for_lote(value) for value in respostas_obj.values())
+
+    def _kpi_extract_analysis_label(self, card):
+        if not isinstance(card, dict):
+            return '[Sem tipo]'
+        analysis_type = card.get('analysis_type')
+        if isinstance(analysis_type, dict):
+            nome = str(analysis_type.get('nome') or '').strip()
+            if nome:
+                return nome
+            slug = str(analysis_type.get('slug') or '').strip()
+            if slug:
+                return slug.replace('_', ' ').replace('-', ' ').title()
+        fallback = str(card.get('tipo_analise') or '').strip()
+        if fallback:
+            return fallback
+        return '[Sem tipo]'
+
+    def _kpi_cpf_lote_option_payload(self, item):
+        cpfs = self._kpi_parse_cpf_lote_text(getattr(item, 'cpfs', ''))
+        return {
+            'id': int(item.id),
+            'nome': str(item.nome or '').strip(),
+            'quantidade': len(cpfs),
+            'compartilhado': bool(item.compartilhado),
+            'criado_por': item.criado_por.get_username() if getattr(item, 'criado_por', None) else '',
+        }
+
+    def _build_cpf_lote_kpi_options(self, request):
+        payload = {
+            'summary_url': '',
+            'lists': [],
+            'carteiras': [],
+            'warning': '',
+        }
+        if not request or not getattr(getattr(request, 'user', None), 'is_authenticated', False):
+            return payload
+        payload['summary_url'] = reverse('admin:contratos_carteira_kpi_cpf_lote_summary')
+        try:
+            payload['lists'] = [
+                self._kpi_cpf_lote_option_payload(item)
+                for item in self._kpi_cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id')
+            ]
+        except (ProgrammingError, OperationalError):
+            payload['warning'] = (
+                'Listas salvas de CPF ainda nao estao disponiveis neste banco. '
+                'Finalize as migracoes para habilitar a funcionalidade.'
+            )
+        carteira_rows = (
+            Carteira.objects
+            .annotate(
+                total_processos=models.Count('processos_multicarteira', distinct=True),
+                valor_total=Coalesce(models.Sum('processos_multicarteira__valor_causa'), Decimal('0.00')),
+            )
+            .order_by('nome')
+            .values('id', 'nome', 'cor_grafico', 'total_processos', 'valor_total')
+        )
+        payload['carteiras'] = [
+            {
+                'id': int(item['id']),
+                'nome': str(item['nome'] or '').strip(),
+                'cor_grafico': item.get('cor_grafico') or '#417690',
+                'total_processos': int(item.get('total_processos') or 0),
+                'valor_total': float(item.get('valor_total') or 0),
+            }
+            for item in carteira_rows
+        ]
+        return payload
+
+    def kpi_cpf_lote_summary_view(self, request):
+        if request.method != 'GET':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+
+        try:
+            lote_id = int(request.GET.get('lote_id') or 0)
+            carteira_id = int(request.GET.get('carteira_id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Parâmetros inválidos.'}, status=400)
+
+        if lote_id <= 0 or carteira_id <= 0:
+            return JsonResponse({'error': 'Selecione a lista e a carteira.'}, status=400)
+
+        try:
+            lote = self._kpi_cpf_lote_accessible_qs(request).filter(id=lote_id).first()
+        except (ProgrammingError, OperationalError):
+            return JsonResponse(
+                {
+                    'error': (
+                        'Listas salvas de CPF ainda nao estao disponiveis neste banco. '
+                        'Finalize as migracoes para habilitar a funcionalidade.'
+                    ),
+                },
+                status=503,
+            )
+        if not lote:
+            return JsonResponse({'error': 'Lista salva não encontrada.'}, status=404)
+
+        carteira_obj = Carteira.objects.filter(id=carteira_id).only('id', 'nome', 'cor_grafico').first()
+        if not carteira_obj:
+            return JsonResponse({'error': 'Carteira não encontrada.'}, status=404)
+
+        cpfs = self._kpi_parse_cpf_lote_text(lote.cpfs)
+        base_qs = (
+            ProcessoJudicial.objects
+            .filter(Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id))
+            .distinct()
+        )
+        base_totals = base_qs.aggregate(
+            total_processos=models.Count('id', distinct=True),
+            valor_total=Coalesce(models.Sum('valor_causa'), Decimal('0.00')),
+        )
+
+        process_ids = set()
+        found_cpfs = set()
+        if cpfs:
+            parte_qs = (
+                Parte.objects.filter(
+                    tipo_polo='PASSIVO',
+                    processo__in=base_qs,
+                )
+                .exclude(documento__isnull=True)
+                .exclude(documento__exact='')
+                .annotate(
+                    _doc_digits=models.Func(
+                        models.F('documento'),
+                        models.Value(r'\D'),
+                        models.Value(''),
+                        models.Value('g'),
+                        function='regexp_replace',
+                        output_field=models.TextField(),
+                    )
+                )
+                .filter(_doc_digits__in=cpfs)
+            )
+            for processo_id, doc_digits in parte_qs.values_list('processo_id', '_doc_digits').distinct().iterator(chunk_size=200):
+                if doc_digits:
+                    found_cpfs.add(doc_digits)
+                if processo_id:
+                    process_ids.add(int(processo_id))
+
+        found_qs = (
+            ProcessoJudicial.objects.filter(id__in=process_ids)
+            .select_related('analise_processo')
+            .distinct()
+        )
+
+        analysis_type_counts = {}
+        analyzed_total = 0
+        pending_total = 0
+        for processo in found_qs.iterator(chunk_size=100):
+            respostas = getattr(getattr(processo, 'analise_processo', None), 'respostas', None)
+            cards = self._kpi_extract_cards(respostas)
+            process_labels = {}
+            for card in cards:
+                if not isinstance(card, dict):
+                    continue
+                if not self._kpi_card_has_content_for_lote(card):
+                    continue
+                analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
+                label = self._kpi_extract_analysis_label(card)
+                slug = str(analysis_type.get('slug') or '').strip()
+                key = slug or label
+                if not key:
+                    continue
+                process_labels[key] = {
+                    'slug': slug,
+                    'label': label,
+                }
+            if process_labels:
+                analyzed_total += 1
+                for key, meta in process_labels.items():
+                    bucket = analysis_type_counts.setdefault(
+                        key,
+                        {
+                            'slug': meta.get('slug', ''),
+                            'label': meta.get('label') or '[Sem tipo]',
+                            'count': 0,
+                        },
+                    )
+                    bucket['count'] += 1
+            else:
+                pending_total += 1
+
+        piece_labels = {
+            'monitoria_inicial': 'Monitória',
+            'cobranca_judicial': 'Cobrança Judicial',
+            'habilitacao': 'Habilitação',
+        }
+        pieces_generated = {slug: 0 for slug in piece_labels}
+        pieces_protocoladas = {slug: 0 for slug in piece_labels}
+        if process_ids:
+            arquivo_qs = ProcessoArquivo.objects.filter(processo_id__in=process_ids).values_list(
+                'nome',
+                'arquivo',
+                'protocolado_no_tribunal',
+            )
+            for nome_arquivo, arquivo_path, protocolado in arquivo_qs.iterator(chunk_size=200):
+                kind = self._kpi_classify_piece_kind(nome_arquivo, arquivo_path)
+                if not kind:
+                    continue
+                nome_str = str(nome_arquivo or '').strip().lower()
+                path_str = str(arquivo_path or '').strip().lower()
+                is_zip = nome_str.endswith('.zip') or path_str.endswith('.zip')
+                if not is_zip:
+                    pieces_generated[kind] += 1
+                if protocolado:
+                    pieces_protocoladas[kind] += 1
+
+        list_totals = found_qs.aggregate(
+            valor_total=Coalesce(models.Sum('valor_causa'), Decimal('0.00')),
+        )
+        valor_total_lista = Decimal(list_totals.get('valor_total') or 0)
+        valor_total_base = Decimal(base_totals.get('valor_total') or 0)
+        if valor_total_lista > valor_total_base:
+            valor_total_base = valor_total_lista
+        valuation_ticket_medio = (
+            (valor_total_lista / Decimal(max(len(process_ids), 1)))
+            if process_ids
+            else Decimal('0.00')
+        )
+        valor_restante_base = valor_total_base - valor_total_lista
+        if valor_restante_base < 0:
+            valor_restante_base = Decimal('0.00')
+
+        tipo_defs = list(TipoAnaliseObjetiva.objects.order_by('nome').values('nome', 'slug'))
+        serialized_analysis_types = []
+        consumed_labels = set()
+        for item in tipo_defs:
+            label = str(item.get('nome') or '').strip()
+            slug = str(item.get('slug') or '').strip()
+            if not label:
+                continue
+            consumed_labels.add(slug or label)
+            serialized_analysis_types.append({
+                'slug': slug,
+                'label': label,
+                'count': int((analysis_type_counts.get(slug or label) or {}).get('count', 0)),
+            })
+        for key, meta in sorted(analysis_type_counts.items(), key=lambda pair: str((pair[1] or {}).get('label') or pair[0]).lower()):
+            if key in consumed_labels:
+                continue
+            serialized_analysis_types.append({
+                'slug': str((meta or {}).get('slug') or '').strip(),
+                'label': str((meta or {}).get('label') or key),
+                'count': int((meta or {}).get('count') or 0),
+            })
+
+        serialized_generated = [
+            {'slug': slug, 'label': label, 'count': int(pieces_generated.get(slug, 0))}
+            for slug, label in piece_labels.items()
+        ]
+        serialized_protocoladas = [
+            {'slug': slug, 'label': label, 'count': int(pieces_protocoladas.get(slug, 0))}
+            for slug, label in piece_labels.items()
+        ]
+
+        return JsonResponse(
+            {
+                'ok': True,
+                'lote': {
+                    'id': int(lote.id),
+                    'nome': str(lote.nome or '').strip(),
+                    'total_cpfs': len(cpfs),
+                },
+                'carteira': {
+                    'id': int(carteira_obj.id),
+                    'nome': str(carteira_obj.nome or '').strip(),
+                    'cor_grafico': getattr(carteira_obj, 'cor_grafico', '') or '#417690',
+                    'total_processos_base': int(base_totals.get('total_processos') or 0),
+                    'valor_total_base': float(valor_total_base),
+                },
+                'summary': {
+                    'total_cpfs': len(cpfs),
+                    'cpfs_encontrados': len(found_cpfs),
+                    'cpfs_nao_encontrados': max(len(cpfs) - len(found_cpfs), 0),
+                    'cadastros_encontrados': len(process_ids),
+                    'cadastros_analisados': int(analyzed_total),
+                    'cadastros_pendentes': int(pending_total),
+                    'valor_total_lista': float(valor_total_lista),
+                    'valuation_ticket_medio': float(valuation_ticket_medio),
+                    'valor_total_base': float(valor_total_base),
+                    'valor_restante_base': float(valor_restante_base),
+                    'pecas_geradas_total': int(sum(pieces_generated.values())),
+                    'pecas_protocoladas_total': int(sum(pieces_protocoladas.values())),
+                },
+                'analysis_types': serialized_analysis_types,
+                'pieces_generated': serialized_generated,
+                'pieces_protocoladas': serialized_protocoladas,
             }
         )
     
@@ -7608,6 +7994,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "ttl_seconds": int(settings_map["ttl_seconds"]),
             "idle_seconds": int(settings_map["idle_seconds"]),
         }
+        cpf_lote_kpi_data = self._build_cpf_lote_kpi_options(request)
 
         return {
             "ufs": uf_options,
@@ -7625,6 +8012,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             "priority_kpi": priority_kpi_data,
             "productivity_kpi": productivity_kpi_data,
             "online_presence_kpi": online_presence_kpi_data,
+            "cpf_lote_kpi": cpf_lote_kpi_data,
         }
 
     def changelist_view(self, request, extra_context=None):
@@ -8122,6 +8510,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'peticao_pendente',
             'cpf_lote',
             'cpf_lote_id',
+            'lote_kpi_status',
             'priority_kpi_tag_id',
             'priority_kpi_status',
             'priority_kpi_uf',
@@ -8351,11 +8740,18 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_peticao_pendente_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
         cpf_info = self._get_cpf_lote_info(request)
+        lote_kpi_status = self._parse_cpf_lote_kpi_status_filter(request)
         if cpf_info.get('cpfs'):
             process_ids = cpf_info.get('process_ids') or set()
-            if not process_ids:
-                return qs.none()
-            qs = qs.filter(pk__in=process_ids)
+            if lote_kpi_status == 'fora_lote':
+                if process_ids:
+                    qs = qs.exclude(pk__in=process_ids)
+            else:
+                if not process_ids:
+                    return qs.none()
+                qs = qs.filter(pk__in=process_ids)
+        if lote_kpi_status in {'analisado', 'pendente_analise'}:
+            qs = self._apply_cpf_lote_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related(
             'carteiras_vinculadas',
             Prefetch(
@@ -8635,6 +9031,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return None
         return parsed if parsed > 0 else None
 
+    def _parse_cpf_lote_kpi_status_filter(self, request):
+        raw = str(request.GET.get('lote_kpi_status') or '').strip().lower()
+        if raw not in {'analisado', 'pendente_analise', 'fora_lote'}:
+            return None
+        return raw
+
     def _normalize_kpi_text(self, value):
         text = str(value or '').strip().lower()
         if not text:
@@ -8913,6 +9315,28 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
 
+    def _build_cpf_lote_kpi_process_ids(self, queryset, status_filter):
+        if status_filter not in {'analisado', 'pendente_analise'}:
+            return set()
+        candidate_qs = queryset.select_related('analise_processo').distinct()
+        process_ids = set()
+        for processo in candidate_qs.iterator(chunk_size=200):
+            analyzed = self._kpi_process_has_analysis_content(processo)
+            if status_filter == 'analisado' and analyzed:
+                process_ids.add(int(processo.pk))
+            elif status_filter == 'pendente_analise' and not analyzed:
+                process_ids.add(int(processo.pk))
+        return process_ids
+
+    def _apply_cpf_lote_kpi_filter(self, queryset, request):
+        status_filter = self._parse_cpf_lote_kpi_status_filter(request)
+        if status_filter not in {'analisado', 'pendente_analise'}:
+            return queryset
+        process_ids = self._build_cpf_lote_kpi_process_ids(queryset, status_filter)
+        if not process_ids:
+            return queryset.none()
+        return queryset.filter(pk__in=process_ids)
+
     def _normalize_filename_text(self, value):
         text = str(value or '').strip().lower()
         if not text:
@@ -9184,6 +9608,31 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'title': 'KPI',
                 'value': f'Importados com Prioridade · {tag_nome}',
                 'subtitle': f'{status_label} ({uf_label})',
+            }
+
+        lote_kpi_status = self._parse_cpf_lote_kpi_status_filter(request)
+        cpf_info = self._get_cpf_lote_info(request)
+        if lote_kpi_status and cpf_info.get('cpfs'):
+            carteira_nome = None
+            carteira_id = self._get_filtered_carteira_id(request)
+            if carteira_id:
+                carteira_nome = (
+                    Carteira.objects.filter(pk=carteira_id)
+                    .values_list('nome', flat=True)
+                    .first()
+                )
+            status_label = {
+                'analisado': 'Cadastros analisados',
+                'pendente_analise': 'Pendentes de análise',
+                'fora_lote': 'Restante da carteira',
+            }.get(lote_kpi_status, 'Lista salva')
+            lote_label = cpf_info.get('lote_label') or 'Lista digitada'
+            subtitle = lote_label if not carteira_nome else f'{lote_label} · {carteira_nome}'
+            return {
+                'kind': 'kpi',
+                'title': 'KPI',
+                'value': status_label,
+                'subtitle': subtitle,
             }
 
         carteira_id = self._get_filtered_carteira_id(request)

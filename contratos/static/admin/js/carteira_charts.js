@@ -972,7 +972,16 @@ window.addEventListener('DOMContentLoaded', () => {
     const onlinePresenceKpi = (kpiData && typeof kpiData === 'object' && kpiData.online_presence_kpi)
         ? kpiData.online_presence_kpi
         : {};
+    const cpfLoteKpi = (kpiData && typeof kpiData === 'object' && kpiData.cpf_lote_kpi)
+        ? kpiData.cpf_lote_kpi
+        : {};
     if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
+
+    const formatCountPt = (value) => Number(value || 0).toLocaleString('pt-BR');
+    const formatCurrencyPt = (value) => `R$ ${Number(value || 0).toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
 
     const kpiSection = document.createElement('section');
     kpiSection.style.marginTop = '22px';
@@ -1126,6 +1135,55 @@ window.addEventListener('DOMContentLoaded', () => {
         if (carteiraParsed > 0) {
             params.set('carteira', String(carteiraParsed));
         }
+        return `${kpiProcessChangelistUrl}?${params.toString()}`;
+    };
+
+    const buildCpfLoteMetricUrl = ({
+        loteId,
+        carteiraId,
+        metric = '',
+        tipoSlug = '',
+        pieceKind = '',
+        pieceStatus = '',
+    } = {}) => {
+        if (!kpiProcessChangelistUrl) return '';
+        const parsedLoteId = Number(loteId || 0);
+        const parsedCarteiraId = Number(carteiraId || 0);
+        if (!parsedCarteiraId) return '';
+
+        const params = new URLSearchParams();
+        params.set('carteira', String(parsedCarteiraId));
+        if (parsedLoteId) {
+            params.set('cpf_lote_id', String(parsedLoteId));
+        }
+
+        const normalizedMetric = String(metric || '').trim().toLowerCase();
+        if (normalizedMetric === 'analisados') {
+            params.set('lote_kpi_status', 'analisado');
+        } else if (normalizedMetric === 'pendentes_analise') {
+            params.set('lote_kpi_status', 'pendente_analise');
+        } else if (normalizedMetric === 'restante_carteira') {
+            if (parsedLoteId) {
+                params.set('lote_kpi_status', 'fora_lote');
+            } else {
+                return `${kpiProcessChangelistUrl}?${params.toString()}`;
+            }
+        } else if (normalizedMetric === 'tipo_analise') {
+            const normalizedTipoSlug = String(tipoSlug || '').trim();
+            if (!normalizedTipoSlug) return '';
+            params.set('tipo_analise', normalizedTipoSlug);
+        } else if (normalizedMetric === 'peca') {
+            const normalizedPieceKind = String(pieceKind || '').trim();
+            const normalizedPieceStatus = String(pieceStatus || '').trim().toLowerCase();
+            if (!normalizedPieceKind) return '';
+            params.set('peticao_tipo', normalizedPieceKind);
+            params.set('peticao_carteira_id', String(parsedCarteiraId));
+            params.set('peticao_kind', normalizedPieceStatus === 'protocolada' ? 'protocolada' : 'peca');
+            if (normalizedPieceStatus === 'protocolada') {
+                params.set('peticao_protocoladas', '1');
+            }
+        }
+
         return `${kpiProcessChangelistUrl}?${params.toString()}`;
     };
 
@@ -3096,6 +3154,441 @@ window.addEventListener('DOMContentLoaded', () => {
             metricSelect.addEventListener('change', renderProductivity);
             syncCompareVisibility();
             renderProductivity();
+        }
+    }
+
+    const cpfLoteLists = Array.isArray(cpfLoteKpi.lists) ? cpfLoteKpi.lists : [];
+    const cpfLoteCarteiras = Array.isArray(cpfLoteKpi.carteiras) ? cpfLoteKpi.carteiras : [];
+    const cpfLoteSummaryUrl = String(cpfLoteKpi.summary_url || '').trim();
+    const cpfLoteWarning = String(cpfLoteKpi.warning || '').trim();
+    const cpfLoteSection = document.createElement('section');
+    cpfLoteSection.style.marginTop = '16px';
+    cpfLoteSection.style.padding = '14px';
+    cpfLoteSection.style.border = '1px solid #d9e1ea';
+    cpfLoteSection.style.borderRadius = '10px';
+    cpfLoteSection.style.background = '#fff';
+    cpfLoteSection.innerHTML = `
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+            <div>
+                <h3 style="margin:0;">KPI por Lista Salva de CPF</h3>
+                <div style="font-size:12px; color:#5d6f83; margin-top:4px;">Selecione a lista, a carteira base e monte o KPI sob demanda.</div>
+            </div>
+        </div>
+        <div class="kpi-cpf-lote-controls" style="display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin-bottom:10px;">
+            <label style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:#46576b;">
+                Lista salva
+                <select class="kpi-cpf-lote-list" style="padding:6px 8px; min-width:260px;"></select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:#46576b;">
+                Carteira base
+                <select class="kpi-cpf-lote-carteira" style="padding:6px 8px; min-width:220px;"></select>
+            </label>
+            <button type="button" class="kpi-cpf-lote-run" style="padding:7px 14px; font-weight:600;">Montar KPI</button>
+        </div>
+        <div class="kpi-cpf-lote-feedback" style="font-size:12px; color:#5d6f83; margin-bottom:10px;"></div>
+        <div class="kpi-cpf-lote-summary" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:8px; margin-bottom:10px;"></div>
+        <div class="kpi-cpf-lote-charts" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:10px;"></div>
+    `;
+    chartContainer.appendChild(cpfLoteSection);
+    attachPrintButtonToPanel(cpfLoteSection, 'KPI por Lista Salva de CPF');
+
+    const cpfLoteListSelect = cpfLoteSection.querySelector('.kpi-cpf-lote-list');
+    const cpfLoteCarteiraSelect = cpfLoteSection.querySelector('.kpi-cpf-lote-carteira');
+    const cpfLoteRunButton = cpfLoteSection.querySelector('.kpi-cpf-lote-run');
+    const cpfLoteFeedback = cpfLoteSection.querySelector('.kpi-cpf-lote-feedback');
+    const cpfLoteSummary = cpfLoteSection.querySelector('.kpi-cpf-lote-summary');
+    const cpfLoteChartsWrap = cpfLoteSection.querySelector('.kpi-cpf-lote-charts');
+
+    if (cpfLoteListSelect && cpfLoteCarteiraSelect && cpfLoteRunButton && cpfLoteFeedback && cpfLoteSummary && cpfLoteChartsWrap) {
+        const cpfLoteCharts = [];
+        const destroyCpfLoteCharts = () => {
+            while (cpfLoteCharts.length) {
+                const chart = cpfLoteCharts.pop();
+                if (chart && typeof chart.destroy === 'function') {
+                    chart.destroy();
+                }
+            }
+        };
+
+        const renderCpfLoteEmpty = (message) => {
+            destroyCpfLoteCharts();
+            cpfLoteSummary.innerHTML = '';
+            cpfLoteChartsWrap.innerHTML = `
+                <div style="grid-column:1 / -1; border:1px dashed #d9e1ea; border-radius:8px; padding:16px; font-size:12px; color:#6d7c8c;">
+                    ${escapeHtml(message || 'Selecione uma lista salva e uma carteira base para montar o KPI.')}
+                </div>
+            `;
+        };
+
+        const openCpfLoteUrl = (url) => {
+            if (!url) return;
+            window.location.href = url;
+        };
+
+        const buildMetricCard = (label, value, subtitle = '', url = '') => {
+            const isInteractive = Boolean(url);
+            const wrapperStyle = [
+                'border:1px solid #e4ebf3',
+                'border-radius:8px',
+                'padding:10px 12px',
+                'background:#f9fbfe',
+                'display:block',
+                'text-decoration:none',
+                'transition:box-shadow .18s ease, transform .18s ease, border-color .18s ease',
+                isInteractive ? 'cursor:pointer' : 'cursor:default',
+                isInteractive ? 'color:inherit' : '',
+            ].filter(Boolean).join('; ');
+            const content = `
+                <div style="font-size:11px; color:#6c7d8f; text-transform:uppercase; letter-spacing:.03em;">${escapeHtml(label)}</div>
+                <div style="font-size:22px; font-weight:700; color:#23384d; margin-top:2px;">${escapeHtml(value)}</div>
+                ${subtitle ? `<div style="font-size:11px; color:#6c7d8f; margin-top:4px;">${escapeHtml(subtitle)}</div>` : ''}
+            `;
+            if (!isInteractive) {
+                return `<div style="${wrapperStyle}">${content}</div>`;
+            }
+            return `
+                <a href="${escapeHtml(url)}" style="${wrapperStyle}" class="kpi-cpf-lote-card-link">
+                    ${content}
+                </a>
+            `;
+        };
+
+        const buildChartClickOptions = (urls = []) => ({
+            onClick: (_event, elements) => {
+                if (!Array.isArray(elements) || !elements.length) return;
+                const target = elements[0];
+                const url = urls[target.index];
+                if (url) {
+                    openCpfLoteUrl(url);
+                }
+            },
+            onHover: (event, elements) => {
+                const canvas = event?.native?.target || event?.chart?.canvas;
+                if (!canvas) return;
+                const target = Array.isArray(elements) && elements.length ? elements[0] : null;
+                const url = target ? urls[target.index] : '';
+                canvas.style.cursor = url ? 'pointer' : 'default';
+            },
+        });
+
+        const renderCpfLoteCharts = (payload) => {
+            destroyCpfLoteCharts();
+            const summary = payload?.summary || {};
+            const analysisTypes = Array.isArray(payload?.analysis_types) ? payload.analysis_types : [];
+            const piecesGenerated = Array.isArray(payload?.pieces_generated) ? payload.pieces_generated : [];
+            const piecesProtocoladas = Array.isArray(payload?.pieces_protocoladas) ? payload.pieces_protocoladas : [];
+            const carteira = payload?.carteira || {};
+            const lote = payload?.lote || {};
+            const carteiraColor = normalizeHex(carteira.cor_grafico, '#417690');
+            const loteId = Number(lote.id || 0);
+            const carteiraId = Number(carteira.id || 0);
+            const foundUrl = buildCpfLoteMetricUrl({ loteId, carteiraId, metric: 'encontrados' });
+            const analyzedUrl = buildCpfLoteMetricUrl({ loteId, carteiraId, metric: 'analisados' });
+            const pendingAnalysisUrl = buildCpfLoteMetricUrl({ loteId, carteiraId, metric: 'pendentes_analise' });
+            const valueListUrl = buildCpfLoteMetricUrl({ loteId, carteiraId, metric: 'valor_lista' });
+            const remainingBaseUrl = buildCpfLoteMetricUrl({ loteId, carteiraId, metric: 'restante_carteira' });
+
+            cpfLoteFeedback.innerHTML = `
+                <strong>Lista:</strong> ${escapeHtml(lote.nome || '-')}
+                &nbsp;|&nbsp;
+                <strong>Carteira base:</strong> ${escapeHtml(carteira.nome || '-')}
+                &nbsp;|&nbsp;
+                <strong>Valor total da carteira:</strong> ${escapeHtml(formatCurrencyPt(summary.valor_total_base || 0))}
+            `;
+
+            cpfLoteSummary.innerHTML = [
+                buildMetricCard('CPFs na lista', formatCountPt(summary.total_cpfs || 0)),
+                buildMetricCard('CPFs encontrados', formatCountPt(summary.cpfs_encontrados || 0), '', foundUrl),
+                buildMetricCard('CPFs não encontrados', formatCountPt(summary.cpfs_nao_encontrados || 0)),
+                buildMetricCard('Cadastros encontrados', formatCountPt(summary.cadastros_encontrados || 0), '', foundUrl),
+                buildMetricCard('Cadastros analisados', formatCountPt(summary.cadastros_analisados || 0), '', analyzedUrl),
+                buildMetricCard('Pendentes de Análise', formatCountPt(summary.cadastros_pendentes || 0), '', pendingAnalysisUrl),
+                buildMetricCard('Peças geradas', formatCountPt(summary.pecas_geradas_total || 0), '', foundUrl),
+                buildMetricCard('Protocoladas', formatCountPt(summary.pecas_protocoladas_total || 0), '', foundUrl),
+                buildMetricCard('Valor total da lista', formatCurrencyPt(summary.valor_total_lista || 0), '', valueListUrl),
+                buildMetricCard('Valuation', formatCurrencyPt(summary.valuation_ticket_medio || 0), 'Ticket médio', valueListUrl),
+            ].join('');
+
+            cpfLoteChartsWrap.innerHTML = `
+                <div style="border:1px solid #e4ebf3; border-radius:8px; padding:10px;">
+                    <div style="font-size:13px; font-weight:700; color:#2c4157; margin-bottom:8px;">Cobertura da Lista</div>
+                    <div style="height:280px;"><canvas class="kpi-cpf-lote-coverage"></canvas></div>
+                </div>
+                <div style="border:1px solid #e4ebf3; border-radius:8px; padding:10px;">
+                    <div style="font-size:13px; font-weight:700; color:#2c4157; margin-bottom:8px;">Análises por Tipo</div>
+                    <div style="height:280px;"><canvas class="kpi-cpf-lote-analysis"></canvas></div>
+                </div>
+                <div style="border:1px solid #e4ebf3; border-radius:8px; padding:10px;">
+                    <div style="font-size:13px; font-weight:700; color:#2c4157; margin-bottom:8px;">Peças Geradas x Protocoladas</div>
+                    <div style="height:280px;"><canvas class="kpi-cpf-lote-pieces"></canvas></div>
+                </div>
+                <div style="border:1px solid #e4ebf3; border-radius:8px; padding:10px;">
+                    <div style="font-size:13px; font-weight:700; color:#2c4157; margin-bottom:8px;">Participação Financeira da Lista</div>
+                    <div style="height:280px;"><canvas class="kpi-cpf-lote-financial"></canvas></div>
+                </div>
+            `;
+
+            const coverageCanvas = cpfLoteChartsWrap.querySelector('.kpi-cpf-lote-coverage');
+            const analysisCanvas = cpfLoteChartsWrap.querySelector('.kpi-cpf-lote-analysis');
+            const piecesCanvas = cpfLoteChartsWrap.querySelector('.kpi-cpf-lote-pieces');
+            const financialCanvas = cpfLoteChartsWrap.querySelector('.kpi-cpf-lote-financial');
+
+            if (coverageCanvas) {
+                const coverageUrls = [
+                    foundUrl,
+                    '',
+                    foundUrl,
+                    analyzedUrl,
+                    pendingAnalysisUrl,
+                ];
+                const chart = new Chart(coverageCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['CPFs encontrados', 'CPFs não encontrados', 'Cadastros encontrados', 'Analisados', 'Pendentes de Análise'],
+                        datasets: [{
+                            label: 'Quantidade',
+                            data: [
+                                Number(summary.cpfs_encontrados || 0),
+                                Number(summary.cpfs_nao_encontrados || 0),
+                                Number(summary.cadastros_encontrados || 0),
+                                Number(summary.cadastros_analisados || 0),
+                                Number(summary.cadastros_pendentes || 0),
+                            ],
+                            backgroundColor: [
+                                hexToRgba(carteiraColor, 0.72),
+                                'rgba(193, 102, 107, 0.70)',
+                                'rgba(52, 129, 174, 0.72)',
+                                'rgba(74, 170, 87, 0.72)',
+                                'rgba(207, 162, 61, 0.72)',
+                            ],
+                            borderColor: [
+                                hexToRgba(carteiraColor, 0.94),
+                                'rgba(193, 102, 107, 0.94)',
+                                'rgba(52, 129, 174, 0.94)',
+                                'rgba(74, 170, 87, 0.94)',
+                                'rgba(207, 162, 61, 0.94)',
+                            ],
+                            borderWidth: 1,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        ...buildChartClickOptions(coverageUrls),
+                        scales: {
+                            x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                        },
+                    },
+                });
+                cpfLoteCharts.push(chart);
+            }
+
+            if (analysisCanvas) {
+                const labels = analysisTypes.map((item) => String(item.label || 'Sem tipo'));
+                const values = analysisTypes.map((item) => Number(item.count || 0));
+                const analysisUrls = analysisTypes.map((item) => buildCpfLoteMetricUrl({
+                    loteId,
+                    carteiraId,
+                    metric: 'tipo_analise',
+                    tipoSlug: item?.slug,
+                }));
+                const chart = new Chart(analysisCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Cadastros analisados',
+                            data: values,
+                            backgroundColor: labels.map((_, index) => paletteColor(index, 0.68)),
+                            borderColor: labels.map((_, index) => paletteColor(index, 0.94)),
+                            borderWidth: 1,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        ...buildChartClickOptions(analysisUrls),
+                        scales: {
+                            x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+                            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                        },
+                    },
+                });
+                cpfLoteCharts.push(chart);
+            }
+
+            if (piecesCanvas) {
+                const labels = piecesGenerated.map((item) => String(item.label || item.slug || 'Peça'));
+                const pieceGeneratedUrls = piecesGenerated.map((item) => buildCpfLoteMetricUrl({
+                    loteId,
+                    carteiraId,
+                    metric: 'peca',
+                    pieceKind: item?.slug,
+                    pieceStatus: 'gerada',
+                }));
+                const pieceProtocoladaUrls = piecesProtocoladas.map((item) => buildCpfLoteMetricUrl({
+                    loteId,
+                    carteiraId,
+                    metric: 'peca',
+                    pieceKind: item?.slug,
+                    pieceStatus: 'protocolada',
+                }));
+                const chart = new Chart(piecesCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Geradas',
+                                data: piecesGenerated.map((item) => Number(item.count || 0)),
+                                backgroundColor: labels.map((_, index) => paletteColor(index, 0.65)),
+                                borderColor: labels.map((_, index) => paletteColor(index, 0.92)),
+                                borderWidth: 1,
+                            },
+                            {
+                                label: 'Protocoladas',
+                                data: piecesProtocoladas.map((item) => Number(item.count || 0)),
+                                backgroundColor: labels.map((_, index) => paletteColor(index + 3, 0.65)),
+                                borderColor: labels.map((_, index) => paletteColor(index + 3, 0.92)),
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        ...buildChartClickOptions(pieceGeneratedUrls),
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+                        },
+                        scales: {
+                            x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } },
+                        },
+                    },
+                });
+                chart.options.onClick = (_event, elements) => {
+                    if (!Array.isArray(elements) || !elements.length) return;
+                    const target = elements[0];
+                    const datasetIndex = Number(target.datasetIndex || 0);
+                    const index = Number(target.index || 0);
+                    const url = datasetIndex === 1 ? pieceProtocoladaUrls[index] : pieceGeneratedUrls[index];
+                    if (url) {
+                        openCpfLoteUrl(url);
+                    }
+                };
+                chart.options.onHover = (event, elements) => {
+                    const canvas = event?.native?.target || event?.chart?.canvas;
+                    if (!canvas) return;
+                    const target = Array.isArray(elements) && elements.length ? elements[0] : null;
+                    const datasetIndex = target ? Number(target.datasetIndex || 0) : -1;
+                    const index = target ? Number(target.index || 0) : -1;
+                    const url = datasetIndex === 1 ? pieceProtocoladaUrls[index] : pieceGeneratedUrls[index];
+                    canvas.style.cursor = url ? 'pointer' : 'default';
+                };
+                cpfLoteCharts.push(chart);
+            }
+
+            if (financialCanvas) {
+                const financialUrls = [valueListUrl, remainingBaseUrl];
+                const chart = new Chart(financialCanvas.getContext('2d'), {
+                    type: 'pie',
+                    data: {
+                        labels: ['Valor da lista', 'Restante da carteira'],
+                        datasets: [{
+                            data: [
+                                Number(summary.valor_total_lista || 0),
+                                Number(summary.valor_restante_base || 0),
+                            ],
+                            backgroundColor: [
+                                hexToRgba(carteiraColor, 0.82),
+                                'rgba(216, 225, 234, 0.92)',
+                            ],
+                            borderColor: [
+                                hexToRgba(carteiraColor, 0.98),
+                                'rgba(190, 204, 218, 0.98)',
+                            ],
+                            borderWidth: 1,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        ...buildChartClickOptions(financialUrls),
+                        plugins: {
+                            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => `${context.label}: ${formatCurrencyPt(context.parsed || 0)}`,
+                                },
+                            },
+                        },
+                    },
+                });
+                cpfLoteCharts.push(chart);
+            }
+        };
+
+        cpfLoteListSelect.innerHTML = cpfLoteLists.length
+            ? cpfLoteLists.map((item) => `<option value="${Number(item.id || 0)}">${escapeHtml(item.nome || 'Lista')} (${formatCountPt(item.quantidade || 0)} CPF${Number(item.quantidade || 0) === 1 ? '' : 's'})</option>`).join('')
+            : '<option value="">Nenhuma lista salva disponível</option>';
+        cpfLoteCarteiraSelect.innerHTML = cpfLoteCarteiras.length
+            ? cpfLoteCarteiras.map((item) => `<option value="${Number(item.id || 0)}">${escapeHtml(item.nome || 'Carteira')}</option>`).join('')
+            : '<option value="">Nenhuma carteira disponível</option>';
+
+        if (cpfLoteLists.length) {
+            cpfLoteListSelect.value = String(cpfLoteLists[0].id);
+        }
+        if (cpfLoteCarteiras.length) {
+            cpfLoteCarteiraSelect.value = String(cpfLoteCarteiras[0].id);
+        }
+
+        if (cpfLoteWarning) {
+            cpfLoteFeedback.innerHTML = `<span style="color:#8b3c3c;">${escapeHtml(cpfLoteWarning)}</span>`;
+            cpfLoteRunButton.disabled = true;
+            renderCpfLoteEmpty('As listas salvas ainda não estão disponíveis neste banco.');
+        } else if (!cpfLoteSummaryUrl || !cpfLoteLists.length || !cpfLoteCarteiras.length) {
+            cpfLoteRunButton.disabled = true;
+            renderCpfLoteEmpty('Cadastre ao menos uma lista salva de CPF e mantenha uma carteira base disponível para montar o KPI.');
+        } else {
+            renderCpfLoteEmpty('Selecione a lista salva e clique em "Montar KPI" para carregar os indicadores.');
+            cpfLoteRunButton.addEventListener('click', async () => {
+                const loteId = Number(cpfLoteListSelect.value || 0);
+                const carteiraId = Number(cpfLoteCarteiraSelect.value || 0);
+                if (!loteId || !carteiraId) {
+                    cpfLoteFeedback.innerHTML = '<span style="color:#8b3c3c;">Selecione a lista salva e a carteira base.</span>';
+                    renderCpfLoteEmpty('Selecione a lista salva e a carteira base para montar o KPI.');
+                    return;
+                }
+                cpfLoteRunButton.disabled = true;
+                const originalLabel = cpfLoteRunButton.textContent;
+                cpfLoteRunButton.textContent = 'Montando...';
+                cpfLoteFeedback.innerHTML = 'Calculando indicadores da lista selecionada...';
+                try {
+                    const url = new URL(cpfLoteSummaryUrl, window.location.origin);
+                    url.searchParams.set('lote_id', String(loteId));
+                    url.searchParams.set('carteira_id', String(carteiraId));
+                    const response = await fetch(url.toString(), {
+                        method: 'GET',
+                        credentials: 'same-origin',
+                        headers: { Accept: 'application/json' },
+                    });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok || !payload || payload.ok === false) {
+                        throw new Error(payload.error || 'Não foi possível montar o KPI desta lista.');
+                    }
+                    renderCpfLoteCharts(payload);
+                } catch (error) {
+                    cpfLoteFeedback.innerHTML = `<span style="color:#8b3c3c;">${escapeHtml(error?.message || 'Falha ao montar o KPI da lista.')}</span>`;
+                    renderCpfLoteEmpty('Não foi possível calcular os indicadores. Tente novamente.');
+                } finally {
+                    cpfLoteRunButton.disabled = false;
+                    cpfLoteRunButton.textContent = originalLabel;
+                }
+            });
         }
     }
 
