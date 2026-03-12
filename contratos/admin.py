@@ -4046,6 +4046,23 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         'cumprimento_sentenca': ['cumprimento de sentenca', 'cumprimento de sentença', 'cumprimento sentenca', 'cumprimento sentença'],
     }
 
+    @classmethod
+    def _get_request_cache(cls, request):
+        cache = getattr(request, '_para_protocolar_filter_cache', None)
+        if cache is None:
+            cache = {}
+            setattr(request, '_para_protocolar_filter_cache', cache)
+        return cache
+
+    @classmethod
+    def _build_request_cache_key(cls, request, protocol_type):
+        params = tuple(
+            (key, tuple(values))
+            for key, values in sorted(request.GET.lists())
+            if key != '_skip_saved_filters'
+        )
+        return (protocol_type, params)
+
     @staticmethod
     def _normalize_text(value):
         text = str(value or '').strip().lower()
@@ -4107,12 +4124,43 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         return queryset.exclude(protocol_q & name_q).distinct()
 
     @classmethod
-    def _matching_process_ids(cls, queryset, protocol_type):
-        candidate_qs = cls._exclude_already_protocolado(queryset, protocol_type)
+    def _build_candidate_qs(cls, queryset, protocol_type):
+        qs = queryset.model._default_manager.filter(
+            pk__in=queryset.order_by().values('pk')
+        ).filter(
+            analise_processo__isnull=False
+        ).select_related(
+            'analise_processo'
+        ).order_by()
+
+        respostas_text = Cast('analise_processo__respostas', models.TextField())
+        if protocol_type == 'habilitacao':
+            qs = qs.annotate(_respostas_text=respostas_text).filter(_respostas_text__icontains='habilit')
+        elif protocol_type == 'cumprimento_sentenca':
+            qs = qs.annotate(_respostas_text=respostas_text).filter(
+                Q(_respostas_text__icontains='cumprimento') |
+                Q(_respostas_text__icontains='iniciar cs') |
+                Q(_respostas_text__icontains='iniciar c s')
+            )
+
+        return cls._exclude_already_protocolado(qs, protocol_type)
+
+    @classmethod
+    def _matching_process_ids(cls, queryset, protocol_type, request=None):
+        if request is not None:
+            cache = cls._get_request_cache(request)
+            cache_key = cls._build_request_cache_key(request, protocol_type)
+            if cache_key in cache:
+                return set(cache[cache_key])
+
+        candidate_qs = cls._build_candidate_qs(queryset, protocol_type)
         process_ids = set()
         for process_id, respostas in candidate_qs.values_list('id', 'analise_processo__respostas').iterator(chunk_size=200):
             if cls._process_requires_protocol(respostas, protocol_type):
                 process_ids.add(int(process_id))
+
+        if request is not None:
+            cache[cache_key] = tuple(sorted(process_ids))
         return process_ids
 
     def lookups(self, request, model_admin):
@@ -4121,7 +4169,7 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         qs = _get_filter_count_queryset(model_admin, request)
         items = []
         for value, label in self.OPTIONS:
-            count = len(self._matching_process_ids(qs, value))
+            count = len(self._matching_process_ids(qs, value, request=request))
             label_html = mark_safe(f"{label} <span class='filter-count'>({count})</span>")
             items.append((value, label_html))
         return items
@@ -4150,7 +4198,7 @@ class ParaProtocolarFilter(admin.SimpleListFilter):
         protocol_type = self.value()
         if not protocol_type:
             return queryset
-        process_ids = self._matching_process_ids(queryset, protocol_type)
+        process_ids = self._matching_process_ids(queryset, protocol_type, request=request)
         if not process_ids:
             return queryset.none()
         return queryset.filter(pk__in=process_ids)
