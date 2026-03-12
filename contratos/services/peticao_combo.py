@@ -193,12 +193,15 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
     optional_files = _find_optional_annexes(files, used_ids)
     continuous_annexes = _get_continuous_annexes(tipo)
     continuous_entries = _build_continuous_entries(continuous_annexes)
-    extrato = _find_extrato(files, used_ids)
-    if extrato:
-        used_ids.add(extrato.id)
-    else:
-        missing.append("05 - Extrato de Titularidade")
-    per_contract = _collect_contract_files(contratos, files, used_ids, missing)
+    extrato = None
+    per_contract = []
+    if _requires_contract_documents(tipo):
+        extrato = _find_extrato(files, used_ids)
+        if extrato:
+            used_ids.add(extrato.id)
+        else:
+            missing.append("05 - Extrato de Titularidade")
+        per_contract = _collect_contract_files(contratos, files, used_ids, missing)
     zip_entries = _build_zip_entries(
         base_file,
         continuous_entries,
@@ -232,6 +235,17 @@ def _collect_combo_assets(tipo_id, arquivo_base_id):
             for annex_entry in continuous_entries
         ]
     }
+
+
+def _requires_contract_documents(tipo):
+    if not tipo:
+        return True
+    nome_norm = _normalize_text(getattr(tipo, 'nome', '') or '')
+    key_norm = _normalize_text(getattr(tipo, 'key', '') or '')
+    joined = f"{nome_norm} {key_norm}".strip()
+    if 'habilitacao' in joined:
+        return False
+    return True
 
 
 def _extract_contracts(nome):
