@@ -4373,6 +4373,25 @@ class AprovacaoFilter(admin.SimpleListFilter):
         "reprovado": '@.supervisor_status == "reprovado" && @.barrado.ativo != true',
         "barrado": '@.barrado.ativo == true',
     }
+    PROTOCOL_KEYWORDS = {
+        "monitoria": ["monitória", "monitoria"],
+        "cobranca": ["cobrança", "cobranca"],
+        "habilitacao": ["habilitação", "habilitacao"],
+    }
+
+    @classmethod
+    def _build_protocol_name_q(cls):
+        name_q = models.Q()
+        for keywords in cls.PROTOCOL_KEYWORDS.values():
+            for keyword in keywords:
+                name_q |= models.Q(arquivos__nome__icontains=keyword)
+        return name_q
+
+    @classmethod
+    def _exclude_protocolados(cls, queryset):
+        protocol_q = models.Q(arquivos__protocolado_no_tribunal=True)
+        name_q = cls._build_protocol_name_q()
+        return queryset.exclude(protocol_q & name_q).distinct()
 
     def _json_path_expr_for_key(self, key, condition):
         path = f'$.{key}[*] ? ({condition})'
@@ -4393,7 +4412,10 @@ class AprovacaoFilter(admin.SimpleListFilter):
             match_q = current if match_q is None else match_q | current
         if match_q is None:
             return queryset.none()
-        return queryset.filter(match_q)
+        queryset = queryset.filter(match_q)
+        if condition == self.MATCH_CONDITIONS.get("aprovado"):
+            queryset = self._exclude_protocolados(queryset)
+        return queryset
 
     def lookups(self, request, model_admin):
         if not _show_filter_counts(request):
@@ -10659,6 +10681,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     match_q = current_q if match_q is None else match_q | current_q
                 if match_q is not None:
                     entries_qs = entries_qs.filter(match_q)
+                if aprovacao_filter == "aprovado":
+                    protocol_q = models.Q(processo__arquivos__protocolado_no_tribunal=True)
+                    name_q = models.Q()
+                    for keywords in AprovacaoFilter.PROTOCOL_KEYWORDS.values():
+                        for keyword in keywords:
+                            name_q |= models.Q(processo__arquivos__nome__icontains=keyword)
+                    entries_qs = entries_qs.exclude(protocol_q & name_q).distinct()
 
         if protocolados_filter:
             keywords = ProtocoladosFilter.LOOKUP_KEYWORDS.get(protocolados_filter) or []
