@@ -10825,15 +10825,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             result_count,
         ) % {"total_count": result_count}
         class _LembretesFilterAdmin:
-            def __init__(self, base_qs, lembretes_qs):
-                self._base_qs = base_qs
+            def __init__(self, lembretes_qs):
                 self.lembretes_queryset = lembretes_qs
 
             def get_queryset(self, request):
-                return self._base_qs
+                return self.lembretes_queryset
 
             def get_filter_base_queryset(self, request):
-                return self._base_qs
+                return self.lembretes_queryset
 
         filter_params = dict(request.GET.lists())
         filter_classes = [
@@ -10848,7 +10847,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             UFCountFilter,
             EtiquetaFilter,
         ]
-        filter_admin = _LembretesFilterAdmin(base_processos, lembretes_processos_qs)
+        filter_admin = _LembretesFilterAdmin(lembretes_processos_qs)
         filter_specs = []
         for filter_class in filter_classes:
             spec = filter_class(request, filter_params, ProcessoJudicial, filter_admin)
