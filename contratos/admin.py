@@ -10709,7 +10709,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             entries_qs = entries_qs.order_by('pertinencia_proximo_em', '-criado_em')
 
         full_result_count = entries_qs_full.count()
-        result_count = entries_qs.count()
 
         if request.method == 'POST' and request.POST.get('action'):
             action_queryset = base_processos.filter(
@@ -10798,6 +10797,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'is_overdue': bool(proximo and proximo <= today),
                 'admin_url': admin_url,
             })
+
+        result_count = len(lembretes)
 
         result_list = lembretes
         cl = SimpleNamespace(

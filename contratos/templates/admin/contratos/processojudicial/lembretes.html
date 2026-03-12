@@ -596,7 +596,7 @@
 
       <form id="changelist-form" method="post" novalidate>
         {% csrf_token %}
-        {% if action_form and actions_on_top and cl.result_count %}
+        {% if action_form and actions_on_top %}
           {% admin_actions %}
         {% endif %}
         <div class="results">
@@ -661,7 +661,7 @@
             </tbody>
           </table>
         </div>
-        {% if action_form and actions_on_bottom and cl.result_count %}
+        {% if action_form and actions_on_bottom %}
           {% admin_actions %}
         {% endif %}
       </form>
