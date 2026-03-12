@@ -1925,6 +1925,7 @@ def demandas_analise_planilha_view(request):
     retry_row_id = ""
     background_job = None
     analise_lote_sync_limit = 80
+    analise_lote_chunk_size = 20
 
     action = (request.POST.get("action") or request.POST.get("action_override")) if request.method == "POST" else None
     import_action_requested = request.method == "POST" and action == "import"
@@ -2171,6 +2172,48 @@ def demandas_analise_planilha_view(request):
                 [str(value).strip() for value in request.POST.getlist("selected_row_ids") if str(value).strip()]
             )
         )
+
+    def _merge_analise_lote_import_results(target, chunk_result):
+        if not chunk_result:
+            return target
+        target.created_cards += getattr(chunk_result, "created_cards", 0)
+        target.updated_cards += getattr(chunk_result, "updated_cards", 0)
+        target.created_cnjs += getattr(chunk_result, "created_cnjs", 0)
+        target.updated_cnjs += getattr(chunk_result, "updated_cnjs", 0)
+        target.updated_processos += getattr(chunk_result, "updated_processos", 0)
+        target.skipped_rows += getattr(chunk_result, "skipped_rows", 0)
+        target.matched_rows += getattr(chunk_result, "matched_rows", 0)
+        target.errors.extend(getattr(chunk_result, "errors", []) or [])
+        target.row_results.extend(getattr(chunk_result, "row_results", []) or [])
+        return target
+
+    def _import_analise_lote_rows_in_chunks(parsed_rows, *, selected_ids_for_import):
+        effective_ids = []
+        selected_set = {str(value).strip() for value in (selected_ids_for_import or []) if str(value).strip()}
+        if selected_set:
+            for row in parsed_rows:
+                row_id = str(getattr(row, "row_id", "") or "").strip()
+                if row_id and row_id in selected_set:
+                    effective_ids.append(row_id)
+        else:
+            effective_ids = [str(getattr(row, "row_id", "") or "").strip() for row in parsed_rows if str(getattr(row, "row_id", "") or "").strip()]
+
+        aggregate = AnaliseLoteImportResult()
+        if not effective_ids:
+            return aggregate
+
+        for start in range(0, len(effective_ids), analise_lote_chunk_size):
+            chunk_ids = effective_ids[start : start + analise_lote_chunk_size]
+            chunk_result = import_analise_lote_rows(
+                parsed_rows,
+                carteira=form.cleaned_data["carteira"],
+                tipo_analise=form.cleaned_data["tipo_analise"],
+                analista=form.cleaned_data["analista"],
+                acting_user=request.user,
+                selected_row_ids=chunk_ids,
+            )
+            _merge_analise_lote_import_results(aggregate, chunk_result)
+        return aggregate
 
     def _build_imported_status_map(rows, carteira_obj, tipo_analise_obj):
         cpfs = {normalize_cpf(getattr(r, "cpf", "")) for r in rows if getattr(r, "cpf", "")}
@@ -2577,6 +2620,7 @@ def demandas_analise_planilha_view(request):
                     )
                 else:
                     try:
+                        request.session.pop(background_job_session_key, None)
                         import_result = import_analise_lote_rows(
                             parsed,
                             carteira=form.cleaned_data["carteira"],
@@ -2618,57 +2662,73 @@ def demandas_analise_planilha_view(request):
                             "error": str(exc),
                         }
             elif action == "import":
-                if rows_to_import_count > analise_lote_sync_limit:
-                    try:
-                        background_job = _enqueue_analise_lote_import(
-                            file_bytes=file_bytes,
-                            upload_name=upload_name,
-                            selected_row_ids=selected_row_ids,
-                            auto_message=(
-                                f"Lote com {rows_to_import_count} linha(s) enviado automaticamente para "
-                                "importação em background para evitar timeout do servidor."
-                            ),
-                        )
-                        preview = _mark_selected_preview_items_as_pending(preview)
-                    except Exception as exc:
-                        messages.error(request, f"Falha ao iniciar importação em background: {exc}")
-                else:
-                    try:
-                        import_result = import_analise_lote_rows(
-                            parsed,
-                            carteira=form.cleaned_data["carteira"],
-                            tipo_analise=form.cleaned_data["tipo_analise"],
-                            analista=form.cleaned_data["analista"],
-                            acting_user=request.user,
-                            selected_row_ids=selected_row_ids,
-                        )
-                        import_modal_data = {
-                            "created_cadastros": 0,
-                            "updated_cadastros": import_result.updated_processos,
-                            "created_cnjs": import_result.created_cnjs,
-                            "updated_cnjs": import_result.updated_cnjs,
+                try:
+                    request.session.pop(background_job_session_key, None)
+                    import_result = _import_analise_lote_rows_in_chunks(
+                        parsed,
+                        selected_ids_for_import=selected_row_ids,
+                    )
+                    import_modal_data = {
+                        "created_cadastros": 0,
+                        "updated_cadastros": import_result.updated_processos,
+                        "created_cnjs": import_result.created_cnjs,
+                        "updated_cnjs": import_result.updated_cnjs,
+                        "created_cards": import_result.created_cards,
+                        "updated_cards": import_result.updated_cards,
+                        "reused_priority_tags": 0,
+                        "standardized_priority_tags": 0,
+                        "note": (
+                            f"Linhas importadas: {import_result.matched_rows}. "
+                            f"Linhas ignoradas: {import_result.skipped_rows}."
+                        ),
+                    }
+                    request.session[import_modal_session_key] = import_modal_data
+                    if import_result.errors:
+                        messages.warning(request, "Algumas linhas foram ignoradas durante a importação em lote.")
+                    preview = _apply_row_results_to_preview(
+                        preview,
+                        getattr(import_result, "row_results", []),
+                    )
+                except Exception as exc:
+                    messages.error(request, f"Falha ao importar análises em lote: {exc}")
+                    import_modal_data = {
+                        "title": "Falha ao importar análises em lote",
+                        "error": str(exc),
+                    }
+            elif action == "import_chunk":
+                try:
+                    request.session.pop(background_job_session_key, None)
+                    import_result = _import_analise_lote_rows_in_chunks(
+                        parsed,
+                        selected_ids_for_import=selected_row_ids,
+                    )
+                    preview_base = _normalize_analise_lote_preview(request.session.get(preview_session_key)) or preview
+                    preview = _apply_row_results_to_preview(
+                        preview_base,
+                        getattr(import_result, "row_results", []),
+                    )
+                    _store_preview(preview)
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "processed_rows": len(getattr(import_result, "row_results", []) or []),
+                            "imported_rows": import_result.matched_rows,
+                            "skipped_rows": import_result.skipped_rows,
                             "created_cards": import_result.created_cards,
                             "updated_cards": import_result.updated_cards,
-                            "reused_priority_tags": 0,
-                            "standardized_priority_tags": 0,
-                            "note": (
-                                f"Linhas importadas: {import_result.matched_rows}. "
-                                f"Linhas ignoradas: {import_result.skipped_rows}."
-                            ),
+                            "errors": import_result.errors,
+                            "row_results": import_result.row_results,
+                            "status_counts": (preview or {}).get("status_counts") or {},
                         }
-                        request.session[import_modal_session_key] = import_modal_data
-                        if import_result.errors:
-                            messages.warning(request, "Algumas linhas foram ignoradas durante a importação em lote.")
-                        preview = _apply_row_results_to_preview(
-                            preview,
-                            getattr(import_result, "row_results", []),
-                        )
-                    except Exception as exc:
-                        messages.error(request, f"Falha ao importar análises em lote: {exc}")
-                        import_modal_data = {
-                            "title": "Falha ao importar análises em lote",
-                            "error": str(exc),
-                        }
+                    )
+                except Exception as exc:
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "detail": f"Falha ao importar o lote parcial: {exc}",
+                        },
+                        status=500,
+                    )
             elif action == "import_async":
                 try:
                     background_job = _enqueue_analise_lote_import(
@@ -3224,6 +3284,8 @@ def demandas_analise_planilha_view(request):
             "background_job": background_job,
             "modo_importacao": modo_importacao,
             "is_analise_lote_mode": is_analise_lote_mode,
+            "analise_lote_sync_limit": analise_lote_sync_limit,
+            "analise_lote_chunk_size": analise_lote_chunk_size,
         }
     )
     return render(request, "admin/contratos/demandas_analise_planilha.html", context)

@@ -216,6 +216,67 @@
       font-size: .88rem;
       font-weight: 600;
     }
+    .analise-lote-import-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 16, 28, 0.45);
+      z-index: 1400;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .analise-lote-import-overlay.is-visible {
+      display: flex;
+    }
+    .analise-lote-import-overlay__card {
+      width: min(92vw, 520px);
+      background: #fff;
+      border: 1px solid #d7dee8;
+      border-radius: 14px;
+      box-shadow: 0 18px 38px rgba(0, 0, 0, 0.24);
+      padding: 18px 20px;
+    }
+    .analise-lote-import-overlay__title {
+      margin: 0 0 8px 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #213547;
+    }
+    .analise-lote-import-overlay__detail {
+      margin: 0 0 14px 0;
+      color: #5f7387;
+      line-height: 1.4;
+    }
+    .analise-lote-import-overlay__bar {
+      width: 100%;
+      height: 12px;
+      border-radius: 999px;
+      background: #eef3f8;
+      overflow: hidden;
+      border: 1px solid #d7dee8;
+    }
+    .analise-lote-import-overlay__bar-fill {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, #2b6d8d 0%, #4ba3d6 100%);
+      transition: width .2s ease;
+    }
+    .analise-lote-import-overlay__meta {
+      margin-top: 12px;
+      font-size: .92rem;
+      color: #3f556c;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .analise-lote-import-overlay__error {
+      margin-top: 12px;
+      color: #922f2f;
+      font-weight: 600;
+      display: none;
+    }
     .analise-lote-summary__results {
       margin: 0;
       padding-left: 18px;
@@ -298,7 +359,7 @@
       <div>
         <div style="opacity:.8;">
           {% if is_analise_lote_mode %}
-            Importa cards de analise em lote a partir de planilha, com preview por linha, selecao por UF e atribuicao de analista responsavel. Lotes grandes sao enviados automaticamente para background.
+            Importa cards de analise em lote a partir de planilha, com preview por linha, selecao por UF e atribuicao de analista responsavel. Lotes grandes sao enviados em blocos com carregamento progressivo.
           {% else %}
             Importa planilha Passivas (.xlsx/.csv) criando cadastros/CNJs e salvando cards no caderno.
           {% endif %}
@@ -912,6 +973,169 @@
     const removeBtn = document.getElementById('planilha-remove-btn');
     const actionOverrideInput = document.getElementById('id_action_override');
     const supervisorPasswordInput = document.getElementById('id_supervisor_password');
+    const selectedRowIdsPayloadInput = document.getElementById('id_selected_row_ids_payload');
+    const analiseLoteSyncLimit = Number('{{ analise_lote_sync_limit|default:80 }}') || 80;
+    const analiseLoteChunkSize = Number('{{ analise_lote_chunk_size|default:20 }}') || 20;
+    const analiseLoteModeValue = 'analise_lote';
+
+    const ensureChunkOverlay = () => {
+      let overlay = document.getElementById('analise-lote-import-overlay');
+      if (overlay) return overlay;
+      overlay = document.createElement('div');
+      overlay.id = 'analise-lote-import-overlay';
+      overlay.className = 'analise-lote-import-overlay';
+      overlay.innerHTML = `
+        <div class="analise-lote-import-overlay__card">
+          <h3 class="analise-lote-import-overlay__title">Importando análises em lote</h3>
+          <p class="analise-lote-import-overlay__detail">Preparando envio dos blocos selecionados...</p>
+          <div class="analise-lote-import-overlay__bar"><div class="analise-lote-import-overlay__bar-fill"></div></div>
+          <div class="analise-lote-import-overlay__meta">
+            <span data-role="progress">0 / 0</span>
+            <span data-role="result">Importadas: 0 | Ignoradas: 0</span>
+          </div>
+          <div class="analise-lote-import-overlay__error" data-role="error"></div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      return overlay;
+    };
+
+    const setChunkOverlayState = ({ title, detail, processed, total, imported, skipped, error }) => {
+      const overlay = ensureChunkOverlay();
+      overlay.classList.add('is-visible');
+      const titleEl = overlay.querySelector('.analise-lote-import-overlay__title');
+      const detailEl = overlay.querySelector('.analise-lote-import-overlay__detail');
+      const fillEl = overlay.querySelector('.analise-lote-import-overlay__bar-fill');
+      const progressEl = overlay.querySelector('[data-role="progress"]');
+      const resultEl = overlay.querySelector('[data-role="result"]');
+      const errorEl = overlay.querySelector('[data-role="error"]');
+      const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((processed / total) * 100))) : 0;
+      if (titleEl && title) titleEl.textContent = title;
+      if (detailEl) detailEl.textContent = detail || '';
+      if (fillEl) fillEl.style.width = `${percent}%`;
+      if (progressEl) progressEl.textContent = `${processed} / ${total}`;
+      if (resultEl) resultEl.textContent = `Importadas: ${imported} | Ignoradas: ${skipped}`;
+      if (errorEl) {
+        if (error) {
+          errorEl.textContent = error;
+          errorEl.style.display = 'block';
+        } else {
+          errorEl.textContent = '';
+          errorEl.style.display = 'none';
+        }
+      }
+    };
+
+    const getSelectedAnaliseLoteRowIds = () => {
+      const payload = String(selectedRowIdsPayloadInput ? selectedRowIdsPayloadInput.value : '').trim();
+      if (payload && payload !== '__none__') {
+        return payload.split(',').map((value) => String(value || '').trim()).filter(Boolean);
+      }
+      return Array.from(document.querySelectorAll('.js-analise-lote-box:checked'))
+        .map((box) => String(box.dataset.rowId || '').trim())
+        .filter(Boolean);
+    };
+
+    const setImportButtonsBusy = (busy) => {
+      [importBtn, asyncBtn, removeBtn].forEach((button) => {
+        if (!button) return;
+        if (busy) {
+          button.style.pointerEvents = 'none';
+          button.setAttribute('aria-disabled', 'true');
+          button.classList.add('disabled');
+        } else {
+          button.style.pointerEvents = '';
+          button.removeAttribute('aria-disabled');
+          button.classList.remove('disabled');
+        }
+      });
+    };
+
+    const runChunkedAnaliseLoteImport = async () => {
+      if (!formEl) return;
+      const selectedRowIds = getSelectedAnaliseLoteRowIds();
+      if (!selectedRowIds.length) {
+        window.alert('Selecione ao menos uma linha para importar.');
+        return;
+      }
+      setImportButtonsBusy(true);
+      if (importBtn) {
+        importBtn.dataset.importing = '1';
+        importBtn.textContent = 'Importando...';
+      }
+      const total = selectedRowIds.length;
+      let processed = 0;
+      let imported = 0;
+      let skipped = 0;
+      setChunkOverlayState({
+        title: 'Importando análises em lote',
+        detail: 'Enviando os blocos selecionados para importação.',
+        processed,
+        total,
+        imported,
+        skipped,
+        error: '',
+      });
+      try {
+        for (let index = 0; index < selectedRowIds.length; index += analiseLoteChunkSize) {
+          const chunkIds = selectedRowIds.slice(index, index + analiseLoteChunkSize);
+          const formData = new FormData(formEl);
+          formData.set('action_override', 'import_chunk');
+          formData.set('selected_row_ids_payload', chunkIds.join(','));
+          formData.set('retry_row_id', '');
+          const response = await fetch(formEl.action || window.location.href, {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.detail || 'Falha ao importar um dos blocos do lote.');
+          }
+          processed += Number(payload.processed_rows || chunkIds.length || 0);
+          imported += Number(payload.imported_rows || 0);
+          skipped += Number(payload.skipped_rows || 0);
+          setChunkOverlayState({
+            title: 'Importando análises em lote',
+            detail: `Processando bloco ${Math.floor(index / analiseLoteChunkSize) + 1} de ${Math.ceil(total / analiseLoteChunkSize)}...`,
+            processed,
+            total,
+            imported,
+            skipped,
+            error: '',
+          });
+        }
+        setChunkOverlayState({
+          title: 'Importação concluída',
+          detail: 'Os blocos foram processados. Recarregando a prévia...',
+          processed: total,
+          total,
+          imported,
+          skipped,
+          error: '',
+        });
+        window.location.reload();
+      } catch (error) {
+        setChunkOverlayState({
+          title: 'Falha na importação em lote',
+          detail: 'A importação foi interrompida antes de concluir todos os blocos.',
+          processed,
+          total,
+          imported,
+          skipped,
+          error: error && error.message ? error.message : 'Erro inesperado durante a importação.',
+        });
+        setImportButtonsBusy(false);
+        if (importBtn) {
+          importBtn.dataset.importing = '0';
+          importBtn.textContent = 'Importar';
+        }
+      }
+    };
 
     const syncModeSections = () => {
       const mode = modeSelect ? modeSelect.value : 'passivas';
@@ -952,6 +1176,14 @@
         }
         if (isImportAsyncAction && asyncBtn && asyncBtn.dataset.importing === '1') {
           event.preventDefault();
+          return;
+        }
+
+        const isAnaliseLoteMode = Boolean(modeSelect && modeSelect.value === analiseLoteModeValue);
+        const selectedAnaliseLoteRowIds = isAnaliseLoteMode ? getSelectedAnaliseLoteRowIds() : [];
+        if (isImportAction && isAnaliseLoteMode && selectedAnaliseLoteRowIds.length > analiseLoteSyncLimit) {
+          event.preventDefault();
+          runChunkedAnaliseLoteImport();
           return;
         }
 
