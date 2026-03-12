@@ -1131,7 +1131,7 @@
           skipped,
           error: '',
         });
-        window.location.reload();
+        window.location.assign(`${window.location.pathname}${window.location.search}`);
       } catch (error) {
         setChunkOverlayState({
           title: 'Falha na importação em lote',

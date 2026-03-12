@@ -57,11 +57,10 @@ def build_preview(tipo_id, arquivo_base_id):
     }
 
 
-def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
+def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None):
     assets = _collect_combo_assets(tipo_id, arquivo_base_id)
-    tipo = assets['tipo']
-    processo = assets['processo']
     base_file = assets['base_file']
+    files = assets['files']
     optional_ids_set = set(str(v) for v in (optional_ids or []))
     optional_files = [
         arquivo for arquivo in assets['optional_files']
@@ -80,8 +79,6 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
             existing_ids.add(arquivo_id)
 
     zip_buffer = io.BytesIO()
-    base_file = assets['base_file']
-    files = assets['files']
     with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
         for entry in files_to_zip:
             entry_name = _determine_zip_entry_name(entry)
@@ -115,31 +112,15 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
                     zip_file.writestr(entry_name, fh.read())
             except Exception:
                 continue
-    zip_buffer.seek(0)
-
-    zip_name = assets['zip_name']
-    zip_proc_file = ProcessoArquivo.objects.create(
-        processo=processo,
-        nome=zip_name
-    )
-    zip_proc_file.arquivo.save(zip_name, ContentFile(zip_buffer.read()))
-    zip_proc_file.save()
-
-    ZipGerado.objects.create(
-        tipo_peticao=tipo,
-        processo=processo,
-        arquivo_base=base_file,
-        zip_file=zip_proc_file.arquivo,
-        missing=assets['missing'],
-        contratos=assets['contracts']
-    )
-
+    zip_bytes = zip_buffer.getvalue()
     return {
-        'url': zip_proc_file.arquivo.url,
-        'arquivo_id': zip_proc_file.id,
+        'tipo': assets['tipo'],
+        'processo': assets['processo'],
+        'base_file': base_file,
+        'zip_name': assets['zip_name'],
+        'zip_bytes': zip_bytes,
         'missing': assets['missing'],
-        'ok': True,
-        'zip_name': zip_name,
+        'contracts': assets['contracts'],
         'entries': [
             {
                 'label': entry.get('label'),
@@ -151,7 +132,42 @@ def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
         'missing_count': len(assets['missing']),
         'missing_message': (
             f"Existem {len(assets['missing'])} itens faltantes." if assets['missing'] else ''
-        )
+        ),
+    }
+
+
+def generate_zip(tipo_id, arquivo_base_id, optional_ids=None):
+    bundle = build_zip_bundle(tipo_id, arquivo_base_id, optional_ids)
+    tipo = bundle['tipo']
+    processo = bundle['processo']
+    base_file = bundle['base_file']
+    zip_name = bundle['zip_name']
+
+    zip_proc_file = ProcessoArquivo.objects.create(
+        processo=processo,
+        nome=zip_name
+    )
+    zip_proc_file.arquivo.save(zip_name, ContentFile(bundle['zip_bytes']))
+    zip_proc_file.save()
+
+    ZipGerado.objects.create(
+        tipo_peticao=tipo,
+        processo=processo,
+        arquivo_base=base_file,
+        zip_file=zip_proc_file.arquivo,
+        missing=bundle['missing'],
+        contratos=bundle['contracts']
+    )
+
+    return {
+        'url': zip_proc_file.arquivo.url,
+        'arquivo_id': zip_proc_file.id,
+        'missing': bundle['missing'],
+        'ok': True,
+        'zip_name': zip_name,
+        'entries': bundle['entries'],
+        'missing_count': bundle['missing_count'],
+        'missing_message': bundle['missing_message'],
     }
 
 
