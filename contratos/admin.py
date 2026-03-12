@@ -7974,6 +7974,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     actions = [
         'excluir_andamentos_selecionados',
         'delegate_processes',
+        'gerar_habilitacao_em_lote',
         'change_carteira_bulk',
         'inserir_lembrete',
         'ligar_busca_ativa_em_lote',
@@ -7982,6 +7983,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
+    PARA_PROTOCOLAR_LABELS = {
+        'habilitacao': 'Habilitação',
+        'cumprimento_sentenca': 'Cumprimento de Sentença',
+    }
 
     def get_list_filter(self, request):
         filters = list(self.BASE_LIST_FILTERS)
@@ -7991,6 +7996,57 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             insert_at = 1
         filters.insert(insert_at, ParaProtocolarFilter)
         return filters
+
+    def get_list_display(self, request):
+        display = list(super().get_list_display(request))
+        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+        if protocol_type in self.PARA_PROTOCOLAR_LABELS and 'tipo_peca_para_protocolar' not in display:
+            insert_at = display.index('uf') + 1 if 'uf' in display else 0
+            display.insert(insert_at, 'tipo_peca_para_protocolar')
+        if protocol_type == 'habilitacao' and 'habilitacao_gerada_status' not in display:
+            insert_at = display.index('tipo_peca_para_protocolar') + 1 if 'tipo_peca_para_protocolar' in display else (
+                display.index('uf') + 1 if 'uf' in display else 0
+            )
+            display.insert(insert_at, 'habilitacao_gerada_status')
+        return tuple(display)
+
+    def _get_pending_protocol_labels(self, obj):
+        respostas = getattr(getattr(obj, 'analise_processo', None), 'respostas', None)
+        if not isinstance(respostas, dict):
+            return []
+        labels = []
+        for protocol_type, label in ParaProtocolarFilter.OPTIONS:
+            if ParaProtocolarFilter._process_requires_protocol(respostas, protocol_type):
+                labels.append(label)
+        return labels
+
+    @admin.display(description="Peça a Gerar")
+    def tipo_peca_para_protocolar(self, obj):
+        labels = self._get_pending_protocol_labels(obj)
+        if not labels:
+            return "-"
+        return ", ".join(dict.fromkeys(labels))
+
+    def _has_pending_generated_piece(self, obj, piece_type):
+        arquivos = getattr(obj, '_prefetched_arquivos', None)
+        if arquivos is None:
+            arquivos = obj.arquivos.only('nome', 'arquivo', 'protocolado_no_tribunal')
+        for arquivo in arquivos:
+            if getattr(arquivo, 'protocolado_no_tribunal', False):
+                continue
+            tipo_slug = self._classify_peticao_kind(
+                getattr(arquivo, 'nome', ''),
+                getattr(getattr(arquivo, 'arquivo', None), 'name', ''),
+            )
+            if tipo_slug == piece_type:
+                return True
+        return False
+
+    @admin.display(description="Habilitação Gerada")
+    def habilitacao_gerada_status(self, obj):
+        if self._has_pending_generated_piece(obj, 'habilitacao'):
+            return format_html('<span title="Habilitação gerada e ainda não protocolada">✓</span>')
+        return format_html('<span title="Habilitação ainda não gerada">✕</span>')
 
     def _sanitize_filter_qs(self, qs):
         params = QueryDict(qs, mutable=True)
@@ -9106,7 +9162,120 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         actions = super().get_actions(request)
         if not request.user.is_superuser and not is_user_supervisor(request.user):
             actions.pop('change_carteira_bulk', None)
+        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+        if protocol_type != 'habilitacao':
+            actions.pop('gerar_habilitacao_em_lote', None)
         return actions
+
+    def _resolve_habilitacao_target_entry(self, processo):
+        respostas = getattr(getattr(processo, 'analise_processo', None), 'respostas', None)
+        if not isinstance(respostas, dict):
+            return None
+        for card in ParaProtocolarFilter._iter_cards(respostas):
+            if not ParaProtocolarFilter._card_requires_protocol(card, 'habilitacao'):
+                continue
+            card_cnj = str(card.get('cnj') or '').strip()
+            if card_cnj:
+                for entry in processo.numeros_cnj.all():
+                    if normalize_cnj_digits(entry.cnj or '') == normalize_cnj_digits(card_cnj):
+                        return entry
+        return processo.numeros_cnj.order_by('-criado_em').first()
+
+    def gerar_habilitacao_em_lote(self, request, queryset):
+        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+        if protocol_type != 'habilitacao':
+            self.message_user(
+                request,
+                "A ação 'Gerar Habilitação em Lote' só fica disponível no filtro Para Protocolar > Habilitação.",
+                messages.ERROR,
+            )
+            return None
+
+        from .views import (
+            _build_habilitacao_base_filename,
+            _build_habilitacao_docx_bytes,
+            _collect_missing_habilitacao_fields,
+        )
+
+        generated = []
+        pending = []
+        failed = []
+
+        processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
+        for processo in processos.iterator(chunk_size=100):
+            if self._has_pending_generated_piece(processo, 'habilitacao'):
+                pending.append(f"{processo.pk}: já existe habilitação gerada pendente de protocolo")
+                continue
+
+            polo_passivo = next(
+                (parte for parte in getattr(processo, '_prefetched_objects_cache', {}).get('partes_processuais', []) if parte.tipo_polo == 'PASSIVO'),
+                None,
+            )
+            if polo_passivo is None:
+                polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+            if not polo_passivo:
+                failed.append(f"{processo.pk}: polo passivo não encontrado")
+                continue
+
+            cnj_entry = self._resolve_habilitacao_target_entry(processo)
+            processo_override = {}
+            if cnj_entry:
+                processo_override = {
+                    'cnj': cnj_entry.cnj or '',
+                    'uf': cnj_entry.uf or '',
+                    'vara': cnj_entry.vara or '',
+                    'tribunal': cnj_entry.tribunal or '',
+                    'valor_causa': cnj_entry.valor_causa,
+                }
+
+            missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override)
+            if missing_fields:
+                failed.append(
+                    f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(missing_fields)}"
+                )
+                continue
+
+            try:
+                docx_bytes = _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override)
+                base_filename = _build_habilitacao_base_filename(
+                    polo_passivo,
+                    processo,
+                    cnj_reference=processo_override.get('cnj') if processo_override else None,
+                )
+                docx_name = f"{base_filename}.docx"
+                arquivo_docx = ProcessoArquivo(
+                    processo=processo,
+                    nome=docx_name,
+                    enviado_por=request.user if request.user.is_authenticated else None,
+                )
+                arquivo_docx.arquivo.save(docx_name, ContentFile(docx_bytes), save=True)
+                generated.append(processo_override.get('cnj') or processo.cnj or str(processo.pk))
+            except Exception as exc:
+                logger.error("Erro ao gerar habilitação em lote para processo %s: %s", processo.pk, exc, exc_info=True)
+                failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
+
+        if generated:
+            self.message_user(
+                request,
+                f"Habilitações geradas: {len(generated)}. " + '; '.join(generated[:10]) + ('...' if len(generated) > 10 else ''),
+                messages.SUCCESS,
+            )
+        if pending:
+            self.message_user(
+                request,
+                f"Pendentes já geradas: {len(pending)}. " + '; '.join(pending[:10]) + ('...' if len(pending) > 10 else ''),
+                messages.WARNING,
+            )
+        if failed:
+            self.message_user(
+                request,
+                f"Não geradas: {len(failed)}. Corrija e gere depois. " + '; '.join(failed[:10]) + ('...' if len(failed) > 10 else ''),
+                messages.ERROR,
+            )
+        if not generated and not pending and not failed:
+            self.message_user(request, "Nenhum cadastro selecionado para gerar habilitação.", messages.WARNING)
+        return None
+    gerar_habilitacao_em_lote.short_description = "Gerar Habilitação em Lote"
 
     def _build_cnj_entries_context(self, obj):
         if not obj:

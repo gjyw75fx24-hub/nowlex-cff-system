@@ -2910,6 +2910,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ensureUserResponsesShape();
             syncProcessoVinculadoResponseKey(null, { preferKey: true });
             if (!Array.isArray(userResponses.processos_vinculados) || !userResponses.processos_vinculados.length) {
+                pruneIrrelevantMonitoriaSelection(userResponses);
                 return;
             }
             const cards = userResponses.processos_vinculados;
@@ -2923,6 +2924,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if (!cardData || typeof cardData !== 'object') {
                     return;
                 }
+                if (!cardData.tipo_de_acao_respostas || typeof cardData.tipo_de_acao_respostas !== 'object') {
+                    cardData.tipo_de_acao_respostas = {};
+                }
+                pruneIrrelevantMonitoriaSelection(cardData.tipo_de_acao_respostas);
                 const $supervisionToggle = $card.find('.supervision-toggle-input').first();
                 if ($supervisionToggle.length) {
                     cardData.supervisionado = Boolean($supervisionToggle.is(':checked'));
@@ -2948,6 +2953,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 ensureSupervisionFields(cardData);
                 syncEditingCardWithSaved(cardData);
             });
+            pruneIrrelevantMonitoriaSelection(userResponses);
         }
 
         function syncNaoJudicializadoSupervisionBeforePersist() {
@@ -3639,20 +3645,16 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 syncProcessoVinculadoResponseKey(processoListKey);
 
                 if (isMonitoria) {
-                    const contratoArray = parseContractsField(cardData.contratos);
-                    const contratoArrayNormalizado = Array.from(
-                        new Set(
-                            contratoArray
-                                .map(resolveContratoCandidate)
-                                .filter(Boolean)
-                                .map(item => item.id)
-                        )
+                    pruneIrrelevantMonitoriaSelection(savedResponses);
+                    const selectedMonitoriaContracts = parseContractsField(
+                        savedResponses.contratos_para_monitoria || []
                     );
-                    userResponses.contratos_para_monitoria =
-                        contratoArrayNormalizado.length > 0
-                            ? contratoArrayNormalizado
-                            : contratoArray;
-                    userResponses.ativar_botao_monitoria = contratoArray.length ? 'SIM' : '';
+                    userResponses.contratos_para_monitoria = selectedMonitoriaContracts;
+                    userResponses.ativar_botao_monitoria =
+                        shouldKeepMonitoriaContractSelection(savedResponses) &&
+                        selectedMonitoriaContracts.length > 0
+                            ? 'SIM'
+                            : '';
                 }
 
                 console.log('UserResponses completo:', userResponses);
@@ -3962,8 +3964,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             syncRenderedProcessCardsBeforePersist();
             syncNaoJudicializadoSupervisionBeforePersist();
             reconcileDuplicatedSummaryCards();
-            const treeSelectionIds = getMonitoriaContractIds();
+            pruneIrrelevantMonitoriaSelection(userResponses);
+            const treeSelectionIds = shouldKeepMonitoriaContractSelection(userResponses)
+                ? getMonitoriaContractIds()
+                : [];
             userResponses.contratos_para_monitoria = treeSelectionIds;
+            userResponses.ativar_botao_monitoria = treeSelectionIds.length ? 'SIM' : '';
             const currentGeneralSnapshot = getGeneralCardSnapshot();
             if (isCurrentGeneralMonitoriaEligible() && !shouldSkipGeneralCard()) {
                 const generalSnapshot = buildGeneralCardSnapshotFromCurrentResponses();
@@ -4858,7 +4864,9 @@ function formatCnjDigits(raw) {
                 ? options.excludeFields
                 : [];
             const treeData = options.treeData || treeConfig || {};
-            const responses = (processo && processo.tipo_de_acao_respostas) || processo || {};
+            const responses = normalizeResponsesForCurrentTree(
+                (processo && processo.tipo_de_acao_respostas) || processo || {}
+            );
 
             const keysOrdered = Object.keys(treeData || {})
                 .filter(Boolean)
@@ -5063,10 +5071,12 @@ function formatCnjDigits(raw) {
                 : '';
             const $ulDetalhes = $('<ul></ul>');
             const contratoIds = parseContractsField(processo.contratos);
+            const normalizedActionResponses = normalizeResponsesForCurrentTree(
+                processo && processo.tipo_de_acao_respostas ? processo.tipo_de_acao_respostas : {}
+            );
             const monitoriaIds = parseContractsField(
-                processo.tipo_de_acao_respostas &&
-                processo.tipo_de_acao_respostas.contratos_para_monitoria
-                    ? processo.tipo_de_acao_respostas.contratos_para_monitoria
+                normalizedActionResponses.contratos_para_monitoria
+                    ? normalizedActionResponses.contratos_para_monitoria
                     : []
             );
             // Para cálculos/saldos no resumo, prioriza os contratos selecionados para monitória.
@@ -7270,6 +7280,55 @@ function formatCnjDigits(raw) {
             );
         }
 
+        function getReproporMonitoriaValue(responses) {
+            return getResponseBySemanticKey(
+                responses || userResponses,
+                'repropor_monitoria',
+                findReproporMonitoriaQuestionKey
+            );
+        }
+
+        function isMonitoriaContractsQuestionKey(questionKey) {
+            if (!questionKey) {
+                return false;
+            }
+            const question = treeConfig && treeConfig[questionKey];
+            return Boolean(question && question.tipo_campo === 'CONTRATOS_MONITORIA');
+        }
+
+        function clearMonitoriaSelectionState(targetResponses) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return;
+            }
+            Object.keys(treeConfig || {}).forEach(key => {
+                if (isMonitoriaContractsQuestionKey(key)) {
+                    delete targetResponses[key];
+                }
+            });
+            delete targetResponses.selecionar_contratos_monitoria;
+            targetResponses.contratos_para_monitoria = [];
+            targetResponses.ativar_botao_monitoria = '';
+        }
+
+        function shouldKeepMonitoriaContractSelection(targetResponses) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return false;
+            }
+            return (
+                isYesResponse(getProporMonitoriaValue(targetResponses)) ||
+                isYesResponse(getReproporMonitoriaValue(targetResponses))
+            );
+        }
+
+        function pruneIrrelevantMonitoriaSelection(targetResponses) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return;
+            }
+            if (!shouldKeepMonitoriaContractSelection(targetResponses)) {
+                clearMonitoriaSelectionState(targetResponses);
+            }
+        }
+
         function applySemanticResponseAlias(targetResponses, finder, aliasKeys = []) {
             if (!targetResponses || typeof targetResponses !== 'object') {
                 return;
@@ -7346,6 +7405,7 @@ function formatCnjDigits(raw) {
                 findReproporMonitoriaQuestionKey,
                 ['repropor_monitoria']
             );
+            pruneIrrelevantMonitoriaSelection(normalizedResponses);
 
             const processoListKey = getProcessoVinculadoQuestionKey();
             if (
@@ -8086,8 +8146,8 @@ function formatCnjDigits(raw) {
             const clearResponsesForKey = (qKey) => {
                 if (!qKey) return;
                 delete currentResponses[qKey];
-                if (qKey === 'selecionar_contratos_monitoria') {
-                    currentResponses.contratos_para_monitoria = [];
+                if (qKey === 'selecionar_contratos_monitoria' || isMonitoriaContractsQuestionKey(qKey)) {
+                    clearMonitoriaSelectionState(currentResponses);
                 }
             };
 
