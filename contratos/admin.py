@@ -3480,8 +3480,29 @@ def guardados_view(request):
             return None
         return value if value > 0 else None
 
+    def _format_documento_digits(value):
+        digits = re.sub(r"\D", "", str(value or ""))
+        if len(digits) == 11:
+            return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+        if len(digits) == 14:
+            return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
+        return digits
+
+    def _parse_search_documentos(raw):
+        values = []
+        seen = set()
+        for chunk in re.split(r"[\s,;\t\r\n]+", str(raw or "")):
+            digits = re.sub(r"\D", "", chunk)
+            if len(digits) < 11 or digits in seen:
+                continue
+            seen.add(digits)
+            values.append(digits)
+        return values
+
     carteira_id = _safe_positive_int_value(request.GET.get("carteira"))
     tipo_slug = str(request.GET.get("tipo_analise") or "").strip()
+    search_query = str(request.GET.get("q") or "").strip()
+    ord_prescricao = str(request.GET.get("ord_prescricao") or "").strip().lower()
     viabilidade = str(request.GET.get("viabilidade") or "").strip().upper()
     prescricao_mes = _safe_positive_int_value(request.GET.get("prescricao_mes"))
     ordem = str(request.GET.get("ordem") or "recente").strip().lower()
@@ -3497,6 +3518,18 @@ def guardados_view(request):
     qs = ProcessoJudicial.objects.all()
     qs = filter_processos_queryset_for_user(qs, request.user)
 
+    if ord_prescricao != "incluir":
+        today = timezone.now().date()
+        nao_prescrito_q = (
+            models.Q(contratos__data_prescricao__gte=today) |
+            models.Q(contratos__data_prescricao__isnull=True)
+        )
+        qs = qs.annotate(
+            contratos_nao_prescritos=Count("contratos", filter=nao_prescrito_q, distinct=True)
+        ).filter(
+            contratos_nao_prescritos__gt=0
+        )
+
     if carteira_id:
         qs = qs.filter(
             Q(carteira_id=carteira_id) | Q(carteiras_vinculadas__id=carteira_id)
@@ -3505,6 +3538,30 @@ def guardados_view(request):
     viabilidade_choices = {key for key, _ in ProcessoJudicial.VIABILIDADE_CHOICES if key}
     if viabilidade in viabilidade_choices:
         qs = qs.filter(viabilidade=viabilidade)
+
+    if search_query:
+        document_search_values = _parse_search_documentos(search_query)
+        search_digits = re.sub(r"\D", "", search_query)
+        search_filter = (
+            Q(cnj__icontains=search_query) |
+            Q(numeros_cnj__cnj__icontains=search_query) |
+            Q(partes_processuais__nome__icontains=search_query)
+        )
+        if search_digits:
+            search_filter |= (
+                Q(cnj__icontains=search_digits) |
+                Q(numeros_cnj__cnj__icontains=search_digits)
+            )
+        if document_search_values:
+            documents_q = Q()
+            for document_digits in document_search_values:
+                documents_q |= (
+                    Q(partes_processuais__documento__iexact=document_digits) |
+                    Q(partes_processuais__documento__iexact=_format_documento_digits(document_digits)) |
+                    Q(partes_processuais__documento__icontains=document_digits)
+                )
+            search_filter |= documents_q
+        qs = qs.filter(search_filter).distinct()
 
     qs = qs.filter(analise_processo__isnull=False)
 
@@ -3887,11 +3944,13 @@ def guardados_view(request):
             ],
             "view_mode": view_mode,
             "selected": {
+                "q": search_query,
                 "carteira": str(carteira_id or ""),
                 "tipo_analise": tipo_slug,
                 "viabilidade": viabilidade,
                 "prescricao_mes": str(prescricao_mes or ""),
                 "ordem": ordem or "recente",
+                "ord_prescricao": ord_prescricao,
                 "analista": analista_query,
                 "supervision_status": supervision_status,
                 "periodo": periodo,
