@@ -10112,7 +10112,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             }
 
         base_filename = os.path.splitext(str(getattr(base_file, 'nome', '') or os.path.basename(base_path)))[0]
-        pdf_name = f"{base_filename}.pdf"
+        pdf_name = f"{base_filename}.pdf".replace('Habilitação', 'Habilitacao')
         arquivo_pdf = ProcessoArquivo(
             processo=processo,
             nome=pdf_name,
@@ -10125,6 +10125,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'status': 'generated',
             'arquivo': arquivo_pdf,
         }
+
+    def _normalize_batch_export_filename(self, filename, default_name='arquivo'):
+        raw_name = str(filename or '').strip() or default_name
+        raw_name = raw_name.replace('Habilitação', 'Habilitacao')
+        normalized = unicodedata.normalize('NFKD', raw_name)
+        normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = re.sub(r'[\\/:*?"<>|]+', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized or default_name
 
     def _load_habilitacao_batch_issues(self, request):
         raw_items = request.session.get(self.HABILITACAO_BATCH_ISSUES_SESSION_KEY, [])
@@ -10574,6 +10583,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         missing = []
         zip_buffer = io.BytesIO()
         zip_name = timezone.localtime().strftime('pdfs_habilitacao_lote_%Y%m%d_%H%M%S.zip')
+        used_filenames = set()
 
         processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
         with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -10605,9 +10615,22 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     missing.append(f"{cnj_label}: Não foi possível ler o PDF")
                     continue
 
-                safe_folder = re.sub(r'[^A-Za-z0-9._-]+', '_', cnj_label).strip('_') or str(processo.pk)
-                filename = os.path.basename(getattr(arquivo_pdf, 'nome', '') or getattr(getattr(arquivo_pdf, 'arquivo', None), 'name', '') or f'{safe_folder}.pdf')
-                zip_file.writestr(f"{safe_folder}/{filename}", pdf_bytes)
+                raw_filename = os.path.basename(
+                    getattr(arquivo_pdf, 'nome', '')
+                    or getattr(getattr(arquivo_pdf, 'arquivo', None), 'name', '')
+                    or f'{cnj_label}.pdf'
+                )
+                normalized_filename = self._normalize_batch_export_filename(raw_filename, default_name=f'{cnj_label}.pdf')
+                stem, ext = os.path.splitext(normalized_filename)
+                if not ext:
+                    ext = '.pdf'
+                candidate_name = f"{stem}{ext}"
+                suffix = 2
+                while candidate_name in used_filenames:
+                    candidate_name = f"{stem}__{suffix}{ext}"
+                    suffix += 1
+                used_filenames.add(candidate_name)
+                zip_file.writestr(candidate_name, pdf_bytes)
                 found.append(cnj_label)
 
             report_lines = [
@@ -10984,6 +11007,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         )
         counter = format_html('{}/{}', current_index + 1, total)
         control_buttons = format_html('{}{}', prev_btn, next_btn)
+        copyable_current_cnj = format_html(
+            '<span class="processo-copyable-token" data-copy-value="{}" data-copy-label="CNJ" tabindex="0" title="Clique para copiar o CNJ">{}</span>',
+            current_cnj,
+            current_cnj,
+        )
         return format_html(
             '<div class="cnj-nav-wrapper" style="display:flex; align-items:center; gap:6px;" data-cnj-values="{}" data-cnj-index="{}">'
             '<span class="cnj-current">{}</span>'
@@ -10992,7 +11020,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             '</div>',
             mark_safe(values_json),
             current_index,
-            current_cnj,
+            copyable_current_cnj,
             control_buttons,
             counter
         )
@@ -11005,7 +11033,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         else:
             parte = next((item for item in partes if item.tipo_polo == 'PASSIVO'), None)
         if parte and parte.documento:
-            return _format_cpf(parte.documento)
+            cpf_value = _format_cpf(parte.documento)
+            return format_html(
+                '<span class="processo-copyable-token" data-copy-value="{}" data-copy-label="CPF" tabindex="0" title="Clique para copiar o CPF">{}</span>',
+                cpf_value,
+                cpf_value,
+            )
         return "-"
 
     @admin.display(description=mark_safe('<span style="white-space:nowrap;">Valuation por Contratos</span>'))

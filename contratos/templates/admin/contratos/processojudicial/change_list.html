@@ -319,6 +319,22 @@
             background: currentColor;
             opacity: 0.8;
         }
+        .processo-copyable-token {
+            cursor: copy;
+            border-radius: 6px;
+            padding: 0 2px;
+            transition: background-color 0.16s ease, color 0.16s ease;
+        }
+        .processo-copyable-token:hover,
+        .processo-copyable-token:focus {
+            background: rgba(37, 99, 235, 0.10);
+            color: #1d4ed8;
+            outline: none;
+        }
+        .processo-copyable-token--copied {
+            background: rgba(22, 163, 74, 0.16);
+            color: #166534;
+        }
         .processo-cpf-lote-inline__item {
             display: inline-flex;
             align-items: center;
@@ -2956,6 +2972,55 @@
             if (selectedAction === 'baixar_pdfs_habilitacao_em_lote') {
                 showOverlay('Montando o ZIP com os PDFs de habilitação. Quando o navegador iniciar o download, você pode fechar este aviso.', true);
             }
+        });
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const flashCopied = (element) => {
+            if (!element) return;
+            element.classList.add('processo-copyable-token--copied');
+            window.setTimeout(() => element.classList.remove('processo-copyable-token--copied'), 900);
+        };
+
+        const copyValue = async (element) => {
+            const value = (element?.dataset?.copyValue || '').trim();
+            if (!value) return;
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(value);
+                } else {
+                    const helper = document.createElement('textarea');
+                    helper.value = value;
+                    helper.setAttribute('readonly', 'readonly');
+                    helper.style.position = 'absolute';
+                    helper.style.left = '-9999px';
+                    document.body.appendChild(helper);
+                    helper.select();
+                    document.execCommand('copy');
+                    helper.remove();
+                }
+                flashCopied(element);
+            } catch (error) {
+                window.alert(`Não foi possível copiar ${element.dataset.copyLabel || 'o valor'}.`);
+            }
+        };
+
+        document.body.addEventListener('click', (event) => {
+            const target = event.target.closest('.processo-copyable-token');
+            if (!target) return;
+            event.preventDefault();
+            event.stopPropagation();
+            copyValue(target);
+        });
+
+        document.body.addEventListener('keydown', (event) => {
+            const target = event.target.closest('.processo-copyable-token');
+            if (!target) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            copyValue(target);
         });
     });
     </script>

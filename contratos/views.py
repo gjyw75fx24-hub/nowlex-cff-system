@@ -820,7 +820,7 @@ def _build_cobranca_base_filename(polo_passivo, contratos):
 def _build_habilitacao_base_filename(polo_passivo, processo, cnj_reference=None):
     nome_parte = _extrair_primeiros_nomes(polo_passivo.nome or '', 2) or 'parte'
     reference = cnj_reference or processo.cnj or f'processo-{processo.pk}'
-    base = f"Habilitação - {nome_parte} - {reference}"
+    base = f"Habilitacao - {nome_parte} - {reference}"
     return _sanitize_filename(base)
 
 

@@ -187,6 +187,34 @@
     background: currentColor;
     opacity: 0.8;
   }
+  .processo-copyable-token {
+    cursor: copy;
+    border-radius: 6px;
+    padding: 0 2px;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .processo-copyable-token:hover,
+  .processo-copyable-token:focus {
+    background: rgba(37, 99, 235, 0.10);
+    color: #1d4ed8;
+    outline: none;
+  }
+  .processo-copyable-token--copied {
+    background: rgba(22, 163, 74, 0.16);
+    color: #166534;
+  }
+  .processo-copy-open-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 6px;
+    color: #5b667a;
+    text-decoration: none;
+    font-size: 0.88rem;
+  }
+  .processo-copy-open-link:hover {
+    color: #1d4ed8;
+  }
   .processo-cpf-lote-inline__item {
     display: inline-flex;
     align-items: center;
@@ -695,7 +723,10 @@
                   <tr{% if item.is_overdue %} class="lembrete-overdue"{% endif %}>
                     <td><input type="checkbox" name="{{ action_checkbox_name }}" value="{{ item.processo_id }}" class="action-select"></td>
                     <td>{{ item.uf|default:"-" }}</td>
-                    <td><a href="{{ item.admin_url }}">{{ item.cnj }}</a></td>
+                    <td>
+                      <span class="processo-copyable-token" data-copy-value="{{ item.cnj }}" data-copy-label="CNJ" tabindex="0" title="Clique para copiar o CNJ">{{ item.cnj }}</span>
+                      <a href="{{ item.admin_url }}" class="processo-copy-open-link" title="Abrir cadastro">↗</a>
+                    </td>
                     <td>{{ item.polo_passivo|default:"-" }}</td>
                     <td>{{ item.polo_ativo|default:"-" }}</td>
                     <td>{% if item.busca_ativa %}Sim{% else %}Não{% endif %}</td>
@@ -1194,6 +1225,52 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  const flashCopied = (element) => {
+    if (!element) return;
+    element.classList.add('processo-copyable-token--copied');
+    window.setTimeout(() => element.classList.remove('processo-copyable-token--copied'), 900);
+  };
+
+  const copyValue = async (element) => {
+    const value = (element?.dataset?.copyValue || '').trim();
+    if (!value) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const helper = document.createElement('textarea');
+        helper.value = value;
+        helper.setAttribute('readonly', 'readonly');
+        helper.style.position = 'absolute';
+        helper.style.left = '-9999px';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      }
+      flashCopied(element);
+    } catch (error) {
+      window.alert(`Não foi possível copiar ${element.dataset.copyLabel || 'o valor'}.`);
+    }
+  };
+
+  document.body.addEventListener('click', function(event) {
+    const target = event.target.closest('.processo-copyable-token');
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    copyValue(target);
+  });
+
+  document.body.addEventListener('keydown', function(event) {
+    const target = event.target.closest('.processo-copyable-token');
+    if (!target) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    copyValue(target);
+  });
+
   const searchForm = document.getElementById('changelist-search');
   if (!searchForm) return;
   const input = searchForm.querySelector('input[name="q"]');
