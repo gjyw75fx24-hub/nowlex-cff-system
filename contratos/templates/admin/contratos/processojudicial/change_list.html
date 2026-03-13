@@ -274,6 +274,51 @@
             font-size: 0.75rem;
             color: #6b7280;
         }
+        .processo-prescritos-shortcut {
+            flex-basis: 100%;
+            display: flex;
+            align-items: center;
+            margin-top: 2px;
+        }
+        .processo-prescritos-shortcut__button {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            border: 1px solid #ef9a9a;
+            background: #fff5f5;
+            color: #b42318;
+            font-size: 0.74rem;
+            line-height: 1;
+            text-decoration: none;
+            transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+        .processo-prescritos-shortcut__button:hover {
+            background: #ffe4e6;
+            border-color: #e57373;
+        }
+        .processo-prescritos-shortcut__button--inactive {
+            background: #fff8f8;
+            border-color: #f6c1c1;
+            color: #c07070;
+            font-weight: 500;
+        }
+        .processo-prescritos-shortcut__button--active {
+            background: #fde2e2;
+            border-color: #d32f2f;
+            color: #8f1818;
+            font-weight: 700;
+        }
+        .processo-prescritos-shortcut__button::before {
+            content: '';
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.8;
+        }
         .processo-cpf-lote-inline__item {
             display: inline-flex;
             align-items: center;
@@ -1009,6 +1054,17 @@
                         {% endif %}
                     </a>
                 {% endif %}
+                <div class="processo-prescritos-shortcut">
+                    <a
+                        href="#"
+                        class="processo-prescritos-shortcut__button {% if request.GET.ord_prescricao == 'incluir' %}processo-prescritos-shortcut__button--active{% else %}processo-prescritos-shortcut__button--inactive{% endif %}"
+                        data-prescritos-shortcut="1"
+                        data-active="{% if request.GET.ord_prescricao == 'incluir' %}1{% else %}0{% endif %}"
+                        aria-pressed="{% if request.GET.ord_prescricao == 'incluir' %}true{% else %}false{% endif %}"
+                    >
+                        Incluir prescritos
+                    </a>
+                </div>
                 <div class="processo-cpf-lote-inline" id="cpf-lote-inline">
                     <span class="processo-cpf-lote-inline__item" id="cpf-lote-count" hidden>
                         CPFs no lote:
@@ -2843,6 +2899,19 @@
     <script defer src="{% static 'admin/js/changelist_row_open_prompt.js' %}?v=20260212b"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('[data-prescritos-shortcut="1"]').forEach((link) => {
+            const isActive = link.dataset.active === '1';
+            const url = new URL(window.location.href);
+            url.searchParams.delete('p');
+            if (isActive) {
+                url.searchParams.delete('ord_prescricao');
+            } else {
+                url.searchParams.set('ord_prescricao', 'incluir');
+            }
+            const query = url.searchParams.toString();
+            link.href = query ? `${url.pathname}?${query}` : url.pathname;
+        });
+
         const etiquetasData = JSON.parse('{{ etiquetas_data_json|escapejs }}' || '{}');
         
         setTimeout(function() {

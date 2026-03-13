@@ -12035,7 +12035,7 @@ document.addEventListener('DOMContentLoaded', function() {
             row.className = 'form-row field-cpf-demandas';
             row.innerHTML = `
                 <div class="flex-container">
-                    <label>CPF</label>
+                    <label>CPF/CNPJ</label>
                     <div class="cpf-demandas-group">
                         <div class="cpf-demandas-actions">
                             <input type="text" class="cpf-demandas-input" placeholder="Buscar cadastro por CPF">
