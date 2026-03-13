@@ -44,6 +44,32 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     const cnjEntriesInput = ensureHiddenInput('cnj_entries_data');
     const cnjActiveIndexInput = ensureHiddenInput('cnj_active_index');
+    const ensureVaraHint = () => {
+        if (!varaInput || varaInput.dataset.comarcaHintReady === '1') {
+            return;
+        }
+        const hostField = varaInput.closest('.form-row, .field-box, .field-vara, .flex-container') || varaInput.parentElement;
+        if (!hostField) {
+            return;
+        }
+        const hint = document.createElement('div');
+        hint.className = 'vara-comarca-hint';
+        hint.textContent = 'Dica: após "vara", use "de + comarca/cidade" para o endereçamento da peça.';
+        hint.style.display = 'block';
+        hint.style.width = '100%';
+        hint.style.flexBasis = '100%';
+        hint.style.fontSize = '0.78rem';
+        hint.style.color = '#6b7280';
+        hint.style.marginTop = '8px';
+        hint.style.lineHeight = '1.35';
+        const hostDisplay = window.getComputedStyle(hostField).display || '';
+        if (hostDisplay.includes('flex')) {
+            hostField.style.flexWrap = 'wrap';
+        }
+        hostField.appendChild(hint);
+        varaInput.dataset.comarcaHintReady = '1';
+    };
+    ensureVaraHint();
     const dedupeEntryStates = () => {
         const seen = new Set();
         const filtered = [];

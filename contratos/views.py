@@ -1401,6 +1401,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     uf = replacements.get('UF', '')
     vara_value = override_vara if override_vara is not None else processo.vara
     comarca_header = _extract_comarca_from_vara(vara_value) or comarca or cidade
+    cidade_foro = comarca_header or cidade
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
     _replace_with_style(
@@ -1409,7 +1410,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
         _format_vara_text(vara_value),
         uppercase=True
     )
-    _replace_with_style(document, '[CIDADE]', cidade, uppercase=True)
+    _replace_with_style(document, '[CIDADE]', cidade_foro, uppercase=True)
     _replace_with_style(document, '[UF]', uf.upper(), uppercase=True)
     _replace_with_style(
         document,
@@ -1439,7 +1440,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     _replace_with_style(document, '[CABEÇALHO]', saudacao, uppercase=True, bold=True)
     _bold_paragraphs_containing(document, saudacao)
 
-    local_date = f"{cidade.capitalize()}/{uf.upper()}, {data_por_extenso}"
+    local_date = f"{cidade_foro.capitalize()}/{uf.upper()}, {data_por_extenso}"
     _replace_with_style(document, '[LOCAL_DATA]', local_date, uppercase=False)
 
     stream = BytesIO()
