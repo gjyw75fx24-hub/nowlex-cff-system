@@ -1327,15 +1327,26 @@ def _parse_habilitacao_data(polo_passivo):
     }
 
 
+def _prefer_non_empty_text(primary, fallback=''):
+    if primary is None:
+        return fallback
+    if isinstance(primary, str):
+        cleaned = primary.strip()
+        if cleaned:
+            return cleaned
+        return fallback
+    return primary
+
+
 def _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override=None):
     processo_override = processo_override or {}
     override_cnj = processo_override.get('cnj')
     override_vara = processo_override.get('vara')
     missing = []
-    cnj_value = override_cnj if override_cnj is not None else processo.cnj
+    cnj_value = _prefer_non_empty_text(override_cnj, processo.cnj)
     if not (cnj_value and str(cnj_value).strip()):
         missing.append('Número de processo (CNJ)')
-    vara_value = override_vara if override_vara is not None else processo.vara
+    vara_value = _prefer_non_empty_text(override_vara, processo.vara)
     if not (vara_value and str(vara_value).strip()):
         missing.append('Vara')
     endereco = polo_passivo.endereco or ''
@@ -1400,10 +1411,10 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     cidade = replacements.get('CIDADE', '')
     comarca = replacements.get('COMARCA', '')
     uf = replacements.get('UF', '')
-    vara_value = override_vara if override_vara is not None else processo.vara
+    vara_value = _prefer_non_empty_text(override_vara, processo.vara)
     comarca_header = _extract_comarca_from_vara(vara_value) or comarca or cidade
     cidade_foro = comarca_header or cidade
-    uf_foro = (override_uf if override_uf is not None else processo.uf) or uf or ''
+    uf_foro = _prefer_non_empty_text(override_uf, processo.uf) or uf or ''
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
     _replace_with_style(
@@ -1417,7 +1428,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     _replace_with_style(
         document,
         '[Processo]',
-        (override_cnj if override_cnj is not None else processo.cnj) or '',
+        _prefer_non_empty_text(override_cnj, processo.cnj) or '',
         uppercase=False
     )
     _replace_with_style(document, '[Polo Passivo]', polo_passivo.nome, uppercase=False)

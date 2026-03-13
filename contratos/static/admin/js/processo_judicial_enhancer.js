@@ -1375,6 +1375,20 @@ document.addEventListener('DOMContentLoaded', function() {
         updateCnjDisplayHeading();
     };
 
+    const initializeCnjScopedInlineRow = (row) => {
+        if (!row || row.classList?.contains('empty-form')) {
+            return;
+        }
+        const activeEntry = getActiveEntryState() || ensureDraftEntryState();
+        if (row.closest('#partes_processuais-group')) {
+            setupParteInline(row);
+        }
+        if (activeEntry) {
+            bindRowToEntry(row, activeEntry, true);
+        }
+        row.style.display = '';
+    };
+
     const observeInlineCnjRows = () => {
         if (inlineCnjObserver) {
             return;
@@ -1390,7 +1404,24 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!mutations.some((mutation) => mutation.addedNodes && mutation.addedNodes.length)) {
                 return;
             }
-            window.requestAnimationFrame(refreshCnjScopedInlines);
+            const addedRows = [];
+            mutations.forEach((mutation) => {
+                Array.from(mutation.addedNodes || []).forEach((node) => {
+                    if (!(node instanceof Element)) {
+                        return;
+                    }
+                    if (node.matches('.inline-related, tr.dynamic-andamentos, .dynamic-andamento')) {
+                        addedRows.push(node);
+                    }
+                    node.querySelectorAll?.('.inline-related, tr.dynamic-andamentos, .dynamic-andamento').forEach((row) => {
+                        addedRows.push(row);
+                    });
+                });
+            });
+            window.requestAnimationFrame(() => {
+                addedRows.forEach((row) => initializeCnjScopedInlineRow(row));
+                refreshCnjScopedInlines();
+            });
         });
         groups.forEach((group) => {
             inlineCnjObserver.observe(group, { childList: true, subtree: true });
