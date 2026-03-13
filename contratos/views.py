@@ -1394,6 +1394,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     processo_override = processo_override or {}
     override_cnj = processo_override.get('cnj')
     override_vara = processo_override.get('vara')
+    override_uf = processo_override.get('uf')
     replacements = _parse_habilitacao_data(polo_passivo)
     endereco = replacements.get('ENDERECO', '')
     cidade = replacements.get('CIDADE', '')
@@ -1402,6 +1403,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     vara_value = override_vara if override_vara is not None else processo.vara
     comarca_header = _extract_comarca_from_vara(vara_value) or comarca or cidade
     cidade_foro = comarca_header or cidade
+    uf_foro = (override_uf if override_uf is not None else processo.uf) or uf or ''
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
     _replace_with_style(
@@ -1411,7 +1413,7 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
         uppercase=True
     )
     _replace_with_style(document, '[CIDADE]', cidade_foro, uppercase=True)
-    _replace_with_style(document, '[UF]', uf.upper(), uppercase=True)
+    _replace_with_style(document, '[UF]', uf_foro.upper(), uppercase=True)
     _replace_with_style(
         document,
         '[Processo]',
@@ -1435,12 +1437,12 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
 
     saudacao = (
         f"EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {_format_vara_text(vara_value)} "
-        f"DA COMARCA DE {comarca_header.upper()} - {uf.upper()}"
+        f"DA COMARCA DE {comarca_header.upper()} - {uf_foro.upper()}"
     )
     _replace_with_style(document, '[CABEÇALHO]', saudacao, uppercase=True, bold=True)
     _bold_paragraphs_containing(document, saudacao)
 
-    local_date = f"{cidade_foro.capitalize()}/{uf.upper()}, {data_por_extenso}"
+    local_date = f"{cidade_foro.capitalize()}/{uf_foro.upper()}, {data_por_extenso}"
     _replace_with_style(document, '[LOCAL_DATA]', local_date, uppercase=False)
 
     stream = BytesIO()
