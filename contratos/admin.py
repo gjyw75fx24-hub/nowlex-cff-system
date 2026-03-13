@@ -8631,7 +8631,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         'excluir_andamentos_selecionados',
         'delegate_processes',
         'gerar_habilitacao_em_lote',
+        'gerar_pdf_habilitacao_em_lote',
         'baixar_combo_habilitacao_em_lote',
+        'baixar_pdfs_habilitacao_em_lote',
         'change_carteira_bulk',
         'inserir_lembrete',
         'ligar_busca_ativa_em_lote',
@@ -9884,7 +9886,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
         if protocol_type != 'habilitacao':
             actions.pop('gerar_habilitacao_em_lote', None)
+            actions.pop('gerar_pdf_habilitacao_em_lote', None)
             actions.pop('baixar_combo_habilitacao_em_lote', None)
+            actions.pop('baixar_pdfs_habilitacao_em_lote', None)
         return actions
 
     def _resolve_habilitacao_target_entry(self, processo):
@@ -9935,6 +9939,129 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             )
         )
         return candidates[0]
+
+    def _find_existing_piece_pdf(self, processo, piece_type, base_file=None):
+        arquivos = getattr(processo, '_prefetched_arquivos', None)
+        if arquivos is None:
+            arquivos = getattr(processo, '_prefetched_objects_cache', {}).get('arquivos')
+        if arquivos is None:
+            arquivos = list(
+                processo.arquivos.only('id', 'nome', 'arquivo', 'protocolado_no_tribunal', 'criado_em').all()
+            )
+
+        base_name_stems = set()
+        if base_file is not None:
+            base_nome = str(getattr(base_file, 'nome', '') or '').strip()
+            base_path = str(getattr(getattr(base_file, 'arquivo', None), 'name', '') or '').strip()
+            if base_nome:
+                base_name_stems.add(os.path.splitext(base_nome)[0].lower())
+            if base_path:
+                base_name_stems.add(os.path.splitext(os.path.basename(base_path))[0].lower())
+
+        candidates = []
+        for arquivo in arquivos:
+            nome_arquivo = getattr(arquivo, 'nome', '')
+            arquivo_path = getattr(getattr(arquivo, 'arquivo', None), 'name', '')
+            if not str(arquivo_path or '').lower().endswith('.pdf'):
+                continue
+            tipo_slug = self._classify_peticao_kind(nome_arquivo, arquivo_path)
+            if tipo_slug != piece_type:
+                continue
+
+            candidate_nome_stem = os.path.splitext(str(nome_arquivo or '').strip().lower())[0]
+            candidate_path_stem = os.path.splitext(os.path.basename(str(arquivo_path or '').strip().lower()))[0]
+            exact_match = bool(base_name_stems and (
+                candidate_nome_stem in base_name_stems or candidate_path_stem in base_name_stems
+            ))
+            candidates.append((
+                1 if exact_match else 0,
+                bool(getattr(arquivo, 'protocolado_no_tribunal', False)),
+                -int(getattr(arquivo, 'id', 0) or 0),
+                arquivo,
+            ))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+        return candidates[0][3]
+
+    def _ensure_habilitacao_pdf(self, processo, *, acting_user=None):
+        cnj_entry = self._resolve_habilitacao_target_entry(processo)
+        cnj_label = str(
+            (cnj_entry.cnj if cnj_entry else '')
+            or processo.cnj
+            or processo.pk
+        ).strip()
+
+        base_file = self._find_existing_piece_file(processo, 'habilitacao')
+        if base_file is None:
+            return {
+                'ok': False,
+                'cnj': cnj_label,
+                'reason': 'Peça base de habilitação não encontrada',
+            }
+
+        base_path = str(getattr(getattr(base_file, 'arquivo', None), 'name', '') or '').strip().lower()
+        if base_path.endswith('.pdf'):
+            return {
+                'ok': True,
+                'cnj': cnj_label,
+                'status': 'existing',
+                'arquivo': base_file,
+            }
+
+        existing_pdf = self._find_existing_piece_pdf(processo, 'habilitacao', base_file=base_file)
+        if existing_pdf is not None:
+            return {
+                'ok': True,
+                'cnj': cnj_label,
+                'status': 'existing',
+                'arquivo': existing_pdf,
+            }
+
+        if not base_path.endswith('.docx'):
+            return {
+                'ok': False,
+                'cnj': cnj_label,
+                'reason': 'Peça base encontrada, mas não está em DOCX/PDF',
+            }
+
+        from .views import _convert_docx_to_pdf_bytes
+
+        try:
+            base_file.arquivo.open('rb')
+            docx_bytes = base_file.arquivo.read()
+            base_file.arquivo.close()
+        except Exception as exc:
+            logger.error("Erro ao ler DOCX de habilitação %s para converter em PDF: %s", base_file.pk, exc, exc_info=True)
+            return {
+                'ok': False,
+                'cnj': cnj_label,
+                'reason': 'Não foi possível ler a peça base DOCX',
+            }
+
+        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+        if not pdf_bytes:
+            return {
+                'ok': False,
+                'cnj': cnj_label,
+                'reason': 'Não foi possível converter o DOCX para PDF',
+            }
+
+        base_filename = os.path.splitext(str(getattr(base_file, 'nome', '') or os.path.basename(base_path)))[0]
+        pdf_name = f"{base_filename}.pdf"
+        arquivo_pdf = ProcessoArquivo(
+            processo=processo,
+            nome=pdf_name,
+            enviado_por=acting_user if getattr(acting_user, 'is_authenticated', False) else None,
+        )
+        arquivo_pdf.arquivo.save(pdf_name, ContentFile(pdf_bytes), save=True)
+        return {
+            'ok': True,
+            'cnj': cnj_label,
+            'status': 'generated',
+            'arquivo': arquivo_pdf,
+        }
 
     def _load_habilitacao_batch_issues(self, request):
         raw_items = request.session.get(self.HABILITACAO_BATCH_ISSUES_SESSION_KEY, [])
@@ -10163,6 +10290,54 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         return None
     gerar_habilitacao_em_lote.short_description = "Gerar Habilitação em Lote"
 
+    def gerar_pdf_habilitacao_em_lote(self, request, queryset):
+        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+        if protocol_type != 'habilitacao':
+            self.message_user(
+                request,
+                "A ação 'Gerar PDF em Lote (Habilitação)' só fica disponível no filtro Para Protocolar > Habilitação.",
+                messages.ERROR,
+            )
+            return None
+
+        generated = []
+        reused = []
+        failed = []
+
+        processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
+        for processo in processos.iterator(chunk_size=25):
+            result = self._ensure_habilitacao_pdf(processo, acting_user=request.user)
+            if not result.get('ok'):
+                failed.append(f"{result.get('cnj')}: {result.get('reason')}")
+                continue
+            if result.get('status') == 'generated':
+                generated.append(result.get('cnj'))
+            else:
+                reused.append(result.get('cnj'))
+
+        if generated:
+            self.message_user(
+                request,
+                f"PDFs gerados: {len(generated)}. " + '; '.join(generated[:10]) + ('...' if len(generated) > 10 else ''),
+                messages.SUCCESS,
+            )
+        if reused:
+            self.message_user(
+                request,
+                f"PDFs já existentes reaproveitados: {len(reused)}. " + '; '.join(reused[:10]) + ('...' if len(reused) > 10 else ''),
+                messages.INFO,
+            )
+        if failed:
+            self.message_user(
+                request,
+                f"PDFs não gerados: {len(failed)}. " + '; '.join(failed[:10]) + ('...' if len(failed) > 10 else ''),
+                messages.ERROR,
+            )
+        if not generated and not reused and not failed:
+            self.message_user(request, "Nenhum cadastro selecionado para gerar PDF em lote.", messages.WARNING)
+        return None
+    gerar_pdf_habilitacao_em_lote.short_description = "Gerar PDF em Lote (Habilitação)"
+
     def baixar_combo_habilitacao_em_lote(self, request, queryset):
         try:
             protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
@@ -10317,6 +10492,82 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             )
             return None
     baixar_combo_habilitacao_em_lote.short_description = "Baixar Combo ZIP de Habilitação em Lote"
+
+    def baixar_pdfs_habilitacao_em_lote(self, request, queryset):
+        protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
+        if protocol_type != 'habilitacao':
+            self.message_user(
+                request,
+                "A ação 'Baixar PDFs em Lote (Habilitação)' só fica disponível no filtro Para Protocolar > Habilitação.",
+                messages.ERROR,
+            )
+            return None
+
+        found = []
+        missing = []
+        zip_buffer = io.BytesIO()
+        zip_name = timezone.localtime().strftime('pdfs_habilitacao_lote_%Y%m%d_%H%M%S.zip')
+
+        processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
+        with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+            for processo in processos.iterator(chunk_size=100):
+                base_file = self._find_existing_piece_file(processo, 'habilitacao')
+                cnj_entry = self._resolve_habilitacao_target_entry(processo)
+                cnj_label = str(
+                    (cnj_entry.cnj if cnj_entry else '')
+                    or processo.cnj
+                    or processo.pk
+                ).strip()
+                if base_file is None:
+                    missing.append(f"{cnj_label}: peça base de habilitação não encontrada")
+                    continue
+                base_path = str(getattr(getattr(base_file, 'arquivo', None), 'name', '') or '').strip().lower()
+                if base_path.endswith('.pdf'):
+                    arquivo_pdf = base_file
+                else:
+                    arquivo_pdf = self._find_existing_piece_pdf(processo, 'habilitacao', base_file=base_file)
+                if not arquivo_pdf or not getattr(arquivo_pdf, 'arquivo', None):
+                    missing.append(f"{cnj_label}: PDF ainda não gerado")
+                    continue
+                try:
+                    arquivo_pdf.arquivo.open('rb')
+                    pdf_bytes = arquivo_pdf.arquivo.read()
+                    arquivo_pdf.arquivo.close()
+                except Exception as exc:
+                    logger.error("Erro ao ler PDF de habilitação %s para lote: %s", getattr(arquivo_pdf, 'pk', None), exc, exc_info=True)
+                    missing.append(f"{cnj_label}: Não foi possível ler o PDF")
+                    continue
+
+                safe_folder = re.sub(r'[^A-Za-z0-9._-]+', '_', cnj_label).strip('_') or str(processo.pk)
+                filename = os.path.basename(getattr(arquivo_pdf, 'nome', '') or getattr(getattr(arquivo_pdf, 'arquivo', None), 'name', '') or f'{safe_folder}.pdf')
+                zip_file.writestr(f"{safe_folder}/{filename}", pdf_bytes)
+                found.append(cnj_label)
+
+            report_lines = [
+                "Relatório - PDFs de Habilitação em Lote",
+                "",
+                f"PDFs incluídos: {len(found)}",
+                f"Pendências: {len(missing)}",
+                "",
+            ]
+            if found:
+                report_lines.extend(["Incluídos:"] + [f"- {item}" for item in found] + [""])
+            if missing:
+                report_lines.extend(["Pendências:"] + [f"- {item}" for item in missing] + [""])
+            zip_file.writestr("relatorio_pdfs_habilitacao.txt", "\n".join(report_lines).encode('utf-8'))
+
+        if not found:
+            self.message_user(
+                request,
+                f"Nenhum PDF de habilitação foi reunido. {'; '.join(missing[:10])}{'...' if len(missing) > 10 else ''}",
+                messages.ERROR,
+            )
+            return None
+
+        response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="{zip_name}"'
+        return response
+    baixar_pdfs_habilitacao_em_lote.short_description = "Baixar PDFs em Lote (Habilitação)"
 
     def _build_cnj_entries_context(self, obj):
         if not obj:
@@ -11211,6 +11462,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         habilitacao_batch_issues = self._build_habilitacao_batch_issue_context(request)
         extra_context['habilitacao_batch_issues'] = habilitacao_batch_issues
         extra_context['habilitacao_batch_issue_revalidate_url'] = reverse('admin:processo_habilitacao_batch_issue_revalidate')
+        extra_context['habilitacao_pdf_batch_generate_url'] = reverse('admin:processo_habilitacao_pdf_batch_generate')
         extra_context['habilitacao_batch_issue_pending_count'] = sum(
             1 for item in habilitacao_batch_issues if not item.get('resolved')
         )
@@ -11277,6 +11529,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'habilitacao-lote/pendencias/revalidar/',
                 self.admin_site.admin_view(self.habilitacao_batch_issue_revalidate_view),
                 name='processo_habilitacao_batch_issue_revalidate',
+            ),
+            path(
+                'habilitacao-lote/pdf/gerar-chunk/',
+                self.admin_site.admin_view(self.habilitacao_pdf_batch_generate_view),
+                name='processo_habilitacao_pdf_batch_generate',
             ),
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/bulk/', self.admin_site.admin_view(self.etiquetas_bulk_view), name='processo_etiquetas_bulk'),
@@ -11346,6 +11603,59 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'item': normalized_item,
             'pending_count': sum(1 for entry in issues if not entry.get('resolved')),
             'resolved_count': sum(1 for entry in issues if entry.get('resolved')),
+        })
+
+    def habilitacao_pdf_batch_generate_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+
+        raw_ids = request.POST.getlist('process_ids[]') or request.POST.getlist('process_ids')
+        try:
+            process_ids = [int(value) for value in raw_ids if str(value).strip()]
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Lista de processos inválida.'}, status=400)
+        if not process_ids:
+            return JsonResponse({'error': 'Selecione ao menos um cadastro.'}, status=400)
+
+        protocol_type = str(request.GET.get('para_protocolar') or request.POST.get('para_protocolar') or '').strip().lower()
+        if protocol_type != 'habilitacao':
+            return JsonResponse({'error': 'Filtro inválido para geração de PDF em lote.'}, status=400)
+
+        generated = []
+        reused = []
+        failed = []
+
+        processos = (
+            ProcessoJudicial.objects
+            .select_related('analise_processo')
+            .prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
+            .filter(pk__in=process_ids)
+        )
+        process_map = {processo.pk: processo for processo in processos}
+
+        for process_id in process_ids:
+            processo = process_map.get(process_id)
+            if not processo:
+                failed.append({'processo_id': process_id, 'cnj': str(process_id), 'reason': 'Cadastro não encontrado'})
+                continue
+            result = self._ensure_habilitacao_pdf(processo, acting_user=request.user)
+            if not result.get('ok'):
+                failed.append({'processo_id': process_id, 'cnj': result.get('cnj') or str(process_id), 'reason': result.get('reason') or 'Falha ao gerar PDF'})
+                continue
+            item = {'processo_id': process_id, 'cnj': result.get('cnj') or str(process_id)}
+            if result.get('status') == 'generated':
+                generated.append(item)
+            else:
+                reused.append(item)
+
+        return JsonResponse({
+            'ok': True,
+            'generated': generated,
+            'reused': reused,
+            'failed': failed,
+            'processed': len(generated) + len(reused) + len(failed),
         })
 
     def _cpf_lote_accessible_qs(self, request):

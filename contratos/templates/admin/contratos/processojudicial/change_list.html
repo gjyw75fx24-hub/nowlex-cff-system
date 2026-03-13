@@ -2804,6 +2804,9 @@
     document.addEventListener('DOMContentLoaded', function() {
         const changelistForm = document.getElementById('changelist-form');
         if (!changelistForm) return;
+        const pdfChunkUrl = "{{ habilitacao_pdf_batch_generate_url|default:''|escapejs }}";
+        const csrfInput = changelistForm.querySelector('input[name="csrfmiddlewaretoken"]');
+        const csrfToken = csrfInput ? csrfInput.value : '';
 
         const ensureOverlay = () => {
             let overlay = document.getElementById('bulk-action-progress-overlay');
@@ -2866,6 +2869,56 @@
             overlay.style.display = 'flex';
         };
 
+        const runGenerateHabilitacaoPdfInChunks = async (processIds) => {
+            if (!pdfChunkUrl) {
+                throw new Error('Endpoint de geração de PDF em lote não configurado.');
+            }
+            const chunkSize = 5;
+            let processed = 0;
+            let generated = 0;
+            let reused = 0;
+            let failed = 0;
+            const failures = [];
+
+            for (let start = 0; start < processIds.length; start += chunkSize) {
+                const chunk = processIds.slice(start, start + chunkSize);
+                showOverlay(
+                    `Gerando PDFs de habilitação em lote... ${processed}/${processIds.length} concluídos. Gerados: ${generated} | Reaproveitados: ${reused} | Falhas: ${failed}`,
+                    false
+                );
+
+                const formData = new FormData();
+                chunk.forEach((id) => formData.append('process_ids[]', id));
+                formData.append('para_protocolar', 'habilitacao');
+
+                const response = await fetch(pdfChunkUrl, {
+                    method: 'POST',
+                    headers: csrfToken ? { 'X-CSRFToken': csrfToken } : {},
+                    body: formData,
+                    credentials: 'same-origin',
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.ok !== true) {
+                    throw new Error(payload.error || payload.detail || 'Falha ao gerar PDFs do lote.');
+                }
+
+                generated += Array.isArray(payload.generated) ? payload.generated.length : 0;
+                reused += Array.isArray(payload.reused) ? payload.reused.length : 0;
+                failed += Array.isArray(payload.failed) ? payload.failed.length : 0;
+                if (Array.isArray(payload.failed)) {
+                    failures.push(...payload.failed);
+                }
+                processed += Number(payload.processed || chunk.length || 0);
+            }
+
+            const summary = `Gerando PDFs de habilitação em lote... ${processIds.length}/${processIds.length} concluídos. Gerados: ${generated} | Reaproveitados: ${reused} | Falhas: ${failed}`;
+            showOverlay(summary, true);
+            setTimeout(() => {
+                const currentUrl = new URL(window.location.href);
+                window.location.href = currentUrl.toString();
+            }, 800);
+        };
+
         window.addEventListener('pageshow', () => {
             const overlay = document.getElementById('bulk-action-progress-overlay');
             if (overlay) {
@@ -2873,7 +2926,7 @@
             }
         });
 
-        changelistForm.addEventListener('submit', function() {
+        changelistForm.addEventListener('submit', function(event) {
             const actionSelect = changelistForm.querySelector('select[name="action"]');
             if (!actionSelect) return;
             const selectedAction = String(actionSelect.value || '').trim();
@@ -2885,8 +2938,23 @@
                 showOverlay('Gerando habilitações em lote. A página será atualizada ao concluir.', false);
                 return;
             }
+            if (selectedAction === 'gerar_pdf_habilitacao_em_lote') {
+                event.preventDefault();
+                const processIds = Array.from(checkedRows).map((input) => String(input.value || '').trim()).filter(Boolean);
+                if (!processIds.length) {
+                    return;
+                }
+                runGenerateHabilitacaoPdfInChunks(processIds).catch((error) => {
+                    showOverlay(`Falha ao gerar PDFs em lote. ${error.message || 'Erro desconhecido.'}`, true);
+                });
+                return;
+            }
             if (selectedAction === 'baixar_combo_habilitacao_em_lote') {
                 showOverlay('Montando o combo ZIP em lote. Quando o navegador iniciar o download, você pode fechar este aviso.', true);
+                return;
+            }
+            if (selectedAction === 'baixar_pdfs_habilitacao_em_lote') {
+                showOverlay('Montando o ZIP com os PDFs de habilitação. Quando o navegador iniciar o download, você pode fechar este aviso.', true);
             }
         });
     });
