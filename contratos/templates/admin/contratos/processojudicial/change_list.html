@@ -352,6 +352,160 @@
             background: #edf2f7;
             color: #4a5568;
         }
+        .habilitacao-batch-panel {
+            margin-top: 10px;
+            padding: 14px 16px;
+            border: 1px solid #d9e6ef;
+            border-radius: 14px;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef5fb 100%);
+            flex-basis: 100%;
+        }
+        .habilitacao-batch-panel__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .habilitacao-batch-panel__title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #1f3f68;
+        }
+        .habilitacao-batch-panel__meta {
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            font-size: 0.82rem;
+            color: #516070;
+        }
+        .habilitacao-batch-panel__badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid #cddbe9;
+            background: #fff;
+            font-weight: 600;
+        }
+        .habilitacao-batch-panel__badge--pending {
+            border-color: #f2c0c0;
+            color: #b42318;
+            background: #fff5f5;
+        }
+        .habilitacao-batch-panel__badge--resolved {
+            border-color: #93c5fd;
+            color: #1d4ed8;
+            background: #eff6ff;
+        }
+        .habilitacao-batch-panel__list {
+            display: grid;
+            gap: 10px;
+        }
+        .habilitacao-batch-item {
+            border: 1px solid #e4e8ef;
+            border-radius: 12px;
+            background: #fff;
+            padding: 12px 14px;
+        }
+        .habilitacao-batch-item--resolved {
+            border-color: #93c5fd;
+            background: #eff6ff;
+        }
+        .habilitacao-batch-item__top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .habilitacao-batch-item__main {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .habilitacao-batch-item__cnj {
+            font-weight: 700;
+            color: #1f3f68;
+            text-decoration: none;
+        }
+        .habilitacao-batch-item__cnj:hover {
+            text-decoration: underline;
+        }
+        .habilitacao-batch-item__status {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            border: 1px solid #f2c0c0;
+            background: #fff5f5;
+            color: #b42318;
+        }
+        .habilitacao-batch-item--resolved .habilitacao-batch-item__status {
+            border-color: #93c5fd;
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        .habilitacao-batch-item__updated-at {
+            font-size: 0.74rem;
+            color: #6b7280;
+        }
+        .habilitacao-batch-item__actions {
+            display: inline-flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .habilitacao-batch-item__button,
+        .habilitacao-batch-item__link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid #c7d3e6;
+            background: #fff;
+            color: #1f3f68;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .habilitacao-batch-item__button:hover,
+        .habilitacao-batch-item__link:hover {
+            background: #f5f8fd;
+        }
+        .habilitacao-batch-item__button[disabled] {
+            opacity: 0.6;
+            cursor: wait;
+        }
+        .habilitacao-batch-item__details {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #d8dee8;
+        }
+        .habilitacao-batch-item__details[hidden] {
+            display: none;
+        }
+        .habilitacao-batch-item__details ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .habilitacao-batch-item__details li {
+            margin-bottom: 4px;
+            color: #4b5563;
+        }
+        .habilitacao-batch-item__details-note {
+            margin: 0;
+            color: #1d4ed8;
+            font-weight: 600;
+        }
         .cpf-lote-modal {
             position: fixed;
             inset: 0;
@@ -910,6 +1064,80 @@
                                 {% endif %}
                             </div>
                         </div>
+                    </div>
+                </div>
+            {% endif %}
+            {% if habilitacao_batch_issues %}
+                <div
+                    class="habilitacao-batch-panel"
+                    data-habilitacao-batch-panel="1"
+                    data-revalidate-url="{{ habilitacao_batch_issue_revalidate_url }}"
+                >
+                    <div class="habilitacao-batch-panel__header">
+                        <span class="habilitacao-batch-panel__title">Pendências da Geração em Lote</span>
+                        <span class="habilitacao-batch-panel__meta">
+                            <span class="habilitacao-batch-panel__badge habilitacao-batch-panel__badge--pending" data-habilitacao-batch-pending-count>
+                                Pendentes: {{ habilitacao_batch_issue_pending_count }}
+                            </span>
+                            <span class="habilitacao-batch-panel__badge habilitacao-batch-panel__badge--resolved" data-habilitacao-batch-resolved-count>
+                                Corrigidos: {{ habilitacao_batch_issue_resolved_count }}
+                            </span>
+                        </span>
+                    </div>
+                    <div class="habilitacao-batch-panel__list">
+                        {% for item in habilitacao_batch_issues %}
+                            <div
+                                class="habilitacao-batch-item{% if item.resolved %} habilitacao-batch-item--resolved{% endif %}"
+                                data-habilitacao-batch-item
+                                data-processo-id="{{ item.processo_id }}"
+                            >
+                                <div class="habilitacao-batch-item__top">
+                                    <div class="habilitacao-batch-item__main">
+                                        <a
+                                            class="habilitacao-batch-item__cnj"
+                                            href="{{ item.admin_url }}"
+                                            target="_blank"
+                                            rel="noopener"
+                                        >{{ item.cnj }}</a>
+                                        <span class="habilitacao-batch-item__status" data-habilitacao-batch-status>
+                                            {{ item.status_label }}
+                                        </span>
+                                        {% if item.updated_at %}
+                                            <span class="habilitacao-batch-item__updated-at" data-habilitacao-batch-updated-at>
+                                                Atualizado em {{ item.updated_at }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="habilitacao-batch-item__actions">
+                                        <button type="button" class="habilitacao-batch-item__button" data-habilitacao-batch-toggle>
+                                            Ver pendências
+                                        </button>
+                                        <a
+                                            class="habilitacao-batch-item__link"
+                                            href="{{ item.admin_url }}"
+                                            target="_blank"
+                                            rel="noopener"
+                                        >Entrar no cadastro</a>
+                                        <button type="button" class="habilitacao-batch-item__button" data-habilitacao-batch-revalidate>
+                                            Atualizar/Verificar
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="habilitacao-batch-item__details" data-habilitacao-batch-details hidden>
+                                    {% if item.resolved %}
+                                        <p class="habilitacao-batch-item__details-note">
+                                            Pendências resolvidas. Gere novamente a habilitação quando quiser.
+                                        </p>
+                                    {% else %}
+                                        <ul data-habilitacao-batch-reasons>
+                                            {% for reason in item.reasons %}
+                                                <li>{{ reason }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
                     </div>
                 </div>
             {% endif %}
@@ -2826,6 +3054,109 @@
         } else {
             searchInput.insertAdjacentElement('afterend', clearBtn);
         }
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const panel = document.querySelector('[data-habilitacao-batch-panel="1"]');
+        if (!panel) return;
+
+        const revalidateUrl = panel.dataset.revalidateUrl || '';
+        const pendingCountEl = panel.querySelector('[data-habilitacao-batch-pending-count]');
+        const resolvedCountEl = panel.querySelector('[data-habilitacao-batch-resolved-count]');
+
+        const getCsrfToken = () => {
+            const match = document.cookie.match(/(?:^|;)\s*csrftoken=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        };
+        const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[char] || char));
+
+        const updateCounters = () => {
+            const items = Array.from(panel.querySelectorAll('[data-habilitacao-batch-item]'));
+            const pendingCount = items.filter((item) => !item.classList.contains('habilitacao-batch-item--resolved')).length;
+            const resolvedCount = items.length - pendingCount;
+            if (pendingCountEl) {
+                pendingCountEl.textContent = `Pendentes: ${pendingCount}`;
+            }
+            if (resolvedCountEl) {
+                resolvedCountEl.textContent = `Corrigidos: ${resolvedCount}`;
+            }
+        };
+
+        panel.addEventListener('click', async (event) => {
+            const toggleButton = event.target.closest('[data-habilitacao-batch-toggle]');
+            if (toggleButton) {
+                const item = toggleButton.closest('[data-habilitacao-batch-item]');
+                const details = item?.querySelector('[data-habilitacao-batch-details]');
+                if (details) {
+                    details.hidden = !details.hidden;
+                }
+                return;
+            }
+
+            const verifyButton = event.target.closest('[data-habilitacao-batch-revalidate]');
+            if (!verifyButton) return;
+
+            const item = verifyButton.closest('[data-habilitacao-batch-item]');
+            if (!item || !revalidateUrl) return;
+
+            const processoId = item.dataset.processoId;
+            verifyButton.disabled = true;
+            const originalText = verifyButton.textContent;
+            verifyButton.textContent = 'Verificando...';
+
+            try {
+                const response = await fetch(revalidateUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken(),
+                    },
+                    body: JSON.stringify({ processo_id: processoId }),
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.error) {
+                    throw new Error(payload.error || 'Não foi possível verificar a pendência.');
+                }
+
+                const updatedItem = payload.item || {};
+                const statusEl = item.querySelector('[data-habilitacao-batch-status]');
+                const details = item.querySelector('[data-habilitacao-batch-details]');
+                const updatedAt = item.querySelector('[data-habilitacao-batch-updated-at]');
+                const isResolved = Boolean(updatedItem.resolved);
+
+                item.classList.toggle('habilitacao-batch-item--resolved', isResolved);
+                if (statusEl) {
+                    statusEl.textContent = updatedItem.status_label || (isResolved ? 'Corrigido' : 'Pendente');
+                }
+                if (updatedAt) {
+                    updatedAt.textContent = updatedItem.updated_at ? `Atualizado em ${updatedItem.updated_at}` : '';
+                }
+                if (details) {
+                    if (isResolved) {
+                        details.innerHTML = '<p class="habilitacao-batch-item__details-note">Pendências resolvidas. Gere novamente a habilitação quando quiser.</p>';
+                    } else {
+                        const reasons = Array.isArray(updatedItem.reasons) ? updatedItem.reasons : [];
+                        details.innerHTML = `<ul data-habilitacao-batch-reasons>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>`;
+                    }
+                    details.hidden = false;
+                }
+                updateCounters();
+            } catch (error) {
+                window.alert(error.message || 'Não foi possível verificar a pendência.');
+            } finally {
+                verifyButton.disabled = false;
+                verifyButton.textContent = originalText;
+            }
+        });
+
+        updateCounters();
     });
     </script>
 {% endblock %}

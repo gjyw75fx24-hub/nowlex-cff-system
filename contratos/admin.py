@@ -8640,6 +8640,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
     FILTER_SESSION_KEY = 'processo_last_filters'
     FILTER_SKIP_KEY = 'processo_skip_last_filters'
+    HABILITACAO_BATCH_ISSUES_SESSION_KEY = 'processo_habilitacao_batch_issues'
     PARA_PROTOCOLAR_LABELS = {
         'habilitacao': 'Habilitação',
         'cumprimento_sentenca': 'Cumprimento de Sentença',
@@ -9935,6 +9936,128 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         )
         return candidates[0]
 
+    def _load_habilitacao_batch_issues(self, request):
+        raw_items = request.session.get(self.HABILITACAO_BATCH_ISSUES_SESSION_KEY, [])
+        if not isinstance(raw_items, list):
+            return []
+        items = []
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            processo_id = raw.get('processo_id')
+            try:
+                processo_id = int(processo_id)
+            except (TypeError, ValueError):
+                continue
+            reasons = raw.get('reasons') or []
+            if not isinstance(reasons, list):
+                reasons = [str(reasons)]
+            items.append({
+                'processo_id': processo_id,
+                'cnj': str(raw.get('cnj') or processo_id).strip(),
+                'reasons': [str(reason).strip() for reason in reasons if str(reason).strip()],
+                'resolved': bool(raw.get('resolved')),
+                'updated_at': str(raw.get('updated_at') or ''),
+            })
+        return items
+
+    def _save_habilitacao_batch_issues(self, request, items):
+        request.session[self.HABILITACAO_BATCH_ISSUES_SESSION_KEY] = items
+        request.session.modified = True
+
+    def _merge_habilitacao_batch_issues(self, request, failed_items=None, resolved_process_ids=None):
+        failed_items = failed_items or []
+        resolved_process_ids = resolved_process_ids or []
+        issues_by_process = {
+            int(item['processo_id']): item
+            for item in self._load_habilitacao_batch_issues(request)
+        }
+        now_label = timezone.localtime().strftime('%d/%m/%Y %H:%M')
+
+        for processo_id in resolved_process_ids:
+            try:
+                process_id_int = int(processo_id)
+            except (TypeError, ValueError):
+                continue
+            existing = issues_by_process.get(process_id_int)
+            if not existing:
+                continue
+            existing['resolved'] = True
+            existing['reasons'] = []
+            existing['updated_at'] = now_label
+
+        for item in failed_items:
+            try:
+                process_id_int = int(item.get('processo_id'))
+            except (TypeError, ValueError):
+                continue
+            issues_by_process[process_id_int] = {
+                'processo_id': process_id_int,
+                'cnj': str(item.get('cnj') or process_id_int).strip(),
+                'reasons': [str(reason).strip() for reason in (item.get('reasons') or []) if str(reason).strip()],
+                'resolved': False,
+                'updated_at': now_label,
+            }
+
+        merged_items = list(issues_by_process.values())
+        merged_items.sort(key=lambda item: (item['resolved'], item['cnj']))
+        self._save_habilitacao_batch_issues(request, merged_items)
+        return merged_items
+
+    def _build_habilitacao_batch_issue_context(self, request):
+        items = []
+        for item in self._load_habilitacao_batch_issues(request):
+            item_copy = {
+                **item,
+                'admin_url': reverse('admin:contratos_processojudicial_change', args=[item['processo_id']]),
+                'status_label': 'Corrigido' if item.get('resolved') else 'Pendente',
+            }
+            items.append(item_copy)
+        items.sort(key=lambda item: (item['resolved'], item['cnj']))
+        return items
+
+    def _build_habilitacao_process_context(self, processo):
+        polo_passivo = next(
+            (
+                parte for parte in getattr(processo, '_prefetched_objects_cache', {}).get('partes_processuais', [])
+                if parte.tipo_polo == 'PASSIVO'
+            ),
+            None,
+        )
+        if polo_passivo is None:
+            polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+
+        cnj_entry = self._resolve_habilitacao_target_entry(processo)
+        processo_override = {}
+        if cnj_entry:
+            processo_override = {
+                'cnj': cnj_entry.cnj or '',
+                'uf': cnj_entry.uf or '',
+                'vara': cnj_entry.vara or '',
+                'tribunal': cnj_entry.tribunal or '',
+                'valor_causa': cnj_entry.valor_causa,
+            }
+        return polo_passivo, processo_override
+
+    def _revalidate_habilitacao_batch_issue(self, processo):
+        from .views import _collect_missing_habilitacao_fields
+
+        cnj_label = ''
+        reasons = []
+        polo_passivo, processo_override = self._build_habilitacao_process_context(processo)
+        cnj_label = str(processo_override.get('cnj') or processo.cnj or processo.pk).strip()
+        if not polo_passivo:
+            reasons.append('Polo passivo não encontrado')
+        else:
+            reasons.extend(_collect_missing_habilitacao_fields(processo, polo_passivo, processo_override))
+        return {
+            'processo_id': processo.pk,
+            'cnj': cnj_label,
+            'reasons': reasons,
+            'resolved': not reasons,
+            'updated_at': timezone.localtime().strftime('%d/%m/%Y %H:%M'),
+        }
+
     def gerar_habilitacao_em_lote(self, request, queryset):
         protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
         if protocol_type != 'habilitacao':
@@ -9954,39 +10077,35 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         generated = []
         pending = []
         failed = []
+        failed_items = []
+        resolved_issue_ids = []
 
         processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
         for processo in processos.iterator(chunk_size=100):
             if self._has_pending_generated_piece(processo, 'habilitacao'):
                 pending.append(f"{processo.pk}: já existe habilitação gerada pendente de protocolo")
+                resolved_issue_ids.append(processo.pk)
                 continue
 
-            polo_passivo = next(
-                (parte for parte in getattr(processo, '_prefetched_objects_cache', {}).get('partes_processuais', []) if parte.tipo_polo == 'PASSIVO'),
-                None,
-            )
-            if polo_passivo is None:
-                polo_passivo = processo.partes_processuais.filter(tipo_polo='PASSIVO').first()
+            polo_passivo, processo_override = self._build_habilitacao_process_context(processo)
             if not polo_passivo:
                 failed.append(f"{processo.pk}: polo passivo não encontrado")
+                failed_items.append({
+                    'processo_id': processo.pk,
+                    'cnj': processo.cnj or str(processo.pk),
+                    'reasons': ['Polo passivo não encontrado'],
+                })
                 continue
-
-            cnj_entry = self._resolve_habilitacao_target_entry(processo)
-            processo_override = {}
-            if cnj_entry:
-                processo_override = {
-                    'cnj': cnj_entry.cnj or '',
-                    'uf': cnj_entry.uf or '',
-                    'vara': cnj_entry.vara or '',
-                    'tribunal': cnj_entry.tribunal or '',
-                    'valor_causa': cnj_entry.valor_causa,
-                }
 
             missing_fields = _collect_missing_habilitacao_fields(processo, polo_passivo, processo_override)
             if missing_fields:
-                failed.append(
-                    f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: faltam {', '.join(missing_fields)}"
-                )
+                cnj_label = processo_override.get('cnj') or processo.cnj or str(processo.pk)
+                failed.append(f"{cnj_label}: faltam {', '.join(missing_fields)}")
+                failed_items.append({
+                    'processo_id': processo.pk,
+                    'cnj': cnj_label,
+                    'reasons': [f"Faltam {field}" for field in missing_fields],
+                })
                 continue
 
             try:
@@ -10004,9 +10123,22 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 )
                 arquivo_docx.arquivo.save(docx_name, ContentFile(docx_bytes), save=True)
                 generated.append(processo_override.get('cnj') or processo.cnj or str(processo.pk))
+                resolved_issue_ids.append(processo.pk)
             except Exception as exc:
                 logger.error("Erro ao gerar habilitação em lote para processo %s: %s", processo.pk, exc, exc_info=True)
-                failed.append(f"{(processo_override.get('cnj') or processo.cnj or processo.pk)}: {exc}")
+                cnj_label = processo_override.get('cnj') or processo.cnj or str(processo.pk)
+                failed.append(f"{cnj_label}: {exc}")
+                failed_items.append({
+                    'processo_id': processo.pk,
+                    'cnj': cnj_label,
+                    'reasons': [str(exc)],
+                })
+
+        self._merge_habilitacao_batch_issues(
+            request,
+            failed_items=failed_items,
+            resolved_process_ids=resolved_issue_ids,
+        )
 
         if generated:
             self.message_user(
@@ -10023,7 +10155,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if failed:
             self.message_user(
                 request,
-                f"Não geradas: {len(failed)}. Corrija e gere depois. " + '; '.join(failed[:10]) + ('...' if len(failed) > 10 else ''),
+                f"Não geradas: {len(failed)}. Veja o painel de pendências acima da lista para corrigir e revalidar os cadastros.",
                 messages.ERROR,
             )
         if not generated and not pending and not failed:
@@ -11076,6 +11208,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         extra_context['cpf_lote_rename_url'] = reverse('admin:processo_cpf_lote_rename')
         extra_context['cpf_lote_delete_url'] = reverse('admin:processo_cpf_lote_delete')
         extra_context['cpf_lote_share_url'] = reverse('admin:processo_cpf_lote_share')
+        habilitacao_batch_issues = self._build_habilitacao_batch_issue_context(request)
+        extra_context['habilitacao_batch_issues'] = habilitacao_batch_issues
+        extra_context['habilitacao_batch_issue_revalidate_url'] = reverse('admin:processo_habilitacao_batch_issue_revalidate')
+        extra_context['habilitacao_batch_issue_pending_count'] = sum(
+            1 for item in habilitacao_batch_issues if not item.get('resolved')
+        )
+        extra_context['habilitacao_batch_issue_resolved_count'] = sum(
+            1 for item in habilitacao_batch_issues if item.get('resolved')
+        )
         response = super().changelist_view(request, extra_context=extra_context)
         context_data = getattr(response, 'context_data', None)
         if not context_data:
@@ -11132,6 +11273,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
+            path(
+                'habilitacao-lote/pendencias/revalidar/',
+                self.admin_site.admin_view(self.habilitacao_batch_issue_revalidate_view),
+                name='processo_habilitacao_batch_issue_revalidate',
+            ),
             path('<path:object_id>/etiquetas/', self.admin_site.admin_view(self.etiquetas_view), name='processo_etiquetas'),
             path('etiquetas/bulk/', self.admin_site.admin_view(self.etiquetas_bulk_view), name='processo_etiquetas_bulk'),
             path('<path:object_id>/checagem-sistemas/', self.admin_site.admin_view(self.checagem_sistemas_view), name='processo_checagem_sistemas'),
@@ -11151,6 +11297,56 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
+
+    def habilitacao_batch_issue_revalidate_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+
+        try:
+            processo_id = int(payload.get('processo_id'))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Processo inválido.'}, status=400)
+
+        issues = self._load_habilitacao_batch_issues(request)
+        issue_index = next((idx for idx, item in enumerate(issues) if item.get('processo_id') == processo_id), None)
+        if issue_index is None:
+            return JsonResponse({'error': 'Pendência não encontrada.'}, status=404)
+
+        processo = (
+            ProcessoJudicial.objects
+            .select_related('analise_processo')
+            .prefetch_related('numeros_cnj', 'partes_processuais')
+            .filter(pk=processo_id)
+            .first()
+        )
+        if not processo:
+            item = issues[issue_index]
+            item['resolved'] = False
+            item['reasons'] = ['Cadastro não encontrado']
+            item['updated_at'] = timezone.localtime().strftime('%d/%m/%Y %H:%M')
+        else:
+            item = self._revalidate_habilitacao_batch_issue(processo)
+            issues[issue_index] = item
+
+        issues.sort(key=lambda item: (item.get('resolved', False), item.get('cnj') or ''))
+        self._save_habilitacao_batch_issues(request, issues)
+
+        normalized_item = next(
+            item for item in self._build_habilitacao_batch_issue_context(request)
+            if item.get('processo_id') == processo_id
+        )
+        return JsonResponse({
+            'ok': True,
+            'item': normalized_item,
+            'pending_count': sum(1 for entry in issues if not entry.get('resolved')),
+            'resolved_count': sum(1 for entry in issues if entry.get('resolved')),
+        })
 
     def _cpf_lote_accessible_qs(self, request):
         return (
