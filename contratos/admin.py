@@ -9985,7 +9985,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
         return candidates[0][3]
 
-    def _ensure_habilitacao_pdf(self, processo, *, acting_user=None):
+    def _ensure_habilitacao_pdf(self, processo, *, acting_user=None, allow_remote_conversion=True):
         cnj_entry = self._resolve_habilitacao_target_entry(processo)
         cnj_label = str(
             (cnj_entry.cnj if cnj_entry else '')
@@ -10040,7 +10040,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'reason': 'Não foi possível ler a peça base DOCX',
             }
 
-        pdf_bytes = _convert_docx_to_pdf_bytes(docx_bytes)
+        pdf_bytes = _convert_docx_to_pdf_bytes(
+            docx_bytes,
+            allow_remote=allow_remote_conversion,
+            gotenberg_timeout=45 if allow_remote_conversion else 0,
+        )
         if not pdf_bytes:
             return {
                 'ok': False,
@@ -10306,7 +10310,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
         processos = queryset.select_related('analise_processo').prefetch_related('numeros_cnj', 'partes_processuais', 'arquivos')
         for processo in processos.iterator(chunk_size=25):
-            result = self._ensure_habilitacao_pdf(processo, acting_user=request.user)
+            result = self._ensure_habilitacao_pdf(
+                processo,
+                acting_user=request.user,
+                allow_remote_conversion=False,
+            )
             if not result.get('ok'):
                 failed.append(f"{result.get('cnj')}: {result.get('reason')}")
                 continue
@@ -11640,7 +11648,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             if not processo:
                 failed.append({'processo_id': process_id, 'cnj': str(process_id), 'reason': 'Cadastro não encontrado'})
                 continue
-            result = self._ensure_habilitacao_pdf(processo, acting_user=request.user)
+            result = self._ensure_habilitacao_pdf(
+                processo,
+                acting_user=request.user,
+                allow_remote_conversion=False,
+            )
             if not result.get('ok'):
                 failed.append({'processo_id': process_id, 'cnj': result.get('cnj') or str(process_id), 'reason': result.get('reason') or 'Falha ao gerar PDF'})
                 continue

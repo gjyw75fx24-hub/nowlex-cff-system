@@ -824,16 +824,17 @@ def _build_habilitacao_base_filename(polo_passivo, processo, cnj_reference=None)
     return _sanitize_filename(base)
 
 
-def _convert_docx_to_pdf_bytes(docx_bytes):
+def _convert_docx_to_pdf_bytes(docx_bytes, *, allow_remote=True, gotenberg_timeout=120):
     """
     Converte DOCX para PDF.
-    Prioriza Gotenberg (serviço com LibreOffice embutido).
+    Prioriza Gotenberg (serviço com LibreOffice embutido) quando permitido.
     Se não disponível, tenta LibreOffice local (soffice/libreoffice).
     Como fallback, usa mammoth + xhtml2pdf (100% Python).
     Último recurso: reportlab direto do DOCX (texto/tabelas).
     """
-    # Tenta Gotenberg primeiro (serviço Docker com LibreOffice)
-    gotenberg_url = getattr(settings, 'GOTENBERG_URL', os.environ.get('GOTENBERG_URL', ''))
+    gotenberg_url = ''
+    if allow_remote:
+        gotenberg_url = getattr(settings, 'GOTENBERG_URL', os.environ.get('GOTENBERG_URL', ''))
 
     def _convert_with_gotenberg():
         if not gotenberg_url:
@@ -844,30 +845,26 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
             response = requests.post(
                 f"{gotenberg_url}/forms/libreoffice/convert",
                 files=files,
-                timeout=120
+                timeout=gotenberg_timeout
             )
             if response.status_code == 200 and response.content:
                 pdf_size = len(response.content)
                 logger.info("Gotenberg: conversão bem-sucedida (PDF: %d bytes)", pdf_size)
 
-                # Valida se é um PDF válido (começa com %PDF-)
                 if response.content[:5] == b'%PDF-':
-                    # Verifica se não está muito pequeno (possível erro)
-                    if pdf_size > 1000:  # PDFs válidos geralmente têm mais de 1KB
+                    if pdf_size > 1000:
                         return response.content
-                    else:
-                        logger.warning("Gotenberg: PDF muito pequeno (%d bytes), pode estar corrompido", pdf_size)
+                    logger.warning("Gotenberg: PDF muito pequeno (%d bytes), pode estar corrompido", pdf_size)
                 else:
                     logger.warning("Gotenberg: Conteúdo retornado não é um PDF válido")
             else:
                 logger.warning("Gotenberg falhou: status=%s", response.status_code)
         except requests.Timeout:
-            logger.warning("Gotenberg timeout após 120s")
+            logger.warning("Gotenberg timeout após %ss", gotenberg_timeout)
         except Exception as exc:
             logger.warning("Erro ao usar Gotenberg: %s", exc)
         return None
 
-    # Tenta Gotenberg primeiro
     if gotenberg_url:
         gotenberg_pdf = _convert_with_gotenberg()
         if gotenberg_pdf:
@@ -892,10 +889,6 @@ def _convert_docx_to_pdf_bytes(docx_bytes):
         logger.error("LibreOffice não encontrado. Tentou: %s", ", ".join(candidates))
         logger.error("PATH atual: %s", os.environ.get('PATH', 'N/A'))
         return None
-
-    gotenberg_pdf = _convert_with_gotenberg()
-    if gotenberg_pdf:
-        return gotenberg_pdf
 
     # Tenta LibreOffice local
     soffice_cmd = _find_soffice()
