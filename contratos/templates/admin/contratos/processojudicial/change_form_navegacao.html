@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', function () {
 .documento-peticoes-modify-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
 }
@@ -136,6 +137,7 @@ document.addEventListener('DOMContentLoaded', function () {
  .documento-peticoes-modify-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
 }
@@ -155,7 +157,9 @@ document.addEventListener('DOMContentLoaded', function () {
 .documento-peticoes-selected-file {
   font-size: 0.76rem;
   color: #5d6d86;
-  max-width: 260px;
+  flex: 1 1 520px;
+  max-width: 520px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -370,6 +374,12 @@ document.addEventListener('DOMContentLoaded', function() {
   modal.addEventListener('click', function(e) {
     if (e.target === modal) closeModal();
   });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      e.preventDefault();
+      closeModal();
+    }
+  });
 
   // Variáveis globais para o visualizador PDF
   let pdfDoc = null;
@@ -409,11 +419,29 @@ document.addEventListener('DOMContentLoaded', function() {
     return pdfJsLoader;
   };
 
+  const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const getHrefPath = (href) => {
+    if (!href) return '';
+    try {
+      return new URL(href, window.location.origin).pathname || '';
+    } catch (error) {
+      return String(href).split('#')[0].split('?')[0];
+    }
+  };
+
+  const hasFileExtension = (href, pattern) => pattern.test(getHrefPath(href));
+
   function renderFile(href) {
     console.log('[DEBUG] renderFile chamado com href:', href);
     if (!href) return;
-    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
-    const isPdf = /\.pdf$/i.test(href) || /\/convert-to-pdf\/?/.test(href);
+    const isImage = hasFileExtension(href, /\.(png|jpe?g|gif|webp|bmp)$/i);
+    const isPdf = hasFileExtension(href, /\.pdf$/i) || /\/convert-to-pdf\/?/.test(href);
     console.log('[DEBUG] isImage:', isImage, 'isPdf:', isPdf);
     if (!isImage && !isPdf) {
       console.log('[DEBUG] Arquivo não é imagem nem PDF, abortando');
@@ -546,18 +574,59 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  function showZipPreview(href, label) {
+  function showZipPreview(href, label, contentsUrl) {
     if (!href) return;
     const fileName = label || href.split('/').pop() || 'arquivo.zip';
     const safeName = escapeHtml(fileName);
     content.innerHTML = `
-      <div style="max-width:480px; text-align:left; display:flex; flex-direction:column; gap:12px;">
-        <h3 style="margin:0 0 6px;font-size:1.1rem;">Pré-visualização do ZIP</h3>
+      <div style="max-width:680px; min-width:520px; text-align:left; display:flex; flex-direction:column; gap:12px;">
+        <h3 style="margin:0 0 6px;font-size:1.1rem;">Conteúdo do ZIP</h3>
         <p style="margin:0; color:#333;">Arquivo: <strong>${safeName}</strong></p>
-        <p style="margin:0; color:#555;">Use o botão abaixo para baixar o pacote finalizado.</p>
-        <a href="${href}" target="_blank" rel="noopener" class="button" style="background:#1c7ed6; border-color:#1660af; padding:6px 12px; font-weight:600;">Baixar ZIP</a>
+        <p style="margin:0; color:#555;">Carregando lista de arquivos...</p>
       </div>`;
     modal.style.display = 'flex';
+
+    const buildDownloadButton = () => `
+      <a href="${href}" target="_blank" rel="noopener" class="button" style="background:#1c7ed6; border-color:#1660af; padding:6px 12px; font-weight:600; align-self:flex-start;">Baixar ZIP</a>
+    `;
+    if (!contentsUrl) {
+      content.innerHTML = `
+        <div style="max-width:680px; min-width:520px; text-align:left; display:flex; flex-direction:column; gap:12px;">
+          <h3 style="margin:0 0 6px;font-size:1.1rem;">Conteúdo do ZIP</h3>
+          <p style="margin:0; color:#333;">Arquivo: <strong>${safeName}</strong></p>
+          <p style="margin:0; color:#c00;">Não foi possível localizar a lista interna deste ZIP.</p>
+          ${buildDownloadButton()}
+        </div>`;
+      return;
+    }
+
+    fetch(contentsUrl, { headers: { Accept: 'application/json' } })
+      .then((response) => response.json().then((payload) => ({ response, payload })))
+      .then(({ response, payload }) => {
+        if (!response.ok || payload.status !== 'success') {
+          throw new Error(payload.error || 'Não foi possível listar os arquivos do ZIP.');
+        }
+        const entries = Array.isArray(payload.entries) ? payload.entries : [];
+        const listMarkup = entries.length
+          ? `<ol style="margin:0; padding-left:20px; max-height:55vh; overflow:auto;">${entries.map((entry) => `<li style="margin:0 0 6px; word-break:break-word;">${escapeHtml(entry)}</li>`).join('')}</ol>`
+          : '<p style="margin:0; color:#555;">O ZIP não contém arquivos listáveis.</p>';
+        content.innerHTML = `
+          <div style="max-width:680px; min-width:520px; text-align:left; display:flex; flex-direction:column; gap:12px;">
+            <h3 style="margin:0 0 6px;font-size:1.1rem;">Conteúdo do ZIP</h3>
+            <p style="margin:0; color:#333;">Arquivo: <strong>${safeName}</strong></p>
+            ${listMarkup}
+            ${buildDownloadButton()}
+          </div>`;
+      })
+      .catch((error) => {
+        content.innerHTML = `
+          <div style="max-width:680px; min-width:520px; text-align:left; display:flex; flex-direction:column; gap:12px;">
+            <h3 style="margin:0 0 6px;font-size:1.1rem;">Conteúdo do ZIP</h3>
+            <p style="margin:0; color:#333;">Arquivo: <strong>${safeName}</strong></p>
+            <p style="margin:0; color:#c00;">${escapeHtml(error.message || 'Não foi possível listar os arquivos do ZIP.')}</p>
+            ${buildDownloadButton()}
+          </div>`;
+      });
   }
 
   document.body.addEventListener('click', function(e) {
@@ -578,10 +647,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Apenas links de arquivo da pasta do processo
     if (!/\/media\/processos\//.test(href) && !/processos\/[\d]+\/pasta\//.test(href)) return;
     // Extensões suportadas (imagens, PDFs; DOCX tenta abrir o PDF-irmão, senão alerta)
-    const isImage = /\.(png|jpe?g|gif|webp|bmp)$/i.test(href);
-    const isPdf = /\.pdf$/i.test(href);
-    const isDocx = /\.docx$/i.test(href);
-    const isZip = /\.zip$/i.test(href);
+    const isImage = hasFileExtension(href, /\.(png|jpe?g|gif|webp|bmp)$/i);
+    const isPdf = hasFileExtension(href, /\.pdf$/i);
+    const isDocx = hasFileExtension(href, /\.docx$/i);
+    const isZip = hasFileExtension(href, /\.zip$/i);
     if (!isImage && !isPdf && !isDocx && !isZip) return;
 
     if (isDocx) {
@@ -604,7 +673,11 @@ document.addEventListener('DOMContentLoaded', function() {
       const wantsPreview = link.dataset.zipPreview === '1';
       if (wantsPreview) {
         e.preventDefault();
-        showZipPreview(href, link.closest('tr') ? getRowFileNameText(link.closest('tr')) : null);
+        showZipPreview(
+          href,
+          link.closest('tr') ? getRowFileNameText(link.closest('tr')) : null,
+          link.dataset.zipContentsUrl || ''
+        );
         return;
       }
       return;
@@ -633,8 +706,11 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.style.boxShadow = 'none';
         btn.style.fontWeight = '400';
         btn.style.fontSize = '0.85em';
-        if (opts.preview) {
+      if (opts.preview) {
         btn.dataset.zipPreview = '1';
+      }
+      if (opts.zipContentsUrl) {
+        btn.dataset.zipContentsUrl = opts.zipContentsUrl;
       }
       if (opts.download) {
         btn.setAttribute('download', '');
@@ -645,7 +721,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.dataset.skipPreview = '1';
         btn.addEventListener('click', function(ev) {
           ev.preventDefault();
-          window.open(href, '_blank');
+          window.open(href, '_blank', 'noopener');
         });
       }
       return btn;
@@ -1060,14 +1136,25 @@ document.addEventListener('DOMContentLoaded', function() {
       leftGroup.style.flexWrap = 'wrap';
       leftGroup.style.gap = '6px';
       const isProtocolRowEntry = isProtocolRow(row);
-      const isZipFile = /\.zip$/i.test(link.href);
-      const visualizarOpts = isProtocolRowEntry && isZipFile ? { preview: true } : {};
+      const isZipFile = hasFileExtension(link.href, /\.zip$/i);
+      const isPdfFile = hasFileExtension(link.href, /\.pdf$/i);
+      const isImageFile = hasFileExtension(link.href, /\.(png|jpe?g|gif|webp|bmp)$/i);
       const arquivoId = getRowArquivoId(row);
-      const visualizarHref = arquivoId
-        ? `/contratos/arquivo/${arquivoId}/convert-to-pdf/`
-        : link.href;
-      // Para monitória, usa o proxy_arquivo_view para visualização inline
-      const visualizarOpts2 = isMonitoriaRow(row) && !isZipFile ? { openInNewTab: false } : visualizarOpts;
+      let visualizarHref = link.href;
+      let visualizarOpts2 = {};
+      if (isZipFile) {
+        visualizarOpts2 = {
+          preview: true,
+          zipContentsUrl: arquivoId ? `/contratos/arquivo/${arquivoId}/zip-contents/` : '',
+        };
+      } else if (isPdfFile) {
+        visualizarHref = arquivoId ? `/contratos/arquivo/${arquivoId}/view/` : link.href;
+        visualizarOpts2 = { openInNewTab: true };
+      } else if (isImageFile) {
+        visualizarHref = arquivoId ? `/contratos/arquivo/${arquivoId}/view/` : link.href;
+      } else if (arquivoId) {
+        visualizarHref = `/contratos/arquivo/${arquivoId}/convert-to-pdf/`;
+      }
       leftGroup.appendChild(createButton('Visualizar', visualizarHref, visualizarOpts2));
       if (isMonitoriaRow(row)) {
         const pdfHref = arquivoId

@@ -355,6 +355,12 @@
     box-shadow: 0 1px 0 rgba(15, 23, 42, 0.08);
 }
 
+#arquivos-group tr.dynamic-arquivos td.field-nome input[name$="-nome"],
+#processoarquivo_set-group tr.dynamic-processoarquivo td.field-nome input[name$="-nome"] {
+    width: min(36rem, 100%);
+    max-width: 100%;
+}
+
 #arquivos-group tr.dynamic-arquivos td.original,
 #processoarquivo_set-group tr.dynamic-processoarquivo td.original {
     display: none;

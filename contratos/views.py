@@ -28,6 +28,7 @@ from pathlib import Path
 import subprocess
 import threading
 import shutil
+import zipfile
 
 # Imports para geração de DOCX
 from docx import Document
@@ -1316,10 +1317,12 @@ def _parse_habilitacao_data(polo_passivo):
     endereco = polo_passivo.endereco or ''
     parts = parse_endereco(endereco)
     cidade = parts.get('F') or parts.get('E') or ''
+    comarca = parts.get('F') or ''
     uf = parts.get('H') or ''
     return {
         'ENDERECO': endereco,
         'CIDADE': cidade,
+        'COMARCA': comarca,
         'UF': uf
     }
 
@@ -1368,6 +1371,18 @@ def _format_vara_text(vara_raw):
     return upper if 'VARA' in upper else f"{upper} VARA"
 
 
+def _extract_comarca_from_vara(vara_raw):
+    if not vara_raw:
+        return ''
+    cleaned = re.sub(r'\s+', ' ', str(vara_raw)).strip()
+    match = re.search(r'\bde\s+(.+)$', cleaned, flags=re.IGNORECASE)
+    if not match:
+        return ''
+    comarca = match.group(1).strip(" -")
+    comarca = re.sub(r'\s*[-/]\s*[A-Z]{2}$', '', comarca, flags=re.IGNORECASE)
+    return comarca.strip()
+
+
 def _replace_with_style(document, pattern, replacement, uppercase=False, bold=False):
     if not replacement:
         return
@@ -1382,13 +1397,16 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     replacements = _parse_habilitacao_data(polo_passivo)
     endereco = replacements.get('ENDERECO', '')
     cidade = replacements.get('CIDADE', '')
+    comarca = replacements.get('COMARCA', '')
     uf = replacements.get('UF', '')
+    vara_value = override_vara if override_vara is not None else processo.vara
+    comarca_header = _extract_comarca_from_vara(vara_value) or comarca or cidade
     document = _load_template_document(DocumentoModelo.SlugChoices.HABILITACAO, None)
 
     _replace_with_style(
         document,
         '[VARA]',
-        _format_vara_text(override_vara if override_vara is not None else processo.vara),
+        _format_vara_text(vara_value),
         uppercase=True
     )
     _replace_with_style(document, '[CIDADE]', cidade, uppercase=True)
@@ -1415,8 +1433,8 @@ def _build_habilitacao_docx_bytes(processo, polo_passivo, processo_override=None
     _replace_with_style(document, '[DATA DE HOJE]', data_por_extenso, uppercase=False)
 
     saudacao = (
-        f"EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {_format_vara_text(processo.vara)} "
-        f"DA COMARCA DE {cidade.upper()} - {uf.upper()}"
+        f"EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {_format_vara_text(vara_value)} "
+        f"DA COMARCA DE {comarca_header.upper()} - {uf.upper()}"
     )
     _replace_with_style(document, '[CABEÇALHO]', saudacao, uppercase=True, bold=True)
     _bold_paragraphs_containing(document, saudacao)
@@ -2705,6 +2723,40 @@ def proxy_arquivo_view(request, arquivo_id):
     except Exception as exc:
         logger.error("Erro ao servir arquivo via proxy: %s", exc, exc_info=True)
         return HttpResponse("Erro ao carregar arquivo.", status=500)
+
+
+@login_required
+@require_GET
+def arquivo_zip_contents_view(request, arquivo_id):
+    """Retorna a listagem ordenada dos arquivos internos de um ZIP salvo."""
+    try:
+        arquivo = get_object_or_404(ProcessoArquivo, pk=arquivo_id)
+    except ProcessoArquivo.DoesNotExist:
+        return JsonResponse({"status": "error", "error": "Arquivo não encontrado."}, status=404)
+
+    if not arquivo.arquivo:
+        return JsonResponse({"status": "error", "error": "Arquivo sem conteúdo."}, status=404)
+
+    try:
+        arquivo.arquivo.open('rb')
+        zip_bytes = arquivo.arquivo.read()
+        arquivo.arquivo.close()
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zip_file:
+            entries = [
+                info.filename
+                for info in zip_file.infolist()
+                if info.filename and not info.filename.endswith('/')
+            ]
+        return JsonResponse({
+            "status": "success",
+            "file_name": arquivo.nome or os.path.basename(arquivo.arquivo.name),
+            "entries": entries,
+        })
+    except zipfile.BadZipFile:
+        return JsonResponse({"status": "error", "error": "O arquivo selecionado não é um ZIP válido."}, status=400)
+    except Exception as exc:
+        logger.error("Erro ao listar conteúdo do ZIP %s: %s", arquivo_id, exc, exc_info=True)
+        return JsonResponse({"status": "error", "error": "Não foi possível listar os arquivos do ZIP."}, status=500)
 
 
 @login_required
