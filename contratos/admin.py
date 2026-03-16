@@ -5469,6 +5469,27 @@ class BuscaAtivaFilter(admin.SimpleListFilter):
 
 
 class AndamentoProcessualForm(forms.ModelForm):
+    def clean(self):
+        cleaned = super().clean()
+        data = cleaned.get('data')
+        instance = getattr(self, 'instance', None)
+
+        # O widget padrão do admin expõe apenas HH:MM. Quando o andamento veio da API
+        # com segundos diferentes, um simples save de "detalhes" pode colapsar dois
+        # registros distintos no mesmo minuto e disparar falso positivo de duplicidade.
+        if instance and instance.pk and data and instance.data:
+            original_data = instance.data
+            try:
+                cleaned['data'] = data.replace(
+                    second=getattr(original_data, 'second', 0),
+                    microsecond=getattr(original_data, 'microsecond', 0),
+                )
+                self.instance.data = cleaned['data']
+            except Exception:
+                pass
+
+        return cleaned
+
     class Meta:
         model = AndamentoProcessual
         fields = '__all__'

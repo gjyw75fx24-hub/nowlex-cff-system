@@ -1212,6 +1212,16 @@ document.addEventListener('DOMContentLoaded', function() {
         return Boolean(deleteField && deleteField.checked);
     };
 
+    const rowHasValidationError = (row) => {
+        if (!row) {
+            return false;
+        }
+        return Boolean(
+            row.querySelector('.errorlist, .errors, ul.errorlist')
+            || row.classList.contains('errors')
+        );
+    };
+
     const updateParteInlineLabels = () => {
         const group = document.getElementById('partes_processuais-group');
         if (!group) {
@@ -1318,6 +1328,10 @@ document.addEventListener('DOMContentLoaded', function() {
         scopedRows.forEach((row) => {
             if (isRowMarkedForDelete(row)) {
                 row.style.display = 'none';
+                return;
+            }
+            if (rowHasValidationError(row)) {
+                row.style.display = '';
                 return;
             }
             const rowRef = rowRefs.get(row) || '';
@@ -11118,6 +11132,37 @@ document.addEventListener('DOMContentLoaded', function() {
         return cleaned;
     }
 
+    const resolveParteDocumento = (parte = {}) => {
+        const nestedDocumento = parte?.documento && typeof parte.documento === 'object'
+            ? (parte.documento.numero || parte.documento.valor || parte.documento.documento || '')
+            : '';
+        const candidates = [
+            parte?.documento,
+            parte?.cpf,
+            parte?.cnpj,
+            parte?.parte_cpf,
+            parte?.documento_titular,
+            nestedDocumento,
+        ];
+        return String(candidates.find((candidate) => String(candidate || '').trim()) || '').trim();
+    };
+
+    const applyDocumentoToParteInline = (parteInline, documentoRaw) => {
+        const documentoInput = parteInline?.querySelector('input[name$="-documento"], [id$="-documento"]');
+        if (!documentoInput) {
+            return '';
+        }
+        const documento = String(documentoRaw || '').trim();
+        documentoInput.value = documento;
+        documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
+        documentoInput.dispatchEvent(new Event('change', { bubbles: true }));
+        documentoInput.dispatchEvent(new Event('blur', { bubbles: true }));
+        if (!documentoInput.value && documento) {
+            documentoInput.value = maskCpfCnpj(documento);
+        }
+        return documentoInput.value;
+    };
+
     // Atualiza o estado visual da inline de parte (ex: cor de fundo, visibilidade do botão CIA)
     function updateParteDisplay(parteInline) {
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
@@ -11684,7 +11729,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const applyDemandasDataToParte = (parteInline, data) => {
         if (!parteInline || !data) return;
         const nomeInput = parteInline.querySelector('[id$="-nome"]');
-        const documentoInput = parteInline.querySelector('[id$="-documento"]');
         const tipoPessoaSelect = parteInline.querySelector('[id$="-tipo_pessoa"]');
         const tipoPoloSelect = parteInline.querySelector('[id$="-tipo_polo"]');
         const enderecoInput = parteInline.querySelector('[id$="-endereco"]');
@@ -11695,11 +11739,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (nomeInput && data.nome) {
             nomeInput.value = data.nome;
             nomeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            nomeInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        if (documentoInput && data.documento) {
-            documentoInput.value = data.documento;
-            documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
-            documentoInput.dispatchEvent(new Event('change', { bubbles: true }));
+        const documentoValue = resolveParteDocumento(data);
+        if (documentoValue) {
+            applyDocumentoToParteInline(parteInline, documentoValue);
         }
         if (tipoPessoaSelect && data.tipo_pessoa) {
             tipoPessoaSelect.value = data.tipo_pessoa;
@@ -11710,7 +11754,8 @@ document.addEventListener('DOMContentLoaded', function() {
             enderecoInput.dispatchEvent(new Event('input', { bubbles: true }));
             enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        const cpfTitular = normalizeCpfDigits(data.documento || data.cpf || '');
+        updateParteDisplay(parteInline);
+        const cpfTitular = normalizeCpfDigits(documentoValue || data.documento || data.cpf || '');
         appendContratosFromDemandas(data.contratos || [], cpfTitular);
     };
 
@@ -12216,25 +12261,37 @@ document.addEventListener('DOMContentLoaded', function() {
                     const tipoPoloSelect = inline.querySelector('select[name$="-tipo_polo"]');
                     const nomeInput = inline.querySelector('input[name$="-nome"]');
                     const tipoPessoaSelect = inline.querySelector('select[name$="-tipo_pessoa"]');
-                    const documentoInput = inline.querySelector('input[name$="-documento"]');
                     const enderecoInput = inline.querySelector('textarea[name$="-endereco"], input[name$="-endereco"]');
 
-                    if (nomeInput) nomeInput.value = parte.nome || '';
-                    if (tipoPoloSelect) tipoPoloSelect.value = parte.tipo_polo || '';
+                    if (nomeInput) {
+                        nomeInput.value = parte.nome || '';
+                        nomeInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        nomeInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    if (tipoPoloSelect) {
+                        tipoPoloSelect.value = parte.tipo_polo || '';
+                        tipoPoloSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
                     if (tipoPessoaSelect) {
                         const apiTipoPessoa = parte.tipo_pessoa ? parte.tipo_pessoa.toUpperCase() : '';
                         tipoPessoaSelect.value = tipoPessoaMap[apiTipoPessoa] || '';
+                        tipoPessoaSelect.dispatchEvent(new Event('change', { bubbles: true }));
                     }
-                    if (documentoInput) {
-                        documentoInput.value = parte.documento || '';
-                        documentoInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    const documentoValue = resolveParteDocumento(parte);
+                    if (documentoValue) {
+                        applyDocumentoToParteInline(inline, documentoValue);
                     }
-                    if (enderecoInput) enderecoInput.value = parte.endereco || '';
+                    if (enderecoInput) {
+                        enderecoInput.value = parte.endereco || '';
+                        enderecoInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        enderecoInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
 
                     // Garante que o checkbox de deleção esteja desmarcado para as partes que estamos preenchendo
                     const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                     if (deleteCheckbox) deleteCheckbox.checked = false;
                     inline.style.display = 'block';
+                    updateParteDisplay(inline);
                 }
                 updateParteInlineLabels();
             }, 500);

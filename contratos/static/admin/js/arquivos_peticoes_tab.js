@@ -337,49 +337,92 @@
             }
         };
         const setInputFile = (input, file) => {
-            if (!input || !file) return;
+            if (!input || !file) return false;
             try {
                 const dt = new DataTransfer();
                 dt.items.add(file);
                 input.dataset.skipMulti = '1';
                 input.files = dt.files;
+                return true;
             } catch (error) {
-                // fallback: browser may block programmatic assignment
+                console.warn('Nao foi possivel atribuir arquivo ao input dinamicamente.', error);
+                return false;
             } finally {
-                input.dataset.skipMulti = '0';
+                window.setTimeout(() => {
+                    input.dataset.skipMulti = '0';
+                }, 0);
             }
         };
-        const addNewRowAndAssignFile = (group, file) => {
-            if (!group) return;
+        const waitForNewRow = (group, previousRows, attempts = 20) => new Promise((resolve) => {
+            const previousSet = new Set(previousRows);
+            const check = () => {
+                const currentRows = getDynamicRows(group);
+                const newRow = currentRows.find(item => !previousSet.has(item));
+                if (newRow) {
+                    resolve(newRow);
+                    return;
+                }
+                if (attempts <= 0) {
+                    resolve(null);
+                    return;
+                }
+                attempts -= 1;
+                window.setTimeout(check, 60);
+            };
+            check();
+        });
+        const addNewRowAndAssignFile = async (group, file) => {
+            if (!group || !file) return null;
             const before = getDynamicRows(group);
             const addLink = group.querySelector('tr.add-row a');
-            if (!addLink) return;
+            if (!addLink) return null;
             addLink.click();
-            const after = getDynamicRows(group);
-            const newRow = after.find(row => !before.includes(row)) || after[after.length - 1];
-            if (!newRow) return;
+            const newRow = await waitForNewRow(group, before);
+            if (!newRow) return null;
             const newInput = newRow.querySelector('input[type="file"]');
-            if (!newInput) return;
-            if (!newInput.multiple) {
-                newInput.multiple = true;
+            if (!newInput) return null;
+            newInput.multiple = true;
+            if (!setInputFile(newInput, file)) {
+                return null;
             }
-            setInputFile(newInput, file);
             setFileNameDisplay(newRow, file.name);
+            return newRow;
         };
-        const handleFileSelection = (row, fileInput) => {
+        const handleFileSelection = async (row, fileInput) => {
             const files = Array.from(fileInput.files || []);
             if (!files.length) return;
             if (fileInput.dataset.skipMulti === '1') {
                 setFileNameDisplay(row, files[0].name);
-                fileInput.dataset.skipMulti = '0';
                 return;
             }
-            const [first, ...rest] = files;
-            setInputFile(fileInput, first);
-            setFileNameDisplay(row, first.name);
-            if (!rest.length) return;
+            if (files.length === 1) {
+                setFileNameDisplay(row, files[0].name);
+                return;
+            }
+
+            const [firstFile, ...remainingFiles] = files;
             const group = getGroup(row);
-            rest.forEach(file => addNewRowAndAssignFile(group, file));
+            if (!group) {
+                setFileNameDisplay(row, firstFile.name);
+                alert('Nao foi possivel distribuir os arquivos automaticamente.');
+                return;
+            }
+
+            if (!setInputFile(fileInput, firstFile)) {
+                alert('Nao foi possivel distribuir os arquivos automaticamente.');
+                return;
+            }
+            setFileNameDisplay(row, firstFile.name);
+
+            let assigned = 1;
+            for (const file of remainingFiles) {
+                const newRow = await addNewRowAndAssignFile(group, file);
+                if (!newRow) {
+                    alert(`Somente ${assigned} de ${files.length} arquivos puderam ser preparados. Adicione novas linhas e envie os restantes novamente.`);
+                    return;
+                }
+                assigned += 1;
+            }
         };
         rows.forEach(row => {
             const hasFileLink = row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]');
@@ -392,9 +435,7 @@
             if (!fileInput) {
                 return;
             }
-            if (!fileInput.multiple) {
-                fileInput.multiple = true;
-            }
+            fileInput.multiple = true;
             if (!fileInput.dataset.fileHandler) {
                 fileInput.dataset.fileHandler = '1';
                 fileInput.addEventListener('change', () => handleFileSelection(row, fileInput));
