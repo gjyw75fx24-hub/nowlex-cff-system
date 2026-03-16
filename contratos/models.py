@@ -1,3 +1,6 @@
+import os
+import re
+import unicodedata
 import uuid
 
 from django.conf import settings
@@ -25,6 +28,25 @@ import datetime
 
 def _normalize_documento_digits(value):
     return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def sanitize_processo_arquivo_filename(filename):
+    original = os.path.basename(str(filename or '')).strip()
+    if not original:
+        return 'arquivo'
+    base, ext = os.path.splitext(original)
+    normalized = unicodedata.normalize('NFD', base)
+    normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r'[^A-Za-z0-9._ -]+', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip(' ._-')
+    normalized = normalized or 'arquivo'
+    ext_normalized = unicodedata.normalize('NFD', ext)
+    ext_normalized = ''.join(ch for ch in ext_normalized if not unicodedata.combining(ch))
+    ext_normalized = re.sub(r'[^A-Za-z0-9.]', '', ext_normalized)
+    ext_normalized = ext_normalized.lower()
+    if ext and not ext_normalized.startswith('.'):
+        ext_normalized = f'.{ext_normalized}'
+    return f'{normalized[:180]}{ext_normalized[:20]}' if ext_normalized else normalized[:200]
 
 
 class Etiqueta(models.Model):
@@ -399,7 +421,8 @@ class AndamentoProcessualPendente(models.Model):
 
 def processo_arquivo_upload_path(instance, filename):
     processo_id = instance.processo_id or 'novo'
-    return f'processos/{processo_id}/pasta/{filename}'
+    safe_filename = sanitize_processo_arquivo_filename(filename)
+    return f'processos/{processo_id}/pasta/{safe_filename}'
 
 
 class ProcessoArquivo(models.Model):
@@ -425,7 +448,7 @@ class ProcessoArquivo(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.nome and self.arquivo:
-            self.nome = self.arquivo.name.split('/')[-1]
+            self.nome = sanitize_processo_arquivo_filename(self.arquivo.name.split('/')[-1])
         super().save(*args, **kwargs)
 
     def __str__(self):

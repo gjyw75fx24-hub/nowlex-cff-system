@@ -58,7 +58,7 @@ from .models import (
     KpiGlobalConfig, ProcessoCpfLoteSalvo, ProcessoCnjLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
-    _generate_tipo_peticao_key,
+    _generate_tipo_peticao_key, sanitize_processo_arquivo_filename,
 )
 from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .widgets import EnderecoWidget
@@ -12147,12 +12147,20 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
         created_items = []
         failed_items = []
+        renamed_items = []
         for uploaded in uploaded_files:
             try:
-                file_name = os.path.basename(getattr(uploaded, 'name', '') or '')[:255]
+                original_name = os.path.basename(getattr(uploaded, 'name', '') or '')
+                safe_name = sanitize_processo_arquivo_filename(original_name)
+                if safe_name != original_name:
+                    renamed_items.append({
+                        'original': original_name,
+                        'safe': safe_name,
+                    })
+                uploaded.name = safe_name
                 processo_arquivo = ProcessoArquivo.objects.create(
                     processo=processo,
-                    nome=file_name,
+                    nome=safe_name,
                     arquivo=uploaded,
                     enviado_por=request.user,
                 )
@@ -12184,6 +12192,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'items': created_items,
             'failed_count': len(failed_items),
             'failed_items': failed_items,
+            'renamed_count': len(renamed_items),
+            'renamed_items': renamed_items,
         })
 
     def cnj_batch_import_view(self, request):

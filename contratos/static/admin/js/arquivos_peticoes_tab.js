@@ -507,14 +507,28 @@
                     xhr.send(formData);
                 });
                 setMultiUploadOverlayState('Concluindo...', 100);
+                hideMultiUploadOverlay();
+                const messages = [];
+                if (payload.renamed_count) {
+                    const renamedNames = Array.isArray(payload.renamed_items)
+                        ? payload.renamed_items.map((item) => `${item?.original} -> ${item?.safe}`).filter(Boolean)
+                        : [];
+                    messages.push(
+                        `Nome${payload.renamed_count > 1 ? 's' : ''} ajustado${payload.renamed_count > 1 ? 's' : ''} automaticamente para formato aceito.` +
+                        (renamedNames.length ? ` ${renamedNames.join(' | ')}` : '')
+                    );
+                }
                 if (payload.failed_count) {
                     const failedNames = Array.isArray(payload.failed_items)
                         ? payload.failed_items.map((item) => item?.nome).filter(Boolean)
                         : [];
-                    window.alert(
+                    messages.push(
                         `Foram enviados ${payload.created_count} arquivo(s), mas ${payload.failed_count} falharam.` +
                         (failedNames.length ? ` Falharam: ${failedNames.join(', ')}` : '')
                     );
+                }
+                if (messages.length) {
+                    window.alert(messages.join('\n\n'));
                 }
                 setUploadStatusLabel(row, 'Arquivos enviados. Atualizando...');
                 allowArquivoNavigation = true;
