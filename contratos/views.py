@@ -484,6 +484,17 @@ def _sanitize_monitoria_custas_paragrafo(text):
     return '\n'.join(collapsed).strip()
 
 
+def _should_replace_monitoria_custas_paragrafo(text):
+    normalized = _sanitize_monitoria_custas_paragrafo(text)
+    if not normalized:
+        return False
+    # Frases muito curtas indicam que o front não conseguiu carregar a prévia
+    # completa; nesse caso é melhor preservar o parágrafo original do modelo.
+    if len(normalized) < 120:
+        return False
+    return 'parcelamento das custas iniciais' in normalized.lower()
+
+
 def _complete_cobranca_custas_paragraphs(document, custas_valor, parcelas, valor_parcela):
     if not document or custas_valor is None:
         return
@@ -779,11 +790,11 @@ def _build_docx_bytes_common(
             document,
             "Seja deferido o parcelamento das custas iniciais"
         )
-    elif custas_paragrafo:
+    elif _should_replace_monitoria_custas_paragrafo(custas_paragrafo):
         _replace_paragraphs_containing(
             document,
             "Seja deferido o parcelamento das custas iniciais",
-            custas_paragrafo,
+            _sanitize_monitoria_custas_paragrafo(custas_paragrafo),
             first_only=True
         )
 

@@ -1644,7 +1644,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     'A requerente requer o parcelamento em [X PARCELAS] ([X PARCELAS POR EXTENSO]) mensais e sucessivas. Após o deferimento, seja autorizado o depósito judicial pertinente às custas, sendo a primeira parcela à vista e as demais parcelas com vencimento no mesmo dia dos meses subsequentes.'
                 ].join('\n');
             }
-            return 'Seja deferido o parcelamento das custas iniciais';
+            return 'Seja deferido o parcelamento das custas iniciais, nos termos do art. 98, § 6 º, do CPC, de aproximadamente [2,5% DO VALOR DA CAUSA] ([2,5% DO VALOR DA CAUSA POR EXTENSO]) em [X PARCELAS] ([X PARCELAS POR EXTENSO]) parcelas mensais e sucessivas, autorizando-se o depósito judicial correspondente, com a 1ª parcela à vista e as demais com vencimento no mesmo dia dos meses subsequentes, facultando-se à Exequente a juntada dos respectivos comprovantes de recolhimento a cada vencimento.';
         }
 
         function buildPeticaoSourceOptions() {
