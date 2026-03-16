@@ -96,6 +96,41 @@
     let statusElement = null;
     let executeButtonRef = null;
     let executeLabelRef = null;
+    let pendingFileDistributions = 0;
+    const multiUploadUrl = window.__processo_arquivos_multi_upload_url || '';
+    let multiUploadOverlay = null;
+    let allowArquivoNavigation = false;
+    const handleArquivosBeforeUnload = (event) => {
+        if (pendingFileDistributions <= 0 || allowArquivoNavigation) {
+            return;
+        }
+        event.preventDefault();
+        event.returnValue = '';
+    };
+
+    const setArquivoDistributionBusy = (busy) => {
+        pendingFileDistributions = Math.max(0, pendingFileDistributions + (busy ? 1 : -1));
+        const form = document.querySelector('#processojudicial_form, form');
+        if (!form) {
+            return;
+        }
+        form.dataset.arquivosDistributionPending = pendingFileDistributions > 0 ? '1' : '0';
+        if (pendingFileDistributions > 0) {
+            window.addEventListener('beforeunload', handleArquivosBeforeUnload);
+        } else {
+            window.removeEventListener('beforeunload', handleArquivosBeforeUnload);
+        }
+        form.querySelectorAll('input[type="submit"], button[type="submit"]').forEach((button) => {
+            if (button.dataset.originalDisabled === undefined) {
+                button.dataset.originalDisabled = button.disabled ? '1' : '0';
+            }
+            if (pendingFileDistributions > 0) {
+                button.disabled = true;
+            } else if (button.dataset.originalDisabled === '0') {
+                button.disabled = false;
+            }
+        });
+    };
 
     const normalizeText = (value) => {
         if (!value) {
@@ -353,33 +388,164 @@
                 }, 0);
             }
         };
-        const openMultiFilePicker = (onSelect) => {
-            const picker = document.createElement('input');
-            picker.type = 'file';
-            picker.multiple = true;
-            picker.style.position = 'fixed';
-            picker.style.left = '-9999px';
-            picker.style.top = '0';
-            picker.style.opacity = '0';
-            picker.style.pointerEvents = 'none';
-            document.body.appendChild(picker);
-            picker.addEventListener('change', async () => {
-                try {
-                    const files = Array.from(picker.files || []);
-                    if (files.length && typeof onSelect === 'function') {
-                        await onSelect(files);
-                    }
-                } finally {
-                    picker.remove();
-                }
-            }, { once: true });
-            if (typeof picker.showPicker === 'function') {
-                picker.showPicker();
-            } else {
-                picker.click();
+        const setUploadStatusLabel = (row, text) => {
+            const label = row?.querySelector('.documento-peticoes-selected-file');
+            if (label) {
+                label.textContent = text;
             }
         };
-        const waitForNewRow = (group, previousRows, attempts = 20) => new Promise((resolve) => {
+        const ensureMultiUploadOverlay = () => {
+            if (multiUploadOverlay) {
+                return multiUploadOverlay;
+            }
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.background = 'rgba(15, 23, 42, 0.45)';
+            overlay.style.display = 'none';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '10050';
+            overlay.innerHTML = `
+                <div style="background:#fff;padding:24px 28px;border-radius:16px;min-width:320px;box-shadow:0 18px 44px rgba(0,0,0,0.25);text-align:center;">
+                    <div style="font-size:26px;font-weight:700;margin-bottom:10px;">Enviando arquivos</div>
+                    <div class="arquivos-multi-upload-status" style="font-size:16px;color:#475569;margin-bottom:12px;">Preparando envio...</div>
+                    <div style="height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
+                        <div class="arquivos-multi-upload-bar" style="height:100%;width:0;background:#2563eb;transition:width .2s ease;"></div>
+                    </div>
+                    <div style="margin-top:12px;font-size:13px;color:#64748b;">Aguarde. Não salve nem saia da página.</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            multiUploadOverlay = overlay;
+            return overlay;
+        };
+        const setMultiUploadOverlayState = (statusText, progressPercent = null) => {
+            const overlay = ensureMultiUploadOverlay();
+            const status = overlay.querySelector('.arquivos-multi-upload-status');
+            const bar = overlay.querySelector('.arquivos-multi-upload-bar');
+            if (status) {
+                status.textContent = statusText || 'Enviando arquivos...';
+            }
+            if (bar) {
+                bar.style.width = progressPercent == null ? '15%' : `${Math.max(5, Math.min(100, progressPercent))}%`;
+            }
+            overlay.style.display = 'flex';
+        };
+        const hideMultiUploadOverlay = () => {
+            if (multiUploadOverlay) {
+                multiUploadOverlay.style.display = 'none';
+            }
+        };
+        const uploadFilesDirectly = async (row, fileInput, files) => {
+            if (!multiUploadUrl || !files.length) {
+                return false;
+            }
+            allowArquivoNavigation = false;
+            const csrfToken = getCsrfToken();
+            const formData = new FormData();
+            files.forEach((file) => formData.append('files', file, file.name));
+            if (fileInput) {
+                fileInput.value = '';
+            }
+            setUploadStatusLabel(
+                row,
+                files.length === 1
+                    ? `Enviando ${files[0].name}...`
+                    : `${files.length} arquivos selecionados. Enviando...`
+            );
+            setArquivoDistributionBusy(true);
+            setMultiUploadOverlayState(
+                files.length === 1
+                    ? `Enviando ${files[0].name}...`
+                    : `Enviando ${files.length} arquivos...`,
+                10,
+            );
+            try {
+                const payload = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', multiUploadUrl, true);
+                    if (csrfToken) {
+                        xhr.setRequestHeader('X-CSRFToken', csrfToken);
+                    }
+                    xhr.responseType = 'json';
+                    xhr.upload.addEventListener('progress', (event) => {
+                        if (!event.lengthComputable) {
+                            setMultiUploadOverlayState(
+                                files.length === 1 ? `Enviando ${files[0].name}...` : `Enviando ${files.length} arquivos...`
+                            );
+                            return;
+                        }
+                        const percent = Math.round((event.loaded / event.total) * 100);
+                        setMultiUploadOverlayState(
+                            files.length === 1 ? `Enviando ${files[0].name}...` : `Enviando ${files.length} arquivos...`,
+                            percent
+                        );
+                    });
+                    xhr.addEventListener('load', () => {
+                        const responsePayload = xhr.response && typeof xhr.response === 'object'
+                            ? xhr.response
+                            : (() => {
+                                try {
+                                    return JSON.parse(xhr.responseText || '{}');
+                                } catch (error) {
+                                    return {};
+                                }
+                            })();
+                        if (xhr.status >= 200 && xhr.status < 300 && responsePayload.ok === true) {
+                            resolve(responsePayload);
+                            return;
+                        }
+                        reject(new Error(responsePayload.error || `Falha ao enviar arquivos (HTTP ${xhr.status || 0}).`));
+                    });
+                    xhr.addEventListener('error', () => {
+                        reject(new Error('Falha de conexão ao enviar arquivos.'));
+                    });
+                    xhr.addEventListener('abort', () => {
+                        reject(new Error('Envio interrompido antes de concluir.'));
+                    });
+                    xhr.send(formData);
+                });
+                setMultiUploadOverlayState('Concluindo...', 100);
+                if (payload.failed_count) {
+                    const failedNames = Array.isArray(payload.failed_items)
+                        ? payload.failed_items.map((item) => item?.nome).filter(Boolean)
+                        : [];
+                    window.alert(
+                        `Foram enviados ${payload.created_count} arquivo(s), mas ${payload.failed_count} falharam.` +
+                        (failedNames.length ? ` Falharam: ${failedNames.join(', ')}` : '')
+                    );
+                }
+                setUploadStatusLabel(row, 'Arquivos enviados. Atualizando...');
+                allowArquivoNavigation = true;
+                setArquivoDistributionBusy(false);
+                window.setTimeout(() => {
+                    window.location.reload();
+                }, 150);
+                return true;
+            } catch (error) {
+                setUploadStatusLabel(row, 'Falha no envio. Selecione novamente.');
+                hideMultiUploadOverlay();
+                allowArquivoNavigation = false;
+                window.alert(error.message || 'Falha ao enviar arquivos.');
+                return false;
+            } finally {
+                hideMultiUploadOverlay();
+                if (!allowArquivoNavigation) {
+                    setArquivoDistributionBusy(false);
+                }
+            }
+        };
+        const openMultiFilePicker = async (fileInput, onSelect) => {
+            if (!fileInput) {
+                return;
+            }
+            fileInput.value = '';
+            fileInput.multiple = true;
+            fileInput.setAttribute('multiple', 'multiple');
+            fileInput.click();
+        };
+        const waitForNewRow = (group, previousRows, attempts = 60) => new Promise((resolve) => {
             const previousSet = new Set(previousRows);
             const check = () => {
                 const currentRows = getDynamicRows(group);
@@ -393,7 +559,7 @@
                     return;
                 }
                 attempts -= 1;
-                window.setTimeout(check, 60);
+                window.setTimeout(check, 80);
             };
             check();
         });
@@ -405,9 +571,11 @@
             addLink.click();
             const newRow = await waitForNewRow(group, before);
             if (!newRow) return null;
+            newRow.dataset.wasAutoAdded = '1';
             const newInput = newRow.querySelector('input[type="file"]');
             if (!newInput) return null;
             newInput.multiple = true;
+            newInput.setAttribute('multiple', 'multiple');
             if (!setInputFile(newInput, file)) {
                 return null;
             }
@@ -416,6 +584,12 @@
         };
         const handleFileBatchSelection = async (row, fileInput, files = []) => {
             if (!files.length) return;
+            if (files.length > 1 && multiUploadUrl) {
+                await uploadFilesDirectly(row, fileInput, files);
+                return;
+            }
+            setArquivoDistributionBusy(true);
+            try {
             if (fileInput.dataset.skipMulti === '1') {
                 setFileNameDisplay(row, files[0].name);
                 return;
@@ -448,6 +622,9 @@
                 }
                 assigned += 1;
             }
+            } finally {
+                setArquivoDistributionBusy(false);
+            }
         };
         const handleFileSelection = async (row, fileInput) => {
             const files = Array.from(fileInput.files || []);
@@ -464,7 +641,9 @@
             if (!fileInput) {
                 return;
             }
-            fileInput.multiple = false;
+            fileInput.multiple = true;
+            fileInput.setAttribute('multiple', 'multiple');
+            fileInput.style.display = '';
             if (!fileInput.dataset.fileHandler) {
                 fileInput.dataset.fileHandler = '1';
                 fileInput.addEventListener('change', () => handleFileSelection(row, fileInput));
@@ -474,8 +653,8 @@
                 button.type = 'button';
                 button.className = 'documento-peticoes-addfile-button button';
                 button.textContent = 'Procurar...';
-                button.addEventListener('click', () => {
-                    openMultiFilePicker((files) => handleFileBatchSelection(row, fileInput, files));
+                button.addEventListener('click', async () => {
+                    await openMultiFilePicker(fileInput, (files) => handleFileBatchSelection(row, fileInput, files));
                 });
                 uploadParagraph.appendChild(button);
                 uploadParagraph.dataset.addButton = '1';
@@ -485,11 +664,34 @@
                 button.type = 'button';
                 button.className = 'documento-peticoes-addfile-button';
                 button.textContent = 'Procurar...';
-                button.addEventListener('click', () => {
-                    openMultiFilePicker((files) => handleFileBatchSelection(row, fileInput, files));
+                button.addEventListener('click', async () => {
+                    await openMultiFilePicker(fileInput, (files) => handleFileBatchSelection(row, fileInput, files));
                 });
                 nameInput.insertAdjacentElement('afterend', button);
                 nameInput.dataset.addButtonRow = '1';
+            }
+        });
+    };
+
+    const cleanupIncompleteArquivoRowsBeforeSubmit = () => {
+        const rows = Array.from(document.querySelectorAll(
+            '#arquivos-group tr.dynamic-arquivos, #processoarquivo_set-group tr.dynamic-processoarquivo'
+        )).filter((row) => !row.classList.contains('empty-form'));
+        rows.forEach((row) => {
+            const fileInput = row.querySelector('input[type="file"]');
+            const nameInput = row.querySelector('td.field-nome input[name$="-nome"]');
+            const deleteInput = row.querySelector('input[name$="-DELETE"]');
+            const hasExistingLink = Boolean(row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]'));
+            const hasSelectedFile = Boolean(fileInput && fileInput.files && fileInput.files.length);
+            if (hasExistingLink || hasSelectedFile) {
+                return;
+            }
+            if (nameInput && nameInput.value) {
+                nameInput.value = '';
+            }
+            if (deleteInput && row.dataset.wasAutoAdded === '1') {
+                deleteInput.checked = true;
+                row.style.display = 'none';
             }
         });
     };
@@ -1073,6 +1275,18 @@
     const initArquivosPeticoesTab = () => {
         tryAttachSubtab();
         initBaseSelectionObserver();
+        const form = document.querySelector('#processojudicial_form, form');
+        if (form && !form.dataset.arquivosCleanupBound) {
+            form.dataset.arquivosCleanupBound = '1';
+            form.addEventListener('submit', (event) => {
+                if (pendingFileDistributions > 0) {
+                    event.preventDefault();
+                    alert('Aguarde a distribuicao dos arquivos terminar antes de salvar.');
+                    return;
+                }
+                cleanupIncompleteArquivoRowsBeforeSubmit();
+            });
+        }
         // In case tabs load after, wait a bit
         setTimeout(tryAttachSubtab, 200);
     };

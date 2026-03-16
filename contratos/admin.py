@@ -11612,6 +11612,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         extra_context['tipos_peticao_api_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao')
         extra_context['tipos_peticao_preview_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_preview')
         extra_context['tipos_peticao_generate_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_generate')
+        extra_context['processo_arquivos_multi_upload_url'] = reverse(
+            'admin:processo_arquivos_multi_upload',
+            args=[object_id],
+        )
         extra_context['csrf_token'] = get_token(request)
         
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
@@ -12060,6 +12064,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom_urls = [
             path(
+                '<path:object_id>/arquivos/upload-multiplos/',
+                self.admin_site.admin_view(self.arquivos_multi_upload_view),
+                name='processo_arquivos_multi_upload',
+            ),
+            path(
                 'cnj-lote/cadastro/verificar/',
                 self.admin_site.admin_view(self.cnj_batch_verify_view),
                 name='processo_cnj_batch_verify',
@@ -12124,6 +12133,58 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
         rows = [self._build_cnj_batch_preview_row(cnj, request=request) for cnj in cnjs]
         return JsonResponse({'ok': True, 'rows': rows})
+
+    def arquivos_multi_upload_view(self, request, object_id):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+
+        processo = get_object_or_404(ProcessoJudicial, pk=object_id)
+        uploaded_files = request.FILES.getlist('files')
+        if not uploaded_files:
+            return JsonResponse({'error': 'Nenhum arquivo selecionado.'}, status=400)
+
+        created_items = []
+        failed_items = []
+        for uploaded in uploaded_files:
+            try:
+                file_name = os.path.basename(getattr(uploaded, 'name', '') or '')[:255]
+                processo_arquivo = ProcessoArquivo.objects.create(
+                    processo=processo,
+                    nome=file_name,
+                    arquivo=uploaded,
+                    enviado_por=request.user,
+                )
+                created_items.append({
+                    'id': processo_arquivo.pk,
+                    'nome': processo_arquivo.nome,
+                })
+            except Exception as exc:
+                logger.error(
+                    'Falha ao salvar arquivo em upload múltiplo do processo %s: %s',
+                    processo.pk,
+                    exc,
+                    exc_info=True,
+                )
+                failed_items.append({
+                    'nome': os.path.basename(getattr(uploaded, 'name', '') or ''),
+                    'reason': str(exc),
+                })
+
+        if not created_items and failed_items:
+            return JsonResponse({
+                'error': failed_items[0].get('reason') or 'Falha ao salvar arquivos.',
+                'failed_items': failed_items,
+            }, status=500)
+
+        return JsonResponse({
+            'ok': True,
+            'created_count': len(created_items),
+            'items': created_items,
+            'failed_count': len(failed_items),
+            'failed_items': failed_items,
+        })
 
     def cnj_batch_import_view(self, request):
         if request.method != 'POST':

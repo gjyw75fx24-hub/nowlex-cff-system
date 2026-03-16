@@ -12,6 +12,7 @@ window.__analise_username = "{{ request.user.get_full_name|default:request.user.
 window.__tipos_peticao_api_url = "{{ tipos_peticao_api_url|default:'' }}";
 window.__tipos_peticao_preview_url = "{{ tipos_peticao_preview_url|default:'' }}";
 window.__tipos_peticao_generate_url = "{{ tipos_peticao_generate_url|default:'' }}";
+window.__processo_arquivos_multi_upload_url = "{{ processo_arquivos_multi_upload_url|default:''|escapejs }}";
 window.__tipos_peticao_csrf_token = "{{ csrf_token|default:'' }}";
 window.__cnj_entries = {{ cnj_entries_json|default:"[]"|safe }};
 window.__cnj_active_index = {{ cnj_active_index|default:0 }};
