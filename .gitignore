@@ -27,6 +27,8 @@ erp_contratos_status3_CANCELADOS.xlsx
 # Arquivos locais de monitoria / relatórios
 01 - Monitoria Inicial - *.docx
 01 - Monitoria Inicial - *.pdf
+1_-_Base_-_Inicial_Monitoria.docx
+~$*.docx
 produtividade-por-usuario-*.jpg
 
 # Arquivos de ambiente (NUNCA commitar!)

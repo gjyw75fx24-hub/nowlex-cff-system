@@ -10044,7 +10044,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
         return candidates[0][3]
 
-    def _ensure_habilitacao_pdf(self, processo, *, acting_user=None, allow_remote_conversion=True):
+    def _ensure_habilitacao_pdf(self, processo, *, acting_user=None, allow_remote_conversion=True, remote_timeout=45):
         cnj_entry = self._resolve_habilitacao_target_entry(processo)
         cnj_label = str(
             (cnj_entry.cnj if cnj_entry else '')
@@ -10102,7 +10102,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         pdf_bytes = _convert_docx_to_pdf_bytes(
             docx_bytes,
             allow_remote=allow_remote_conversion,
-            gotenberg_timeout=45 if allow_remote_conversion else 0,
+            gotenberg_timeout=remote_timeout if allow_remote_conversion else 0,
         )
         if not pdf_bytes:
             return {
@@ -10381,7 +10381,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             result = self._ensure_habilitacao_pdf(
                 processo,
                 acting_user=request.user,
-                allow_remote_conversion=False,
+                allow_remote_conversion=True,
+                remote_timeout=18,
             )
             if not result.get('ok'):
                 failed.append(f"{result.get('cnj')}: {result.get('reason')}")

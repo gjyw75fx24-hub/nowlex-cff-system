@@ -454,6 +454,36 @@ def _complete_cobranca_custas_preview(text, custas_valor, parcelas_override=None
     return '\n'.join(lines).strip()
 
 
+def _sanitize_monitoria_custas_paragrafo(text):
+    if not text:
+        return ''
+    sanitized = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    stop_markers = (
+        'Por fim, requer-se',
+        'Dá-se à causa',
+        'Nestes termos',
+        'DEFERIMENTO',
+        'São Paulo,',
+    )
+    for marker in stop_markers:
+        marker_index = sanitized.find(marker)
+        if marker_index >= 0:
+            sanitized = sanitized[:marker_index]
+            break
+    lines = [line.strip() for line in sanitized.split('\n')]
+    collapsed = []
+    last_blank = True
+    for line in lines:
+        if not line:
+            if not last_blank:
+                collapsed.append('')
+            last_blank = True
+            continue
+        collapsed.append(line)
+        last_blank = False
+    return '\n'.join(collapsed).strip()
+
+
 def _complete_cobranca_custas_paragraphs(document, custas_valor, parcelas, valor_parcela):
     if not document or custas_valor is None:
         return
@@ -2172,7 +2202,9 @@ def generate_monitoria_petition(request, processo_id=None):
             entry_id=request.POST.get('peticao_cnj_entry_id'),
         )
         custas_override = _parse_decimal_input(request.POST.get('custas_total'))
-        custas_paragrafo = request.POST.get('custas_paragrafo') or ''
+        custas_paragrafo = _sanitize_monitoria_custas_paragrafo(
+            request.POST.get('custas_paragrafo') or ''
+        )
         custas_parcelas = _parse_int_input(request.POST.get('custas_parcelas'))
         custas_valor_parcela = _parse_decimal_input(request.POST.get('custas_valor_parcela'))
         processo_override = {}
@@ -2545,7 +2577,11 @@ def preview_peticao_custas(request, processo_id=None):
                 custas_valor_parcela=custas_valor_parcela,
             )
             start_markers = ["Seja deferido o parcelamento das custas iniciais"]
-            end_markers = None
+            end_markers = [
+                "Por fim, requer-se",
+                "Dá-se à causa",
+                "Nestes termos",
+            ]
         else:
             total_valor_causa = _get_total_valor_causa(
                 contratos,
