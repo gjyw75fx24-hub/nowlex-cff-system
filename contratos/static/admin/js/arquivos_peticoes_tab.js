@@ -357,7 +357,11 @@
             const picker = document.createElement('input');
             picker.type = 'file';
             picker.multiple = true;
-            picker.style.display = 'none';
+            picker.style.position = 'fixed';
+            picker.style.left = '-9999px';
+            picker.style.top = '0';
+            picker.style.opacity = '0';
+            picker.style.pointerEvents = 'none';
             document.body.appendChild(picker);
             picker.addEventListener('change', async () => {
                 try {
@@ -369,7 +373,11 @@
                     picker.remove();
                 }
             }, { once: true });
-            picker.click();
+            if (typeof picker.showPicker === 'function') {
+                picker.showPicker();
+            } else {
+                picker.click();
+            }
         };
         const waitForNewRow = (group, previousRows, attempts = 20) => new Promise((resolve) => {
             const previousSet = new Set(previousRows);
