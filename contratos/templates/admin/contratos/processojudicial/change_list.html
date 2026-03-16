@@ -376,6 +376,28 @@
             gap: 8px;
             align-items: center;
         }
+        .processo-cpf-lote-summary__actions {
+            margin-left: auto;
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .processo-cpf-lote-summary__action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            border: 1px solid #bcd0e5;
+            background: #eef6ff;
+            color: #1d4f8c;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .processo-cpf-lote-summary__action-btn:hover {
+            background: #dcecff;
+        }
         .processo-cpf-lote-summary__lists {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -412,6 +434,107 @@
         .processo-cpf-lote-summary__chip--more {
             background: #edf2f7;
             color: #4a5568;
+        }
+        .cnj-batch-register-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.48);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10005;
+            padding: 16px;
+        }
+        .cnj-batch-register-modal__panel {
+            width: min(920px, calc(100vw - 24px));
+            max-height: calc(100vh - 32px);
+            overflow: auto;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+            padding: 20px;
+        }
+        .cnj-batch-register-modal__header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .cnj-batch-register-modal__header h3 {
+            margin: 0;
+            color: #1e3a5f;
+        }
+        .cnj-batch-register-modal__close {
+            border: none;
+            background: transparent;
+            color: #64748b;
+            font-size: 1.6rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .cnj-batch-register-modal__meta,
+        .cnj-batch-register-modal__progress {
+            font-size: 0.88rem;
+            color: #475569;
+            margin-bottom: 10px;
+        }
+        .cnj-batch-register-modal__actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .cnj-batch-register-modal__table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .cnj-batch-register-modal__table th,
+        .cnj-batch-register-modal__table td {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 8px 6px;
+            text-align: left;
+            vertical-align: top;
+        }
+        .cnj-batch-register-modal__table th {
+            color: #475569;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .cnj-batch-register-modal__status {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #334155;
+            font-weight: 600;
+            font-size: 0.78rem;
+        }
+        .cnj-batch-register-modal__status--ready {
+            background: #ecfdf3;
+            border-color: #86efac;
+            color: #166534;
+        }
+        .cnj-batch-register-modal__status--created,
+        .cnj-batch-register-modal__status--already_exists {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            color: #1d4ed8;
+        }
+        .cnj-batch-register-modal__status--pending_data,
+        .cnj-batch-register-modal__status--not_found,
+        .cnj-batch-register-modal__status--error,
+        .cnj-batch-register-modal__status--invalid {
+            background: #fff5f5;
+            border-color: #fca5a5;
+            color: #b91c1c;
+        }
+        .cnj-batch-register-modal__link {
+            white-space: nowrap;
         }
         .habilitacao-batch-panel {
             margin-top: 10px;
@@ -1108,6 +1231,13 @@
                         <span>Consultados: {{ cpf_lote_summary.total }}</span>
                         <span>Encontrados: {{ cpf_lote_summary.found }}</span>
                         <span>Não encontrados: {{ cpf_lote_summary.missing }}</span>
+                        {% if batch_lote_kind == 'cnj' and cpf_lote_summary.missing %}
+                            <div class="processo-cpf-lote-summary__actions">
+                                <button type="button" class="processo-cpf-lote-summary__action-btn" id="cnj-batch-register-open">
+                                    Cadastrar não encontrados
+                                </button>
+                            </div>
+                        {% endif %}
                     </div>
                     <div class="processo-cpf-lote-summary__lists">
                         <div>
@@ -1740,6 +1870,39 @@
             </div>
         </div>
     </div>
+    {{ cnj_batch_register_missing|json_script:"cnj-batch-register-missing-data" }}
+    <div id="cnj-batch-register-modal" class="cnj-batch-register-modal">
+        <div class="cnj-batch-register-modal__panel">
+            <div class="cnj-batch-register-modal__header">
+                <h3>Cadastro em lote por CNJ</h3>
+                <button type="button" id="cnj-batch-register-close" class="cnj-batch-register-modal__close">×</button>
+            </div>
+            <div class="cnj-batch-register-modal__meta" id="cnj-batch-register-meta">
+                Os CNJs abaixo não possuem cadastro. A verificação exige dados completos; não será criado cadastro incompleto.
+            </div>
+            <div class="cnj-batch-register-modal__actions">
+                <button type="button" id="cnj-batch-register-verify" class="button">Verificar</button>
+                <button type="button" id="cnj-batch-register-run" class="button default" disabled>Cadastrar em lote</button>
+                <button type="button" id="cnj-batch-register-refresh" class="button" disabled>Atualizar lista</button>
+            </div>
+            <div class="cnj-batch-register-modal__progress" id="cnj-batch-register-progress"></div>
+            <table class="cnj-batch-register-modal__table">
+                <thead>
+                    <tr>
+                        <th>CNJ</th>
+                        <th>Status</th>
+                        <th>Detalhes</th>
+                        <th>Cadastro</th>
+                    </tr>
+                </thead>
+                <tbody id="cnj-batch-register-body">
+                    <tr>
+                        <td colspan="4">Nenhum CNJ pendente.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 
     <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -2005,6 +2168,18 @@
         let cpfLoteRenameId = '';
         let cpfLoteRenameOriginalName = '';
         let cpfLoteRenameOriginalShared = false;
+        const cnjBatchRegisterOpen = document.getElementById('cnj-batch-register-open');
+        const cnjBatchRegisterModal = document.getElementById('cnj-batch-register-modal');
+        const cnjBatchRegisterClose = document.getElementById('cnj-batch-register-close');
+        const cnjBatchRegisterVerify = document.getElementById('cnj-batch-register-verify');
+        const cnjBatchRegisterRun = document.getElementById('cnj-batch-register-run');
+        const cnjBatchRegisterRefresh = document.getElementById('cnj-batch-register-refresh');
+        const cnjBatchRegisterBody = document.getElementById('cnj-batch-register-body');
+        const cnjBatchRegisterProgress = document.getElementById('cnj-batch-register-progress');
+        const cnjBatchRegisterVerifyUrl = "{{ cnj_batch_verify_url|escapejs }}";
+        const cnjBatchRegisterImportUrl = "{{ cnj_batch_import_url|escapejs }}";
+        const cnjBatchRegisterMissingScript = document.getElementById('cnj-batch-register-missing-data');
+        let cnjBatchRegisterRows = [];
 
         if (!form || !actionSelect) return;
 
@@ -2261,6 +2436,163 @@
                 .replace(/>/g, '&gt;')
                 .replace(/\"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+
+        function getCnjBatchRegisterInitialRows() {
+            if (!cnjBatchRegisterMissingScript) return [];
+            try {
+                const parsed = JSON.parse(cnjBatchRegisterMissingScript.textContent || '[]');
+                if (!Array.isArray(parsed)) return [];
+                return parsed.map((item) => ({
+                    cnj: String(item.cnj || '').replace(/\D/g, ''),
+                    cnj_display: item.cnj_display || item.cnj || '',
+                    status: 'pending_check',
+                    status_label: 'Aguardando verificação',
+                    detail: '',
+                    processo_url: '',
+                }));
+            } catch (error) {
+                console.warn('Falha ao carregar CNJs pendentes para cadastro em lote.', error);
+                return [];
+            }
+        }
+
+        function renderCnjBatchRegisterRows() {
+            if (!cnjBatchRegisterBody) return;
+            if (!cnjBatchRegisterRows.length) {
+                cnjBatchRegisterBody.innerHTML = '<tr><td colspan="4">Nenhum CNJ pendente.</td></tr>';
+                if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = true;
+                return;
+            }
+            cnjBatchRegisterBody.innerHTML = cnjBatchRegisterRows.map((row) => {
+                const statusClass = `cnj-batch-register-modal__status--${escapeHtml(String(row.status || 'pending_check'))}`;
+                const linkHtml = row.processo_url
+                    ? `<a class="cnj-batch-register-modal__link" href="${escapeHtml(row.processo_url)}" target="_blank" rel="noopener">Entrar no cadastro</a>`
+                    : '—';
+                return `
+                    <tr data-cnj="${escapeHtml(row.cnj || '')}">
+                        <td>${escapeHtml(row.cnj_display || row.cnj || '')}</td>
+                        <td><span class="cnj-batch-register-modal__status ${statusClass}">${escapeHtml(row.status_label || '')}</span></td>
+                        <td>${escapeHtml(row.detail || '—')}</td>
+                        <td>${linkHtml}</td>
+                    </tr>
+                `;
+            }).join('');
+            const readyRows = cnjBatchRegisterRows.filter((row) => row.status === 'ready');
+            if (cnjBatchRegisterRun) {
+                cnjBatchRegisterRun.disabled = readyRows.length === 0;
+            }
+        }
+
+        function showCnjBatchRegisterModal() {
+            if (!cnjBatchRegisterModal) return;
+            cnjBatchRegisterRows = getCnjBatchRegisterInitialRows();
+            if (cnjBatchRegisterProgress) {
+                cnjBatchRegisterProgress.textContent = '';
+            }
+            if (cnjBatchRegisterRefresh) {
+                cnjBatchRegisterRefresh.disabled = true;
+            }
+            renderCnjBatchRegisterRows();
+            cnjBatchRegisterModal.style.display = 'flex';
+        }
+
+        function hideCnjBatchRegisterModal() {
+            if (!cnjBatchRegisterModal) return;
+            cnjBatchRegisterModal.style.display = 'none';
+        }
+
+        async function postJson(url, payload) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload || {}),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.ok !== true) {
+                throw new Error(data.error || data.detail || 'Falha no processamento do lote.');
+            }
+            return data;
+        }
+
+        function mergeCnjBatchRegisterRows(rows) {
+            const byCnj = new Map((cnjBatchRegisterRows || []).map((item) => [item.cnj, item]));
+            (rows || []).forEach((item) => {
+                const key = String(item.cnj || '').replace(/\D/g, '');
+                if (!key) return;
+                byCnj.set(key, {
+                    ...(byCnj.get(key) || {}),
+                    ...item,
+                    cnj: key,
+                });
+            });
+            cnjBatchRegisterRows = Array.from(byCnj.values());
+            renderCnjBatchRegisterRows();
+        }
+
+        async function verifyCnjBatchRegisterRows() {
+            if (!cnjBatchRegisterVerifyUrl) return;
+            const cnjs = cnjBatchRegisterRows.map((row) => row.cnj).filter(Boolean);
+            if (!cnjs.length) return;
+            if (cnjBatchRegisterProgress) {
+                cnjBatchRegisterProgress.textContent = 'Verificando CNJs no Escavador...';
+            }
+            if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = true;
+            if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = true;
+            try {
+                const payload = await postJson(cnjBatchRegisterVerifyUrl, { cnjs });
+                mergeCnjBatchRegisterRows(payload.rows || []);
+                const readyCount = cnjBatchRegisterRows.filter((row) => row.status === 'ready').length;
+                if (cnjBatchRegisterProgress) {
+                    cnjBatchRegisterProgress.textContent = `Verificação concluída. Prontos: ${readyCount} | Pendentes: ${cnjBatchRegisterRows.length - readyCount}`;
+                }
+            } catch (error) {
+                if (cnjBatchRegisterProgress) {
+                    cnjBatchRegisterProgress.textContent = error.message || 'Falha ao verificar os CNJs.';
+                }
+            } finally {
+                if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+                renderCnjBatchRegisterRows();
+            }
+        }
+
+        async function runCnjBatchRegisterImport() {
+            if (!cnjBatchRegisterImportUrl) return;
+            const cnjs = cnjBatchRegisterRows.filter((row) => row.status === 'ready').map((row) => row.cnj);
+            if (!cnjs.length) {
+                if (cnjBatchRegisterProgress) cnjBatchRegisterProgress.textContent = 'Nenhum CNJ pronto para cadastrar.';
+                return;
+            }
+            if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = true;
+            if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = true;
+            const chunkSize = 3;
+            let processed = 0;
+            let created = 0;
+            let failed = 0;
+            for (let start = 0; start < cnjs.length; start += chunkSize) {
+                const chunk = cnjs.slice(start, start + chunkSize);
+                if (cnjBatchRegisterProgress) {
+                    cnjBatchRegisterProgress.textContent = `Cadastrando CNJs... ${processed}/${cnjs.length} processados. Criados: ${created} | Falhas: ${failed}`;
+                }
+                const payload = await postJson(cnjBatchRegisterImportUrl, { cnjs: chunk });
+                mergeCnjBatchRegisterRows(payload.rows || []);
+                processed += Number(payload.processed || chunk.length || 0);
+                created += Number(payload.created || 0);
+                failed += Number(payload.failed || 0);
+            }
+            if (cnjBatchRegisterProgress) {
+                const alreadyExists = cnjBatchRegisterRows.filter((row) => row.status === 'already_exists').length;
+                cnjBatchRegisterProgress.textContent = `Cadastro concluído. Criados: ${created} | Já cadastrados: ${alreadyExists} | Falhas/Pendências: ${failed}`;
+            }
+            if (cnjBatchRegisterRefresh) {
+                cnjBatchRegisterRefresh.disabled = false;
+            }
+            if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+            renderCnjBatchRegisterRows();
         }
 
         function showCpfLoteDialog({ title, message, confirmText, cancelText }) {
@@ -2681,6 +3013,39 @@
         }
         if (cpfLoteClose) {
             cpfLoteClose.addEventListener('click', hideCpfLoteModal);
+        }
+        if (cnjBatchRegisterOpen) {
+            cnjBatchRegisterOpen.addEventListener('click', showCnjBatchRegisterModal);
+        }
+        if (cnjBatchRegisterClose) {
+            cnjBatchRegisterClose.addEventListener('click', hideCnjBatchRegisterModal);
+        }
+        if (cnjBatchRegisterModal) {
+            cnjBatchRegisterModal.addEventListener('click', (event) => {
+                if (event.target === cnjBatchRegisterModal) {
+                    hideCnjBatchRegisterModal();
+                }
+            });
+        }
+        if (cnjBatchRegisterVerify) {
+            cnjBatchRegisterVerify.addEventListener('click', verifyCnjBatchRegisterRows);
+        }
+        if (cnjBatchRegisterRun) {
+            cnjBatchRegisterRun.addEventListener('click', () => {
+                runCnjBatchRegisterImport().catch((error) => {
+                    if (cnjBatchRegisterProgress) {
+                        cnjBatchRegisterProgress.textContent = error.message || 'Falha ao cadastrar os CNJs.';
+                    }
+                    if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = false;
+                    if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+                });
+            });
+        }
+        if (cnjBatchRegisterRefresh) {
+            cnjBatchRegisterRefresh.addEventListener('click', () => {
+                const url = new URL(window.location.href);
+                window.location.href = url.toString();
+            });
         }
         if (cpfLoteModal) {
             cpfLoteModal.addEventListener('click', (event) => {

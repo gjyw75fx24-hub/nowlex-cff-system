@@ -92,6 +92,8 @@ from .services.analise_lote_planilha import (
     build_analise_lote_rows_from_file_bytes,
     import_analise_lote_rows,
 )
+from .integracoes_escavador.api import buscar_processo_por_cnj
+from .integracoes_escavador.partes import collect_partes_from_escavador_payload
 from .queue import get_passivas_import_queue, get_queue_connection
 from .tasks import run_passivas_planilha_import_job, run_analise_lote_planilha_import_job
 
@@ -9442,6 +9444,260 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         request._cnj_lote_cache = info
         return info
 
+    def _find_processo_by_cnj_digits(self, cnj_digits):
+        cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
+        if len(cnj_digits) != 20:
+            return None
+
+        numero_match = (
+            ProcessoJudicialNumeroCnj.objects.annotate(
+                _cnj_digits=models.Func(
+                    models.F('cnj'),
+                    models.Value(r'\D'),
+                    models.Value(''),
+                    models.Value('g'),
+                    function='regexp_replace',
+                    output_field=models.TextField(),
+                )
+            )
+            .filter(_cnj_digits=cnj_digits)
+            .select_related('processo')
+            .order_by('-criado_em', '-id')
+            .first()
+        )
+        if numero_match and numero_match.processo_id:
+            return numero_match.processo
+
+        return (
+            ProcessoJudicial.objects.annotate(
+                _cnj_digits=models.Func(
+                    models.F('cnj'),
+                    models.Value(r'\D'),
+                    models.Value(''),
+                    models.Value('g'),
+                    function='regexp_replace',
+                    output_field=models.TextField(),
+                )
+            )
+            .filter(_cnj_digits=cnj_digits)
+            .order_by('-id')
+            .first()
+        )
+
+    def _get_carteira_for_cnj_batch_registration(self, request):
+        carteira_id = self._get_filtered_carteira_id(request)
+        if not carteira_id:
+            carteira_id = self._get_single_allowed_carteira_id_for_user(request.user)
+        if not carteira_id:
+            return None
+        qs = Carteira.objects.filter(pk=carteira_id)
+        allowed_ids = get_user_allowed_carteira_ids(request.user)
+        if allowed_ids is not None:
+            qs = qs.filter(pk__in=allowed_ids)
+        return qs.first()
+
+    def _inspect_cnj_batch_registration(self, cnj_digits):
+        cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
+        row = {
+            'cnj': cnj_digits,
+            'cnj_display': self._format_cnj_display(cnj_digits),
+            'status': 'pending_check',
+            'status_label': 'Aguardando verificação',
+            'detail': '',
+            'processo_id': None,
+            'processo_url': '',
+            'can_import': False,
+            'dados_api': None,
+            'partes': [],
+        }
+        if len(cnj_digits) != 20:
+            row.update({
+                'status': 'invalid',
+                'status_label': 'CNJ inválido',
+                'detail': 'O CNJ precisa ter 20 dígitos.',
+            })
+            return row
+
+        existing = self._find_processo_by_cnj_digits(cnj_digits)
+        if existing:
+            row.update({
+                'status': 'already_exists',
+                'status_label': 'Já cadastrado',
+                'detail': 'Já existe cadastro com esse CNJ.',
+                'processo_id': existing.pk,
+                'processo_url': reverse('admin:contratos_processojudicial_change', args=[existing.pk]),
+            })
+            return row
+
+        dados_api = buscar_processo_por_cnj(cnj_digits)
+        if not dados_api:
+            row.update({
+                'status': 'not_found',
+                'status_label': 'Não encontrado',
+                'detail': 'O Escavador não retornou dados para esse CNJ.',
+            })
+            return row
+
+        fontes = dados_api.get('fontes') or []
+        fonte_principal = fontes[0] if fontes else {}
+        capa = fonte_principal.get('capa') or {}
+        tribunal = fonte_principal.get('tribunal') or {}
+        uf = str((dados_api.get('estado_origem') or {}).get('sigla') or '').strip()
+        vara = str(capa.get('orgao_julgador') or '').strip()
+        tribunal_sigla = str(tribunal.get('sigla') or '').strip()
+        partes = collect_partes_from_escavador_payload(dados_api)
+        row['dados_api'] = dados_api
+        row['partes'] = partes
+
+        issues = []
+        if not uf:
+            issues.append('UF')
+        if not vara:
+            issues.append('Vara')
+        if not tribunal_sigla:
+            issues.append('Tribunal')
+
+        ativos = [item for item in partes if item.get('tipo_polo') == 'ATIVO']
+        passivos = [item for item in partes if item.get('tipo_polo') == 'PASSIVO']
+        if not ativos:
+            issues.append('Polo ativo')
+        if not passivos:
+            issues.append('Polo passivo')
+        if any(not str(item.get('documento') or '').strip() for item in ativos):
+            issues.append('Documento do polo ativo')
+        if any(not str(item.get('documento') or '').strip() for item in passivos):
+            issues.append('Documento do polo passivo')
+
+        if issues:
+            row.update({
+                'status': 'pending_data',
+                'status_label': 'Pendência',
+                'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(issues)) + '.',
+            })
+            return row
+
+        row.update({
+            'status': 'ready',
+            'status_label': 'Pronto para cadastrar',
+            'detail': f'{len(passivos)} polo(s) passivo(s), {len(ativos)} polo(s) ativo(s).',
+            'can_import': True,
+        })
+        return row
+
+    def _build_cnj_batch_preview_row(self, cnj_digits, request=None):
+        row = self._inspect_cnj_batch_registration(cnj_digits)
+        row.pop('dados_api', None)
+        row.pop('partes', None)
+        return row
+
+    def _create_processo_from_escavador_cnj(self, cnj_digits, request):
+        cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
+        preview = self._inspect_cnj_batch_registration(cnj_digits)
+        if preview.get('status') != 'ready':
+            preview.pop('dados_api', None)
+            preview.pop('partes', None)
+            return preview
+
+        dados_api = preview.pop('dados_api', None) or {}
+        fontes = dados_api.get('fontes') or []
+        fonte_principal = fontes[0] if fontes else {}
+        capa = fonte_principal.get('capa') or {}
+        tribunal = fonte_principal.get('tribunal') or {}
+        cnj_original = str(dados_api.get('numero_cnj') or cnj_digits).strip()
+        partes = preview.pop('partes', None) or collect_partes_from_escavador_payload(dados_api)
+        carteira = self._get_carteira_for_cnj_batch_registration(request)
+
+        classe_nome = str(capa.get('classe') or '').strip()
+        status_obj = None
+        if classe_nome:
+            status_obj, _ = StatusProcessual.objects.get_or_create(
+                nome=re.sub(r'\s*\(\d+\)$', '', classe_nome).strip().title(),
+                defaults={'ordem': 0},
+            )
+
+        valor_causa = Decimal('0.00')
+        valor_raw = (capa.get('valor_causa') or {}).get('valor')
+        if valor_raw not in (None, ''):
+            try:
+                valor_causa = Decimal(str(valor_raw))
+            except (InvalidOperation, TypeError, ValueError):
+                valor_causa = Decimal('0.00')
+
+        with transaction.atomic():
+            existing = self._find_processo_by_cnj_digits(cnj_digits)
+            if existing:
+                preview.update({
+                    'status': 'already_exists',
+                    'status_label': 'Já cadastrado',
+                    'detail': 'Já existe cadastro com esse CNJ.',
+                    'can_import': False,
+                    'processo_id': existing.pk,
+                    'processo_url': reverse('admin:contratos_processojudicial_change', args=[existing.pk]),
+                })
+                return preview
+
+            processo = ProcessoJudicial.objects.create(
+                cnj=cnj_original,
+                uf=str((dados_api.get('estado_origem') or {}).get('sigla') or '').strip(),
+                vara=str(capa.get('orgao_julgador') or '').strip(),
+                tribunal=str(tribunal.get('sigla') or '').strip(),
+                valor_causa=valor_causa,
+                status=status_obj,
+                carteira=carteira,
+            )
+            if carteira:
+                processo.vincular_carteira(carteira)
+
+            numero_cnj = ProcessoJudicialNumeroCnj.objects.create(
+                processo=processo,
+                cnj=cnj_original,
+                uf=processo.uf or '',
+                status=status_obj,
+                carteira=carteira,
+                vara=processo.vara or '',
+                tribunal=processo.tribunal or '',
+                valor_causa=processo.valor_causa,
+            )
+
+            for parte_data in partes:
+                Parte.objects.create(
+                    processo=processo,
+                    numero_cnj=numero_cnj,
+                    tipo_polo=parte_data.get('tipo_polo'),
+                    nome=str(parte_data.get('nome') or '').strip(),
+                    tipo_pessoa=str(parte_data.get('tipo_pessoa') or '').strip() or 'PF',
+                    documento=str(parte_data.get('documento') or '').strip(),
+                    endereco=str(parte_data.get('endereco') or '').strip(),
+                )
+
+            movimentos = dados_api.get('movimentacoes') or []
+            for movimento in movimentos:
+                data_obj = parse_datetime(movimento.get('data') or '')
+                descricao = str(movimento.get('conteudo') or '').strip()
+                if not data_obj or not descricao:
+                    continue
+                if timezone.is_naive(data_obj):
+                    data_obj = timezone.make_aware(data_obj, timezone.get_current_timezone())
+                AndamentoProcessual.objects.get_or_create(
+                    processo=processo,
+                    numero_cnj=numero_cnj,
+                    data=data_obj,
+                    descricao=descricao,
+                    defaults={
+                        'detalhes': str(((movimento.get('fonte') or {}).get('nome')) or '').strip(),
+                    },
+                )
+
+        preview.update({
+            'status': 'created',
+            'status_label': 'Cadastrado',
+            'detail': 'Cadastro criado com sucesso.',
+            'can_import': False,
+            'processo_id': processo.pk,
+            'processo_url': reverse('admin:contratos_processojudicial_change', args=[processo.pk]),
+        })
+        return preview
+
     def _safe_positive_int(self, value):
         try:
             parsed = int(value)
@@ -11697,6 +11953,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             extra_context['cpf_lote_id'] = None
             extra_context['batch_lote_kind'] = ''
             extra_context['batch_lote_count_label'] = 'CPFs no lote'
+        extra_context['cnj_batch_register_missing'] = [
+            {
+                'cnj': value,
+                'cnj_display': self._format_cnj_display(value),
+            }
+            for value in cnj_info.get('missing', [])
+        ]
+        extra_context['cnj_batch_verify_url'] = reverse('admin:processo_cnj_batch_verify')
+        extra_context['cnj_batch_import_url'] = reverse('admin:processo_cnj_batch_import')
         extra_context['cpf_lote_list_url'] = reverse('admin:processo_cpf_lote_list')
         extra_context['cpf_lote_save_url'] = reverse('admin:processo_cpf_lote_save')
         extra_context['cpf_lote_rename_url'] = reverse('admin:processo_cpf_lote_rename')
@@ -11774,6 +12039,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         urls = super().get_urls()
         custom_urls = [
             path(
+                'cnj-lote/cadastro/verificar/',
+                self.admin_site.admin_view(self.cnj_batch_verify_view),
+                name='processo_cnj_batch_verify',
+            ),
+            path(
+                'cnj-lote/cadastro/importar-chunk/',
+                self.admin_site.admin_view(self.cnj_batch_import_view),
+                name='processo_cnj_batch_import',
+            ),
+            path(
                 'habilitacao-lote/pendencias/revalidar/',
                 self.admin_site.admin_view(self.habilitacao_batch_issue_revalidate_view),
                 name='processo_habilitacao_batch_issue_revalidate',
@@ -11807,6 +12082,81 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('parte/<int:parte_id>/obito-info/', self.admin_site.admin_view(self.obito_info_view), name='parte_obito_info'),
         ]
         return custom_urls + urls
+
+    def cnj_batch_verify_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+
+        raw_cnjs = payload.get('cnjs') or []
+        if isinstance(raw_cnjs, str):
+            raw_cnjs = [raw_cnjs]
+        cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
+        if not cnjs:
+            return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
+
+        rows = [self._build_cnj_batch_preview_row(cnj, request=request) for cnj in cnjs]
+        return JsonResponse({'ok': True, 'rows': rows})
+
+    def cnj_batch_import_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+
+        raw_cnjs = payload.get('cnjs') or []
+        if isinstance(raw_cnjs, str):
+            raw_cnjs = [raw_cnjs]
+        cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
+        if not cnjs:
+            return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
+
+        rows = []
+        created = 0
+        already_exists = 0
+        failed = 0
+        for cnj in cnjs:
+            try:
+                row = self._create_processo_from_escavador_cnj(cnj, request)
+            except Exception as exc:
+                logger.error('Erro ao cadastrar CNJ em lote %s: %s', cnj, exc, exc_info=True)
+                row = {
+                    'cnj': cnj,
+                    'cnj_display': self._format_cnj_display(cnj),
+                    'status': 'error',
+                    'status_label': 'Erro',
+                    'detail': str(exc),
+                    'processo_id': None,
+                    'processo_url': '',
+                    'can_import': False,
+                }
+            rows.append(row)
+            if row.get('status') == 'created':
+                created += 1
+            elif row.get('status') == 'already_exists':
+                already_exists += 1
+            else:
+                failed += 1
+
+        return JsonResponse({
+            'ok': True,
+            'rows': rows,
+            'created': created,
+            'already_exists': already_exists,
+            'failed': failed,
+            'processed': len(rows),
+        })
 
     def habilitacao_batch_issue_revalidate_view(self, request):
         if request.method != 'POST':
