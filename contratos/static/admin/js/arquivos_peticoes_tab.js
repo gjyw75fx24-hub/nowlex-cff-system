@@ -353,6 +353,24 @@
                 }, 0);
             }
         };
+        const openMultiFilePicker = (onSelect) => {
+            const picker = document.createElement('input');
+            picker.type = 'file';
+            picker.multiple = true;
+            picker.style.display = 'none';
+            document.body.appendChild(picker);
+            picker.addEventListener('change', async () => {
+                try {
+                    const files = Array.from(picker.files || []);
+                    if (files.length && typeof onSelect === 'function') {
+                        await onSelect(files);
+                    }
+                } finally {
+                    picker.remove();
+                }
+            }, { once: true });
+            picker.click();
+        };
         const waitForNewRow = (group, previousRows, attempts = 20) => new Promise((resolve) => {
             const previousSet = new Set(previousRows);
             const check = () => {
@@ -388,8 +406,7 @@
             setFileNameDisplay(newRow, file.name);
             return newRow;
         };
-        const handleFileSelection = async (row, fileInput) => {
-            const files = Array.from(fileInput.files || []);
+        const handleFileBatchSelection = async (row, fileInput, files = []) => {
             if (!files.length) return;
             if (fileInput.dataset.skipMulti === '1') {
                 setFileNameDisplay(row, files[0].name);
@@ -424,6 +441,10 @@
                 assigned += 1;
             }
         };
+        const handleFileSelection = async (row, fileInput) => {
+            const files = Array.from(fileInput.files || []);
+            await handleFileBatchSelection(row, fileInput, files);
+        };
         rows.forEach(row => {
             const hasFileLink = row.querySelector('td.field-arquivo a[href*="/media/"], td.field-arquivo a[href*="processos/"]');
             if (hasFileLink) {
@@ -435,17 +456,20 @@
             if (!fileInput) {
                 return;
             }
-            fileInput.multiple = true;
+            fileInput.multiple = false;
             if (!fileInput.dataset.fileHandler) {
                 fileInput.dataset.fileHandler = '1';
                 fileInput.addEventListener('change', () => handleFileSelection(row, fileInput));
             }
             if (uploadParagraph && uploadParagraph.dataset.addButton !== '1') {
-                const label = document.createElement('label');
-                label.className = 'documento-peticoes-addfile-button button';
-                label.textContent = 'Procurar...';
-                label.setAttribute('for', fileInput.id);
-                uploadParagraph.appendChild(label);
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'documento-peticoes-addfile-button button';
+                button.textContent = 'Procurar...';
+                button.addEventListener('click', () => {
+                    openMultiFilePicker((files) => handleFileBatchSelection(row, fileInput, files));
+                });
+                uploadParagraph.appendChild(button);
                 uploadParagraph.dataset.addButton = '1';
             }
             if (nameInput && !nameInput.dataset.addButtonRow) {
@@ -454,7 +478,7 @@
                 button.className = 'documento-peticoes-addfile-button';
                 button.textContent = 'Procurar...';
                 button.addEventListener('click', () => {
-                    fileInput.click();
+                    openMultiFilePicker((files) => handleFileBatchSelection(row, fileInput, files));
                 });
                 nameInput.insertAdjacentElement('afterend', button);
                 nameInput.dataset.addButtonRow = '1';
