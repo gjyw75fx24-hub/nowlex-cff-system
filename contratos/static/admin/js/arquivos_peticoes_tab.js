@@ -99,6 +99,7 @@
     let pendingFileDistributions = 0;
     const multiUploadUrl = window.__processo_arquivos_multi_upload_url || '';
     let multiUploadOverlay = null;
+    let multiUploadSummaryModal = null;
     let allowArquivoNavigation = false;
     const handleArquivosBeforeUnload = (event) => {
         if (pendingFileDistributions <= 0 || allowArquivoNavigation) {
@@ -437,6 +438,87 @@
                 multiUploadOverlay.style.display = 'none';
             }
         };
+        const ensureMultiUploadSummaryModal = () => {
+            if (multiUploadSummaryModal) {
+                return multiUploadSummaryModal;
+            }
+            const modal = document.createElement('div');
+            modal.style.position = 'fixed';
+            modal.style.inset = '0';
+            modal.style.background = 'rgba(15, 23, 42, 0.45)';
+            modal.style.display = 'none';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.style.zIndex = '10060';
+            modal.innerHTML = `
+                <div style="background:#fff;padding:24px 28px;border-radius:18px;width:min(920px, calc(100vw - 40px));max-height:min(80vh, 820px);box-shadow:0 18px 44px rgba(0,0,0,0.25);display:flex;flex-direction:column;gap:16px;">
+                    <div style="font-size:28px;font-weight:700;color:#0f172a;">Resumo do upload</div>
+                    <div class="arquivos-multi-upload-summary-body" style="display:flex;flex-direction:column;gap:12px;overflow:auto;padding-right:4px;"></div>
+                    <div style="display:flex;justify-content:flex-end;">
+                        <button type="button" class="button" style="background:#1d4ed8;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-weight:600;cursor:pointer;">OK</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            multiUploadSummaryModal = modal;
+            return modal;
+        };
+        const showMultiUploadSummary = (payload) => new Promise((resolve) => {
+            const modal = ensureMultiUploadSummaryModal();
+            const body = modal.querySelector('.arquivos-multi-upload-summary-body');
+            const button = modal.querySelector('button');
+            if (!body || !button) {
+                resolve();
+                return;
+            }
+            const renamedItems = Array.isArray(payload?.renamed_items) ? payload.renamed_items : [];
+            const failedItems = Array.isArray(payload?.failed_items) ? payload.failed_items : [];
+            const successCount = Number(payload?.created_count || 0);
+            const sections = [];
+            sections.push(`
+                <div style="border:1px solid #cbd5e1;border-radius:14px;padding:14px 16px;background:#f8fafc;">
+                    <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px;">Resultado</div>
+                    <div style="font-size:15px;color:#334155;">${successCount} arquivo(s) enviado(s) com sucesso.</div>
+                </div>
+            `);
+            if (renamedItems.length) {
+                const cards = renamedItems.map((item) => `
+                    <div style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:12px;padding:12px 14px;">
+                        <div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">Nome ajustado automaticamente</div>
+                        <div style="font-size:14px;color:#0f172a;word-break:break-word;"><strong>Original:</strong> ${String(item?.original || '')}</div>
+                        <div style="font-size:14px;color:#0f172a;word-break:break-word;margin-top:4px;"><strong>Salvo como:</strong> ${String(item?.safe || '')}</div>
+                    </div>
+                `).join('');
+                sections.push(`
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div style="font-size:16px;font-weight:700;color:#0f172a;">Renomeações</div>
+                        ${cards}
+                    </div>
+                `);
+            }
+            if (failedItems.length) {
+                const cards = failedItems.map((item) => `
+                    <div style="border:1px solid #fecaca;background:#fef2f2;border-radius:12px;padding:12px 14px;">
+                        <div style="font-size:14px;font-weight:700;color:#991b1b;word-break:break-word;">${String(item?.nome || 'Arquivo')}</div>
+                        <div style="font-size:13px;color:#7f1d1d;margin-top:6px;word-break:break-word;">${String(item?.reason || 'Falha ao salvar.')}</div>
+                    </div>
+                `).join('');
+                sections.push(`
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div style="font-size:16px;font-weight:700;color:#991b1b;">Falhas</div>
+                        ${cards}
+                    </div>
+                `);
+            }
+            body.innerHTML = sections.join('');
+            const close = () => {
+                modal.style.display = 'none';
+                button.removeEventListener('click', close);
+                resolve();
+            };
+            button.addEventListener('click', close);
+            modal.style.display = 'flex';
+        });
         const uploadFilesDirectly = async (row, fileInput, files) => {
             if (!multiUploadUrl || !files.length) {
                 return false;
@@ -508,27 +590,8 @@
                 });
                 setMultiUploadOverlayState('Concluindo...', 100);
                 hideMultiUploadOverlay();
-                const messages = [];
-                if (payload.renamed_count) {
-                    const renamedNames = Array.isArray(payload.renamed_items)
-                        ? payload.renamed_items.map((item) => `${item?.original} -> ${item?.safe}`).filter(Boolean)
-                        : [];
-                    messages.push(
-                        `Nome${payload.renamed_count > 1 ? 's' : ''} ajustado${payload.renamed_count > 1 ? 's' : ''} automaticamente para formato aceito.` +
-                        (renamedNames.length ? ` ${renamedNames.join(' | ')}` : '')
-                    );
-                }
-                if (payload.failed_count) {
-                    const failedNames = Array.isArray(payload.failed_items)
-                        ? payload.failed_items.map((item) => item?.nome).filter(Boolean)
-                        : [];
-                    messages.push(
-                        `Foram enviados ${payload.created_count} arquivo(s), mas ${payload.failed_count} falharam.` +
-                        (failedNames.length ? ` Falharam: ${failedNames.join(', ')}` : '')
-                    );
-                }
-                if (messages.length) {
-                    window.alert(messages.join('\n\n'));
+                if (payload.renamed_count || payload.failed_count) {
+                    await showMultiUploadSummary(payload);
                 }
                 setUploadStatusLabel(row, 'Arquivos enviados. Atualizando...');
                 allowArquivoNavigation = true;
