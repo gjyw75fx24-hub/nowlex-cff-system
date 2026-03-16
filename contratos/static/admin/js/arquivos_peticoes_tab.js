@@ -98,6 +98,7 @@
     let executeLabelRef = null;
     let pendingFileDistributions = 0;
     const multiUploadUrl = window.__processo_arquivos_multi_upload_url || '';
+    const multiUploadToastStorageKey = 'nowlex:arquivos-multi-upload-toast';
     let multiUploadOverlay = null;
     let multiUploadSummaryModal = null;
     let allowArquivoNavigation = false;
@@ -519,6 +520,71 @@
             button.addEventListener('click', close);
             modal.style.display = 'flex';
         });
+        const persistMultiUploadToast = (payload) => {
+            const successCount = Number(payload?.created_count || 0);
+            if (successCount <= 0) {
+                return;
+            }
+            const failedCount = Number(payload?.failed_count || 0);
+            const message = failedCount > 0
+                ? `${successCount} arquivo(s) salvo(s) com sucesso. ${failedCount} falharam.`
+                : `${successCount} arquivo(s) salvo(s) com sucesso.`;
+            try {
+                window.sessionStorage.setItem(multiUploadToastStorageKey, JSON.stringify({
+                    message,
+                    timestamp: Date.now(),
+                }));
+            } catch (error) {
+                // ignore storage failures
+            }
+        };
+        const showPersistedMultiUploadToast = () => {
+            let payload = null;
+            try {
+                const raw = window.sessionStorage.getItem(multiUploadToastStorageKey);
+                if (!raw) {
+                    return;
+                }
+                window.sessionStorage.removeItem(multiUploadToastStorageKey);
+                payload = JSON.parse(raw);
+            } catch (error) {
+                return;
+            }
+            const message = String(payload?.message || '').trim();
+            if (!message) {
+                return;
+            }
+            const toast = document.createElement('div');
+            toast.style.position = 'fixed';
+            toast.style.top = '22px';
+            toast.style.right = '22px';
+            toast.style.zIndex = '10070';
+            toast.style.maxWidth = '420px';
+            toast.style.background = '#ecfdf5';
+            toast.style.border = '1px solid #86efac';
+            toast.style.color = '#166534';
+            toast.style.borderRadius = '14px';
+            toast.style.boxShadow = '0 14px 32px rgba(0,0,0,0.18)';
+            toast.style.padding = '14px 16px';
+            toast.style.display = 'flex';
+            toast.style.gap = '12px';
+            toast.style.alignItems = 'flex-start';
+            toast.innerHTML = `
+                <div style="font-size:20px;line-height:1;">&#10003;</div>
+                <div style="flex:1;">
+                    <div style="font-size:15px;font-weight:700;margin-bottom:4px;">Upload concluído</div>
+                    <div style="font-size:14px;line-height:1.45;">${message}</div>
+                </div>
+                <button type="button" style="border:none;background:transparent;color:#166534;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
+            `;
+            const closeButton = toast.querySelector('button');
+            const close = () => toast.remove();
+            if (closeButton) {
+                closeButton.addEventListener('click', close);
+            }
+            document.body.appendChild(toast);
+            window.setTimeout(close, 6000);
+        };
         const uploadFilesDirectly = async (row, fileInput, files) => {
             if (!multiUploadUrl || !files.length) {
                 return false;
@@ -593,6 +659,7 @@
                 if (payload.renamed_count || payload.failed_count) {
                     await showMultiUploadSummary(payload);
                 }
+                persistMultiUploadToast(payload);
                 setUploadStatusLabel(row, 'Arquivos enviados. Atualizando...');
                 allowArquivoNavigation = true;
                 setArquivoDistributionBusy(false);
@@ -748,6 +815,7 @@
                 nameInput.dataset.addButtonRow = '1';
             }
         });
+        showPersistedMultiUploadToast();
     };
 
     const cleanupIncompleteArquivoRowsBeforeSubmit = () => {
