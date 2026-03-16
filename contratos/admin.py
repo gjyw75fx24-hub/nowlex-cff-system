@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AndamentoProcessualPendente, AdvogadoPassivo, BuscaAtivaConfig,
     Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
-    KpiGlobalConfig, ProcessoCpfLoteSalvo,
+    KpiGlobalConfig, ProcessoCpfLoteSalvo, ProcessoCnjLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key,
@@ -6010,6 +6010,8 @@ class ProcessoJudicialChangeList(ChangeList):
         'peticao_pendente',
         'cpf_lote',
         'cpf_lote_id',
+        'cnj_lote',
+        'cnj_lote_id',
         'lote_kpi_status',
         'priority_kpi_tag_id',
         'priority_kpi_status',
@@ -6045,6 +6047,8 @@ class ProcessoJudicialChangeList(ChangeList):
             "peticao_pendente",
             "cpf_lote",
             "cpf_lote_id",
+            "cnj_lote",
+            "cnj_lote_id",
             "priority_kpi_tag_id",
         )
         if any(request.GET.get(param) for param in scoped_params):
@@ -8793,6 +8797,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'peticao_pendente',
             'cpf_lote',
             'cpf_lote_id',
+            'cnj_lote',
+            'cnj_lote_id',
             'lote_kpi_status',
             'priority_kpi_tag_id',
             'priority_kpi_status',
@@ -9023,9 +9029,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = self._apply_peticao_pendente_filter(qs, request)
         qs = self._apply_priority_kpi_filter(qs, request)
         cpf_info = self._get_cpf_lote_info(request)
+        cnj_info = self._get_cnj_lote_info(request)
+        batch_info = cpf_info if cpf_info.get('cpfs') else cnj_info
         lote_kpi_status = self._parse_cpf_lote_kpi_status_filter(request)
-        if cpf_info.get('cpfs'):
-            process_ids = cpf_info.get('process_ids') or set()
+        if batch_info.get('cpfs') or batch_info.get('cnjs'):
+            process_ids = batch_info.get('process_ids') or set()
             if lote_kpi_status == 'fora_lote':
                 if process_ids:
                     qs = qs.exclude(pk__in=process_ids)
@@ -9033,7 +9041,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 if not process_ids:
                     return qs.none()
                 qs = qs.filter(pk__in=process_ids)
-        if lote_kpi_status in {'analisado', 'pendente_analise'}:
+        if cpf_info.get('cpfs') and lote_kpi_status in {'analisado', 'pendente_analise'}:
             qs = self._apply_cpf_lote_kpi_filter(qs, request)
         qs = qs.select_related('carteira').prefetch_related(
             'carteiras_vinculadas',
@@ -9213,6 +9221,22 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             cpfs.append(digits)
         return cpfs
 
+    def _parse_cnj_lote_text(self, raw_text):
+        raw = str(raw_text or '').strip()
+        if not raw:
+            return []
+        cnjs = []
+        seen = set()
+        for token in re.split(r'[\s,;\n\t]+', raw):
+            digits = re.sub(r'\D', '', token)
+            if len(digits) != 20:
+                continue
+            if digits in seen:
+                continue
+            seen.add(digits)
+            cnjs.append(digits)
+        return cnjs
+
     def _get_cpf_lote_obj(self, request, lote_id):
         lote_id = str(lote_id or '').strip()
         if not lote_id or not lote_id.isdigit():
@@ -9235,9 +9259,37 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao carregar lote %s.', lote_pk, exc_info=True)
             return None
 
+    def _get_cnj_lote_obj(self, request, lote_id):
+        lote_id = str(lote_id or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return None
+        try:
+            lote_pk = int(lote_id)
+        except (TypeError, ValueError):
+            return None
+        try:
+            return (
+                ProcessoCnjLoteSalvo.objects
+                .filter(
+                    Q(compartilhado=True) | Q(criado_por=request.user),
+                    id=lote_pk,
+                )
+                .select_related('criado_por')
+                .first()
+            )
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao carregar lote %s.', lote_pk, exc_info=True)
+            return None
+
     def _cpf_lote_storage_error_message(self):
         return (
             'Listas salvas de CPF ainda nao estao disponiveis neste banco. '
+            'Finalize as migracoes para habilitar a funcionalidade.'
+        )
+
+    def _cnj_lote_storage_error_message(self):
+        return (
+            'Listas salvas de CNJ ainda nao estao disponiveis neste banco. '
             'Finalize as migracoes para habilitar a funcionalidade.'
         )
 
@@ -9253,10 +9305,28 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 return self._parse_cpf_lote_text(lote_obj.cpfs)
         return []
 
+    def _parse_cnj_lote_param(self, request):
+        raw = str(request.GET.get('cnj_lote') or '').strip()
+        if raw:
+            return self._parse_cnj_lote_text(raw)
+        lote_id = request.GET.get('cnj_lote_id')
+        if lote_id:
+            lote_obj = self._get_cnj_lote_obj(request, lote_id)
+            if lote_obj:
+                request._cnj_lote_obj = lote_obj
+                return self._parse_cnj_lote_text(lote_obj.cnjs)
+        return []
+
     def _format_cpf_display(self, cpf_digits):
         digits = re.sub(r'\D', '', str(cpf_digits or ''))
         if len(digits) == 11:
             return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+        return digits
+
+    def _format_cnj_display(self, cnj_digits):
+        digits = re.sub(r'\D', '', str(cnj_digits or ''))
+        if len(digits) == 20:
+            return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:]}"
         return digits
 
     def _get_cpf_lote_info(self, request):
@@ -9305,6 +9375,71 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         info['found'] = found
         info['missing'] = [cpf for cpf in cpfs if cpf not in found]
         request._cpf_lote_cache = info
+        return info
+
+    def _get_cnj_lote_info(self, request):
+        cached = getattr(request, '_cnj_lote_cache', None)
+        if cached is not None:
+            return cached
+        cnjs = self._parse_cnj_lote_param(request)
+        lote_obj = getattr(request, '_cnj_lote_obj', None)
+        info = {
+            'raw': str(request.GET.get('cnj_lote') or ''),
+            'cnjs': cnjs,
+            'process_ids': set(),
+            'found': set(),
+            'missing': [],
+            'lote_id': getattr(lote_obj, 'id', None),
+            'lote_label': getattr(lote_obj, 'nome', ''),
+        }
+        if lote_obj and not info['raw']:
+            info['raw'] = lote_obj.cnjs
+        if not cnjs:
+            request._cnj_lote_cache = info
+            return info
+
+        process_ids = set()
+        found = set()
+
+        cnj_qs = ProcessoJudicialNumeroCnj.objects.annotate(
+            _cnj_digits=models.Func(
+                models.F('cnj'),
+                models.Value(r'\D'),
+                models.Value(''),
+                models.Value('g'),
+                function='regexp_replace',
+                output_field=models.TextField(),
+            )
+        ).filter(_cnj_digits__in=cnjs)
+
+        for processo_id, cnj_digits in cnj_qs.values_list('processo_id', '_cnj_digits').distinct().iterator(chunk_size=200):
+            if not cnj_digits:
+                continue
+            found.add(cnj_digits)
+            if processo_id:
+                process_ids.add(int(processo_id))
+
+        processo_qs = ProcessoJudicial.objects.annotate(
+            _cnj_digits=models.Func(
+                models.F('cnj'),
+                models.Value(r'\D'),
+                models.Value(''),
+                models.Value('g'),
+                function='regexp_replace',
+                output_field=models.TextField(),
+            )
+        ).filter(_cnj_digits__in=cnjs)
+
+        for processo_id, cnj_digits in processo_qs.values_list('id', '_cnj_digits').distinct().iterator(chunk_size=200):
+            if not cnj_digits:
+                continue
+            found.add(cnj_digits)
+            process_ids.add(int(processo_id))
+
+        info['process_ids'] = process_ids
+        info['found'] = found
+        info['missing'] = [cnj for cnj in cnjs if cnj not in found]
+        request._cnj_lote_cache = info
         return info
 
     def _safe_positive_int(self, value):
@@ -11532,34 +11667,46 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         else:
             extra_context['changelist_carteira_options'] = []
         cpf_info = self._get_cpf_lote_info(request)
-        if cpf_info.get('cpfs'):
+        cnj_info = self._get_cnj_lote_info(request)
+        batch_info = cpf_info if cpf_info.get('cpfs') else cnj_info
+        if batch_info.get('cpfs') or batch_info.get('cnjs'):
             max_items = 50
-            found_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('found', set())]
-            missing_list = [self._format_cpf_display(cpf) for cpf in cpf_info.get('missing', [])]
+            formatter = self._format_cpf_display if batch_info.get('cpfs') else self._format_cnj_display
+            found_list = [formatter(value) for value in batch_info.get('found', set())]
+            missing_list = [formatter(value) for value in batch_info.get('missing', [])]
             found_list_sorted = sorted(found_list)
             missing_list_sorted = sorted(missing_list)
             extra_context['cpf_lote_summary'] = {
-                'total': len(cpf_info['cpfs']),
-                'found': len(cpf_info.get('found', set())),
-                'missing': len(cpf_info.get('missing', [])),
+                'total': len(batch_info.get('cpfs') or batch_info.get('cnjs') or []),
+                'found': len(batch_info.get('found', set())),
+                'missing': len(batch_info.get('missing', [])),
                 'found_list': found_list_sorted[:max_items],
                 'missing_list': missing_list_sorted[:max_items],
                 'found_more': max(len(found_list_sorted) - max_items, 0),
                 'missing_more': max(len(missing_list_sorted) - max_items, 0),
             }
-            extra_context['cpf_lote_input'] = cpf_info.get('raw', '')
-            extra_context['cpf_lote_label'] = cpf_info.get('lote_label', '')
-            extra_context['cpf_lote_id'] = cpf_info.get('lote_id')
+            extra_context['cpf_lote_input'] = batch_info.get('raw', '')
+            extra_context['cpf_lote_label'] = batch_info.get('lote_label', '')
+            extra_context['cpf_lote_id'] = batch_info.get('lote_id')
+            extra_context['batch_lote_kind'] = 'cpf' if batch_info.get('cpfs') else 'cnj'
+            extra_context['batch_lote_count_label'] = 'CPFs no lote' if batch_info.get('cpfs') else 'CNJs no lote'
         else:
             extra_context['cpf_lote_summary'] = None
             extra_context['cpf_lote_input'] = ''
             extra_context['cpf_lote_label'] = ''
             extra_context['cpf_lote_id'] = None
+            extra_context['batch_lote_kind'] = ''
+            extra_context['batch_lote_count_label'] = 'CPFs no lote'
         extra_context['cpf_lote_list_url'] = reverse('admin:processo_cpf_lote_list')
         extra_context['cpf_lote_save_url'] = reverse('admin:processo_cpf_lote_save')
         extra_context['cpf_lote_rename_url'] = reverse('admin:processo_cpf_lote_rename')
         extra_context['cpf_lote_delete_url'] = reverse('admin:processo_cpf_lote_delete')
         extra_context['cpf_lote_share_url'] = reverse('admin:processo_cpf_lote_share')
+        extra_context['cnj_lote_list_url'] = reverse('admin:processo_cnj_lote_list')
+        extra_context['cnj_lote_save_url'] = reverse('admin:processo_cnj_lote_save')
+        extra_context['cnj_lote_rename_url'] = reverse('admin:processo_cnj_lote_rename')
+        extra_context['cnj_lote_delete_url'] = reverse('admin:processo_cnj_lote_delete')
+        extra_context['cnj_lote_share_url'] = reverse('admin:processo_cnj_lote_share')
         habilitacao_batch_issues = self._build_habilitacao_batch_issue_context(request)
         extra_context['habilitacao_batch_issues'] = habilitacao_batch_issues
         extra_context['habilitacao_batch_issue_revalidate_url'] = reverse('admin:processo_habilitacao_batch_issue_revalidate')
@@ -11649,6 +11796,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('cpf-lote/renomear/', self.admin_site.admin_view(self.cpf_lote_rename_view), name='processo_cpf_lote_rename'),
             path('cpf-lote/remover/', self.admin_site.admin_view(self.cpf_lote_delete_view), name='processo_cpf_lote_delete'),
             path('cpf-lote/compartilhar/', self.admin_site.admin_view(self.cpf_lote_share_view), name='processo_cpf_lote_share'),
+            path('cnj-lote/listar/', self.admin_site.admin_view(self.cnj_lote_list_view), name='processo_cnj_lote_list'),
+            path('cnj-lote/salvar/', self.admin_site.admin_view(self.cnj_lote_save_view), name='processo_cnj_lote_save'),
+            path('cnj-lote/renomear/', self.admin_site.admin_view(self.cnj_lote_rename_view), name='processo_cnj_lote_rename'),
+            path('cnj-lote/remover/', self.admin_site.admin_view(self.cnj_lote_delete_view), name='processo_cnj_lote_delete'),
+            path('cnj-lote/compartilhar/', self.admin_site.admin_view(self.cnj_lote_share_view), name='processo_cnj_lote_share'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
             path('<path:object_id>/remover-andamentos-duplicados/', self.admin_site.admin_view(self.remover_andamentos_duplicados_view), name='processo_remover_andamentos_duplicados'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
@@ -11782,6 +11934,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'is_owner': item.criado_por_id == request.user.id,
             'quantidade': self._cpf_lote_count(item.cpfs),
             'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
+            'kind': 'cpf',
         }
 
     def cpf_lote_list_view(self, request):
@@ -11922,6 +12075,172 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao compartilhar lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.compartilhado = compartilhado
+        lote.save(update_fields=['compartilhado', 'atualizado_em'])
+        return JsonResponse({'ok': True, 'compartilhado': lote.compartilhado})
+
+    def _cnj_lote_accessible_qs(self, request):
+        return (
+            ProcessoCnjLoteSalvo.objects
+            .filter(Q(compartilhado=True) | Q(criado_por=request.user))
+            .select_related('criado_por')
+        )
+
+    def _cnj_lote_count(self, raw_text):
+        return len(self._parse_cnj_lote_text(raw_text))
+
+    def _cnj_lote_payload(self, request, item):
+        return {
+            'id': item.id,
+            'nome': item.nome,
+            'compartilhado': bool(item.compartilhado),
+            'criado_por': item.criado_por.get_username() if item.criado_por else '',
+            'is_owner': item.criado_por_id == request.user.id,
+            'quantidade': self._cnj_lote_count(item.cnjs),
+            'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
+            'kind': 'cnj',
+        }
+
+    def cnj_lote_list_view(self, request):
+        if request.method != 'GET':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        data = []
+        try:
+            for item in self._cnj_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
+                data.append(self._cnj_lote_payload(request, item))
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao listar lotes.', exc_info=True)
+            return JsonResponse({
+                'lists': [],
+                'warning': self._cnj_lote_storage_error_message(),
+            })
+        return JsonResponse({'lists': data})
+
+    def cnj_lote_save_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        nome = str(payload.get('nome') or '').strip()
+        if not nome:
+            return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        raw_cnjs = str(payload.get('cnjs') or '').strip()
+        source_id = str(payload.get('source_id') or '').strip()
+        if not raw_cnjs and source_id:
+            source_obj = self._get_cnj_lote_obj(request, source_id)
+            if source_obj:
+                raw_cnjs = source_obj.cnjs
+        cnjs = self._parse_cnj_lote_text(raw_cnjs)
+        if not cnjs:
+            return JsonResponse({'error': 'Informe ao menos um CNJ válido.'}, status=400)
+        normalized = ', '.join(cnjs)
+        try:
+            existing = ProcessoCnjLoteSalvo.objects.filter(criado_por=request.user, nome=nome).first()
+            created = False
+            if existing:
+                lote = existing
+            else:
+                lote = ProcessoCnjLoteSalvo(criado_por=request.user, nome=nome)
+                created = True
+            lote.cnjs = normalized
+            lote.compartilhado = compartilhado
+            lote.save()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao salvar lote.', exc_info=True)
+            return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
+        return JsonResponse({
+            'id': lote.id,
+            'created': created,
+            'item': self._cnj_lote_payload(request, lote),
+        })
+
+    def cnj_lote_delete_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        try:
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao remover lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.delete()
+        return JsonResponse({'ok': True})
+
+    def cnj_lote_rename_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        nome = str(payload.get('nome') or '').strip()
+        if not nome:
+            return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        try:
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao renomear lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        if (
+            ProcessoCnjLoteSalvo.objects
+            .filter(criado_por=request.user, nome=nome)
+            .exclude(id=lote.id)
+            .exists()
+        ):
+            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+        lote.nome = nome
+        lote.compartilhado = compartilhado
+        try:
+            lote.save(update_fields=['nome', 'compartilhado', 'atualizado_em'])
+        except IntegrityError:
+            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+        return JsonResponse({'ok': True, 'item': self._cnj_lote_payload(request, lote)})
+
+    def cnj_lote_share_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        compartilhado = bool(payload.get('compartilhado'))
+        try:
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao compartilhar lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
         if not lote:
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.compartilhado = compartilhado
@@ -12329,11 +12648,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def cpf_lote_manage(self, request, queryset):
         self.message_user(
             request,
-            "Use a opção 'Listas salvas de CPF (lote)' com o gerenciador aberto.",
+            "Use a opção 'Listas salvas de CPF/CNJ (lote)' com o gerenciador aberto.",
             messages.INFO,
         )
         return None
-    cpf_lote_manage.short_description = "Listas salvas de CPF (lote)"
+    cpf_lote_manage.short_description = "Listas salvas de CPF/CNJ (lote)"
 
     def ligar_busca_ativa_em_lote(self, request, queryset):
         updated = queryset.filter(busca_ativa=False).update(busca_ativa=True)

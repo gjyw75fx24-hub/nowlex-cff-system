@@ -1083,7 +1083,7 @@
                 </div>
                 <div class="processo-cpf-lote-inline" id="cpf-lote-inline">
                     <span class="processo-cpf-lote-inline__item" id="cpf-lote-count" hidden>
-                        CPFs no lote:
+                        <span id="cpf-lote-count-label">{{ batch_lote_count_label|default:"CPFs no lote" }}</span>:
                         <span class="processo-cpf-lote-inline__value">0</span>
                     </span>
                     {% if cpf_lote_summary %}
@@ -1695,11 +1695,11 @@
         </div>
     </div>
 
-    <!-- Modal de listas salvas de CPF -->
+    <!-- Modal de listas salvas de CPF/CNJ -->
     <div id="cpf-lote-modal" class="cpf-lote-modal">
         <div class="cpf-lote-modal__panel">
             <div class="cpf-lote-modal__header">
-                <h3>Listas salvas de CPF</h3>
+                <h3 id="cpf-lote-modal-title">Listas salvas de CPF/CNJ</h3>
                 <button type="button" id="cpf-lote-close" class="cpf-lote-modal__close">×</button>
             </div>
             <div class="cpf-lote-modal__save">
@@ -1988,13 +1988,20 @@
         const cpfLoteTableBody = document.getElementById('cpf-lote-table-body');
         const cpfLoteCurrentLabel = document.getElementById('cpf-lote-current-label');
         const cpfLoteCurrentCount = document.getElementById('cpf-lote-current-count');
+        const cpfLoteModalTitle = document.getElementById('cpf-lote-modal-title');
         const cpfLoteListUrl = "{{ cpf_lote_list_url|escapejs }}";
         const cpfLoteSaveUrl = "{{ cpf_lote_save_url|escapejs }}";
         const cpfLoteRenameUrl = "{{ cpf_lote_rename_url|escapejs }}";
         const cpfLoteDeleteUrl = "{{ cpf_lote_delete_url|escapejs }}";
         const cpfLoteShareUrl = "{{ cpf_lote_share_url|escapejs }}";
+        const cnjLoteListUrl = "{{ cnj_lote_list_url|escapejs }}";
+        const cnjLoteSaveUrl = "{{ cnj_lote_save_url|escapejs }}";
+        const cnjLoteRenameUrl = "{{ cnj_lote_rename_url|escapejs }}";
+        const cnjLoteDeleteUrl = "{{ cnj_lote_delete_url|escapejs }}";
+        const cnjLoteShareUrl = "{{ cnj_lote_share_url|escapejs }}";
         const cpfLoteActiveId = "{{ cpf_lote_id|default:'' }}";
         let cpfLoteResolvedActiveLabel = "{{ cpf_lote_label|default:''|escapejs }}";
+        let cpfLoteResolvedActiveKind = "{{ batch_lote_kind|default:''|escapejs }}" || 'cpf';
         let cpfLoteRenameId = '';
         let cpfLoteRenameOriginalName = '';
         let cpfLoteRenameOriginalShared = false;
@@ -2049,6 +2056,7 @@
             if (!cpfLoteModal) return;
             cpfLoteModal.style.display = 'flex';
             resetCpfLoteEditor();
+            updateCpfLoteModalPresentation();
             if (cpfLoteName) {
                 cpfLoteName.focus();
             }
@@ -2059,6 +2067,78 @@
             if (!cpfLoteModal) return;
             cpfLoteModal.style.display = 'none';
             resetCpfLoteEditor();
+        }
+
+        function parseCnjs(raw) {
+            const cnjs = [];
+            const seen = new Set();
+            String(raw || '')
+                .split(/[\s,;\n\t]+/)
+                .forEach((token) => {
+                    const digits = token.replace(/\D/g, '');
+                    if (digits.length !== 20) return;
+                    if (seen.has(digits)) return;
+                    seen.add(digits);
+                    cnjs.push(digits);
+                });
+            return cnjs;
+        }
+
+        function getCurrentBatchKind() {
+            const raw = getCpfLoteRawFromSearch();
+            const hasBatchSeparator = /[,\n;]/.test(raw || '');
+            const cpfs = parseCpfs(raw);
+            const cnjs = parseCnjs(raw);
+            if (cnjs.length >= 2 || (cnjs.length === 1 && hasBatchSeparator)) return 'cnj';
+            if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) return 'cpf';
+            return cpfLoteResolvedActiveKind || 'cpf';
+        }
+
+        function getCpfLoteKindLabels(kind) {
+            if (kind === 'cnj') {
+                return {
+                    singular: 'CNJ',
+                    plural: 'CNJs',
+                    title: 'Listas salvas de CNJ',
+                    typedLabel: 'Lista digitada',
+                };
+            }
+            return {
+                singular: 'CPF',
+                plural: 'CPFs',
+                title: 'Listas salvas de CPF',
+                typedLabel: 'Lista digitada',
+            };
+        }
+
+        function getCpfLoteEndpoints(kind) {
+            if (kind === 'cnj') {
+                return {
+                    list: cnjLoteListUrl,
+                    save: cnjLoteSaveUrl,
+                    rename: cnjLoteRenameUrl,
+                    remove: cnjLoteDeleteUrl,
+                    share: cnjLoteShareUrl,
+                    param: 'cnj_lote',
+                    idParam: 'cnj_lote_id',
+                };
+            }
+            return {
+                list: cpfLoteListUrl,
+                save: cpfLoteSaveUrl,
+                rename: cpfLoteRenameUrl,
+                remove: cpfLoteDeleteUrl,
+                share: cpfLoteShareUrl,
+                param: 'cpf_lote',
+                idParam: 'cpf_lote_id',
+            };
+        }
+
+        function updateCpfLoteModalPresentation() {
+            const labels = getCpfLoteKindLabels(getCurrentBatchKind());
+            if (cpfLoteModalTitle) {
+                cpfLoteModalTitle.textContent = labels.title;
+            }
         }
         function applyDelegation(ids, userId) {
             if (delegateConfirm) {
@@ -2200,7 +2280,7 @@
 
                 const titleEl = document.createElement('h3');
                 titleEl.className = 'cpf-lote-feedback-dialog__title';
-                titleEl.textContent = title || 'Listas salvas de CPF';
+                titleEl.textContent = title || getCpfLoteKindLabels(getCurrentBatchKind()).title;
 
                 const bodyEl = document.createElement('div');
                 bodyEl.className = 'cpf-lote-feedback-dialog__body';
@@ -2261,21 +2341,21 @@
             });
         }
 
-        function showCpfLoteMessage(message, title = 'Listas salvas de CPF') {
+        function showCpfLoteMessage(message, title = null) {
             return showCpfLoteDialog({
-                title,
+                title: title || getCpfLoteKindLabels(getCurrentBatchKind()).title,
                 message,
                 confirmText: 'OK',
             });
         }
 
         function showCpfLoteConfirm(message, {
-            title = 'Listas salvas de CPF',
+            title = null,
             confirmText = 'Confirmar',
             cancelText = 'Cancelar',
         } = {}) {
             return showCpfLoteDialog({
-                title,
+                title: title || getCpfLoteKindLabels(getCurrentBatchKind()).title,
                 message,
                 confirmText,
                 cancelText,
@@ -2301,7 +2381,11 @@
             const rawValue = (searchInput && searchInput.value ? searchInput.value : '').trim();
             if (rawValue) return rawValue;
             const url = new URL(window.location.href);
-            return String(url.searchParams.get('cpf_lote') || '').trim();
+            return String(
+                url.searchParams.get('cpf_lote')
+                || url.searchParams.get('cnj_lote')
+                || ''
+            ).trim();
         }
 
         function updateCpfLoteSaveButtonState() {
@@ -2367,15 +2451,19 @@
             if (!cpfLoteCurrentLabel || !cpfLoteCurrentCount) return;
             const raw = getCpfLoteRawFromSearch();
             const cpfs = parseCpfs(raw);
+            const cnjs = parseCnjs(raw);
+            const kind = getCurrentBatchKind();
+            const labels = getCpfLoteKindLabels(kind);
+            const items = kind === 'cnj' ? cnjs : cpfs;
             if (cpfLoteActiveId && cpfLoteResolvedActiveLabel) {
                 cpfLoteCurrentLabel.textContent = cpfLoteResolvedActiveLabel;
-            } else if (cpfs.length) {
-                cpfLoteCurrentLabel.textContent = 'Lista digitada';
+            } else if (items.length) {
+                cpfLoteCurrentLabel.textContent = labels.typedLabel;
             } else {
                 cpfLoteCurrentLabel.textContent = 'Nenhuma';
             }
-            if (cpfs.length) {
-                cpfLoteCurrentCount.textContent = `Total de CPFs: ${cpfs.length}`;
+            if (items.length) {
+                cpfLoteCurrentCount.textContent = `Total de ${labels.plural}: ${items.length}`;
             } else if (cpfLoteActiveId && !raw) {
                 cpfLoteCurrentCount.textContent = 'Usando lista salva.';
             } else {
@@ -2383,11 +2471,17 @@
             }
         }
 
-        function applyCpfLoteId(id) {
+        function applyCpfLoteId(id, kind = null) {
             if (!id) return;
             const url = new URL(window.location.href);
-            url.searchParams.set('cpf_lote_id', id);
+            const endpoints = getCpfLoteEndpoints(kind || getCurrentBatchKind());
+            url.searchParams.set(endpoints.idParam, id);
+            url.searchParams.delete(endpoints.param);
             url.searchParams.delete('cpf_lote');
+            url.searchParams.delete('cpf_lote_id');
+            url.searchParams.delete('cnj_lote');
+            url.searchParams.delete('cnj_lote_id');
+            url.searchParams.set(endpoints.idParam, id);
             url.searchParams.delete('q');
             url.searchParams.delete('p');
             window.location.href = url.toString();
@@ -2402,12 +2496,13 @@
             }
             lists.forEach(item => {
                 const row = document.createElement('tr');
+                const itemKind = item.kind || getCurrentBatchKind();
                 const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
                 const shareCell = item.is_owner
-                    ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
+                    ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
                     : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
                 const deleteBtn = item.is_owner
-                    ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-id=\"${item.id}\">Excluir</button>`
+                    ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Excluir</button>`
                     : '';
                 row.innerHTML = `
                     <td>${escapeHtml(item.nome)}</td>
@@ -2415,7 +2510,7 @@
                     <td>${escapeHtml(item.criado_por || '-')}</td>
                     <td>${shareCell}</td>
                     <td class=\"actions\">
-                        <button type=\"button\" class=\"button\" data-action=\"load\" data-id=\"${item.id}\">Carregar</button>
+                        <button type=\"button\" class=\"button\" data-action=\"load\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Carregar</button>
                         ${deleteBtn}
                     </td>
                 `;
@@ -2441,6 +2536,7 @@
                 if (!loadBtn || String(loadBtn.dataset.id) === String(item.id)) return;
                 normalized.push({
                     id: loadBtn.dataset.id,
+                    kind: loadBtn.dataset.kind || getCurrentBatchKind(),
                     nome: row.children[0] ? row.children[0].textContent.trim() : '',
                     quantidade: row.children[1] ? row.children[1].textContent.trim() : '',
                     criado_por: row.children[2] ? row.children[2].textContent.trim() : '',
@@ -2452,8 +2548,10 @@
         }
 
         function refreshCpfLoteTable() {
-            if (!cpfLoteTableBody || !cpfLoteListUrl) return;
-            const requestUrl = new URL(cpfLoteListUrl, window.location.origin);
+            const kind = getCurrentBatchKind();
+            const endpoints = getCpfLoteEndpoints(kind);
+            if (!cpfLoteTableBody || !endpoints.list) return;
+            const requestUrl = new URL(endpoints.list, window.location.origin);
             requestUrl.searchParams.set('_ts', String(Date.now()));
             return fetch(requestUrl.toString(), {
                 credentials: 'same-origin',
@@ -2470,7 +2568,9 @@
         }
 
         function saveCpfLoteRename() {
-            if (!cpfLoteRenameUrl || !cpfLoteRenameId) return;
+            const kind = getCurrentBatchKind();
+            const endpoints = getCpfLoteEndpoints(kind);
+            if (!endpoints.rename || !cpfLoteRenameId) return;
             const nome = (cpfLoteName && cpfLoteName.value || '').trim();
             if (!nome) {
                 showCpfLoteMessage('Informe o nome da lista.');
@@ -2482,7 +2582,7 @@
                 if (cpfLoteName) cpfLoteName.focus();
                 return;
             }
-            fetch(cpfLoteRenameUrl, {
+            fetch(endpoints.rename, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2502,6 +2602,7 @@
                 }
                 if (String(cpfLoteRenameId) === String(cpfLoteActiveId)) {
                     cpfLoteResolvedActiveLabel = data.item?.nome || nome;
+                    cpfLoteResolvedActiveKind = kind;
                 }
                 resetCpfLoteEditor();
                 if (data.item) {
@@ -2520,7 +2621,9 @@
                 saveCpfLoteRename();
                 return;
             }
-            if (!cpfLoteSaveUrl) return;
+            const kind = getCurrentBatchKind();
+            const endpoints = getCpfLoteEndpoints(kind);
+            if (!endpoints.save) return;
             const nome = (cpfLoteName && cpfLoteName.value || '').trim();
             if (!nome) {
                 showCpfLoteMessage('Informe o nome da lista.');
@@ -2529,19 +2632,23 @@
             }
             const raw = getCpfLoteRawFromSearch();
             const parsedCpfs = parseCpfs(raw);
+            const parsedCnjs = parseCnjs(raw);
             const payload = {
                 nome: nome,
                 compartilhado: Boolean(cpfLoteShared && cpfLoteShared.checked),
             };
-            if (parsedCpfs.length) {
+            if (kind === 'cnj' && parsedCnjs.length) {
+                payload.cnjs = parsedCnjs.join(', ');
+            } else if (kind === 'cpf' && parsedCpfs.length) {
                 payload.cpfs = parsedCpfs.join(', ');
             } else if (cpfLoteActiveId) {
                 payload.source_id = cpfLoteActiveId;
             } else {
-                showCpfLoteMessage('Informe os CPFs na busca ou carregue uma lista antes de salvar.');
+                const labels = getCpfLoteKindLabels(kind);
+                showCpfLoteMessage(`Informe os ${labels.plural} na busca ou carregue uma lista antes de salvar.`);
                 return;
             }
-            fetch(cpfLoteSaveUrl, {
+            fetch(endpoints.save, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2588,12 +2695,15 @@
                 if (!btn) return;
                 const action = btn.dataset.action;
                 const id = btn.dataset.id;
+                const itemKind = btn.dataset.kind || getCurrentBatchKind();
+                const endpoints = getCpfLoteEndpoints(itemKind);
                 if (action === 'load') {
-                    applyCpfLoteId(id);
+                    applyCpfLoteId(id, itemKind);
                     return;
                 }
                 if (action === 'rename') {
                     startCpfLoteRename(id, btn.dataset.name || '', btn.dataset.shared === '1');
+                    cpfLoteResolvedActiveKind = itemKind;
                     refreshCpfLoteTable();
                     return;
                 }
@@ -2603,7 +2713,7 @@
                         confirmText: 'Excluir',
                     }).then((confirmed) => {
                         if (!confirmed) return;
-                        fetch(cpfLoteDeleteUrl, {
+                        fetch(endpoints.remove, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -2623,6 +2733,7 @@
                             if (id && String(id) === String(cpfLoteActiveId)) {
                                 const url = new URL(window.location.href);
                                 url.searchParams.delete('cpf_lote_id');
+                                url.searchParams.delete('cnj_lote_id');
                                 window.location.href = url.toString();
                                 return;
                             }
@@ -2635,7 +2746,7 @@
                 }
                 if (action === 'toggle') {
                     const nextShared = btn.dataset.shared === '1' ? false : true;
-                    fetch(cpfLoteShareUrl, {
+                    fetch(endpoints.share, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -2672,12 +2783,14 @@
         const input = searchForm.querySelector('input[name="q"]');
         if (!input) return;
         const countWrap = document.getElementById('cpf-lote-count');
+        const countLabel = document.getElementById('cpf-lote-count-label');
         const countValue = countWrap ? countWrap.querySelector('.processo-cpf-lote-inline__value') : null;
         const cpfLoteActiveId = "{{ cpf_lote_id|default:'' }}";
         const cpfLoteTotal = parseInt("{{ cpf_lote_summary.total|default:'0' }}", 10) || 0;
+        const batchLoteKind = "{{ batch_lote_kind|default:''|escapejs }}";
 
         if (!input.placeholder || !input.placeholder.trim()) {
-            input.placeholder = 'Pesquisar (nome, CPF, CNJ ou vários CPFs)';
+            input.placeholder = 'Pesquisar (nome, CPF, CNJ ou vários CPFs/CNJs)';
         }
 
         const parseCpfs = (raw) => {
@@ -2694,22 +2807,57 @@
             return cpfs;
         };
 
+        const parseCnjs = (raw) => {
+            const cnjs = [];
+            const seen = new Set();
+            String(raw || '')
+                .split(/[\s,;\n\t]+/)
+                .forEach((token) => {
+                    const digits = token.replace(/\D/g, '');
+                    if (digits.length !== 20) return;
+                    if (seen.has(digits)) return;
+                    seen.add(digits);
+                    cnjs.push(digits);
+                });
+            return cnjs;
+        };
+
         const formatCpf = (digits) => {
             if (!digits || digits.length !== 11) return digits || '';
             return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
         };
 
+        const formatCnj = (digits) => {
+            if (!digits || digits.length !== 20) return digits || '';
+            return `${digits.slice(0, 7)}-${digits.slice(7, 9)}.${digits.slice(9, 13)}.${digits.slice(13, 14)}.${digits.slice(14, 16)}.${digits.slice(16)}`;
+        };
+
         const updateCount = (rawValue) => {
             const cpfs = parseCpfs(rawValue);
+            const cnjs = parseCnjs(rawValue);
             const hasBatchSeparator = /[,\n;]/.test(rawValue || '');
             if (countWrap) {
                 if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
                     countWrap.hidden = false;
+                    if (countLabel) {
+                        countLabel.textContent = 'CPFs no lote';
+                    }
                     if (countValue) {
                         countValue.textContent = String(cpfs.length);
                     }
+                } else if (cnjs.length >= 2 || (cnjs.length === 1 && hasBatchSeparator)) {
+                    countWrap.hidden = false;
+                    if (countLabel) {
+                        countLabel.textContent = 'CNJs no lote';
+                    }
+                    if (countValue) {
+                        countValue.textContent = String(cnjs.length);
+                    }
                 } else if (!rawValue && cpfLoteActiveId && cpfLoteTotal) {
                     countWrap.hidden = false;
+                    if (countLabel) {
+                        countLabel.textContent = batchLoteKind === 'cnj' ? 'CNJs no lote' : 'CPFs no lote';
+                    }
                     if (countValue) {
                         countValue.textContent = String(cpfLoteTotal);
                     }
@@ -2727,9 +2875,13 @@
                 return;
             }
             const cpfs = parseCpfs(rawValue);
+            const cnjs = parseCnjs(rawValue);
             const hasBatchSeparator = /[,\n;]/.test(rawValue);
             if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
                 input.value = cpfs.map(formatCpf).join(', ');
+                updateCount(input.value);
+            } else if (cnjs.length >= 2 || (cnjs.length === 1 && hasBatchSeparator)) {
+                input.value = cnjs.map(formatCnj).join(', ');
                 updateCount(input.value);
             } else {
                 updateCount(rawValue);
@@ -2746,14 +2898,23 @@
             updateCount(input.value);
         }
 
-        const applyCpfLote = (rawValue) => {
+        const applyBatchLote = (kind, rawValue) => {
             const url = new URL(window.location.href);
             if (rawValue) {
-                url.searchParams.set('cpf_lote', rawValue);
+                if (kind === 'cnj') {
+                    url.searchParams.set('cnj_lote', rawValue);
+                    url.searchParams.delete('cpf_lote');
+                } else {
+                    url.searchParams.set('cpf_lote', rawValue);
+                    url.searchParams.delete('cnj_lote');
+                }
                 url.searchParams.delete('cpf_lote_id');
+                url.searchParams.delete('cnj_lote_id');
             } else {
                 url.searchParams.delete('cpf_lote');
+                url.searchParams.delete('cnj_lote');
                 url.searchParams.delete('cpf_lote_id');
+                url.searchParams.delete('cnj_lote_id');
             }
             url.searchParams.delete('q');
             url.searchParams.delete('p');
@@ -2772,23 +2933,32 @@
         searchForm.addEventListener('submit', (event) => {
             const rawValue = (input.value || '').trim();
             const url = new URL(window.location.href);
-            const hasCpfLote = url.searchParams.has('cpf_lote') || url.searchParams.has('cpf_lote_id');
+            const hasBatchLote = url.searchParams.has('cpf_lote') || url.searchParams.has('cpf_lote_id') || url.searchParams.has('cnj_lote') || url.searchParams.has('cnj_lote_id');
 
             if (!rawValue) {
-                if (hasCpfLote) {
+                if (hasBatchLote) {
                     event.preventDefault();
-                    applyCpfLote('');
+                    applyBatchLote('', '');
                 }
                 return;
             }
 
             const cpfs = parseCpfs(rawValue);
+            const cnjs = parseCnjs(rawValue);
             const hasBatchSeparator = /[,\n;]/.test(rawValue);
-            if (!cpfs.length) return;
-            if (cpfs.length < 2 && !hasBatchSeparator) return;
+            if (cpfs.length >= 2 || (cpfs.length === 1 && hasBatchSeparator)) {
+                event.preventDefault();
+                applyBatchLote('cpf', rawValue);
+                return;
+            }
+            if (cnjs.length >= 2 || (cnjs.length === 1 && hasBatchSeparator)) {
+                event.preventDefault();
+                applyBatchLote('cnj', rawValue);
+                return;
+            }
 
-            event.preventDefault();
-            applyCpfLote(rawValue);
+            if (!cpfs.length && !cnjs.length) return;
+            if ((cpfs.length || cnjs.length) && !hasBatchSeparator) return;
         });
 
         input.addEventListener('input', normalizeInput);
@@ -2797,10 +2967,12 @@
 
         const clearSearch = (event) => {
             const url = new URL(window.location.href);
-            if (!url.searchParams.has('cpf_lote') && !url.searchParams.has('cpf_lote_id')) return;
+            if (!url.searchParams.has('cpf_lote') && !url.searchParams.has('cpf_lote_id') && !url.searchParams.has('cnj_lote') && !url.searchParams.has('cnj_lote_id')) return;
             event.preventDefault();
             url.searchParams.delete('cpf_lote');
             url.searchParams.delete('cpf_lote_id');
+            url.searchParams.delete('cnj_lote');
+            url.searchParams.delete('cnj_lote_id');
             url.searchParams.delete('q');
             url.searchParams.delete('p');
             window.location.href = url.toString();
@@ -3235,9 +3407,11 @@
         clearBtn.addEventListener('click', function(event) {
             event.preventDefault();
             const url = new URL(window.location.href);
-            if (url.searchParams.has('cpf_lote') || url.searchParams.has('cpf_lote_id')) {
+            if (url.searchParams.has('cpf_lote') || url.searchParams.has('cpf_lote_id') || url.searchParams.has('cnj_lote') || url.searchParams.has('cnj_lote_id')) {
                 url.searchParams.delete('cpf_lote');
                 url.searchParams.delete('cpf_lote_id');
+                url.searchParams.delete('cnj_lote');
+                url.searchParams.delete('cnj_lote_id');
                 url.searchParams.delete('q');
                 url.searchParams.delete('p');
                 window.location.href = url.toString();
