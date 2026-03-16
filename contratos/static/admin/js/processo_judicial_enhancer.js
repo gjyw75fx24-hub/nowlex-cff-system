@@ -12273,6 +12273,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 500);
         }
     }
+    window.nowlexFillEscavadorFormFields = fillFormFields;
 
     // --- Inicialização de Inlines existentes ---
 

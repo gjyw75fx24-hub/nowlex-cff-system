@@ -9,6 +9,7 @@ from .models import (
 )
 from .permissoes import filter_processos_queryset_for_user
 from .integracoes_escavador.api import buscar_processo_por_cnj
+from .integracoes_escavador.partes import collect_partes_from_escavador_payload
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, ROUND_CEILING
 from django.db.models import Max
 from django.db import transaction
@@ -1592,18 +1593,7 @@ def buscar_dados_escavador_view(request):
                 status_nome = status.nome
 
         # Prepara a lista de partes
-        partes_para_formulario = []
-        if fonte_principal:
-            for parte_api in fonte_principal.get('envolvidos', []):
-                tipo_polo_api = parte_api.get('polo', '').upper()
-                if tipo_polo_api in ['ATIVO', 'PASSIVO']:
-                    partes_para_formulario.append({
-                        'tipo_polo': tipo_polo_api,
-                        'nome': parte_api.get('nome', 'Nome não informado'),
-                        'tipo_pessoa': 'PJ' if parte_api.get('tipo_pessoa', '').upper() == 'JURIDICA' else 'PF',
-                        'documento': parte_api.get('cpf') or parte_api.get('cnpj', ''),
-                        'endereco': parte_api.get('endereco', ''),
-                    })
+        partes_para_formulario = collect_partes_from_escavador_payload(dados_api)
 
         # Prepara a lista de andamentos
         andamentos_para_formulario = []

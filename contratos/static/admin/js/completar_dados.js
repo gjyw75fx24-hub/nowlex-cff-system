@@ -80,49 +80,42 @@ function setupCompletarDados() {
             const data = await response.json();
 
             if (data.status === 'success' && data.processo) {
-                const processo = data.processo;
-                
-                // Mapeamento dos campos simples
-                const map = {
-                    tribunal: "id_tribunal",
-                    vara: "id_vara",
-                    valor_causa: "id_valor_causa",
-                    uf: "id_uf",
-                };
+                if (typeof window.nowlexFillEscavadorFormFields === 'function') {
+                    window.nowlexFillEscavadorFormFields(data.processo, data.partes || [], data.andamentos || []);
+                } else {
+                    const processo = data.processo;
+                    const map = {
+                        tribunal: "id_tribunal",
+                        vara: "id_vara",
+                        valor_causa: "id_valor_causa",
+                        uf: "id_uf",
+                    };
 
-                // Preenche os campos de texto
-                Object.entries(map).forEach(([key, id]) => {
-                    if (processo[key]) {
-                        const el = document.getElementById(id);
-                        if (el) el.value = processo[key];
+                    Object.entries(map).forEach(([key, id]) => {
+                        if (processo[key]) {
+                            const el = document.getElementById(id);
+                            if (el) el.value = processo[key];
+                        }
+                    });
+
+                    const statusSelect = document.getElementById('id_status');
+                    const statusId = processo.status_id;
+                    const statusNome = processo.status_nome;
+
+                    if (statusSelect && statusId && statusNome) {
+                        let optionExists = Array.from(statusSelect.options).some(opt => opt.value == statusId);
+                        if (!optionExists) {
+                            const newOption = new Option(statusNome, statusId, true, true);
+                            statusSelect.appendChild(newOption);
+                        }
+                        statusSelect.value = statusId;
                     }
-                });
 
-                // Lógica específica para o campo de Status Processual (<select>)
-                const statusSelect = document.getElementById('id_status');
-                const statusId = processo.status_id;
-                const statusNome = processo.status_nome;
-
-                if (statusSelect && statusId && statusNome) {
-                    // Verifica se a opção já existe
-                    let optionExists = Array.from(statusSelect.options).some(opt => opt.value == statusId);
-
-                    // Se não existir, cria e adiciona a nova opção
-                    if (!optionExists) {
-                        const newOption = new Option(statusNome, statusId, true, true); // text, value, defaultSelected, selected
-                        statusSelect.appendChild(newOption);
+                    if (data.andamentos && data.andamentos.length > 0) {
+                        populateAndamentos(data.andamentos);
                     }
-                    
-                    // Define o valor do select
-                    statusSelect.value = statusId;
                 }
-
                 alert(data.message || "Dados preenchidos com sucesso!");
-
-                // Chamar a função para preencher os andamentos
-                if (data.andamentos && data.andamentos.length > 0) {
-                    populateAndamentos(data.andamentos);
-                }
 
             } else {
                 alert("Erro: " + (data.message || "Não foi possível completar os dados."));

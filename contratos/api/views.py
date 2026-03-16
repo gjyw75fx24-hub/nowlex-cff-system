@@ -59,6 +59,7 @@ from ..services.nowlex_calc import (
     download_pdf_with_fallback,
     parse_decimal,
 )
+from ..integracoes_escavador.partes import collect_partes_from_escavador_payload
 
 SUPERVISION_STATUS_SEQUENCE = ['pendente', 'pre_aprovado', 'aprovado', 'reprovado']
 SUPERVISION_STATUS_LABELS = {
@@ -2512,37 +2513,7 @@ class BuscarDadosEscavadorView(View):
                     'status_nome': capa_fonte.get('classe') or 'DESCONHECIDO',
                 }
 
-                # Utiliza um dicionário para desduplicar as partes pelo nome
-                partes_encontradas = {}
-
-                for fonte in escavador_data.get('fontes', []):
-                    for envolvido in fonte.get('envolvidos', []):
-                        polo_escavador = envolvido.get('polo', '').upper()
-                        nome_envolvido = envolvido.get('nome')
-
-                        # Se o envolvido não tem nome, ou já foi adicionado, pula
-                        if not nome_envolvido or nome_envolvido in partes_encontradas:
-                            continue
-
-                        # Mapeia polo ATIVO ou PASSIVO. Ignora outros por enquanto para evitar ruído.
-                        tipo_polo_django = None
-                        if polo_escavador == 'ATIVO':
-                            tipo_polo_django = 'ATIVO'
-                        elif polo_escavador == 'PASSIVO':
-                            tipo_polo_django = 'PASSIVO'
-
-                        if tipo_polo_django:
-                            documento = envolvido.get('cpf') or envolvido.get('cnpj')
-                            
-                            partes_encontradas[nome_envolvido] = {
-                                'nome': nome_envolvido,
-                                'tipo_polo': tipo_polo_django,
-                                'tipo_pessoa': envolvido.get('tipo_pessoa'),
-                                'documento': documento,
-                                'endereco': ''
-                            }
-                
-                partes_data = list(partes_encontradas.values())
+                partes_data = collect_partes_from_escavador_payload(escavador_data)
 
                 # Andamentos processuais
                 andamentos_data = []

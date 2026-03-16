@@ -6,6 +6,7 @@ from contratos.models import (
     StatusProcessual,
     AndamentoProcessual,
 )
+from contratos.integracoes_escavador.partes import collect_partes_from_escavador_payload
 from decimal import Decimal
 from datetime import datetime
 
@@ -48,41 +49,37 @@ def importar_dados_escavador(json_data):
             },
         )
 
-    # Mapeamento de tipo_pessoa
-    def map_tipo_pessoa(tipo):
-        if tipo == "FISICA":
-            return "PF"
-        if tipo == "JURIDICA":
-            return "PJ"
-        return ""
-
     # Importar partes (Polo Ativo e Passivo)
+    partes_normalizadas = collect_partes_from_escavador_payload(json_data)
+    advogados_por_chave = {}
     for envolvido in fonte.get("envolvidos", []):
-        if envolvido.get("polo") in ["ATIVO", "PASSIVO"]:
-            parte = Parte.objects.create(
-                processo=processo,
-                numero_cnj=numero_cnj_obj,
-                nome=envolvido.get("nome"),
-                tipo_pessoa=map_tipo_pessoa(envolvido.get("tipo_pessoa")),
-                documento=envolvido.get("cpf") or envolvido.get("cnpj"),
-                tipo_polo=envolvido.get("polo")
+        key = (str(envolvido.get("nome") or "").strip().casefold(), str(envolvido.get("polo") or "").strip().upper())
+        if key[0] and key[1] in {"ATIVO", "PASSIVO"}:
+            advogados_por_chave[key] = envolvido.get("advogados", []) or []
+
+    for parte_data in partes_normalizadas:
+        parte = Parte.objects.create(
+            processo=processo,
+            numero_cnj=numero_cnj_obj,
+            nome=parte_data.get("nome"),
+            tipo_pessoa=parte_data.get("tipo_pessoa") or "",
+            documento=parte_data.get("documento"),
+            tipo_polo=parte_data.get("tipo_polo"),
+        )
+        for advogado_data in advogados_por_chave.get((str(parte.nome or "").strip().casefold(), parte.tipo_polo), []):
+            oabs = advogado_data.get("oabs", [])
+            if isinstance(oabs, dict):
+                oabs = [oabs]
+
+            oab = oabs[0] if oabs else {}
+
+            Advogado.objects.create(
+                parte=parte,
+                nome=advogado_data.get("nome_normalizado"),
+                cpf=advogado_data.get("cpf"),
+                numero_oab=oab.get("numero"),
+                uf_oab=oab.get("uf")
             )
-            # Importar advogados da parte
-            for advogado_data in envolvido.get("advogados", []):
-                # A API pode retornar OABs como lista ou dict
-                oabs = advogado_data.get("oabs", [])
-                if isinstance(oabs, dict):
-                    oabs = [oabs]
-                
-                oab = oabs[0] if oabs else {}
-                
-                Advogado.objects.create(
-                    parte=parte,
-                    nome=advogado_data.get("nome_normalizado"),
-                    cpf=advogado_data.get("cpf"),
-                    numero_oab=oab.get("numero"),
-                    uf_oab=oab.get("uf")
-                )
 
     # Importar andamentos (movimentações)
     for mov in fonte.get("movimentacoes", []):
