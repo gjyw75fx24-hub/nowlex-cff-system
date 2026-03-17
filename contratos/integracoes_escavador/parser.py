@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+import hashlib
 from datetime import datetime
 from django.db import connection
 from django.db.models import Count
@@ -31,7 +32,7 @@ def parse_dados_processo(processo: ProcessoJudicial, dados_api: dict):
         processo.valor_causa = Decimal('0.00')
 
     # Associa o StatusProcessual (classe processual)
-    nome_classe_processual = dados_api.get('classe_processual')
+    nome_classe_processual = build_safe_status_nome(dados_api.get('classe_processual'))
     if nome_classe_processual:
         status, _ = StatusProcessual.objects.get_or_create(
             nome=nome_classe_processual,
@@ -74,16 +75,41 @@ def parse_partes_processo(processo: ProcessoJudicial, dados_api: dict):
 def _normalize_descricao(descricao: str | None) -> str:
     if not descricao:
         return ""
-    return " ".join(descricao.split())
+    return " ".join(str(descricao).split())
 
-def _build_andamento_titulo(descricao: str | None) -> str:
-    normalized = _normalize_descricao(descricao)
+
+def _truncate_with_hash(value: str, max_len: int) -> str:
+    normalized = _normalize_descricao(value)
     if not normalized:
         return ""
-    max_len = 255
     if len(normalized) <= max_len:
         return normalized
-    return normalized[: max_len - 3].rstrip() + "..."
+    digest = hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]
+    suffix = f" [{digest}]"
+    base_len = max(1, max_len - len(suffix))
+    return normalized[:base_len].rstrip() + suffix
+
+
+def build_safe_status_nome(nome: str | None) -> str:
+    return _truncate_with_hash(nome or '', 100)
+
+
+def build_safe_andamento_descricao(descricao: str | None) -> str:
+    return _truncate_with_hash(descricao or '', 255)
+
+
+def build_safe_andamento_fields(descricao: str | None, detalhes: str | None = '') -> tuple[str, str]:
+    normalized = _normalize_descricao(descricao)
+    safe_descricao = build_safe_andamento_descricao(normalized)
+    detalhes_text = str(detalhes or '').strip()
+    if normalized and safe_descricao and normalized != safe_descricao:
+        full_text = f"Conteudo completo: {normalized}"
+        detalhes_text = f"{detalhes_text}\n\n{full_text}".strip() if detalhes_text else full_text
+    return safe_descricao, detalhes_text
+
+
+def _build_andamento_titulo(descricao: str | None) -> str:
+    return build_safe_andamento_descricao(descricao)
 
 
 def _has_andamento_pendente_table():
@@ -149,13 +175,17 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
     for andamento_api in movimentacoes:
         data_str = andamento_api.get('data')
         descricao = andamento_api.get('conteudo')
+        safe_descricao, safe_detalhes = build_safe_andamento_fields(
+            descricao,
+            ((andamento_api.get('fonte') or {}).get('nome')),
+        )
 
-        if not data_str or not descricao:
+        if not data_str or not safe_descricao:
             continue
 
         try:
             data_andamento = make_aware(datetime.fromisoformat(data_str))
-            chave = (numero_cnj_id, data_andamento.isoformat(), _normalize_descricao(descricao))
+            chave = (numero_cnj_id, data_andamento.isoformat(), safe_descricao)
             if chave in existentes:
                 continue
 
@@ -163,8 +193,12 @@ def parse_andamentos_processo(processo: ProcessoJudicial, dados_api: dict) -> in
                 processo=processo,
                 numero_cnj=numero_cnj_obj,
                 data=data_andamento,
-                descricao=descricao
+                descricao=safe_descricao,
+                defaults={'detalhes': safe_detalhes},
             )
+            if not criado and safe_detalhes and safe_detalhes != (andamento_obj.detalhes or '').strip():
+                andamento_obj.detalhes = safe_detalhes
+                andamento_obj.save(update_fields=['detalhes'])
             if criado:
                 novos_andamentos += 1
                 existentes.add(chave)

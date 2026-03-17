@@ -7,6 +7,7 @@ from contratos.models import (
     AndamentoProcessual,
 )
 from contratos.integracoes_escavador.partes import collect_partes_from_escavador_payload
+from contratos.integracoes_escavador.parser import build_safe_andamento_fields, build_safe_status_nome
 from decimal import Decimal
 from datetime import datetime
 
@@ -14,7 +15,7 @@ def importar_dados_escavador(json_data):
     fonte = json_data["fontes"][0]
 
     # Criar ou localizar status processual
-    classe = fonte["capa"].get("classe")
+    classe = build_safe_status_nome(fonte["capa"].get("classe"))
     status, _ = StatusProcessual.objects.get_or_create(nome=classe)
 
     # Criar processo judicial
@@ -83,12 +84,18 @@ def importar_dados_escavador(json_data):
 
     # Importar andamentos (movimentações)
     for mov in fonte.get("movimentacoes", []):
+        descricao, detalhes = build_safe_andamento_fields(
+            mov.get("conteudo"),
+            mov.get("fonte", {}).get("nome"),
+        )
+        if not descricao:
+            continue
         AndamentoProcessual.objects.create(
             processo=processo,
             numero_cnj=numero_cnj_obj,
             data=datetime.strptime(mov["data"], "%Y-%m-%d"),
-            descricao=mov.get("conteudo"),
-            detalhes=mov.get("fonte", {}).get("nome")
+            descricao=descricao,
+            detalhes=detalhes,
         )
 
     print(f"✅ Processo {processo.cnj} importado com sucesso.")

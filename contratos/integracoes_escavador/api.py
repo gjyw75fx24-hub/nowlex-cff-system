@@ -4,6 +4,7 @@ from django.conf import settings
 
 # URL base da API v2 do Escavador
 URL_BASE_API = "https://api.escavador.com/api/v2"
+ESCAVADOR_TIMEOUT_SECONDS = 12
 
 def buscar_processo_por_cnj(cnj: str) -> dict:
     """
@@ -41,13 +42,21 @@ def buscar_processo_por_cnj(cnj: str) -> dict:
     try:
         # 1. Buscar os detalhes do processo
         url_detalhes = f"{URL_BASE_API}/processos/numero_cnj/{cnj_limpo}"
-        response_detalhes = requests.get(url_detalhes, headers=headers)
+        response_detalhes = requests.get(
+            url_detalhes,
+            headers=headers,
+            timeout=ESCAVADOR_TIMEOUT_SECONDS,
+        )
         response_detalhes.raise_for_status()
         dados_processo = response_detalhes.json()
 
         # 2. Buscar as movimentações do processo
         url_movimentacoes = f"{URL_BASE_API}/processos/numero_cnj/{cnj_limpo}/movimentacoes"
-        response_movimentacoes = requests.get(url_movimentacoes, headers=headers)
+        response_movimentacoes = requests.get(
+            url_movimentacoes,
+            headers=headers,
+            timeout=ESCAVADOR_TIMEOUT_SECONDS,
+        )
         response_movimentacoes.raise_for_status()
         dados_movimentacoes = response_movimentacoes.json()
 

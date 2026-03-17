@@ -922,6 +922,44 @@
             return JSON.stringify(signaturePayload);
         }
 
+        function cleanupPersistedEditingCardMirror(targetResponses) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return false;
+            }
+            const editIndex = Number(targetResponses._editing_card_index);
+            if (!Number.isFinite(editIndex) || editIndex < 0) {
+                return false;
+            }
+            const savedCards = Array.isArray(targetResponses[SAVED_PROCESSOS_KEY])
+                ? targetResponses[SAVED_PROCESSOS_KEY]
+                : [];
+            const activeCards = Array.isArray(targetResponses.processos_vinculados)
+                ? targetResponses.processos_vinculados
+                : [];
+            const savedCard = savedCards[editIndex];
+            if (!savedCard) {
+                return false;
+            }
+            const activeCard = activeCards[0] || null;
+            const savedSignature = buildSummaryCardDuplicateSignature(savedCard);
+            const activeSignature = buildSummaryCardDuplicateSignature(activeCard);
+            const shouldCleanup =
+                activeCards.length <= 1 &&
+                (!activeCard || (savedSignature && activeSignature && savedSignature === activeSignature));
+            if (!shouldCleanup) {
+                return false;
+            }
+            delete targetResponses.processos_vinculados;
+            delete targetResponses._editing_card_index;
+            return true;
+        }
+
+        function buildPersistableResponses() {
+            const persistedResponses = deepClone(userResponses || {});
+            cleanupPersistedEditingCardMirror(persistedResponses);
+            return persistedResponses;
+        }
+
         function reconcileDuplicatedSummaryCards() {
             ensureUserResponsesShape();
             if (
@@ -3823,7 +3861,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     localResponsesKey,
                     JSON.stringify({
                         ts: Date.now(),
-                        data: userResponses
+                        data: buildPersistableResponses()
                     })
                 );
             } catch (error) {
@@ -3904,6 +3942,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             ensureUserResponsesShape();
             restoreLocalResponsesIfNewer();
+            cleanupPersistedEditingCardMirror(userResponses);
+            ensureUserResponsesShape();
             migrateProcessCardsIfNeeded();
             loadContratosFromDOM();
             console.log(
@@ -3983,11 +4023,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ) {
                 setGeneralCardSnapshot(null);
             }
+            const persistedResponses = buildPersistableResponses();
             console.log(
                 "DEBUG A_P_A: saveResponses - userResponses ANTES de salvar:",
-                JSON.stringify(userResponses)
+                JSON.stringify(persistedResponses)
             );
-            $responseField.val(JSON.stringify(userResponses, null, 2));
+            $responseField.val(JSON.stringify(persistedResponses, null, 2));
             console.log(
                 "DEBUG A_P_A: saveResponses - TextArea contém:",
                 $responseField.val()
@@ -5746,7 +5787,7 @@ function formatCnjDigits(raw) {
             $formattedResponsesContainer.empty();
             ensureUserResponsesShape();
             if (reconcileDuplicatedSummaryCards()) {
-                $responseField.val(JSON.stringify(userResponses, null, 2));
+                $responseField.val(JSON.stringify(buildPersistableResponses(), null, 2));
                 persistLocalResponses();
             }
             if (!Array.isArray(allAvailableContratos) || allAvailableContratos.length === 0) {
@@ -9559,6 +9600,8 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 userResponses = {};
             }
 
+            ensureUserResponsesShape();
+            cleanupPersistedEditingCardMirror(userResponses);
             ensureUserResponsesShape();
             loadContratosFromDOM();
             if (isDecisionTreeReady()) {

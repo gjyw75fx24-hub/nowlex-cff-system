@@ -594,6 +594,41 @@
             flex-wrap: wrap;
             margin-bottom: 12px;
         }
+        .cnj-batch-register-modal__field-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .cnj-batch-register-modal__field-row--option {
+            gap: 8px;
+            align-items: flex-start;
+        }
+        .cnj-batch-register-modal__field-row label {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: #334155;
+        }
+        .cnj-batch-register-modal__field-row select {
+            min-width: 240px;
+            max-width: 100%;
+        }
+        .cnj-batch-register-modal__checkbox {
+            margin: 2px 0 0;
+            width: 16px;
+            height: 16px;
+            accent-color: #2563eb;
+        }
+        .cnj-batch-register-modal__option-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .cnj-batch-register-modal__hint {
+            font-size: 0.76rem;
+            color: #64748b;
+        }
         .cnj-batch-register-modal__table {
             width: 100%;
             border-collapse: collapse;
@@ -2015,6 +2050,22 @@
             <div class="cnj-batch-register-modal__meta" id="cnj-batch-register-meta">
                 Os CNJs abaixo não possuem cadastro. A verificação exige dados completos; não será criado cadastro incompleto.
             </div>
+            <div class="cnj-batch-register-modal__field-row">
+                <label for="cnj-batch-register-carteira">Carteira destino</label>
+                <select id="cnj-batch-register-carteira">
+                    <option value="">Selecione a carteira</option>
+                    {% for carteira in cnj_batch_register_carteiras %}
+                        <option value="{{ carteira.id }}"{% if carteira.id == cnj_batch_register_carteira_id %} selected{% endif %}>{{ carteira.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="cnj-batch-register-modal__field-row cnj-batch-register-modal__field-row--option">
+                <input type="checkbox" id="cnj-batch-register-allow-missing-documents" class="cnj-batch-register-modal__checkbox">
+                <label for="cnj-batch-register-allow-missing-documents" class="cnj-batch-register-modal__option-copy">
+                    <span>Permitir cadastrar mesmo sem CPF/CNPJ dos polos</span>
+                    <span class="cnj-batch-register-modal__hint">Use isso apenas quando o restante dos dados obrigatórios estiver completo.</span>
+                </label>
+            </div>
             <div class="cnj-batch-register-modal__actions">
                 <button type="button" id="cnj-batch-register-verify" class="button">Verificar</button>
                 <button type="button" id="cnj-batch-register-run" class="button default" disabled>Cadastrar em lote</button>
@@ -2309,6 +2360,8 @@
         const cnjBatchRegisterVerify = document.getElementById('cnj-batch-register-verify');
         const cnjBatchRegisterRun = document.getElementById('cnj-batch-register-run');
         const cnjBatchRegisterRefresh = document.getElementById('cnj-batch-register-refresh');
+        const cnjBatchRegisterCarteira = document.getElementById('cnj-batch-register-carteira');
+        const cnjBatchRegisterAllowMissingDocuments = document.getElementById('cnj-batch-register-allow-missing-documents');
         const cnjBatchRegisterBody = document.getElementById('cnj-batch-register-body');
         const cnjBatchRegisterProgress = document.getElementById('cnj-batch-register-progress');
         const cnjBatchRegisterVerifyUrl = "{{ cnj_batch_verify_url|escapejs }}";
@@ -2329,6 +2382,7 @@
         let batchFoundLoaded = 0;
         let batchMissingLoaded = 0;
         let batchMissingSelected = new Set();
+        let cnjBatchRegisterBusy = false;
 
         if (!form || !actionSelect) return;
 
@@ -2738,7 +2792,7 @@
             }).join('');
             const readyRows = cnjBatchRegisterRows.filter((row) => row.status === 'ready');
             if (cnjBatchRegisterRun) {
-                cnjBatchRegisterRun.disabled = readyRows.length === 0;
+                cnjBatchRegisterRun.disabled = cnjBatchRegisterBusy || readyRows.length === 0;
             }
         }
 
@@ -2759,9 +2813,38 @@
             cnjBatchRegisterModal.style.display = 'flex';
         }
 
+        function resetCnjBatchRegisterRows(message) {
+            cnjBatchRegisterRows = getCnjBatchRegisterInitialRows();
+            if (cnjBatchRegisterRefresh) {
+                cnjBatchRegisterRefresh.disabled = true;
+            }
+            if (cnjBatchRegisterProgress) {
+                cnjBatchRegisterProgress.textContent = message || '';
+            }
+            renderCnjBatchRegisterRows();
+        }
+
         function hideCnjBatchRegisterModal() {
             if (!cnjBatchRegisterModal) return;
+            if (cnjBatchRegisterBusy) {
+                if (cnjBatchRegisterProgress) {
+                    cnjBatchRegisterProgress.textContent = 'Aguarde o processamento do lote terminar para fechar a janela.';
+                }
+                return;
+            }
             cnjBatchRegisterModal.style.display = 'none';
+        }
+
+        function setCnjBatchRegisterBusy(isBusy) {
+            cnjBatchRegisterBusy = !!isBusy;
+            if (cnjBatchRegisterClose) {
+                cnjBatchRegisterClose.disabled = cnjBatchRegisterBusy;
+                cnjBatchRegisterClose.style.opacity = cnjBatchRegisterBusy ? '0.45' : '1';
+                cnjBatchRegisterClose.style.cursor = cnjBatchRegisterBusy ? 'not-allowed' : 'pointer';
+            }
+            if (cnjBatchRegisterBody) {
+                renderCnjBatchRegisterRows();
+            }
         }
 
         async function postJson(url, payload) {
@@ -2796,6 +2879,29 @@
             renderCnjBatchRegisterRows();
         }
 
+        function applyCnjBatchRegisterChunkError(cnjs, detail) {
+            const currentRowsByCnj = new Map((cnjBatchRegisterRows || []).map((row) => [row.cnj, row]));
+            mergeCnjBatchRegisterRows((cnjs || []).map((cnj) => ({
+                cnj: cnj,
+                cnj_display: (currentRowsByCnj.get(cnj) || {}).cnj_display || cnj,
+                status: 'error',
+                status_label: 'Erro',
+                detail: detail || 'Falha ao processar este bloco.',
+                processo_id: null,
+                processo_url: '',
+                can_import: false,
+            })));
+        }
+
+        function getSelectedCnjBatchCarteiraId() {
+            const raw = String(cnjBatchRegisterCarteira?.value || '').trim();
+            return raw && /^\d+$/.test(raw) ? raw : '';
+        }
+
+        function getAllowMissingDocumentsFlag() {
+            return !!cnjBatchRegisterAllowMissingDocuments?.checked;
+        }
+
         async function verifyCnjBatchRegisterRows() {
             if (!cnjBatchRegisterVerifyUrl) return;
             const cnjs = cnjBatchRegisterRows.map((row) => row.cnj).filter(Boolean);
@@ -2805,25 +2911,50 @@
             }
             if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = true;
             if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = true;
-            try {
-                const payload = await postJson(cnjBatchRegisterVerifyUrl, { cnjs });
-                mergeCnjBatchRegisterRows(payload.rows || []);
-                const readyCount = cnjBatchRegisterRows.filter((row) => row.status === 'ready').length;
+            setCnjBatchRegisterBusy(true);
+            const chunkSize = 2;
+            let processed = 0;
+            let readyCount = 0;
+            let failedCount = 0;
+            for (let start = 0; start < cnjs.length; start += chunkSize) {
+                const chunk = cnjs.slice(start, start + chunkSize);
                 if (cnjBatchRegisterProgress) {
-                    cnjBatchRegisterProgress.textContent = `Verificação concluída. Prontos: ${readyCount} | Pendentes: ${cnjBatchRegisterRows.length - readyCount}`;
+                    cnjBatchRegisterProgress.textContent = `Verificando CNJs... ${processed}/${cnjs.length} processados. Prontos: ${readyCount} | Falhas: ${failedCount}`;
                 }
-            } catch (error) {
-                if (cnjBatchRegisterProgress) {
-                    cnjBatchRegisterProgress.textContent = error.message || 'Falha ao verificar os CNJs.';
+                try {
+                    const payload = await postJson(cnjBatchRegisterVerifyUrl, {
+                        cnjs: chunk,
+                        allow_missing_documents: getAllowMissingDocumentsFlag(),
+                    });
+                    mergeCnjBatchRegisterRows(payload.rows || []);
+                } catch (error) {
+                    failedCount += chunk.length;
+                    applyCnjBatchRegisterChunkError(chunk, error.message || 'Falha ao verificar este bloco.');
                 }
-            } finally {
-                if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
-                renderCnjBatchRegisterRows();
+                processed += chunk.length;
+                readyCount = cnjBatchRegisterRows.filter((row) => row.status === 'ready').length;
             }
+            if (cnjBatchRegisterProgress) {
+                const pendingCount = cnjBatchRegisterRows.length - readyCount;
+                cnjBatchRegisterProgress.textContent = `Verificação concluída. Prontos: ${readyCount} | Pendentes/Falhas: ${pendingCount}`;
+            }
+            if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+            setCnjBatchRegisterBusy(false);
+            renderCnjBatchRegisterRows();
         }
 
         async function runCnjBatchRegisterImport() {
             if (!cnjBatchRegisterImportUrl) return;
+            const carteiraId = getSelectedCnjBatchCarteiraId();
+            if (!carteiraId) {
+                if (cnjBatchRegisterProgress) {
+                    cnjBatchRegisterProgress.textContent = 'Selecione a carteira destino antes de cadastrar.';
+                }
+                if (cnjBatchRegisterCarteira) {
+                    cnjBatchRegisterCarteira.focus();
+                }
+                return;
+            }
             const cnjs = cnjBatchRegisterRows.filter((row) => row.status === 'ready').map((row) => row.cnj);
             if (!cnjs.length) {
                 if (cnjBatchRegisterProgress) cnjBatchRegisterProgress.textContent = 'Nenhum CNJ pronto para cadastrar.';
@@ -2831,7 +2962,8 @@
             }
             if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = true;
             if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = true;
-            const chunkSize = 3;
+            setCnjBatchRegisterBusy(true);
+            const chunkSize = 1;
             let processed = 0;
             let created = 0;
             let failed = 0;
@@ -2840,11 +2972,21 @@
                 if (cnjBatchRegisterProgress) {
                     cnjBatchRegisterProgress.textContent = `Cadastrando CNJs... ${processed}/${cnjs.length} processados. Criados: ${created} | Falhas: ${failed}`;
                 }
-                const payload = await postJson(cnjBatchRegisterImportUrl, { cnjs: chunk });
-                mergeCnjBatchRegisterRows(payload.rows || []);
-                processed += Number(payload.processed || chunk.length || 0);
-                created += Number(payload.created || 0);
-                failed += Number(payload.failed || 0);
+                try {
+                    const payload = await postJson(cnjBatchRegisterImportUrl, {
+                        cnjs: chunk,
+                        carteira_id: carteiraId,
+                        allow_missing_documents: getAllowMissingDocumentsFlag(),
+                    });
+                    mergeCnjBatchRegisterRows(payload.rows || []);
+                    processed += Number(payload.processed || chunk.length || 0);
+                    created += Number(payload.created || 0);
+                    failed += Number(payload.failed || 0);
+                } catch (error) {
+                    processed += chunk.length;
+                    failed += chunk.length;
+                    applyCnjBatchRegisterChunkError(chunk, error.message || 'Falha ao cadastrar este bloco.');
+                }
             }
             if (cnjBatchRegisterProgress) {
                 const alreadyExists = cnjBatchRegisterRows.filter((row) => row.status === 'already_exists').length;
@@ -2854,6 +2996,7 @@
                 cnjBatchRegisterRefresh.disabled = false;
             }
             if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+            setCnjBatchRegisterBusy(false);
             renderCnjBatchRegisterRows();
         }
 
@@ -3318,15 +3461,17 @@
         if (cnjBatchRegisterClose) {
             cnjBatchRegisterClose.addEventListener('click', hideCnjBatchRegisterModal);
         }
-        if (cnjBatchRegisterModal) {
-            cnjBatchRegisterModal.addEventListener('click', (event) => {
-                if (event.target === cnjBatchRegisterModal) {
-                    hideCnjBatchRegisterModal();
-                }
-            });
-        }
         if (cnjBatchRegisterVerify) {
-            cnjBatchRegisterVerify.addEventListener('click', verifyCnjBatchRegisterRows);
+            cnjBatchRegisterVerify.addEventListener('click', () => {
+                verifyCnjBatchRegisterRows().catch((error) => {
+                    if (cnjBatchRegisterProgress) {
+                        cnjBatchRegisterProgress.textContent = error.message || 'Falha ao verificar os CNJs.';
+                    }
+                    setCnjBatchRegisterBusy(false);
+                    if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
+                    renderCnjBatchRegisterRows();
+                });
+            });
         }
         if (cnjBatchRegisterRun) {
             cnjBatchRegisterRun.addEventListener('click', () => {
@@ -3334,9 +3479,15 @@
                     if (cnjBatchRegisterProgress) {
                         cnjBatchRegisterProgress.textContent = error.message || 'Falha ao cadastrar os CNJs.';
                     }
+                    setCnjBatchRegisterBusy(false);
                     if (cnjBatchRegisterRun) cnjBatchRegisterRun.disabled = false;
                     if (cnjBatchRegisterVerify) cnjBatchRegisterVerify.disabled = false;
                 });
+            });
+        }
+        if (cnjBatchRegisterAllowMissingDocuments) {
+            cnjBatchRegisterAllowMissingDocuments.addEventListener('change', () => {
+                resetCnjBatchRegisterRows('Opção alterada. Clique em Verificar novamente.');
             });
         }
         if (cnjBatchRegisterRefresh) {

@@ -94,6 +94,7 @@ from .services.analise_lote_planilha import (
 )
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from .integracoes_escavador.partes import collect_partes_from_escavador_payload
+from .integracoes_escavador.parser import build_safe_andamento_fields, build_safe_status_nome
 from .queue import get_passivas_import_queue, get_queue_connection
 from .tasks import run_passivas_planilha_import_job, run_analise_lote_planilha_import_job
 
@@ -5474,19 +5475,52 @@ class AndamentoProcessualForm(forms.ModelForm):
         data = cleaned.get('data')
         instance = getattr(self, 'instance', None)
 
-        # O widget padrão do admin expõe apenas HH:MM. Quando o andamento veio da API
-        # com segundos diferentes, um simples save de "detalhes" pode colapsar dois
-        # registros distintos no mesmo minuto e disparar falso positivo de duplicidade.
-        if instance and instance.pk and data and instance.data:
-            original_data = instance.data
-            try:
-                cleaned['data'] = data.replace(
-                    second=getattr(original_data, 'second', 0),
-                    microsecond=getattr(original_data, 'microsecond', 0),
-                )
-                self.instance.data = cleaned['data']
-            except Exception:
-                pass
+        if instance and instance.pk:
+            # O admin posta textareas com quebras normalizadas. Se o andamento já existe
+            # e o conteúdo só mudou de CRLF para LF, preservamos o texto bruto do banco
+            # para não colidir com duplicatas históricas ao salvar outros campos.
+            submitted_descricao = cleaned.get('descricao')
+            original_descricao = instance.descricao
+            if (submitted_descricao is None and 'descricao' not in self.changed_data) or (
+                isinstance(submitted_descricao, str)
+                and isinstance(original_descricao, str)
+                and submitted_descricao.replace('\r\n', '\n').replace('\r', '\n')
+                == original_descricao.replace('\r\n', '\n').replace('\r', '\n')
+            ):
+                cleaned['descricao'] = original_descricao
+                self.instance.descricao = original_descricao
+
+            submitted_detalhes = cleaned.get('detalhes')
+            original_detalhes = instance.detalhes
+            if (submitted_detalhes is None and 'detalhes' not in self.changed_data) or (
+                isinstance(submitted_detalhes, str)
+                and isinstance(original_detalhes, str)
+                and submitted_detalhes.replace('\r\n', '\n').replace('\r', '\n')
+                == original_detalhes.replace('\r\n', '\n').replace('\r', '\n')
+            ):
+                cleaned['detalhes'] = original_detalhes
+                self.instance.detalhes = original_detalhes
+
+            if 'numero_cnj' not in self.changed_data:
+                cleaned['numero_cnj'] = instance.numero_cnj
+                self.instance.numero_cnj = instance.numero_cnj
+
+            # O widget padrão do admin expõe apenas HH:MM. Quando o andamento veio da API
+            # com segundos diferentes, um simples save de "detalhes" pode colapsar dois
+            # registros distintos no mesmo minuto e disparar falso positivo de duplicidade.
+            if 'data' not in self.changed_data and instance.data:
+                cleaned['data'] = instance.data
+                self.instance.data = instance.data
+            elif data and instance.data:
+                original_data = instance.data
+                try:
+                    cleaned['data'] = data.replace(
+                        second=getattr(original_data, 'second', 0),
+                        microsecond=getattr(original_data, 'microsecond', 0),
+                    )
+                    self.instance.data = cleaned['data']
+                except Exception:
+                    pass
 
         return cleaned
 
@@ -9505,19 +9539,26 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             .first()
         )
 
-    def _get_carteira_for_cnj_batch_registration(self, request):
-        carteira_id = self._get_filtered_carteira_id(request)
+    def _get_cnj_batch_register_carteira_queryset(self, user):
+        qs = Carteira.objects.order_by('nome')
+        allowed_ids = get_user_allowed_carteira_ids(user)
+        if allowed_ids is not None:
+            qs = qs.filter(pk__in=allowed_ids)
+        return qs
+
+    def _get_carteira_for_cnj_batch_registration(self, request, carteira_id=None):
+        carteira_id = self._safe_positive_int(carteira_id)
+        if not carteira_id:
+            carteira_id = self._get_filtered_carteira_id(request)
         if not carteira_id:
             carteira_id = self._get_single_allowed_carteira_id_for_user(request.user)
         if not carteira_id:
             return None
-        qs = Carteira.objects.filter(pk=carteira_id)
-        allowed_ids = get_user_allowed_carteira_ids(request.user)
-        if allowed_ids is not None:
-            qs = qs.filter(pk__in=allowed_ids)
+        qs = self._get_cnj_batch_register_carteira_queryset(request.user)
+        qs = qs.filter(pk=carteira_id)
         return qs.first()
 
-    def _inspect_cnj_batch_registration(self, cnj_digits):
+    def _inspect_cnj_batch_registration(self, cnj_digits, allow_missing_documents=False):
         cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
         row = {
             'cnj': cnj_digits,
@@ -9571,6 +9612,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         row['partes'] = partes
 
         issues = []
+        document_issues = []
         if not uf:
             issues.append('UF')
         if not vara:
@@ -9585,9 +9627,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not passivos:
             issues.append('Polo passivo')
         if any(not str(item.get('documento') or '').strip() for item in ativos):
-            issues.append('Documento do polo ativo')
+            document_issues.append('Documento do polo ativo')
         if any(not str(item.get('documento') or '').strip() for item in passivos):
-            issues.append('Documento do polo passivo')
+            document_issues.append('Documento do polo passivo')
 
         if issues:
             row.update({
@@ -9596,24 +9638,41 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(issues)) + '.',
             })
             return row
+        if document_issues and not allow_missing_documents:
+            row.update({
+                'status': 'pending_data',
+                'status_label': 'Pendência',
+                'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(document_issues)) + '.',
+            })
+            return row
 
         row.update({
             'status': 'ready',
             'status_label': 'Pronto para cadastrar',
-            'detail': f'{len(passivos)} polo(s) passivo(s), {len(ativos)} polo(s) ativo(s).',
+            'detail': (
+                'Cadastro seguirá mesmo sem: ' + ', '.join(dict.fromkeys(document_issues)) + '.'
+                if document_issues
+                else f'{len(passivos)} polo(s) passivo(s), {len(ativos)} polo(s) ativo(s).'
+            ),
             'can_import': True,
         })
         return row
 
-    def _build_cnj_batch_preview_row(self, cnj_digits, request=None):
-        row = self._inspect_cnj_batch_registration(cnj_digits)
+    def _build_cnj_batch_preview_row(self, cnj_digits, request=None, allow_missing_documents=False):
+        row = self._inspect_cnj_batch_registration(
+            cnj_digits,
+            allow_missing_documents=allow_missing_documents,
+        )
         row.pop('dados_api', None)
         row.pop('partes', None)
         return row
 
-    def _create_processo_from_escavador_cnj(self, cnj_digits, request):
+    def _create_processo_from_escavador_cnj(self, cnj_digits, request, carteira_id=None, allow_missing_documents=False):
         cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
-        preview = self._inspect_cnj_batch_registration(cnj_digits)
+        preview = self._inspect_cnj_batch_registration(
+            cnj_digits,
+            allow_missing_documents=allow_missing_documents,
+        )
         if preview.get('status') != 'ready':
             preview.pop('dados_api', None)
             preview.pop('partes', None)
@@ -9626,13 +9685,21 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         tribunal = fonte_principal.get('tribunal') or {}
         cnj_original = str(dados_api.get('numero_cnj') or cnj_digits).strip()
         partes = preview.pop('partes', None) or collect_partes_from_escavador_payload(dados_api)
-        carteira = self._get_carteira_for_cnj_batch_registration(request)
+        carteira = self._get_carteira_for_cnj_batch_registration(request, carteira_id=carteira_id)
+        if not carteira:
+            preview.update({
+                'status': 'pending_data',
+                'status_label': 'Pendência',
+                'detail': 'Selecione uma carteira destino válida.',
+                'can_import': False,
+            })
+            return preview
 
-        classe_nome = str(capa.get('classe') or '').strip()
+        classe_nome = build_safe_status_nome(re.sub(r'\s*\(\d+\)$', '', str(capa.get('classe') or '')).strip().title())
         status_obj = None
         if classe_nome:
             status_obj, _ = StatusProcessual.objects.get_or_create(
-                nome=re.sub(r'\s*\(\d+\)$', '', classe_nome).strip().title(),
+                nome=classe_nome,
                 defaults={'ordem': 0},
             )
 
@@ -9694,7 +9761,10 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             movimentos = dados_api.get('movimentacoes') or []
             for movimento in movimentos:
                 data_obj = parse_datetime(movimento.get('data') or '')
-                descricao = str(movimento.get('conteudo') or '').strip()
+                descricao, detalhes = build_safe_andamento_fields(
+                    movimento.get('conteudo'),
+                    ((movimento.get('fonte') or {}).get('nome')),
+                )
                 if not data_obj or not descricao:
                     continue
                 if timezone.is_naive(data_obj):
@@ -9704,9 +9774,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     numero_cnj=numero_cnj,
                     data=data_obj,
                     descricao=descricao,
-                    defaults={
-                        'detalhes': str(((movimento.get('fonte') or {}).get('nome')) or '').strip(),
-                    },
+                    defaults={'detalhes': detalhes},
                 )
 
         preview.update({
@@ -12001,6 +12069,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             }
             for value in cnj_info.get('missing', [])
         ]
+        cnj_batch_register_carteira = self._get_carteira_for_cnj_batch_registration(request)
+        extra_context['cnj_batch_register_carteiras'] = list(
+            self._get_cnj_batch_register_carteira_queryset(request.user).values('id', 'nome')
+        )
+        extra_context['cnj_batch_register_carteira_id'] = (
+            cnj_batch_register_carteira.id if cnj_batch_register_carteira else None
+        )
         extra_context['cnj_batch_verify_url'] = reverse('admin:processo_cnj_batch_verify')
         extra_context['cnj_batch_import_url'] = reverse('admin:processo_cnj_batch_import')
         extra_context['cpf_lote_list_url'] = reverse('admin:processo_cpf_lote_list')
@@ -12143,11 +12218,19 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         raw_cnjs = payload.get('cnjs') or []
         if isinstance(raw_cnjs, str):
             raw_cnjs = [raw_cnjs]
+        allow_missing_documents = str(payload.get('allow_missing_documents') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
         cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
         if not cnjs:
             return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
 
-        rows = [self._build_cnj_batch_preview_row(cnj, request=request) for cnj in cnjs]
+        rows = [
+            self._build_cnj_batch_preview_row(
+                cnj,
+                request=request,
+                allow_missing_documents=allow_missing_documents,
+            )
+            for cnj in cnjs
+        ]
         return JsonResponse({'ok': True, 'rows': rows})
 
     def arquivos_multi_upload_view(self, request, object_id):
@@ -12226,9 +12309,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         raw_cnjs = payload.get('cnjs') or []
         if isinstance(raw_cnjs, str):
             raw_cnjs = [raw_cnjs]
+        allow_missing_documents = str(payload.get('allow_missing_documents') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
         cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
         if not cnjs:
             return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
+        carteira_id = self._safe_positive_int(payload.get('carteira_id'))
+        carteira = self._get_carteira_for_cnj_batch_registration(request, carteira_id=carteira_id)
+        if not carteira:
+            return JsonResponse({'error': 'Selecione uma carteira destino válida.'}, status=400)
 
         rows = []
         created = 0
@@ -12236,7 +12324,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         failed = 0
         for cnj in cnjs:
             try:
-                row = self._create_processo_from_escavador_cnj(cnj, request)
+                row = self._create_processo_from_escavador_cnj(
+                    cnj,
+                    request,
+                    carteira_id=carteira.id,
+                    allow_missing_documents=allow_missing_documents,
+                )
             except Exception as exc:
                 logger.error('Erro ao cadastrar CNJ em lote %s: %s', cnj, exc, exc_info=True)
                 row = {
