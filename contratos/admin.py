@@ -9306,7 +9306,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return (
                 ProcessoCpfLoteSalvo.objects
                 .filter(
-                    Q(compartilhado=True) | Q(criado_por=request.user),
+                    Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
                     id=lote_pk,
                 )
                 .select_related('criado_por')
@@ -9328,7 +9328,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return (
                 ProcessoCnjLoteSalvo.objects
                 .filter(
-                    Q(compartilhado=True) | Q(criado_por=request.user),
+                    Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
                     id=lote_pk,
                 )
                 .select_related('criado_por')
@@ -12083,11 +12083,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         extra_context['cpf_lote_rename_url'] = reverse('admin:processo_cpf_lote_rename')
         extra_context['cpf_lote_delete_url'] = reverse('admin:processo_cpf_lote_delete')
         extra_context['cpf_lote_share_url'] = reverse('admin:processo_cpf_lote_share')
+        extra_context['cpf_lote_hide_supervisor_url'] = reverse('admin:processo_cpf_lote_hide_supervisor')
         extra_context['cnj_lote_list_url'] = reverse('admin:processo_cnj_lote_list')
         extra_context['cnj_lote_save_url'] = reverse('admin:processo_cnj_lote_save')
         extra_context['cnj_lote_rename_url'] = reverse('admin:processo_cnj_lote_rename')
         extra_context['cnj_lote_delete_url'] = reverse('admin:processo_cnj_lote_delete')
         extra_context['cnj_lote_share_url'] = reverse('admin:processo_cnj_lote_share')
+        extra_context['cnj_lote_hide_supervisor_url'] = reverse('admin:processo_cnj_lote_hide_supervisor')
+        extra_context['can_manage_hidden_saved_lists'] = bool(
+            request.user.is_superuser or is_user_supervisor(request.user)
+        )
         habilitacao_batch_issues = self._build_habilitacao_batch_issue_context(request)
         extra_context['habilitacao_batch_issues'] = habilitacao_batch_issues
         extra_context['habilitacao_batch_issue_revalidate_url'] = reverse('admin:processo_habilitacao_batch_issue_revalidate')
@@ -12192,11 +12197,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             path('cpf-lote/renomear/', self.admin_site.admin_view(self.cpf_lote_rename_view), name='processo_cpf_lote_rename'),
             path('cpf-lote/remover/', self.admin_site.admin_view(self.cpf_lote_delete_view), name='processo_cpf_lote_delete'),
             path('cpf-lote/compartilhar/', self.admin_site.admin_view(self.cpf_lote_share_view), name='processo_cpf_lote_share'),
+            path('cpf-lote/ocultar-supervisor/', self.admin_site.admin_view(self.cpf_lote_hide_supervisor_view), name='processo_cpf_lote_hide_supervisor'),
             path('cnj-lote/listar/', self.admin_site.admin_view(self.cnj_lote_list_view), name='processo_cnj_lote_list'),
             path('cnj-lote/salvar/', self.admin_site.admin_view(self.cnj_lote_save_view), name='processo_cnj_lote_save'),
             path('cnj-lote/renomear/', self.admin_site.admin_view(self.cnj_lote_rename_view), name='processo_cnj_lote_rename'),
             path('cnj-lote/remover/', self.admin_site.admin_view(self.cnj_lote_delete_view), name='processo_cnj_lote_delete'),
             path('cnj-lote/compartilhar/', self.admin_site.admin_view(self.cnj_lote_share_view), name='processo_cnj_lote_share'),
+            path('cnj-lote/ocultar-supervisor/', self.admin_site.admin_view(self.cnj_lote_hide_supervisor_view), name='processo_cnj_lote_hide_supervisor'),
             path('<path:object_id>/atualizar-andamentos/', self.admin_site.admin_view(self.atualizar_andamentos_view), name='processo_atualizar_andamentos'),
             path('<path:object_id>/remover-andamentos-duplicados/', self.admin_site.admin_view(self.remover_andamentos_duplicados_view), name='processo_remover_andamentos_duplicados'),
             path('<path:object_id>/delegar-inline/', self.admin_site.admin_view(self.delegar_inline_view), name='processo_delegate_inline'),
@@ -12466,23 +12473,32 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'processed': len(generated) + len(reused) + len(failed),
         })
 
-    def _cpf_lote_accessible_qs(self, request):
-        return (
+    def _cpf_lote_accessible_qs(self, request, include_hidden=False):
+        qs = (
             ProcessoCpfLoteSalvo.objects
             .filter(Q(compartilhado=True) | Q(criado_por=request.user))
             .select_related('criado_por')
         )
+        if include_hidden and (request.user.is_superuser or is_user_supervisor(request.user)):
+            return qs.filter(Q(oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=True))
+        return qs.filter(oculto_supervisor=False)
 
     def _cpf_lote_count(self, raw_text):
         return len(self._parse_cpf_lote_text(raw_text))
 
     def _cpf_lote_payload(self, request, item):
+        can_hide_supervisor = bool(
+            item.criado_por_id == request.user.id
+            and (request.user.is_superuser or is_user_supervisor(request.user))
+        )
         return {
             'id': item.id,
             'nome': item.nome,
             'compartilhado': bool(item.compartilhado),
+            'oculto_supervisor': bool(getattr(item, 'oculto_supervisor', False)),
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
+            'can_hide_supervisor': can_hide_supervisor,
             'quantidade': self._cpf_lote_count(item.cpfs),
             'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
             'kind': 'cpf',
@@ -12493,9 +12509,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Método não permitido.'}, status=405)
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        include_hidden = (
+            str(request.GET.get('include_hidden') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        )
         data = []
         try:
-            for item in self._cpf_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
+            for item in self._cpf_lote_accessible_qs(request, include_hidden=include_hidden).order_by('-atualizado_em', '-id'):
                 data.append(self._cpf_lote_payload(request, item))
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao listar lotes.', exc_info=True)
@@ -12632,23 +12651,58 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         lote.save(update_fields=['compartilhado', 'atualizado_em'])
         return JsonResponse({'ok': True, 'compartilhado': lote.compartilhado})
 
-    def _cnj_lote_accessible_qs(self, request):
-        return (
+    def cpf_lote_hide_supervisor_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        if not request.user.is_superuser and not is_user_supervisor(request.user):
+            return JsonResponse({'error': 'Acesso restrito a supervisores.'}, status=403)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        oculto_supervisor = bool(payload.get('oculto_supervisor'))
+        try:
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CPF indisponivel ao ocultar lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.oculto_supervisor = oculto_supervisor
+        lote.save(update_fields=['oculto_supervisor', 'atualizado_em'])
+        return JsonResponse({'ok': True, 'oculto_supervisor': lote.oculto_supervisor, 'item': self._cpf_lote_payload(request, lote)})
+
+    def _cnj_lote_accessible_qs(self, request, include_hidden=False):
+        qs = (
             ProcessoCnjLoteSalvo.objects
             .filter(Q(compartilhado=True) | Q(criado_por=request.user))
             .select_related('criado_por')
         )
+        if include_hidden and (request.user.is_superuser or is_user_supervisor(request.user)):
+            return qs.filter(Q(oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=True))
+        return qs.filter(oculto_supervisor=False)
 
     def _cnj_lote_count(self, raw_text):
         return len(self._parse_cnj_lote_text(raw_text))
 
     def _cnj_lote_payload(self, request, item):
+        can_hide_supervisor = bool(
+            item.criado_por_id == request.user.id
+            and (request.user.is_superuser or is_user_supervisor(request.user))
+        )
         return {
             'id': item.id,
             'nome': item.nome,
             'compartilhado': bool(item.compartilhado),
+            'oculto_supervisor': bool(getattr(item, 'oculto_supervisor', False)),
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
+            'can_hide_supervisor': can_hide_supervisor,
             'quantidade': self._cnj_lote_count(item.cnjs),
             'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
             'kind': 'cnj',
@@ -12659,9 +12713,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Método não permitido.'}, status=405)
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        include_hidden = (
+            str(request.GET.get('include_hidden') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        )
         data = []
         try:
-            for item in self._cnj_lote_accessible_qs(request).order_by('-atualizado_em', '-id'):
+            for item in self._cnj_lote_accessible_qs(request, include_hidden=include_hidden).order_by('-atualizado_em', '-id'):
                 data.append(self._cnj_lote_payload(request, item))
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CNJ indisponivel ao listar lotes.', exc_info=True)
@@ -12797,6 +12854,32 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         lote.compartilhado = compartilhado
         lote.save(update_fields=['compartilhado', 'atualizado_em'])
         return JsonResponse({'ok': True, 'compartilhado': lote.compartilhado})
+
+    def cnj_lote_hide_supervisor_view(self, request):
+        if request.method != 'POST':
+            return JsonResponse({'error': 'Método não permitido.'}, status=405)
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Não autenticado.'}, status=401)
+        if not request.user.is_superuser and not is_user_supervisor(request.user):
+            return JsonResponse({'error': 'Acesso restrito a supervisores.'}, status=403)
+        try:
+            payload = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            payload = request.POST
+        lote_id = str(payload.get('id') or '').strip()
+        if not lote_id or not lote_id.isdigit():
+            return JsonResponse({'error': 'Lista inválida.'}, status=400)
+        oculto_supervisor = bool(payload.get('oculto_supervisor'))
+        try:
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+        except (ProgrammingError, OperationalError):
+            logger.warning('Tabela de listas salvas de CNJ indisponivel ao ocultar lote %s.', lote_id, exc_info=True)
+            return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
+        if not lote:
+            return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
+        lote.oculto_supervisor = oculto_supervisor
+        lote.save(update_fields=['oculto_supervisor', 'atualizado_em'])
+        return JsonResponse({'ok': True, 'oculto_supervisor': lote.oculto_supervisor, 'item': self._cnj_lote_payload(request, lote)})
 
     def online_presence_heartbeat_view(self, request, object_id):
         if request.method != 'POST':

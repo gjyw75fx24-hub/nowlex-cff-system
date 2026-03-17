@@ -935,6 +935,13 @@
         .cpf-lote-modal__table th.actions {
             text-align: right;
         }
+        .cpf-lote-modal__action-row {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
         .cpf-lote-modal__badge {
             display: inline-flex;
             align-items: center;
@@ -2020,6 +2027,11 @@
                 Lista atual: <strong id="cpf-lote-current-label">Nenhuma</strong>
             </div>
             <div class="cpf-lote-modal__note" id="cpf-lote-current-count"></div>
+            {% if can_manage_hidden_saved_lists %}
+            <div class="cpf-lote-modal__note">
+                <button type="button" id="cpf-lote-toggle-hidden" class="button">Mostrar ocultas</button>
+            </div>
+            {% endif %}
             <div>
                 <table class="cpf-lote-modal__table">
                     <thead>
@@ -2337,23 +2349,28 @@
         const cpfLoteTableBody = document.getElementById('cpf-lote-table-body');
         const cpfLoteCurrentLabel = document.getElementById('cpf-lote-current-label');
         const cpfLoteCurrentCount = document.getElementById('cpf-lote-current-count');
+        const cpfLoteToggleHidden = document.getElementById('cpf-lote-toggle-hidden');
         const cpfLoteModalTitle = document.getElementById('cpf-lote-modal-title');
         const cpfLoteListUrl = "{{ cpf_lote_list_url|escapejs }}";
         const cpfLoteSaveUrl = "{{ cpf_lote_save_url|escapejs }}";
         const cpfLoteRenameUrl = "{{ cpf_lote_rename_url|escapejs }}";
         const cpfLoteDeleteUrl = "{{ cpf_lote_delete_url|escapejs }}";
         const cpfLoteShareUrl = "{{ cpf_lote_share_url|escapejs }}";
+        const cpfLoteHideSupervisorUrl = "{{ cpf_lote_hide_supervisor_url|escapejs }}";
         const cnjLoteListUrl = "{{ cnj_lote_list_url|escapejs }}";
         const cnjLoteSaveUrl = "{{ cnj_lote_save_url|escapejs }}";
         const cnjLoteRenameUrl = "{{ cnj_lote_rename_url|escapejs }}";
         const cnjLoteDeleteUrl = "{{ cnj_lote_delete_url|escapejs }}";
         const cnjLoteShareUrl = "{{ cnj_lote_share_url|escapejs }}";
+        const cnjLoteHideSupervisorUrl = "{{ cnj_lote_hide_supervisor_url|escapejs }}";
         const cpfLoteActiveId = "{{ cpf_lote_id|default:'' }}";
         let cpfLoteResolvedActiveLabel = "{{ cpf_lote_label|default:''|escapejs }}";
         let cpfLoteResolvedActiveKind = "{{ batch_lote_kind|default:''|escapejs }}" || 'cpf';
         let cpfLoteRenameId = '';
         let cpfLoteRenameOriginalName = '';
         let cpfLoteRenameOriginalShared = false;
+        let cpfLoteShowHidden = false;
+        const canManageHiddenSavedLists = {{ can_manage_hidden_saved_lists|yesno:"true,false" }};
         const cnjBatchRegisterOpen = document.getElementById('cnj-batch-register-open');
         const cnjBatchRegisterModal = document.getElementById('cnj-batch-register-modal');
         const cnjBatchRegisterClose = document.getElementById('cnj-batch-register-close');
@@ -2434,6 +2451,8 @@
             if (!cpfLoteModal) return;
             cpfLoteModal.style.display = 'flex';
             resetCpfLoteEditor();
+            cpfLoteShowHidden = false;
+            updateCpfLoteHiddenToggleLabel();
             updateCpfLoteModalPresentation();
             if (cpfLoteName) {
                 cpfLoteName.focus();
@@ -2497,6 +2516,7 @@
                     rename: cnjLoteRenameUrl,
                     remove: cnjLoteDeleteUrl,
                     share: cnjLoteShareUrl,
+                    hideSupervisor: cnjLoteHideSupervisorUrl,
                     param: 'cnj_lote',
                     idParam: 'cnj_lote_id',
                 };
@@ -2507,6 +2527,7 @@
                 rename: cpfLoteRenameUrl,
                 remove: cpfLoteDeleteUrl,
                 share: cpfLoteShareUrl,
+                hideSupervisor: cpfLoteHideSupervisorUrl,
                 param: 'cpf_lote',
                 idParam: 'cpf_lote_id',
             };
@@ -3165,6 +3186,11 @@
             updateCpfLoteSaveButtonState();
         }
 
+        function updateCpfLoteHiddenToggleLabel() {
+            if (!cpfLoteToggleHidden) return;
+            cpfLoteToggleHidden.textContent = cpfLoteShowHidden ? 'Ocultar listas ocultas' : 'Mostrar ocultas';
+        }
+
         function startCpfLoteRename(id, nome, compartilhado) {
             cpfLoteRenameId = String(id || '').trim();
             cpfLoteRenameOriginalName = String(nome || '').trim();
@@ -3235,9 +3261,13 @@
                 const row = document.createElement('tr');
                 const itemKind = item.kind || getCurrentBatchKind();
                 const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
+                const hideSupervisorLabel = item.oculto_supervisor ? 'Reexibir' : 'Ocultar';
                 const shareCell = item.is_owner
                     ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
                     : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
+                const hideBtn = item.can_hide_supervisor
+                    ? `<button type=\"button\" class=\"button\" data-action=\"hide-supervisor\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-hidden=\"${item.oculto_supervisor ? '1' : '0'}\">${hideSupervisorLabel}</button>`
+                    : '';
                 const deleteBtn = item.is_owner
                     ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Excluir</button>`
                     : '';
@@ -3247,8 +3277,11 @@
                     <td>${escapeHtml(item.criado_por || '-')}</td>
                     <td>${shareCell}</td>
                     <td class=\"actions\">
-                        <button type=\"button\" class=\"button\" data-action=\"load\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Carregar</button>
-                        ${deleteBtn}
+                        <div class=\"cpf-lote-modal__action-row\">
+                            <button type=\"button\" class=\"button\" data-action=\"load\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Carregar</button>
+                            ${hideBtn}
+                            ${deleteBtn}
+                        </div>
                     </td>
                 `;
                 cpfLoteTableBody.appendChild(row);
@@ -3278,7 +3311,9 @@
                     quantidade: row.children[1] ? row.children[1].textContent.trim() : '',
                     criado_por: row.children[2] ? row.children[2].textContent.trim() : '',
                     compartilhado: Boolean(row.querySelector('button[data-action=\"toggle\"][data-shared=\"1\"]') || row.textContent.includes('Pública')),
+                    oculto_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"][data-hidden=\"1\"]')),
                     is_owner: Boolean(row.querySelector('button[data-action=\"delete\"]')),
+                    can_hide_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"]')),
                 });
             });
             renderCpfLoteTable(normalized);
@@ -3290,6 +3325,9 @@
             if (!cpfLoteTableBody || !endpoints.list) return;
             const requestUrl = new URL(endpoints.list, window.location.origin);
             requestUrl.searchParams.set('_ts', String(Date.now()));
+            if (cpfLoteShowHidden && canManageHiddenSavedLists) {
+                requestUrl.searchParams.set('include_hidden', '1');
+            }
             return fetch(requestUrl.toString(), {
                 credentials: 'same-origin',
                 cache: 'no-store',
@@ -3504,6 +3542,14 @@
                 }
             });
         }
+        updateCpfLoteHiddenToggleLabel();
+        if (cpfLoteToggleHidden) {
+            cpfLoteToggleHidden.addEventListener('click', () => {
+                cpfLoteShowHidden = !cpfLoteShowHidden;
+                updateCpfLoteHiddenToggleLabel();
+                refreshCpfLoteTable();
+            });
+        }
         if (cpfLoteTableBody) {
             cpfLoteTableBody.addEventListener('click', (event) => {
                 const btn = event.target.closest('button[data-action]');
@@ -3582,6 +3628,28 @@
                         refreshCpfLoteTable();
                     }).catch((error) => {
                         showCpfLoteMessage(error?.message || 'Não foi possível atualizar.');
+                    });
+                    return;
+                }
+                if (action === 'hide-supervisor') {
+                    const nextHidden = btn.dataset.hidden === '1' ? false : true;
+                    fetch(endpoints.hideSupervisor, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken(),
+                            'Accept': 'application/json',
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ id, oculto_supervisor: nextHidden }),
+                    }).then(async (response) => {
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok || data.error) {
+                            throw new Error(data.error || 'Não foi possível ocultar a lista.');
+                        }
+                        refreshCpfLoteTable();
+                    }).catch((error) => {
+                        showCpfLoteMessage(error?.message || 'Não foi possível ocultar a lista.');
                     });
                 }
             });

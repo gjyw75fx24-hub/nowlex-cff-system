@@ -1072,6 +1072,7 @@ class ProcessoCpfLoteSalvo(models.Model):
     nome = models.CharField(max_length=140, verbose_name='Nome da lista')
     cpfs = models.TextField(verbose_name='CPFs')
     compartilhado = models.BooleanField(default=False, verbose_name='Compartilhado')
+    oculto_supervisor = models.BooleanField(default=False, verbose_name='Oculto para supervisores')
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
     atualizado_em = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
 
@@ -1107,6 +1108,7 @@ class ProcessoCnjLoteSalvo(models.Model):
     nome = models.CharField(max_length=140, verbose_name='Nome da lista')
     cnjs = models.TextField(verbose_name='CNJs')
     compartilhado = models.BooleanField(default=False, verbose_name='Compartilhado')
+    oculto_supervisor = models.BooleanField(default=False, verbose_name='Oculto para supervisores')
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
     atualizado_em = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
 
