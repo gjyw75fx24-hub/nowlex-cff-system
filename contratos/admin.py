@@ -11957,6 +11957,20 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             missing_list = [formatter(value) for value in batch_info.get('missing', [])]
             found_list_sorted = sorted(found_list)
             missing_list_sorted = sorted(missing_list)
+            found_entries = [
+                {
+                    'value': value,
+                    'display': formatter(value),
+                }
+                for value in sorted(batch_info.get('found', set()))
+            ]
+            missing_entries = [
+                {
+                    'value': value,
+                    'display': formatter(value),
+                }
+                for value in batch_info.get('missing', [])
+            ]
             extra_context['cpf_lote_summary'] = {
                 'total': len(batch_info.get('cpfs') or batch_info.get('cnjs') or []),
                 'found': len(batch_info.get('found', set())),
@@ -11965,6 +11979,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 'missing_list': missing_list_sorted[:max_items],
                 'found_more': max(len(found_list_sorted) - max_items, 0),
                 'missing_more': max(len(missing_list_sorted) - max_items, 0),
+                'found_entries': found_entries,
+                'missing_entries': missing_entries,
             }
             extra_context['cpf_lote_input'] = batch_info.get('raw', '')
             extra_context['cpf_lote_label'] = batch_info.get('lote_label', '')

@@ -335,6 +335,28 @@
             background: rgba(22, 163, 74, 0.16);
             color: #166534;
         }
+        .processo-copy-toast {
+            position: fixed;
+            top: 22px;
+            right: 22px;
+            z-index: 10080;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid #86efac;
+            background: #ecfdf5;
+            color: #166534;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+            font-size: 0.82rem;
+            font-weight: 600;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            pointer-events: none;
+        }
+        .processo-copy-toast--visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
         .processo-cpf-lote-inline__item {
             display: inline-flex;
             align-items: center;
@@ -362,11 +384,13 @@
         }
         .processo-cpf-lote-summary {
             margin-top: 8px;
+            margin-right: 10px;
             padding: 8px 10px;
             border: 1px solid #e2e8f0;
             border-radius: 10px;
             background: #fff;
             flex-basis: 100%;
+            box-sizing: border-box;
         }
         .processo-cpf-lote-summary__header {
             font-size: 0.78rem;
@@ -404,6 +428,10 @@
             gap: 10px;
             margin-top: 8px;
         }
+        .processo-cpf-lote-summary__column {
+            display: flex;
+            flex-direction: column;
+        }
         .processo-cpf-lote-summary__label {
             display: block;
             font-size: 0.75rem;
@@ -411,20 +439,63 @@
             color: #4a5568;
             margin-bottom: 4px;
         }
-        .processo-cpf-lote-summary__chips {
+        .processo-cpf-lote-summary__list-head {
             display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .processo-cpf-lote-summary__meta-inline {
+            font-size: 0.72rem;
+            color: #64748b;
+        }
+        .processo-cpf-lote-summary__viewport {
+            max-height: 208px;
+            overflow-y: auto;
+            padding-right: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .processo-cpf-lote-summary__entry {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .processo-cpf-lote-summary__entry-label {
+            width: 100%;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .processo-cpf-lote-summary__entry-copy {
+            width: 100%;
+            display: inline-flex;
+            align-items: center;
+        }
+        .processo-cpf-lote-summary__entry-checkbox {
+            margin: 0;
+            width: 16px;
+            height: 16px;
+            accent-color: #2563eb;
+            flex: 0 0 auto;
         }
         .processo-cpf-lote-summary__chip {
             display: inline-flex;
             align-items: center;
-            padding: 2px 8px;
+            width: 100%;
+            padding: 6px 10px;
             border-radius: 999px;
-            font-size: 0.75rem;
+            font-size: 0.85rem;
             border: 1px solid #e2e8f0;
             background: #f7fafc;
             color: #2d3748;
+        }
+        .processo-cpf-lote-summary__chip.processo-copyable-token {
+            width: 100%;
         }
         .processo-cpf-lote-summary__chip--miss {
             background: #fff5f5;
@@ -434,6 +505,44 @@
         .processo-cpf-lote-summary__chip--more {
             background: #edf2f7;
             color: #4a5568;
+        }
+        .processo-cpf-lote-summary__load-more {
+            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 42px;
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #1e3a5f;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .processo-cpf-lote-summary__load-more[hidden] {
+            display: none;
+        }
+        .processo-cpf-lote-summary__selection-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .processo-cpf-lote-summary__selection-bar--placeholder {
+            visibility: hidden;
+        }
+        .processo-cpf-lote-summary__selection-btn {
+            border: none;
+            background: transparent;
+            color: #2563eb;
+            font-size: 0.76rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
         }
         .cnj-batch-register-modal {
             position: fixed;
@@ -1221,54 +1330,6 @@
                     {% endif %}
                 </div>
             </div>
-            {% if cpf_lote_summary %}
-                <div class="processo-cpf-lote-summary">
-                    <div class="processo-cpf-lote-summary__header">
-                        <strong>Consulta em lote</strong>
-                        {% if cpf_lote_label %}
-                            <span>Lista: {{ cpf_lote_label }}</span>
-                        {% endif %}
-                        <span>Consultados: {{ cpf_lote_summary.total }}</span>
-                        <span>Encontrados: {{ cpf_lote_summary.found }}</span>
-                        <span>Não encontrados: {{ cpf_lote_summary.missing }}</span>
-                        {% if batch_lote_kind == 'cnj' and cpf_lote_summary.missing %}
-                            <div class="processo-cpf-lote-summary__actions">
-                                <button type="button" class="processo-cpf-lote-summary__action-btn" id="cnj-batch-register-open">
-                                    Cadastrar não encontrados
-                                </button>
-                            </div>
-                        {% endif %}
-                    </div>
-                    <div class="processo-cpf-lote-summary__lists">
-                        <div>
-                            <span class="processo-cpf-lote-summary__label">Encontrados</span>
-                            <div class="processo-cpf-lote-summary__chips">
-                                {% for cpf in cpf_lote_summary.found_list %}
-                                    <span class="processo-cpf-lote-summary__chip">{{ cpf }}</span>
-                                {% empty %}
-                                    <span class="processo-cpf-lote-summary__chip">—</span>
-                                {% endfor %}
-                                {% if cpf_lote_summary.found_more %}
-                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.found_more }}</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        <div>
-                            <span class="processo-cpf-lote-summary__label">Não encontrados</span>
-                            <div class="processo-cpf-lote-summary__chips">
-                                {% for cpf in cpf_lote_summary.missing_list %}
-                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--miss">{{ cpf }}</span>
-                                {% empty %}
-                                    <span class="processo-cpf-lote-summary__chip">—</span>
-                                {% endfor %}
-                                {% if cpf_lote_summary.missing_more %}
-                                    <span class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--more">+{{ cpf_lote_summary.missing_more }}</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            {% endif %}
             {% if habilitacao_batch_issues %}
                 <div
                     class="habilitacao-batch-panel"
@@ -1375,6 +1436,80 @@
             </div>
         {% endif %}
     </div>
+    {% if cpf_lote_summary %}
+        <div class="processo-cpf-lote-summary">
+            <div class="processo-cpf-lote-summary__header">
+                <strong>Consulta em lote</strong>
+                {% if cpf_lote_label %}
+                    <span>Lista: {{ cpf_lote_label }}</span>
+                {% endif %}
+                <span>Consultados: {{ cpf_lote_summary.total }}</span>
+                <span>Encontrados: {{ cpf_lote_summary.found }}</span>
+                <span>Não encontrados: {{ cpf_lote_summary.missing }}</span>
+                {% if batch_lote_kind == 'cnj' and cpf_lote_summary.missing %}
+                    <div class="processo-cpf-lote-summary__actions">
+                        <button type="button" class="processo-cpf-lote-summary__action-btn" id="cnj-batch-register-open">
+                            Cadastrar não encontrados
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="processo-cpf-lote-summary__lists">
+                <div class="processo-cpf-lote-summary__column">
+                    <div class="processo-cpf-lote-summary__list-head">
+                        <span class="processo-cpf-lote-summary__label">Encontrados</span>
+                        <span class="processo-cpf-lote-summary__meta-inline">Mostra 4 por vez</span>
+                    </div>
+                    <div class="processo-cpf-lote-summary__selection-bar processo-cpf-lote-summary__selection-bar--placeholder" aria-hidden="true">
+                        <span class="processo-cpf-lote-summary__meta-inline">Selecionados: 0</span>
+                        <span class="processo-cpf-lote-summary__selection-btn">Desmarcar todos</span>
+                    </div>
+                    <div
+                        class="processo-cpf-lote-summary__viewport"
+                        id="batch-found-viewport"
+                        data-batch-list-kind="found"
+                    ></div>
+                    <button
+                        type="button"
+                        class="processo-cpf-lote-summary__load-more"
+                        id="batch-found-load-more"
+                        data-batch-list-more="found"
+                        hidden
+                    >+20</button>
+                </div>
+                <div class="processo-cpf-lote-summary__column">
+                    <div class="processo-cpf-lote-summary__list-head">
+                        <span class="processo-cpf-lote-summary__label">Não encontrados</span>
+                        <span class="processo-cpf-lote-summary__meta-inline">Mostra 4 por vez</span>
+                    </div>
+                    {% if batch_lote_kind == 'cnj' and cpf_lote_summary.missing %}
+                        <div class="processo-cpf-lote-summary__selection-bar">
+                            <span class="processo-cpf-lote-summary__meta-inline">
+                                Selecionados: <strong id="batch-missing-selected-count">{{ cpf_lote_summary.missing }}</strong>
+                            </span>
+                            <button type="button" class="processo-cpf-lote-summary__selection-btn" id="batch-missing-toggle-all">
+                                Desmarcar todos
+                            </button>
+                        </div>
+                    {% endif %}
+                    <div
+                        class="processo-cpf-lote-summary__viewport"
+                        id="batch-missing-viewport"
+                        data-batch-list-kind="missing"
+                    ></div>
+                    <button
+                        type="button"
+                        class="processo-cpf-lote-summary__load-more"
+                        id="batch-missing-load-more"
+                        data-batch-list-more="missing"
+                        hidden
+                    >+20</button>
+                </div>
+            </div>
+        </div>
+        {{ cpf_lote_summary.found_entries|json_script:"batch-found-entries-data" }}
+        {{ cpf_lote_summary.missing_entries|json_script:"batch-missing-entries-data" }}
+    {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -2179,7 +2314,21 @@
         const cnjBatchRegisterVerifyUrl = "{{ cnj_batch_verify_url|escapejs }}";
         const cnjBatchRegisterImportUrl = "{{ cnj_batch_import_url|escapejs }}";
         const cnjBatchRegisterMissingScript = document.getElementById('cnj-batch-register-missing-data');
+        const batchFoundEntriesScript = document.getElementById('batch-found-entries-data');
+        const batchMissingEntriesScript = document.getElementById('batch-missing-entries-data');
+        const batchFoundViewport = document.getElementById('batch-found-viewport');
+        const batchMissingViewport = document.getElementById('batch-missing-viewport');
+        const batchFoundLoadMore = document.getElementById('batch-found-load-more');
+        const batchMissingLoadMore = document.getElementById('batch-missing-load-more');
+        const batchMissingSelectedCount = document.getElementById('batch-missing-selected-count');
+        const batchMissingToggleAll = document.getElementById('batch-missing-toggle-all');
+        const batchLoteKind = "{{ batch_lote_kind|default:''|escapejs }}";
         let cnjBatchRegisterRows = [];
+        let batchFoundEntries = [];
+        let batchMissingEntries = [];
+        let batchFoundLoaded = 0;
+        let batchMissingLoaded = 0;
+        let batchMissingSelected = new Set();
 
         if (!form || !actionSelect) return;
 
@@ -2438,7 +2587,116 @@
                 .replace(/'/g, '&#39;');
         }
 
+        function parseJsonScriptArray(scriptEl) {
+            if (!scriptEl) return [];
+            try {
+                const parsed = JSON.parse(scriptEl.textContent || '[]');
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function updateMissingSelectionUi() {
+            if (batchMissingSelectedCount) {
+                batchMissingSelectedCount.textContent = String(batchMissingSelected.size);
+            }
+            if (batchMissingToggleAll) {
+                batchMissingToggleAll.textContent = batchMissingSelected.size === batchMissingEntries.length && batchMissingEntries.length
+                    ? 'Desmarcar todos'
+                    : 'Marcar todos';
+            }
+            if (cnjBatchRegisterOpen) {
+                cnjBatchRegisterOpen.disabled = batchLoteKind === 'cnj' && batchMissingEntries.length > 0 && batchMissingSelected.size === 0;
+            }
+        }
+
+        function renderBatchSummaryViewport(kind) {
+            const isMissing = kind === 'missing';
+            const viewport = isMissing ? batchMissingViewport : batchFoundViewport;
+            const loadMoreButton = isMissing ? batchMissingLoadMore : batchFoundLoadMore;
+            const loadedCount = isMissing ? batchMissingLoaded : batchFoundLoaded;
+            const entries = isMissing ? batchMissingEntries : batchFoundEntries;
+            if (!viewport) return;
+            if (!entries.length) {
+                viewport.innerHTML = '<div class="processo-cpf-lote-summary__entry"><span class="processo-cpf-lote-summary__chip">—</span></div>';
+                if (loadMoreButton) loadMoreButton.hidden = true;
+                return;
+            }
+            const visibleEntries = entries.slice(0, loadedCount);
+            viewport.innerHTML = visibleEntries.map((entry) => {
+                const display = escapeHtml(entry.display || entry.value || '');
+                const value = escapeHtml(entry.value || '');
+                const copyLabel = batchLoteKind === 'cnj' ? 'o CNJ' : 'o CPF';
+                if (isMissing && batchLoteKind === 'cnj') {
+                    const checked = batchMissingSelected.has(entry.value) ? 'checked' : '';
+                    return `
+                        <div class="processo-cpf-lote-summary__entry">
+                            <input type="checkbox" class="processo-cpf-lote-summary__entry-checkbox" data-batch-missing-checkbox value="${value}" ${checked} aria-label="Selecionar ${display}">
+                            <span
+                                class="processo-cpf-lote-summary__entry-copy"
+                            >
+                                <span
+                                    class="processo-cpf-lote-summary__chip processo-cpf-lote-summary__chip--miss processo-copyable-token"
+                                    data-copy-value="${display}"
+                                    data-copy-label="${copyLabel}"
+                                    role="button"
+                                    tabindex="0"
+                                    title="Clique para copiar"
+                                >${display}</span>
+                            </span>
+                        </div>
+                    `;
+                }
+                return `
+                    <div class="processo-cpf-lote-summary__entry">
+                        <span class="processo-cpf-lote-summary__entry-copy">
+                            <span
+                                class="processo-cpf-lote-summary__chip${isMissing ? ' processo-cpf-lote-summary__chip--miss' : ''} processo-copyable-token"
+                                data-copy-value="${display}"
+                                data-copy-label="${copyLabel}"
+                                role="button"
+                                tabindex="0"
+                                title="Clique para copiar"
+                            >${display}</span>
+                        </span>
+                    </div>
+                `;
+            }).join('');
+            if (loadMoreButton) {
+                loadMoreButton.hidden = loadedCount >= entries.length;
+            }
+        }
+
+        function initializeBatchSummaryLists() {
+            batchFoundEntries = parseJsonScriptArray(batchFoundEntriesScript);
+            batchMissingEntries = parseJsonScriptArray(batchMissingEntriesScript);
+            batchFoundLoaded = Math.min(20, batchFoundEntries.length);
+            batchMissingLoaded = Math.min(20, batchMissingEntries.length);
+            batchMissingSelected = new Set(batchMissingEntries.map((item) => item.value).filter(Boolean));
+            renderBatchSummaryViewport('found');
+            renderBatchSummaryViewport('missing');
+            updateMissingSelectionUi();
+        }
+
         function getCnjBatchRegisterInitialRows() {
+            const selectedCnjs = batchLoteKind === 'cnj' && batchMissingSelected.size
+                ? Array.from(batchMissingSelected)
+                : [];
+            if (selectedCnjs.length) {
+                const byValue = new Map(batchMissingEntries.map((item) => [String(item.value || ''), item]));
+                return selectedCnjs.map((cnj) => {
+                    const entry = byValue.get(cnj) || {};
+                    return {
+                        cnj: String(cnj || '').replace(/\D/g, ''),
+                        cnj_display: entry.display || entry.value || cnj || '',
+                        status: 'pending_check',
+                        status_label: 'Aguardando verificação',
+                        detail: '',
+                        processo_url: '',
+                    };
+                });
+            }
             if (!cnjBatchRegisterMissingScript) return [];
             try {
                 const parsed = JSON.parse(cnjBatchRegisterMissingScript.textContent || '[]');
@@ -2486,6 +2744,10 @@
 
         function showCnjBatchRegisterModal() {
             if (!cnjBatchRegisterModal) return;
+            if (batchLoteKind === 'cnj' && batchMissingEntries.length && batchMissingSelected.size === 0) {
+                alert('Selecione ao menos um CNJ não encontrado para cadastrar.');
+                return;
+            }
             cnjBatchRegisterRows = getCnjBatchRegisterInitialRows();
             if (cnjBatchRegisterProgress) {
                 cnjBatchRegisterProgress.textContent = '';
@@ -3017,6 +3279,42 @@
         if (cnjBatchRegisterOpen) {
             cnjBatchRegisterOpen.addEventListener('click', showCnjBatchRegisterModal);
         }
+        if (batchFoundLoadMore) {
+            batchFoundLoadMore.addEventListener('click', () => {
+                batchFoundLoaded = Math.min(batchFoundEntries.length, batchFoundLoaded + 20);
+                renderBatchSummaryViewport('found');
+            });
+        }
+        if (batchMissingLoadMore) {
+            batchMissingLoadMore.addEventListener('click', () => {
+                batchMissingLoaded = Math.min(batchMissingEntries.length, batchMissingLoaded + 20);
+                renderBatchSummaryViewport('missing');
+            });
+        }
+        if (batchMissingViewport) {
+            batchMissingViewport.addEventListener('change', (event) => {
+                const checkbox = event.target.closest('[data-batch-missing-checkbox]');
+                if (!checkbox) return;
+                const value = String(checkbox.value || '').replace(/\D/g, '');
+                if (!value) return;
+                if (checkbox.checked) {
+                    batchMissingSelected.add(value);
+                } else {
+                    batchMissingSelected.delete(value);
+                }
+                updateMissingSelectionUi();
+            });
+        }
+        if (batchMissingToggleAll) {
+            batchMissingToggleAll.addEventListener('click', () => {
+                const shouldSelectAll = batchMissingSelected.size !== batchMissingEntries.length;
+                batchMissingSelected = shouldSelectAll
+                    ? new Set(batchMissingEntries.map((item) => item.value).filter(Boolean))
+                    : new Set();
+                renderBatchSummaryViewport('missing');
+                updateMissingSelectionUi();
+            });
+        }
         if (cnjBatchRegisterClose) {
             cnjBatchRegisterClose.addEventListener('click', hideCnjBatchRegisterModal);
         }
@@ -3047,6 +3345,7 @@
                 window.location.href = url.toString();
             });
         }
+        initializeBatchSummaryLists();
         if (cpfLoteModal) {
             cpfLoteModal.addEventListener('click', (event) => {
                 if (event.target === cpfLoteModal) {
@@ -3514,6 +3813,25 @@
     </script>
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        let copyToastTimer = null;
+        const showCopyToast = (message) => {
+            let toast = document.getElementById('processo-copy-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'processo-copy-toast';
+                toast.className = 'processo-copy-toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.classList.add('processo-copy-toast--visible');
+            if (copyToastTimer) {
+                window.clearTimeout(copyToastTimer);
+            }
+            copyToastTimer = window.setTimeout(() => {
+                toast.classList.remove('processo-copy-toast--visible');
+            }, 1200);
+        };
+
         const flashCopied = (element) => {
             if (!element) return;
             element.classList.add('processo-copyable-token--copied');
@@ -3538,6 +3856,7 @@
                     helper.remove();
                 }
                 flashCopied(element);
+                showCopyToast('Copiado');
             } catch (error) {
                 window.alert(`Não foi possível copiar ${element.dataset.copyLabel || 'o valor'}.`);
             }
