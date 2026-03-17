@@ -194,7 +194,7 @@ def is_supervisor_user(user):
         user
         and (
             user.is_superuser
-            or user.groups.filter(name__iexact='Supervisor').exists()
+            or user.groups.filter(name__in=['Supervisor', 'Supervisor Desenvolvedor']).exists()
         )
     )
 
@@ -237,10 +237,7 @@ class AgendaGeralAPIView(APIView):
     MAX_PAGE_SIZE = 500
 
     def get(self, request):
-        is_supervisor_user = (
-            request.user.is_superuser
-            or request.user.groups.filter(name__iexact='Supervisor').exists()
-        )
+        is_supervisor_flag = is_supervisor_user(request.user)
         show_all_users = (request.query_params.get('all_users') or '').strip() in ('1', 'true', 'True', 'yes', 'sim')
         target_user_id_raw = (request.query_params.get('user_id') or '').strip()
         target_user = None
@@ -252,7 +249,7 @@ class AgendaGeralAPIView(APIView):
             target_user = User.objects.filter(id=target_user_id).first()
             if not target_user:
                 return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-            if not is_supervisor_user and target_user.id != request.user.id:
+            if not is_supervisor_flag and target_user.id != request.user.id:
                 return Response({'detail': 'Sem permissão para visualizar agenda de outro usuário.'}, status=status.HTTP_403_FORBIDDEN)
 
         status_param = (request.query_params.get('status') or '').lower()
@@ -290,7 +287,7 @@ class AgendaGeralAPIView(APIView):
 
         # Por padrão, Agenda Geral mostra apenas itens do próprio usuário.
         # Supervisor pode ver todos com `?all_users=1`.
-        if not (is_supervisor_user and show_all_users):
+        if not (is_supervisor_flag and show_all_users):
             tarefas = tarefas.filter(
                 Q(responsavel=agenda_user) |
                 (Q(responsavel__isnull=True) & Q(criado_por=agenda_user))
@@ -692,19 +689,13 @@ class AgendaGeralAPIView(APIView):
         }
 
     def _get_supervision_entries(self, show_completed, request, target_user=None):
-        is_supervisor_user = (
-            request.user.is_superuser
-            or request.user.groups.filter(name__iexact='Supervisor').exists()
-        )
-        if not is_supervisor_user:
+        is_supervisor_flag = is_supervisor_user(request.user)
+        if not is_supervisor_flag:
             return []
         if target_user and not isinstance(target_user, User):
             target_user = None
         if target_user:
-            target_user_is_supervisor = (
-                target_user.is_superuser
-                or target_user.groups.filter(name__iexact='Supervisor').exists()
-            )
+            target_user_is_supervisor = is_supervisor_user(target_user)
             if not target_user_is_supervisor:
                 return []
         agenda_supervisor_user = target_user or request.user
@@ -1820,11 +1811,8 @@ class AgendaUsersAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        is_supervisor_user = (
-            request.user.is_superuser
-            or request.user.groups.filter(name__iexact='Supervisor').exists()
-        )
-        if not is_supervisor_user:
+        is_supervisor_flag = is_supervisor_user(request.user)
+        if not is_supervisor_flag:
             # Usuário comum não deve navegar agendas de terceiros.
             users = (
                 User.objects.filter(id=request.user.id, is_active=True)

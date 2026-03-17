@@ -3268,7 +3268,7 @@
                 const hideBtn = item.can_hide_supervisor
                     ? `<button type=\"button\" class=\"button\" data-action=\"hide-supervisor\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-hidden=\"${item.oculto_supervisor ? '1' : '0'}\">${hideSupervisorLabel}</button>`
                     : '';
-                const deleteBtn = item.is_owner
+                const deleteBtn = item.can_delete
                     ? `<button type=\"button\" class=\"button\" data-action=\"delete\" data-kind=\"${itemKind}\" data-id=\"${item.id}\">Excluir</button>`
                     : '';
                 row.innerHTML = `
@@ -3312,8 +3312,9 @@
                     criado_por: row.children[2] ? row.children[2].textContent.trim() : '',
                     compartilhado: Boolean(row.querySelector('button[data-action=\"toggle\"][data-shared=\"1\"]') || row.textContent.includes('Pública')),
                     oculto_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"][data-hidden=\"1\"]')),
-                    is_owner: Boolean(row.querySelector('button[data-action=\"delete\"]')),
+                    is_owner: Boolean(row.querySelector('button[data-action=\"rename\"]')),
                     can_hide_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"]')),
+                    can_delete: Boolean(row.querySelector('button[data-action=\"delete\"]')),
                 });
             });
             renderCpfLoteTable(normalized);

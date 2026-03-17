@@ -166,21 +166,36 @@ class CarteiraBulkForm(forms.Form):
 
 # --- Supervisor helpers e admin personalizado -------------------------------
 SUPERVISOR_GROUP_NAME = "Supervisor"
+SUPERVISOR_DEVELOPER_GROUP_NAME = "Supervisor Desenvolvedor"
 
 def ensure_supervisor_group():
     group, _ = Group.objects.get_or_create(name=SUPERVISOR_GROUP_NAME)
     return group
 
+def ensure_supervisor_developer_group():
+    group, _ = Group.objects.get_or_create(name=SUPERVISOR_DEVELOPER_GROUP_NAME)
+    return group
+
+def is_user_supervisor_developer(user):
+    if not user or not getattr(user, 'pk', None):
+        return False
+    return user.groups.filter(name=SUPERVISOR_DEVELOPER_GROUP_NAME).exists()
+
 def is_user_supervisor(user):
     if not user or not getattr(user, 'pk', None):
         return False
-    return user.groups.filter(name=SUPERVISOR_GROUP_NAME).exists()
+    return user.groups.filter(name__in=[SUPERVISOR_GROUP_NAME, SUPERVISOR_DEVELOPER_GROUP_NAME]).exists()
 
 class SupervisorUserCreationForm(UserCreationForm):
     is_supervisor = forms.BooleanField(
         required=False,
         label="Supervisor",
         help_text="Disponibiliza a aba Supervisionar na Análise do Processo."
+    )
+    is_supervisor_developer = forms.BooleanField(
+        required=False,
+        label="Supervisor Desenvolvedor",
+        help_text="Herda os poderes de Supervisor e pode ocultar/excluir listas salvas de terceiros."
     )
 
     class Meta(UserCreationForm.Meta):
@@ -197,7 +212,9 @@ class SupervisorUserCreationForm(UserCreationForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        developer_flag = self.cleaned_data.get('is_supervisor_developer', False)
+        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False) or developer_flag
+        user._is_supervisor_developer_flag = developer_flag
         user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
         if commit:
             user.save()
@@ -210,6 +227,11 @@ class SupervisorUserChangeForm(UserChangeForm):
         label="Supervisor",
         help_text="Disponibiliza a aba Supervisionar na Análise do Processo."
     )
+    is_supervisor_developer = forms.BooleanField(
+        required=False,
+        label="Supervisor Desenvolvedor",
+        help_text="Herda os poderes de Supervisor e pode ocultar/excluir listas salvas de terceiros."
+    )
 
     class Meta(UserChangeForm.Meta):
         model = User
@@ -218,6 +240,7 @@ class SupervisorUserChangeForm(UserChangeForm):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
             self.fields['is_supervisor'].initial = is_user_supervisor(self.instance)
+            self.fields['is_supervisor_developer'].initial = is_user_supervisor_developer(self.instance)
             if 'carteiras_permitidas' in self.fields:
                 self.fields['carteiras_permitidas'].initial = list(
                     Carteira.objects.filter(usuario_acessos__usuario=self.instance).values_list('id', flat=True)
@@ -233,7 +256,9 @@ class SupervisorUserChangeForm(UserChangeForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False)
+        developer_flag = self.cleaned_data.get('is_supervisor_developer', False)
+        user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False) or developer_flag
+        user._is_supervisor_developer_flag = developer_flag
         user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
         if commit:
             user.save()
@@ -252,14 +277,14 @@ class SupervisorUserAdmin(DjangoUserAdmin):
         (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
         (
             _('Permissions'),
-            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor', 'carteiras_permitidas')}
+            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor', 'is_supervisor_developer', 'carteiras_permitidas')}
         ),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'password1', 'password2', 'is_supervisor', 'carteiras_permitidas'),
+            'fields': ('username', 'password1', 'password2', 'is_supervisor', 'is_supervisor_developer', 'carteiras_permitidas'),
         }),
     )
 
@@ -273,7 +298,16 @@ class SupervisorUserAdmin(DjangoUserAdmin):
             supervisor_flag = form.cleaned_data.get('is_supervisor')
         if supervisor_flag is None:
             supervisor_flag = request.POST.get('is_supervisor') in ('on', 'True', '1', 'true')
-        self._sync_supervisor_flag(form.instance, bool(supervisor_flag))
+        supervisor_developer_flag = getattr(form.instance, '_is_supervisor_developer_flag', None)
+        if supervisor_developer_flag is None:
+            supervisor_developer_flag = form.cleaned_data.get('is_supervisor_developer')
+        if supervisor_developer_flag is None:
+            supervisor_developer_flag = request.POST.get('is_supervisor_developer') in ('on', 'True', '1', 'true')
+        self._sync_supervisor_flags(
+            form.instance,
+            should_be_supervisor=bool(supervisor_flag or supervisor_developer_flag),
+            should_be_supervisor_developer=bool(supervisor_developer_flag),
+        )
 
         carteiras = getattr(form.instance, '_carteiras_permitidas', None)
         if carteiras is None:
@@ -296,12 +330,17 @@ class SupervisorUserAdmin(DjangoUserAdmin):
             return HttpResponseRedirect(request.path)
         return super().response_change(request, obj)
 
-    def _sync_supervisor_flag(self, user, should_be_supervisor):
-        group = ensure_supervisor_group()
-        if should_be_supervisor:
-            user.groups.add(group)
+    def _sync_supervisor_flags(self, user, should_be_supervisor, should_be_supervisor_developer):
+        supervisor_group = ensure_supervisor_group()
+        supervisor_developer_group = ensure_supervisor_developer_group()
+        if should_be_supervisor or should_be_supervisor_developer:
+            user.groups.add(supervisor_group)
         else:
-            user.groups.remove(group)
+            user.groups.remove(supervisor_group)
+        if should_be_supervisor_developer:
+            user.groups.add(supervisor_developer_group)
+        else:
+            user.groups.remove(supervisor_developer_group)
 
 
 # --- Filtros ---
@@ -9303,15 +9342,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (TypeError, ValueError):
             return None
         try:
-            return (
-                ProcessoCpfLoteSalvo.objects
-                .filter(
-                    Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
-                    id=lote_pk,
-                )
-                .select_related('criado_por')
-                .first()
-            )
+            queryset = ProcessoCpfLoteSalvo.objects.filter(id=lote_pk).select_related('criado_por')
+            if request.user.is_superuser or is_user_supervisor_developer(request.user):
+                return queryset.filter(
+                    Q(oculto_supervisor=True)
+                    | Q(criado_por=request.user)
+                    | Q(compartilhado=True, oculto_supervisor=False)
+                ).first()
+            return queryset.filter(
+                Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
+            ).first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao carregar lote %s.', lote_pk, exc_info=True)
             return None
@@ -9325,15 +9365,16 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (TypeError, ValueError):
             return None
         try:
-            return (
-                ProcessoCnjLoteSalvo.objects
-                .filter(
-                    Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
-                    id=lote_pk,
-                )
-                .select_related('criado_por')
-                .first()
-            )
+            queryset = ProcessoCnjLoteSalvo.objects.filter(id=lote_pk).select_related('criado_por')
+            if request.user.is_superuser or is_user_supervisor_developer(request.user):
+                return queryset.filter(
+                    Q(oculto_supervisor=True)
+                    | Q(criado_por=request.user)
+                    | Q(compartilhado=True, oculto_supervisor=False)
+                ).first()
+            return queryset.filter(
+                Q(criado_por=request.user) | Q(compartilhado=True, oculto_supervisor=False),
+            ).first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CNJ indisponivel ao carregar lote %s.', lote_pk, exc_info=True)
             return None
@@ -9343,6 +9384,20 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'Listas salvas de CPF ainda nao estao disponiveis neste banco. '
             'Finalize as migracoes para habilitar a funcionalidade.'
         )
+
+    def _can_hide_saved_lote(self, request, item):
+        if not item:
+            return False
+        if request.user.is_superuser or is_user_supervisor_developer(request.user):
+            return True
+        return bool(item.criado_por_id == request.user.id and is_user_supervisor(request.user))
+
+    def _can_delete_saved_lote(self, request, item):
+        if not item:
+            return False
+        if request.user.is_superuser or is_user_supervisor_developer(request.user):
+            return True
+        return bool(item.criado_por_id == request.user.id)
 
     def _cnj_lote_storage_error_message(self):
         return (
@@ -12474,23 +12529,21 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         })
 
     def _cpf_lote_accessible_qs(self, request, include_hidden=False):
-        qs = (
-            ProcessoCpfLoteSalvo.objects
-            .filter(Q(compartilhado=True) | Q(criado_por=request.user))
-            .select_related('criado_por')
-        )
-        if include_hidden and (request.user.is_superuser or is_user_supervisor(request.user)):
-            return qs.filter(Q(oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=True))
-        return qs.filter(oculto_supervisor=False)
+        qs = ProcessoCpfLoteSalvo.objects.select_related('criado_por')
+        visible_q = Q(compartilhado=True, oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=False)
+        if include_hidden:
+            if request.user.is_superuser or is_user_supervisor_developer(request.user):
+                return qs.filter(visible_q | Q(oculto_supervisor=True)).distinct()
+            if is_user_supervisor(request.user):
+                return qs.filter(visible_q | Q(criado_por=request.user, oculto_supervisor=True)).distinct()
+        return qs.filter(visible_q).distinct()
 
     def _cpf_lote_count(self, raw_text):
         return len(self._parse_cpf_lote_text(raw_text))
 
     def _cpf_lote_payload(self, request, item):
-        can_hide_supervisor = bool(
-            item.criado_por_id == request.user.id
-            and (request.user.is_superuser or is_user_supervisor(request.user))
-        )
+        can_hide_supervisor = self._can_hide_saved_lote(request, item)
+        can_delete = self._can_delete_saved_lote(request, item)
         return {
             'id': item.id,
             'nome': item.nome,
@@ -12499,6 +12552,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
             'can_hide_supervisor': can_hide_supervisor,
+            'can_delete': can_delete,
             'quantidade': self._cpf_lote_count(item.cpfs),
             'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
             'kind': 'cpf',
@@ -12580,11 +12634,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not lote_id or not lote_id.isdigit():
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
         try:
-            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao remover lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_delete_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.delete()
         return JsonResponse({'ok': True})
@@ -12667,34 +12721,32 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
         oculto_supervisor = bool(payload.get('oculto_supervisor'))
         try:
-            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao ocultar lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_hide_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.oculto_supervisor = oculto_supervisor
         lote.save(update_fields=['oculto_supervisor', 'atualizado_em'])
         return JsonResponse({'ok': True, 'oculto_supervisor': lote.oculto_supervisor, 'item': self._cpf_lote_payload(request, lote)})
 
     def _cnj_lote_accessible_qs(self, request, include_hidden=False):
-        qs = (
-            ProcessoCnjLoteSalvo.objects
-            .filter(Q(compartilhado=True) | Q(criado_por=request.user))
-            .select_related('criado_por')
-        )
-        if include_hidden and (request.user.is_superuser or is_user_supervisor(request.user)):
-            return qs.filter(Q(oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=True))
-        return qs.filter(oculto_supervisor=False)
+        qs = ProcessoCnjLoteSalvo.objects.select_related('criado_por')
+        visible_q = Q(compartilhado=True, oculto_supervisor=False) | Q(criado_por=request.user, oculto_supervisor=False)
+        if include_hidden:
+            if request.user.is_superuser or is_user_supervisor_developer(request.user):
+                return qs.filter(visible_q | Q(oculto_supervisor=True)).distinct()
+            if is_user_supervisor(request.user):
+                return qs.filter(visible_q | Q(criado_por=request.user, oculto_supervisor=True)).distinct()
+        return qs.filter(visible_q).distinct()
 
     def _cnj_lote_count(self, raw_text):
         return len(self._parse_cnj_lote_text(raw_text))
 
     def _cnj_lote_payload(self, request, item):
-        can_hide_supervisor = bool(
-            item.criado_por_id == request.user.id
-            and (request.user.is_superuser or is_user_supervisor(request.user))
-        )
+        can_hide_supervisor = self._can_hide_saved_lote(request, item)
+        can_delete = self._can_delete_saved_lote(request, item)
         return {
             'id': item.id,
             'nome': item.nome,
@@ -12703,6 +12755,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
             'can_hide_supervisor': can_hide_supervisor,
+            'can_delete': can_delete,
             'quantidade': self._cnj_lote_count(item.cnjs),
             'atualizado_em': item.atualizado_em.strftime('%d/%m/%Y %H:%M') if item.atualizado_em else '',
             'kind': 'cnj',
@@ -12784,11 +12837,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         if not lote_id or not lote_id.isdigit():
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
         try:
-            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CNJ indisponivel ao remover lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_delete_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.delete()
         return JsonResponse({'ok': True})
@@ -12871,11 +12924,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Lista inválida.'}, status=400)
         oculto_supervisor = bool(payload.get('oculto_supervisor'))
         try:
-            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CNJ indisponivel ao ocultar lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_hide_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         lote.oculto_supervisor = oculto_supervisor
         lote.save(update_fields=['oculto_supervisor', 'atualizado_em'])
