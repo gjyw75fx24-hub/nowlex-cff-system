@@ -1029,6 +1029,8 @@ class AgendaGeralAPIView(APIView):
                 'card_source': card_info['source'],
                 'card_index': card_info['index'],
                 'supervisor_status': card_info['status'],
+                'supervisor_observacoes': str(card.get('supervisor_observacoes') or '').strip(),
+                'supervisor_observacoes_autor': str(card.get('supervisor_observacoes_autor') or '').strip(),
                 'analysis_hashtag': analysis_hashtag,
                 'analysis_type_nome': analysis_type_nome,
                 'analysis_type_short': analysis_type_short,
@@ -1139,6 +1141,55 @@ class AgendaSupervisionStatusAPIView(APIView):
         return Response({
             'supervisor_status': new_status,
             'status_label': SUPERVISION_STATUS_LABELS.get(new_status, new_status.capitalize()),
+        })
+
+
+class AgendaSupervisionNoteAPIView(APIView):
+    """
+    Atualiza a devolutiva do supervisor diretamente pela Agenda Geral.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_supervisor_user(request.user):
+            return Response({'detail': 'Apenas supervisores podem registrar devolutiva.'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        analise_id = data.get('analise_id')
+        source = data.get('source')
+        index = data.get('index')
+        if not analise_id or not source or index is None:
+            return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            analise = AnaliseProcesso.objects.get(pk=analise_id)
+        except AnaliseProcesso.DoesNotExist:
+            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        respostas = analise.respostas or {}
+        cards = respostas.get(source)
+        try:
+            entry_index = int(index)
+        except (TypeError, ValueError):
+            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        card = cards[entry_index]
+        if not isinstance(card, dict):
+            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        note_value = str(data.get('supervisor_observacoes') or '').replace('\r\n', '\n')
+        card['supervisor_observacoes'] = note_value
+        card['supervisor_observacoes_autor'] = request.user.username if note_value.strip() else ''
+        analise.respostas = respostas
+        analise.updated_by = request.user
+        analise.save(update_fields=['respostas', 'updated_by'])
+
+        return Response({
+            'supervisor_observacoes': card['supervisor_observacoes'],
+            'supervisor_observacoes_autor': card['supervisor_observacoes_autor'],
         })
 
 

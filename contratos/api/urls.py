@@ -17,6 +17,7 @@ urlpatterns = [
     path('agenda/users/', views.AgendaUsersAPIView.as_view(), name='agenda_users'),
     path('agenda/geral/', views.AgendaGeralAPIView.as_view(), name='agenda_geral'),
     path('agenda/supervision/status/', views.AgendaSupervisionStatusAPIView.as_view(), name='agenda_supervision_status'),
+    path('agenda/supervision/note/', views.AgendaSupervisionNoteAPIView.as_view(), name='agenda_supervision_note'),
     path('agenda/supervision/barrado/', views.AgendaSupervisionBarradoAPIView.as_view(), name='agenda_supervision_barrado'),
     path('agenda/supervision/custas/', views.AgendaSupervisionCustasAPIView.as_view(), name='agenda_supervision_custas'),
     path('agenda/supervision/date/', views.AgendaSupervisionDateAPIView.as_view(), name='agenda_supervision_date'),

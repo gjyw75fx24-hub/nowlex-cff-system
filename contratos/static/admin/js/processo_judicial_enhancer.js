@@ -2026,6 +2026,7 @@ document.addEventListener('DOMContentLoaded', function() {
         reprovado: 'status-reprovado',
     };
     const AGENDA_SUPERVISION_STATUS_URL = '/api/agenda/supervision/status/';
+    const AGENDA_SUPERVISION_NOTE_URL = '/api/agenda/supervision/note/';
     const AGENDA_SUPERVISION_BARRADO_URL = '/api/agenda/supervision/barrado/';
     const AGENDA_SUPERVISION_CUSTAS_URL = '/api/agenda/supervision/custas/';
     const AGENDA_SUPERVISION_DATE_URL = '/api/agenda/supervision/date/';
@@ -3493,6 +3494,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 ? item.card_index
                 : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
             supervisor_status: item.supervisor_status || item.supervisorStatus || '',
+            supervisor_observacoes: String(item.supervisor_observacoes || item.supervisorObservacoes || '').trim(),
+            supervisor_observacoes_autor: String(item.supervisor_observacoes_autor || item.supervisorObservacoesAutor || '').trim(),
             analysis_hashtag: (item.analysis_hashtag || item.analysisHashtag || '').toString().trim(),
             analysis_type_nome: (item.analysis_type_nome || item.analysisTypeNome || '').toString().trim(),
             analysis_type_short: normalizeAnalysisTypeShort(item.analysis_type_short || item.analysisTypeShort || item.analysis_type_nome || item.analysisTypeNome || item.analysis_hashtag || item.analysisHashtag || ''),
@@ -3696,13 +3699,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
+            detailList.scrollTop = 0;
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            detailCardBody.scrollTop = 0;
             if (selectionState?.onChange) {
                 selectionState.onChange();
             }
             return;
         }
         detailList.innerHTML = '';
+        detailList.scrollTop = 0;
+        detailCardBody.scrollTop = 0;
         const entryElements = [];
         let activeIndex = -1;
         const setActiveDetailItem = (target, index) => {
@@ -4271,7 +4278,9 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         gridElement.innerHTML = '';
         detailList.innerHTML = '<p class="agenda-panel__details-empty">Clique em T, P, S ou AP para ver as tarefas, prazos, supervisões e andamentos.</p>';
+        detailList.scrollTop = 0;
         resetDetailCardBody();
+        detailCardBody.scrollTop = 0;
         setDetailTitle?.(null, null);
         gridElement.classList.toggle('agenda-panel__calendar-grid--weekly', effectiveState.mode === 'weekly');
         let activeDayCell = null;
@@ -4829,6 +4838,15 @@ document.addEventListener('DOMContentLoaded', function() {
                                         ›
                                     </button>
                                 </div>
+                                <div class="agenda-panel__calendar-footer">
+                                    <div class="agenda-panel__calendar-footer-left"></div>
+                                    <div class="agenda-panel__calendar-footer-actions">
+                                        <button type="button" class="agenda-panel__concluir-btn" disabled>Concluir</button>
+                                        <button type="button" class="agenda-panel__form-btn" data-form="tarefas">Tarefas</button>
+                                        <button type="button" class="agenda-panel__form-btn" data-form="prazos">Prazos</button>
+                                        <button type="button" class="agenda-panel__split" aria-pressed="false">Abrir em tela cheia</button>
+                                    </div>
+                                </div>
                             </div>
                         <div class="agenda-panel__details">
                             <div class="agenda-panel__details-list">
@@ -4856,18 +4874,25 @@ document.addEventListener('DOMContentLoaded', function() {
                                     </div>
                                 </div>
                             </div>
+                            <div class="agenda-panel__supervisor-note-card" style="display:none;">
+                                <div class="agenda-panel__supervisor-note-header">
+                                    <p class="agenda-panel__supervisor-note-title">Devolutiva do Supervisor</p>
+                                    <span class="agenda-panel__supervisor-note-status">Salva automaticamente.</span>
+                                </div>
+                                <textarea
+                                    class="agenda-panel__supervisor-note-input"
+                                    placeholder="Registre aqui a devolutiva do supervisor para esta análise."
+                                ></textarea>
+                                <div class="agenda-panel__supervisor-note-footer">
+                                    <span class="agenda-panel__supervisor-note-author"></span>
+                                </div>
+                            </div>
                             <div class="agenda-panel__load-more">
                                 <button type="button" class="agenda-panel__load-more-btn" style="display:none;">Carregar mais atividades</button>
                             </div>
                         </div>
                         </div>
                     </div>
-                </div>
-                <div class="agenda-panel__footer">
-                    <button type="button" class="agenda-panel__concluir-btn" disabled>Concluir</button>
-                    <button type="button" class="agenda-panel__form-btn" data-form="tarefas">Tarefas</button>
-                    <button type="button" class="agenda-panel__form-btn" data-form="prazos">Prazos</button>
-                    <button type="button" class="agenda-panel__split" aria-pressed="false">Abrir em tela cheia</button>
                 </div>
             </div>
         `;
@@ -4911,10 +4936,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailBarrarDate = overlay.querySelector('.agenda-panel__details-card-barrar-date');
         const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
+        const supervisorNoteCard = overlay.querySelector('.agenda-panel__supervisor-note-card');
+        const supervisorNoteInput = overlay.querySelector('.agenda-panel__supervisor-note-input');
+        const supervisorNoteStatus = overlay.querySelector('.agenda-panel__supervisor-note-status');
+        const supervisorNoteAuthor = overlay.querySelector('.agenda-panel__supervisor-note-author');
         let activeSupervisionEntry = null;
         let activeConcludableEntry = null;
         const selectedConcludeEntries = new Map();
         let persistedSupervisionEntryId = null;
+        let supervisorNoteSaveTimer = null;
+        let supervisorNoteSaveToken = 0;
         agendaLoadMoreButton = overlay.querySelector('.agenda-panel__load-more-btn');
         if (detailList) {
             detailList.__navWrap = detailNav;
@@ -5051,6 +5082,151 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             detailAnalystText.textContent = `Analisado por: ${name}`;
             detailAnalystText.style.display = 'inline-flex';
+        };
+
+        const buildSupervisorNoteKey = (entryData) => {
+            if (!entryData) return '';
+            const analiseId = entryData.analise_id || '';
+            const source = entryData.card_source || '';
+            const index = entryData.card_index;
+            if (!analiseId || !source || index === undefined || index === null) {
+                return '';
+            }
+            return `${analiseId}|${source}|${index}`;
+        };
+
+        const setSupervisorNoteStatusText = (text, mode = '') => {
+            if (!supervisorNoteStatus) return;
+            supervisorNoteStatus.textContent = text || '';
+            supervisorNoteStatus.dataset.mode = mode || '';
+        };
+
+        const updateSupervisorNoteAuthor = (entryData) => {
+            if (!supervisorNoteAuthor) return;
+            const rawAuthor = String(entryData?.supervisor_observacoes_autor || '').trim();
+            const authorName = rawAuthor ? formatResponsavelName({ username: rawAuthor }) : '';
+            if (!authorName) {
+                supervisorNoteAuthor.textContent = '';
+                supervisorNoteAuthor.style.display = 'none';
+                return;
+            }
+            supervisorNoteAuthor.textContent = `Observação registrada por: ${authorName}`;
+            supervisorNoteAuthor.style.display = 'inline-flex';
+        };
+
+        const hideSupervisorNoteCard = () => {
+            if (supervisorNoteSaveTimer) {
+                window.clearTimeout(supervisorNoteSaveTimer);
+                supervisorNoteSaveTimer = null;
+            }
+            if (supervisorNoteCard) {
+                supervisorNoteCard.style.display = 'none';
+            }
+            if (supervisorNoteInput) {
+                supervisorNoteInput.value = '';
+                supervisorNoteInput.disabled = true;
+                supervisorNoteInput.dataset.entryKey = '';
+            }
+            setSupervisorNoteStatusText('Salva automaticamente.');
+            if (supervisorNoteAuthor) {
+                supervisorNoteAuthor.textContent = '';
+                supervisorNoteAuthor.style.display = 'none';
+            }
+        };
+
+        const saveSupervisorNote = (entryData, noteValue) => {
+            const payload = {
+                analise_id: entryData?.analise_id,
+                source: entryData?.card_source,
+                index: entryData?.card_index,
+                supervisor_observacoes: noteValue,
+            };
+            const entryKey = buildSupervisorNoteKey(entryData);
+            if (!payload.analise_id || !payload.source || payload.index === undefined || payload.index === null || !entryKey) {
+                setSupervisorNoteStatusText('Não foi possível identificar a análise.', 'error');
+                return;
+            }
+            const currentToken = ++supervisorNoteSaveToken;
+            setSupervisorNoteStatusText('Salvando devolutiva...', 'saving');
+            fetch(AGENDA_SUPERVISION_NOTE_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                },
+                body: JSON.stringify(payload),
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error('Falha ao salvar devolutiva');
+                    }
+                    return response.json();
+                })
+                .then((data) => {
+                    const savedText = String(data.supervisor_observacoes || '');
+                    const savedAuthor = String(data.supervisor_observacoes_autor || '');
+                    if (entryData) {
+                        entryData.supervisor_observacoes = savedText;
+                        entryData.supervisor_observacoes_autor = savedAuthor;
+                    }
+                    window.dispatchEvent(new CustomEvent('agenda:supervision-note-changed', {
+                        detail: {
+                            analise_id: payload.analise_id,
+                            processo_id: entryData?.processo_id || null,
+                            source: payload.source,
+                            index: payload.index,
+                            supervisor_observacoes: savedText,
+                            supervisor_observacoes_autor: savedAuthor,
+                        },
+                    }));
+                    if (supervisorNoteInput && supervisorNoteInput.dataset.entryKey === entryKey && currentToken === supervisorNoteSaveToken) {
+                        const currentInputValue = String(supervisorNoteInput.value || '');
+                        const hasLocalChanges = currentInputValue !== noteValue;
+                        if (!hasLocalChanges) {
+                            if (document.activeElement !== supervisorNoteInput) {
+                                supervisorNoteInput.value = savedText;
+                            }
+                            setSupervisorNoteStatusText('Devolutiva salva automaticamente.', 'saved');
+                            updateSupervisorNoteAuthor(entryData);
+                        } else {
+                            setSupervisorNoteStatusText('Alteração pendente...', 'pending');
+                        }
+                    }
+                })
+                .catch(() => {
+                    if (supervisorNoteInput && supervisorNoteInput.dataset.entryKey === entryKey && currentToken === supervisorNoteSaveToken) {
+                        setSupervisorNoteStatusText('Falha ao salvar. Tente novamente.', 'error');
+                    }
+                });
+        };
+
+        const scheduleSupervisorNoteSave = (entryData, noteValue) => {
+            if (supervisorNoteSaveTimer) {
+                window.clearTimeout(supervisorNoteSaveTimer);
+            }
+            setSupervisorNoteStatusText('Alteração pendente...', 'pending');
+            supervisorNoteSaveTimer = window.setTimeout(() => {
+                supervisorNoteSaveTimer = null;
+                saveSupervisorNote(entryData, noteValue);
+            }, 450);
+        };
+
+        const updateSupervisorNoteCard = (entryData, type) => {
+            if (!supervisorNoteCard || !supervisorNoteInput) {
+                return;
+            }
+            if (!entryData || type !== 'S') {
+                hideSupervisorNoteCard();
+                return;
+            }
+            const entryKey = buildSupervisorNoteKey(entryData);
+            supervisorNoteCard.style.display = 'flex';
+            supervisorNoteInput.disabled = false;
+            supervisorNoteInput.dataset.entryKey = entryKey;
+            supervisorNoteInput.value = String(entryData.supervisor_observacoes || '');
+            setSupervisorNoteStatusText('Salva automaticamente.');
+            updateSupervisorNoteAuthor(entryData);
         };
 
         const buildAnalysisNotebookReferenceText = (entryData) => {
@@ -5563,8 +5739,21 @@ document.addEventListener('DOMContentLoaded', function() {
         detailBarrarButton?.addEventListener('click', handleBarrarToggleClick);
         detailBarrarDate?.addEventListener('change', handleBarrarDateChange);
         detailStatusButton?.addEventListener('click', handleDetailStatusClick);
+        supervisorNoteInput?.addEventListener('input', (event) => {
+            if (!activeSupervisionEntry) {
+                return;
+            }
+            const nextValue = String(event.target?.value || '');
+            activeSupervisionEntry.supervisor_observacoes = nextValue;
+            activeSupervisionEntry.supervisor_observacoes_autor = nextValue.trim()
+                ? (activeSupervisionEntry.supervisor_observacoes_autor || '')
+                : '';
+            updateSupervisorNoteAuthor(activeSupervisionEntry);
+            scheduleSupervisorNoteSave(activeSupervisionEntry, nextValue);
+        });
         hideDetailStatusButton();
         hideBarrarControls();
+        hideSupervisorNoteCard();
         const handleDetailEntrySelect = (entryData, type) => {
             if (entryData && (type === 'T' || type === 'P')) {
                 activeConcludableEntry = { entryData, type };
@@ -5575,6 +5764,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateDetailStatusButton(entryData, type);
             updateDetailBarrarControls(entryData, type);
             updateDetailAnalystLabel(entryData, type);
+            updateSupervisorNoteCard(entryData, type);
             updateConcludeButtonState();
         };
 
@@ -5582,6 +5772,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!activeSupervisionEntry) return;
             updateDetailStatusButton(activeSupervisionEntry, 'S');
             updateDetailBarrarControls(activeSupervisionEntry, 'S');
+            updateSupervisorNoteCard(activeSupervisionEntry, 'S');
         };
 
         restoreActiveEntryReference = (entries) => {
@@ -5628,7 +5819,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const summaryBar = document.createElement('div');
         summaryBar.className = 'agenda-panel__summary';
         subtitleEl.parentNode.insertBefore(summaryBar, subtitleEl.nextSibling);
-        const footer = overlay.querySelector('.agenda-panel__footer');
+        const calendarFooter = overlay.querySelector('.agenda-panel__calendar-footer');
+        const calendarFooterLeft = overlay.querySelector('.agenda-panel__calendar-footer-left');
+        const calendarFooterActions = overlay.querySelector('.agenda-panel__calendar-footer-actions');
         const historyButton = document.createElement('button');
         historyButton.type = 'button';
         historyButton.className = 'agenda-panel__history-toggle';
@@ -5650,9 +5843,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateConcludeButtonState();
             refreshAgendaData(true);
         });
-        const firstActionBtn = concludeButton || footer.querySelector('.agenda-panel__form-btn');
-        footer.insertBefore(completedButton, firstActionBtn);
-        footer.insertBefore(historyButton, completedButton);
+        if (calendarFooterLeft) {
+            calendarFooterLeft.append(historyButton, completedButton);
+        }
+        if (calendarFooter && !calendarFooterActions) {
+            calendarFooter.prepend(historyButton, completedButton);
+        }
         const normalizeAgendaProcessId = (value) => {
             const parsed = Number.parseInt(String(value ?? '').trim(), 10);
             if (!Number.isFinite(parsed) || parsed <= 0) {
