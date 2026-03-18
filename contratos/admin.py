@@ -9399,6 +9399,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return True
         return bool(item.criado_por_id == request.user.id)
 
+    def _can_rename_saved_lote(self, request, item):
+        if not item:
+            return False
+        if request.user.is_superuser or is_user_supervisor_developer(request.user):
+            return True
+        return bool(item.criado_por_id == request.user.id)
+
     def _cnj_lote_storage_error_message(self):
         return (
             'Listas salvas de CNJ ainda nao estao disponiveis neste banco. '
@@ -12544,6 +12551,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def _cpf_lote_payload(self, request, item):
         can_hide_supervisor = self._can_hide_saved_lote(request, item)
         can_delete = self._can_delete_saved_lote(request, item)
+        can_rename = self._can_rename_saved_lote(request, item)
         return {
             'id': item.id,
             'nome': item.nome,
@@ -12551,6 +12559,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'oculto_supervisor': bool(getattr(item, 'oculto_supervisor', False)),
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
+            'can_rename': can_rename,
             'can_hide_supervisor': can_hide_supervisor,
             'can_delete': can_delete,
             'quantidade': self._cpf_lote_count(item.cpfs),
@@ -12660,25 +12669,25 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
         compartilhado = bool(payload.get('compartilhado'))
         try:
-            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCpfLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CPF indisponivel ao renomear lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cpf_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_rename_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         if (
             ProcessoCpfLoteSalvo.objects
-            .filter(criado_por=request.user, nome=nome)
+            .filter(criado_por=lote.criado_por, nome=nome)
             .exclude(id=lote.id)
             .exists()
         ):
-            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+            return JsonResponse({'error': 'O autor dessa lista já possui uma lista com este nome.'}, status=400)
         lote.nome = nome
         lote.compartilhado = compartilhado
         try:
             lote.save(update_fields=['nome', 'compartilhado', 'atualizado_em'])
         except IntegrityError:
-            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+            return JsonResponse({'error': 'O autor dessa lista já possui uma lista com este nome.'}, status=400)
         return JsonResponse({'ok': True, 'item': self._cpf_lote_payload(request, lote)})
 
     def cpf_lote_share_view(self, request):
@@ -12747,6 +12756,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     def _cnj_lote_payload(self, request, item):
         can_hide_supervisor = self._can_hide_saved_lote(request, item)
         can_delete = self._can_delete_saved_lote(request, item)
+        can_rename = self._can_rename_saved_lote(request, item)
         return {
             'id': item.id,
             'nome': item.nome,
@@ -12754,6 +12764,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'oculto_supervisor': bool(getattr(item, 'oculto_supervisor', False)),
             'criado_por': item.criado_por.get_username() if item.criado_por else '',
             'is_owner': item.criado_por_id == request.user.id,
+            'can_rename': can_rename,
             'can_hide_supervisor': can_hide_supervisor,
             'can_delete': can_delete,
             'quantidade': self._cnj_lote_count(item.cnjs),
@@ -12863,25 +12874,25 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return JsonResponse({'error': 'Informe o nome da lista.'}, status=400)
         compartilhado = bool(payload.get('compartilhado'))
         try:
-            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id), criado_por=request.user).first()
+            lote = ProcessoCnjLoteSalvo.objects.filter(id=int(lote_id)).select_related('criado_por').first()
         except (ProgrammingError, OperationalError):
             logger.warning('Tabela de listas salvas de CNJ indisponivel ao renomear lote %s.', lote_id, exc_info=True)
             return JsonResponse({'error': self._cnj_lote_storage_error_message()}, status=503)
-        if not lote:
+        if not lote or not self._can_rename_saved_lote(request, lote):
             return JsonResponse({'error': 'Lista não encontrada.'}, status=404)
         if (
             ProcessoCnjLoteSalvo.objects
-            .filter(criado_por=request.user, nome=nome)
+            .filter(criado_por=lote.criado_por, nome=nome)
             .exclude(id=lote.id)
             .exists()
         ):
-            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+            return JsonResponse({'error': 'O autor dessa lista já possui uma lista com este nome.'}, status=400)
         lote.nome = nome
         lote.compartilhado = compartilhado
         try:
             lote.save(update_fields=['nome', 'compartilhado', 'atualizado_em'])
         except IntegrityError:
-            return JsonResponse({'error': 'Você já possui uma lista com este nome.'}, status=400)
+            return JsonResponse({'error': 'O autor dessa lista já possui uma lista com este nome.'}, status=400)
         return JsonResponse({'ok': True, 'item': self._cnj_lote_payload(request, lote)})
 
     def cnj_lote_share_view(self, request):

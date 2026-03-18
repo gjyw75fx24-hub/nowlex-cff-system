@@ -3267,9 +3267,14 @@
                 const itemKind = item.kind || getCurrentBatchKind();
                 const sharedLabel = item.compartilhado ? 'Pública' : 'Privada';
                 const hideSupervisorLabel = item.oculto_supervisor ? 'Reexibir' : 'Ocultar';
+                const renameBtn = item.can_rename
+                    ? `<button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button>`
+                    : '';
                 const shareCell = item.is_owner
-                    ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button><button type=\"button\" class=\"button ${String(item.id) === String(cpfLoteRenameId) ? 'default' : ''}\" data-action=\"rename\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-name=\"${escapeHtml(item.nome)}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">Renomear</button></div>`
-                    : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`;
+                    ? `<div class=\"cpf-lote-modal__share-actions\"><button type=\"button\" class=\"button\" data-action=\"toggle\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-shared=\"${item.compartilhado ? '1' : '0'}\">${sharedLabel}</button>${renameBtn}</div>`
+                    : (renameBtn
+                        ? `<div class=\"cpf-lote-modal__share-actions\"><span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>${renameBtn}</div>`
+                        : `<span class=\"cpf-lote-modal__badge\">${sharedLabel}</span>`);
                 const hideBtn = item.can_hide_supervisor
                     ? `<button type=\"button\" class=\"button\" data-action=\"hide-supervisor\" data-kind=\"${itemKind}\" data-id=\"${item.id}\" data-hidden=\"${item.oculto_supervisor ? '1' : '0'}\">${hideSupervisorLabel}</button>`
                     : '';
@@ -3318,6 +3323,7 @@
                     compartilhado: Boolean(row.querySelector('button[data-action=\"toggle\"][data-shared=\"1\"]') || row.textContent.includes('Pública')),
                     oculto_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"][data-hidden=\"1\"]')),
                     is_owner: Boolean(row.querySelector('button[data-action=\"rename\"]')),
+                    can_rename: Boolean(row.querySelector('button[data-action=\"rename\"]')),
                     can_hide_supervisor: Boolean(row.querySelector('button[data-action=\"hide-supervisor\"]')),
                     can_delete: Boolean(row.querySelector('button[data-action=\"delete\"]')),
                 });
