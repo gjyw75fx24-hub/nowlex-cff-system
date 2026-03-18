@@ -1533,6 +1533,11 @@
                                 Desmarcar todos
                             </button>
                         </div>
+                    {% else %}
+                        <div class="processo-cpf-lote-summary__selection-bar processo-cpf-lote-summary__selection-bar--placeholder" aria-hidden="true">
+                            <span class="processo-cpf-lote-summary__meta-inline">Selecionados: 0</span>
+                            <span class="processo-cpf-lote-summary__selection-btn">Desmarcar todos</span>
+                        </div>
                     {% endif %}
                     <div
                         class="processo-cpf-lote-summary__viewport"
