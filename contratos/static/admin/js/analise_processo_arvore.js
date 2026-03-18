@@ -356,7 +356,7 @@
             flushPendingSave();
             const stored = storeActiveAnalysisAsProcessCard();
             if (stored) {
-                saveResponses();
+                saveResponses({ skipSyncRenderedCards: true });
                 suppressGeneralSummaryUntilFirstAnswer = true;
                 startNewAnalysis({ skipGeneralSnapshot: true, suppressSummary: false });
                 setTimeout(() => {
@@ -949,7 +949,7 @@
             if (!shouldCleanup) {
                 return false;
             }
-            delete targetResponses.processos_vinculados;
+            clearProcessoVinculadoResponseLists(targetResponses, { deleteKeys: true });
             delete targetResponses._editing_card_index;
             return true;
         }
@@ -957,7 +957,65 @@
         function buildPersistableResponses() {
             const persistedResponses = deepClone(userResponses || {});
             cleanupPersistedEditingCardMirror(persistedResponses);
+            prunePersistedProcessoVinculadoMirror(persistedResponses);
             return persistedResponses;
+        }
+
+        function countMeaningfulSummaryCardFields(card) {
+            const normalizedCard = normalizeProcessCardForSummary(card);
+            if (!normalizedCard) {
+                return 0;
+            }
+            let score = 0;
+            const cnjValue = String(normalizedCard.cnj || '').trim();
+            if (cnjValue) {
+                score += 1;
+            }
+            score += parseContractsField(normalizedCard.contratos).length * 2;
+            const responses =
+                normalizedCard.tipo_de_acao_respostas &&
+                typeof normalizedCard.tipo_de_acao_respostas === 'object'
+                    ? normalizedCard.tipo_de_acao_respostas
+                    : {};
+            Object.values(responses).forEach(value => {
+                if (hasMeaningfulResponseValue(value)) {
+                    score += 1;
+                }
+            });
+            if (typeof normalizedCard.observacoes === 'string' && normalizedCard.observacoes.trim()) {
+                score += 1;
+            }
+            if (normalizedCard.supervisionado) {
+                score += 1;
+            }
+            if (normalizeIsoDateValue(normalizedCard.supervision_date)) {
+                score += 1;
+            }
+            return score;
+        }
+
+        function cardsShareSummarySlot(savedCard, activeCard) {
+            const normalizedSaved = normalizeProcessCardForSummary(savedCard);
+            const normalizedActive = normalizeProcessCardForSummary(activeCard);
+            if (!normalizedSaved || !normalizedActive) {
+                return false;
+            }
+            const savedIdentity = getSummaryCardIdentity(normalizedSaved, 0, 'saved');
+            const activeIdentity = getSummaryCardIdentity(normalizedActive, 0, 'active');
+            if (savedIdentity && activeIdentity && savedIdentity === activeIdentity) {
+                return true;
+            }
+            const savedCnjDigits = String(normalizedSaved.cnj || '').replace(/\D/g, '');
+            const activeCnjDigits = String(normalizedActive.cnj || '').replace(/\D/g, '');
+            if (!savedCnjDigits || !activeCnjDigits || savedCnjDigits !== activeCnjDigits) {
+                return false;
+            }
+            const savedTypeKey = getCardAnalysisTypeKey(normalizedSaved);
+            const activeTypeKey = getCardAnalysisTypeKey(normalizedActive);
+            if (savedTypeKey && activeTypeKey) {
+                return savedTypeKey === activeTypeKey;
+            }
+            return true;
         }
 
         function reconcileDuplicatedSummaryCards() {
@@ -994,6 +1052,15 @@
                 if (signature && savedSignatures.has(signature)) {
                     changed = true;
                     return;
+                }
+                const matchingSavedCard = savedCards.find(savedCard => cardsShareSummarySlot(savedCard, card));
+                if (matchingSavedCard) {
+                    const activeScore = countMeaningfulSummaryCardFields(card);
+                    const savedScore = countMeaningfulSummaryCardFields(matchingSavedCard);
+                    if (activeScore <= savedScore) {
+                        changed = true;
+                        return;
+                    }
                 }
                 filteredActiveCards.push(card);
             });
@@ -1072,6 +1139,50 @@
                 }
             }
             return null;
+        }
+
+        function getAllProcessoVinculadoResponseKeys() {
+            const keys = ['processos_vinculados'];
+            const resolvedKey = getProcessoVinculadoQuestionKey();
+            if (resolvedKey && !keys.includes(resolvedKey)) {
+                keys.push(resolvedKey);
+            }
+            return keys;
+        }
+
+        function clearProcessoVinculadoResponseLists(targetResponses, options = {}) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return false;
+            }
+            const deleteKeys = Boolean(options && options.deleteKeys);
+            let changed = false;
+            getAllProcessoVinculadoResponseKeys().forEach(key => {
+                if (!Object.prototype.hasOwnProperty.call(targetResponses, key)) {
+                    return;
+                }
+                if (deleteKeys) {
+                    delete targetResponses[key];
+                } else {
+                    targetResponses[key] = [];
+                }
+                changed = true;
+            });
+            return changed;
+        }
+
+        function prunePersistedProcessoVinculadoMirror(targetResponses) {
+            if (!targetResponses || typeof targetResponses !== 'object') {
+                return false;
+            }
+            const resolvedKey = getProcessoVinculadoQuestionKey();
+            if (!resolvedKey || resolvedKey === 'processos_vinculados') {
+                return false;
+            }
+            if (!Object.prototype.hasOwnProperty.call(targetResponses, resolvedKey)) {
+                return false;
+            }
+            delete targetResponses[resolvedKey];
+            return true;
         }
 
         function syncProcessoVinculadoResponseKey(questionKey, options = {}) {
@@ -2563,7 +2674,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             delete snapshotResponses.awaiting_supervision_confirm;
             delete snapshotResponses.supervision_date;
             delete snapshotResponses.barrado;
-            delete snapshotResponses.processos_vinculados;
+            clearProcessoVinculadoResponseLists(snapshotResponses, { deleteKeys: true });
             const analysisAuthor = getCurrentAnalysisAuthorName();
             return {
                 cnj: formattedCnj || 'Não informado',
@@ -2647,7 +2758,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const directObservationText =
                 typeof processo.observacoes === 'string' ? processo.observacoes.trim() : '';
             const mergedObservationText = directObservationText || notebookObservationText;
-            delete responses.processos_vinculados;
+            clearProcessoVinculadoResponseLists(responses, { deleteKeys: true });
             return {
                 cnj: cnjFormatted || 'Não informado',
                 valor_causa: valorCausa,
@@ -2844,7 +2955,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 appendProcessCardToHistory(snapshot);
             });
 
-            userResponses.processos_vinculados = [];
+            clearProcessoVinculadoResponseLists(userResponses);
             if (editingIndex !== null) {
                 delete userResponses._editing_card_index;
                 $('.edit-mode-indicator').remove();
@@ -4001,7 +4112,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 autoSaveTimer = null;
             }
             ensureUserResponsesShape();
-            syncRenderedProcessCardsBeforePersist();
+            if (!options.skipSyncRenderedCards) {
+                syncRenderedProcessCardsBeforePersist();
+            }
             syncNaoJudicializadoSupervisionBeforePersist();
             reconcileDuplicatedSummaryCards();
             pruneIrrelevantMonitoriaSelection(userResponses);
@@ -7608,7 +7721,8 @@ function formatCnjDigits(raw) {
         }
 
         function shouldShowCardSupervisionToggle(cardResponses, cardData) {
-            const reachedByConfig = hasReachedSupervisionTrigger(cardResponses || {});
+            const normalizedCardResponses = normalizeResponsesForCurrentTree(cardResponses || {});
+            const reachedByConfig = hasReachedSupervisionTrigger(normalizedCardResponses);
             if (reachedByConfig !== null) {
                 return reachedByConfig || Boolean(cardData && cardData.supervisionado);
             }
