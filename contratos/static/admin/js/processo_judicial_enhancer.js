@@ -12708,13 +12708,6 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
             questionData.link
         );
 
-        const editTrigger = document.createElement('button');
-        editTrigger.type = 'button';
-        editTrigger.className = 'checagem-link-edit-trigger';
-        editTrigger.setAttribute('title', 'Editar link');
-        const editarLinkIcon = '/static/images/editar_link.png';
-        editTrigger.innerHTML = `<img src="${editarLinkIcon}" alt="Editar link">`;
-
         const editorWrapper = document.createElement('div');
         editorWrapper.className = 'checagem-link-editor';
         const urlInput = document.createElement('input');
@@ -12722,12 +12715,18 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         urlInput.placeholder = 'Cole ou atualize o link';
         urlInput.value = questionData.link || '';
         urlInput.setAttribute('aria-label', `Link externo para ${labelValue}`);
+        urlInput.dataset.linkValue = questionData.link || '';
+        urlInput.autocomplete = 'off';
+        const editLinkButton = document.createElement('button');
+        editLinkButton.type = 'button';
+        editLinkButton.className = 'checagem-link-inline-edit';
+        editLinkButton.textContent = 'editar';
 
-        editorWrapper.append(urlInput);
+        editorWrapper.append(urlInput, editLinkButton);
 
         const observationInput = document.createElement('textarea');
         observationInput.className = 'checagem-question-observation';
-        observationInput.placeholder = 'Notas ou status';
+        observationInput.placeholder = '';
         observationInput.value = questionData.notes || '';
         observationInput.setAttribute('aria-label', `Observações para ${labelValue}`);
         observationInput.rows = 1;
@@ -12737,30 +12736,35 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
 
         const topRow = document.createElement('div');
         topRow.className = 'checagem-question-top';
-        topRow.append(linkWrapper, labelInput, observationInput, indicator, editTrigger);
+        linkWrapper.append(indicator);
+        topRow.append(labelInput, linkWrapper);
 
-        questionContent.append(topRow, editorWrapper);
+        const notesWrap = document.createElement('div');
+        notesWrap.className = 'checagem-question-notes';
+        notesWrap.appendChild(observationInput);
+
+        questionContent.append(topRow, notesWrap, editorWrapper);
         questionBody.appendChild(questionContent);
+
+        const refreshLinkInputMode = (linkValue) => {
+            const hasLink = Boolean(normalizeLinkValue(linkValue));
+            urlInput.readOnly = hasLink;
+            urlInput.classList.toggle('checagem-link-input--clickable', hasLink);
+            urlInput.title = hasLink
+                ? 'Clique para abrir em nova aba. Dê duplo clique para editar.'
+                : '';
+        };
 
         const toggleEditor = () => {
             editorWrapper.classList.toggle('visible');
             if (editorWrapper.classList.contains('visible')) {
+                refreshLinkInputMode(urlInput.dataset.linkValue || urlInput.value);
                 urlInput.focus();
             }
         };
 
-        editTrigger.addEventListener('click', (event) => {
-            event.preventDefault();
-            toggleEditor();
-        });
-
         linkButton.addEventListener('click', (event) => {
             event.preventDefault();
-            const freshData = getCachedQuestion(storageKey, question.key);
-            if (freshData.link) {
-                window.open(freshData.link, '_blank');
-                return;
-            }
             toggleEditor();
         });
 
@@ -12770,6 +12774,8 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
                 updated = getCachedQuestion(storageKey, question.key);
             }
             updateLinkIndicatorText(indicator, linkButton, Boolean(updated.link), updated.link);
+            urlInput.dataset.linkValue = updated.link || '';
+            refreshLinkInputMode(updated.link);
             scheduleChecagemServerSave(storageKey, checagemUrl);
             return updated;
         };
@@ -12811,19 +12817,45 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         const syncLinkValue = () => {
             const normalized = normalizeLinkValue(urlInput.value);
             const updated = persistAndRefresh({ link: normalized });
-            if (normalized) {
-                urlInput.value = updated.link;
-            }
+            urlInput.value = updated.link || '';
         };
 
         urlInput.addEventListener('change', syncLinkValue);
         urlInput.addEventListener('blur', syncLinkValue);
+        urlInput.addEventListener('click', (event) => {
+            if (!urlInput.readOnly) {
+                return;
+            }
+            const savedLink = normalizeLinkValue(urlInput.dataset.linkValue || urlInput.value);
+            if (!savedLink) {
+                return;
+            }
+            event.preventDefault();
+            window.open(savedLink, '_blank', 'noopener');
+        });
+        editLinkButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            urlInput.readOnly = false;
+            urlInput.classList.remove('checagem-link-input--clickable');
+            requestAnimationFrame(() => {
+                urlInput.focus();
+                const length = urlInput.value.length;
+                urlInput.setSelectionRange(length, length);
+            });
+        });
         urlInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                urlInput.blur();
+                const savedLink = normalizeLinkValue(urlInput.dataset.linkValue || urlInput.value || '');
+                if (urlInput.readOnly && savedLink) {
+                    window.open(savedLink, '_blank', 'noopener');
+                } else {
+                    urlInput.blur();
+                }
             }
         });
+
+        refreshLinkInputMode(questionData.link || '');
 
         row.appendChild(questionBody);
         return row;
@@ -12859,22 +12891,28 @@ const AGENDA_CHECAGEM_LOGO = '/static/images/Checagem_de_Sistemas_Logo.png';
         if (!trigger || !modal) {
             return;
         }
-        const modalRect = modal.getBoundingClientRect();
         const triggerRect = trigger.getBoundingClientRect();
-        let left = triggerRect.left - modalRect.width - 12;
-        if (left < 12) {
-            left = 12;
-        }
-        if (left + modalRect.width > window.innerWidth - 12) {
-            left = Math.max(12, window.innerWidth - modalRect.width - 12);
-        }
-        let top = triggerRect.top;
-        const maxTop = window.innerHeight - modalRect.height - 12;
+        const viewportPadding = 16;
+        const anchorGap = 12;
+        const rightEdge = Math.max(viewportPadding + 320, triggerRect.left - anchorGap);
+        const availableWidth = rightEdge - viewportPadding;
+        const desiredWidth = availableWidth >= 640
+            ? Math.min(availableWidth, 1180)
+            : Math.max(320, availableWidth);
+        modal.style.width = `${desiredWidth}px`;
+        modal.style.maxWidth = `${desiredWidth}px`;
+        const desiredHeight = Math.max(520, window.innerHeight - (viewportPadding * 2));
+        modal.style.height = `${desiredHeight}px`;
+        modal.style.maxHeight = `${desiredHeight}px`;
+        let left = rightEdge - desiredWidth;
+        let top = viewportPadding;
+        const modalRect = modal.getBoundingClientRect();
+        const maxTop = window.innerHeight - modalRect.height - viewportPadding;
         if (top > maxTop) {
-            top = Math.max(12, maxTop);
+            top = Math.max(viewportPadding, maxTop);
         }
-        if (top < 12) {
-            top = 12;
+        if (top < viewportPadding) {
+            top = viewportPadding;
         }
         modal.style.position = 'absolute';
         modal.style.left = `${left}px`;
