@@ -7041,6 +7041,36 @@ document.addEventListener('DOMContentLoaded', function() {
         return ids;
     };
 
+    const normalizeAgendaContextProcessId = (value) => {
+        const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            return null;
+        }
+        return parsed;
+    };
+
+    const getCurrentAgendaCadastroContext = () => {
+        const cards = Array.from(document.querySelectorAll('.info-card[data-processo-id]'));
+        if (!cards.length) {
+            return null;
+        }
+        const activeCard = cards.find((card) => !card.hidden) || cards[0] || null;
+        if (!activeCard) {
+            return null;
+        }
+        const processId = normalizeAgendaContextProcessId(activeCard.dataset.processoId);
+        if (!processId) {
+            return null;
+        }
+        const nameFromCard = activeCard.querySelector('.parte-nome')?.textContent?.trim() || '';
+        const meta = typeof getAgendaProcessMeta === 'function' ? getAgendaProcessMeta(processId) : {};
+        const parteNome = nameFromCard || meta?.name || '';
+        return {
+            processId,
+            parteNome,
+        };
+    };
+
     const getSelectedPlanilhaCpfs = () => {
         const cpfs = [];
         const boxes = document.querySelectorAll('.js-planilha-cpf-box:checked, input[name="selected_cpfs"]:checked');
@@ -7153,6 +7183,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const buildAgendaBulkForm = (type) => {
         const commentFileId = `agenda-bulk-comment-${type}-${Math.random().toString(36).slice(2)}`;
+        const cadastroContextBlock = `
+            <div class="agenda-bulk-context" data-agenda-cadastro-context hidden>
+                <label class="agenda-bulk-context__toggle">
+                    <input type="checkbox" data-field="vincular_cadastro" checked>
+                    Vincular ao cadastro atual
+                </label>
+                <div class="agenda-bulk-context__preview">
+                    <span class="agenda-bulk-context__label">Parte do cadastro</span>
+                    <input type="text" class="vTextField agenda-bulk-context__input" data-field="cadastro_nome" readonly>
+                </div>
+            </div>
+        `;
         if (type === 'tarefas') {
             return `
                 <div class="agenda-bulk-info">
@@ -7160,6 +7202,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <strong class="agenda-bulk-info__count" data-bulk-count>0</strong>
                     <span class="agenda-bulk-info__note" data-bulk-note></span>
                 </div>
+                ${cadastroContextBlock}
                 <div id="tarefas-group" class="agenda-bulk-group">
                     <table class="agenda-bulk-table">
                         <tbody>
@@ -7224,6 +7267,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <strong class="agenda-bulk-info__count" data-bulk-count>0</strong>
                 <span class="agenda-bulk-info__note" data-bulk-note></span>
             </div>
+            ${cadastroContextBlock}
             <div id="prazos-group" class="agenda-bulk-group">
                 <table class="agenda-bulk-table">
                     <tbody>
@@ -7464,7 +7508,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const noteEl = modal.querySelector('[data-bulk-note]');
         const labelEl = modal.querySelector('.agenda-bulk-info__label');
         const isPlanilha = modal?.dataset?.bulkMode === 'planilha';
-        const count = isPlanilha ? (planilhaCpfs?.length || 0) : (processIds?.length || 0);
+        const bindingState = getAgendaModalEffectiveProcessIds(modal, processIds);
+        const effectiveProcessIds = bindingState.processIds;
+        const count = isPlanilha ? (planilhaCpfs?.length || 0) : (effectiveProcessIds?.length || 0);
         if (countEl) countEl.textContent = `${count}`;
         if (noteEl) {
             if (isPlanilha) {
@@ -7472,6 +7518,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 noteEl.textContent = count > 0
                     ? `${count === 1 ? 'CPF selecionado' : 'CPFs selecionados'} (tarefa será aplicada após importar)`
                     : 'Selecione ao menos um CPF.';
+            } else if (bindingState.useCadastroContext) {
+                if (labelEl) labelEl.textContent = 'Cadastro atual:';
+                noteEl.textContent = bindingState.context?.parteNome
+                    ? `vinculado a ${bindingState.context.parteNome}`
+                    : 'cadastro atual vinculado';
             } else {
                 if (labelEl) labelEl.textContent = 'Processos selecionados:';
                 noteEl.textContent = count > 0
@@ -7479,6 +7530,83 @@ document.addEventListener('DOMContentLoaded', function() {
                     : 'tarefa/prazo geral (sem processo)';
             }
         }
+    };
+
+    const getAgendaModalEffectiveProcessIds = (modal, processIds) => {
+        const manualIds = Array.isArray(processIds)
+            ? Array.from(
+                new Set(
+                    processIds
+                        .map((value) => normalizeAgendaContextProcessId(value))
+                        .filter((value) => Number.isFinite(value) && value > 0)
+                )
+            )
+            : [];
+        const context = modal?._cadastroContext || null;
+        const checkbox = modal?.querySelector('[data-field="vincular_cadastro"]');
+        const canUseCadastroContext = Boolean(
+            context?.processId &&
+            !manualIds.length &&
+            modal?.dataset?.bulkMode !== 'planilha'
+        );
+        const useCadastroContext = Boolean(canUseCadastroContext && checkbox && checkbox.checked);
+        return {
+            processIds: useCadastroContext ? [context.processId] : manualIds,
+            useCadastroContext,
+            canUseCadastroContext,
+            context,
+        };
+    };
+
+    const syncAgendaCadastroContextState = (modal) => {
+        if (!modal) return;
+        const contextWrap = modal.querySelector('[data-agenda-cadastro-context]');
+        const checkbox = modal.querySelector('[data-field="vincular_cadastro"]');
+        const previewInput = modal.querySelector('[data-field="cadastro_nome"]');
+        if (!contextWrap || !checkbox || !previewInput) {
+            return;
+        }
+        const canUseCadastroContext = Boolean(
+            modal._cadastroContext?.processId &&
+            !(Array.isArray(modal._processIds) && modal._processIds.length) &&
+            modal.dataset.bulkMode !== 'planilha'
+        );
+        contextWrap.hidden = !canUseCadastroContext;
+        if (!canUseCadastroContext) {
+            checkbox.checked = false;
+            previewInput.value = '';
+            previewInput.disabled = true;
+            contextWrap.classList.remove('agenda-bulk-context--active');
+            return;
+        }
+        previewInput.value = modal._cadastroContext?.parteNome || '';
+        previewInput.disabled = !checkbox.checked;
+        contextWrap.classList.toggle('agenda-bulk-context--active', checkbox.checked);
+    };
+
+    const setupAgendaCadastroContext = (modal) => {
+        if (!modal) return;
+        const contextWrap = modal.querySelector('[data-agenda-cadastro-context]');
+        const checkbox = modal.querySelector('[data-field="vincular_cadastro"]');
+        if (!contextWrap || !checkbox) {
+            return;
+        }
+        if (!(Array.isArray(modal._processIds) && modal._processIds.length) && modal.dataset.bulkMode !== 'planilha') {
+            modal._cadastroContext = getCurrentAgendaCadastroContext();
+        } else {
+            modal._cadastroContext = null;
+        }
+        if (checkbox.dataset.bound !== '1') {
+            checkbox.dataset.bound = '1';
+            checkbox.addEventListener('change', () => {
+                syncAgendaCadastroContextState(modal);
+                updateAgendaBulkInfo(modal, modal._processIds || [], modal._planilhaCpfs || []);
+            });
+        }
+        if (modal._cadastroContext?.processId) {
+            checkbox.checked = true;
+        }
+        syncAgendaCadastroContextState(modal);
     };
 
     const collectBulkCommentPayload = (modal) => {
@@ -7664,6 +7792,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitAgendaBulkForm = async (modal, type, processIds) => {
         const getFieldValue = (name) => modal.querySelector(`[data-field="${name}"]`)?.value || '';
         const getFieldChecked = (name) => !!modal.querySelector(`[data-field="${name}"]`)?.checked;
+        const bindingState = getAgendaModalEffectiveProcessIds(modal, processIds);
+        const effectiveProcessIds = bindingState.processIds;
 
         if (type === 'tarefas') {
             const descricao = getFieldValue('descricao').trim();
@@ -7686,11 +7816,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 createSystemAlert('Agenda Geral', 'Informe a data da tarefa.');
                 return;
             }
-            if (!processIds.length && !responsavel && !isPlanilha) {
+            if (!effectiveProcessIds.length && !responsavel && !isPlanilha) {
                 createSystemAlert('Agenda Geral', 'Selecione um responsável para criar tarefa geral.');
                 return;
             }
-            if (commentPayload.file && (!processIds.length || isPlanilha)) {
+            if (commentPayload.file && (!effectiveProcessIds.length || isPlanilha)) {
                 createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
                 return;
             }
@@ -7747,7 +7877,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             const payload = {
-                processo_ids: processIds,
+                processo_ids: effectiveProcessIds,
                 descricao,
                 data,
                 responsavel_id: responsavel || null,
@@ -7802,17 +7932,17 @@ document.addEventListener('DOMContentLoaded', function() {
             createSystemAlert('Agenda Geral', 'Informe a data do prazo.');
             return;
         }
-        if (!processIds.length && !responsavel) {
+        if (!effectiveProcessIds.length && !responsavel) {
             createSystemAlert('Agenda Geral', 'Selecione um responsável para criar prazo geral.');
             return;
         }
-        if (commentPayload.file && !processIds.length) {
+        if (commentPayload.file && !effectiveProcessIds.length) {
             createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
             return;
         }
 
         const payload = {
-            processo_ids: processIds,
+            processo_ids: effectiveProcessIds,
             titulo,
             data_limite: `${dataDate}T${dataTime}`,
             alerta_valor: alertaValor,
@@ -7951,6 +8081,7 @@ document.addEventListener('DOMContentLoaded', function() {
         modal.addEventListener('remove', () => {
             document.removeEventListener('keydown', handleEscClose);
         });
+        setupAgendaCadastroContext(modal);
         updateAgendaBulkInfo(modal, modal._processIds, modal._planilhaCpfs || []);
         setupBulkCommentControls(modal);
         fillAgendaBulkSelects(modal, type);
@@ -7992,6 +8123,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modal.dataset.bulkMode = 'planilha';
             modal._planilhaCpfs = planilha.cpfs;
             modal._planilhaUploadToken = planilha.uploadToken;
+            setupAgendaCadastroContext(modal);
             updateAgendaBulkInfo(modal, modal._processIds || [], modal._planilhaCpfs);
         }
     };

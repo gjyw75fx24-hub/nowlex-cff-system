@@ -5934,6 +5934,82 @@ a.historylink {
     color: #0f2f5a;
 }
 
+.agenda-bulk-context {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    margin: 0 0 10px;
+    padding: 4px 8px 6px;
+    border: 1px solid rgba(217, 227, 240, 0.75);
+    border-radius: 10px;
+    background: rgba(248, 251, 255, 0.72);
+}
+.agenda-bulk-context__toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #73869d;
+    line-height: 1.2;
+    text-align: right;
+}
+.agenda-bulk-context__toggle input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: #94a9c2;
+}
+.agenda-bulk-context__preview {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    justify-content: flex-end;
+    width: 100%;
+    text-align: right;
+}
+.agenda-bulk-context__label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #7a8ea6;
+    white-space: nowrap;
+}
+.agenda-bulk-context__input[readonly] {
+    min-width: min(280px, 48vw);
+    max-width: 100%;
+    padding: 5px 9px;
+    border-color: rgba(208, 220, 236, 0.85);
+    border-radius: 999px;
+    background: rgba(238, 245, 255, 0.78);
+    color: #38516b;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+.agenda-bulk-context:not(.agenda-bulk-context--active) .agenda-bulk-context__preview {
+    opacity: 0.5;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-context {
+    gap: 3px;
+    margin-bottom: 8px;
+    padding: 3px 7px 5px;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-context__toggle {
+    font-size: 0.68rem;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-context__label {
+    font-size: 0.64rem;
+}
+.agenda-form-modal--panel-compact-standard .agenda-bulk-context__input[readonly] {
+    min-width: min(220px, 42vw);
+    font-size: 0.76rem;
+    padding: 4px 8px;
+}
+
 .agenda-bulk-group {
     width: 100%;
 }
