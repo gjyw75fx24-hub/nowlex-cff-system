@@ -1095,9 +1095,9 @@
                 }
             }
             if (!card.analysis_author) {
-                const fallbackAuthor = resolveCardAnalysisAuthor(card, getCurrentAnalysisAuthorName());
-                if (fallbackAuthor) {
-                    card.analysis_author = fallbackAuthor;
+                const persistedAuthor = resolveCardAnalysisAuthor(card);
+                if (persistedAuthor) {
+                    card.analysis_author = persistedAuthor;
                 }
             }
             if (!card.updated_at && $responseField?.data('analise-updated-at')) {
@@ -5391,7 +5391,7 @@ function formatCnjDigits(raw) {
             if (normalizedFallback) {
                 return normalizedFallback;
             }
-            return getCurrentAnalysisAuthorName();
+            return '';
         }
 
         function resolveCardAnalysisDateRaw(processo, fallbackDateRaw = '') {
@@ -6653,7 +6653,6 @@ function formatCnjDigits(raw) {
             const analiseCnj = analiseCnjRaw ? formatCnjDigits(analiseCnjRaw) : '';
 
             const updatedAtRaw = $responseField.data('analise-updated-at');
-            const updatedBy = $responseField.data('analise-updated-by');
 
             const tipoAcaoPrincipal = userResponses.tipo_de_acao || 'Não informado';
 
@@ -6672,7 +6671,7 @@ function formatCnjDigits(raw) {
                     const $cardVinculado = $('<div class="analise-summary-card"></div>');
                     const $headerVinculado = $('<div class="analise-summary-card-header"></div>');
                     const $bodyVinculado = $('<div class="analise-summary-card-body"></div>');
-                    const cardAnalysisAuthor = resolveCardAnalysisAuthor(processo, updatedBy);
+                    const cardAnalysisAuthor = resolveCardAnalysisAuthor(processo);
                     const cardAnalysisDateRaw = resolveCardAnalysisDateRaw(processo, updatedAtRaw);
                     const cardAnalysisByline = buildAnalysisByline(cardAnalysisAuthor, cardAnalysisDateRaw);
                     const $titleColumnVinculado = $('<div class="analise-summary-card-title-column"></div>');
