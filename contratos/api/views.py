@@ -128,6 +128,118 @@ def _parse_optional_date(value):
     return None
 
 
+def _agenda_build_contract_lookup_keys(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return set()
+    keys = {raw, re.sub(r'\s+', '', raw)}
+    digits = re.sub(r'\D', '', raw)
+    if digits:
+        keys.add(digits)
+    return {item for item in keys if item}
+
+
+def _agenda_extract_contract_refs(raw_contract):
+    ids = set()
+    numbers = set()
+
+    if isinstance(raw_contract, dict):
+        id_candidates = [raw_contract.get('id'), raw_contract.get('pk')]
+        number_candidates = [
+            raw_contract.get('numero_contrato'),
+            raw_contract.get('numero'),
+            raw_contract.get('contrato'),
+            raw_contract.get('label'),
+        ]
+    else:
+        id_candidates = [raw_contract]
+        number_candidates = [raw_contract]
+
+    for candidate in id_candidates:
+        try:
+            parsed = int(str(candidate or '').strip())
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            ids.add(parsed)
+
+    for candidate in number_candidates:
+        numbers.update(_agenda_build_contract_lookup_keys(candidate))
+
+    return ids, numbers
+
+
+def _resolve_supervision_card_prescricao_date(analise, card, respostas=None):
+    if not analise or not analise.processo_judicial_id:
+        return None
+    if not isinstance(card, dict):
+        card = {}
+    if not isinstance(respostas, dict):
+        respostas = {}
+
+    contract_values = card.get('contratos')
+    if not isinstance(contract_values, (list, tuple)):
+        contract_values = []
+    if not contract_values:
+        tipo_respostas = card.get('tipo_de_acao_respostas') or {}
+        if isinstance(tipo_respostas, dict):
+            contract_values = tipo_respostas.get('contratos_para_monitoria') or []
+    if not contract_values:
+        root_contract_values = respostas.get('contratos_para_monitoria')
+        if isinstance(root_contract_values, (list, tuple)):
+            contract_values = root_contract_values
+
+    process_contracts = list(
+        analise.processo_judicial.contratos.all().only('id', 'numero_contrato', 'data_prescricao')
+    )
+    if not process_contracts:
+        return None
+
+    parsed_ids = set()
+    parsed_numbers = set()
+    for raw_contract in contract_values or []:
+        extracted_ids, extracted_numbers = _agenda_extract_contract_refs(raw_contract)
+        parsed_ids.update(extracted_ids)
+        parsed_numbers.update(extracted_numbers)
+
+    if not parsed_ids and not parsed_numbers:
+        valid_contracts = process_contracts
+    else:
+        contract_map = {contract.id: contract for contract in process_contracts}
+        contract_map_by_number = {}
+        for contract in process_contracts:
+            for lookup_key in _agenda_build_contract_lookup_keys(contract.numero_contrato):
+                contract_map_by_number.setdefault(lookup_key, contract)
+
+        valid_contracts = []
+        seen_contract_ids = set()
+
+        def _append_contract(contract):
+            if not contract or contract.pk in seen_contract_ids:
+                return
+            seen_contract_ids.add(contract.pk)
+            valid_contracts.append(contract)
+
+        for contract_id in parsed_ids:
+            _append_contract(contract_map.get(contract_id))
+
+        for raw_number in parsed_numbers:
+            matched_contract = None
+            for lookup_key in _agenda_build_contract_lookup_keys(raw_number):
+                matched_contract = contract_map_by_number.get(lookup_key)
+                if matched_contract:
+                    break
+            _append_contract(matched_contract)
+
+        if not valid_contracts:
+            valid_contracts = process_contracts
+
+    contracts_with_prescricao = [contract for contract in valid_contracts if contract.data_prescricao]
+    if not contracts_with_prescricao:
+        return None
+    return min(contract.data_prescricao for contract in contracts_with_prescricao)
+
+
 def _build_analysis_type_short(analysis_type):
     if not isinstance(analysis_type, dict):
         return ''
@@ -530,7 +642,6 @@ class AgendaGeralAPIView(APIView):
             'data_de_transito',
             'cumprimento_de_sentenca',
             'propor_monitoria',
-            'contratos_para_monitoria',
             'repropor_monitoria',
             'ativar_botao_monitoria',
         ]
@@ -608,7 +719,9 @@ class AgendaGeralAPIView(APIView):
         def format_value(key, value):
             if value_is_empty(value):
                 return None
-            if key == 'contratos_para_monitoria':
+            normalized_key = re.sub(r'[^a-z0-9]', '', str(key or '').lower())
+            key_refers_to_contracts = 'contrato' in normalized_key
+            if key == 'contratos_para_monitoria' or key_refers_to_contracts:
                 iter_items = value if isinstance(value, (list, tuple)) else [value]
                 formatted = [
                     label
@@ -645,6 +758,17 @@ class AgendaGeralAPIView(APIView):
             parts = re.split(r'[_-]+', key) if key else []
             return ' '.join(part.capitalize() for part in parts if part)
 
+        def is_contract_monitoring_key(key):
+            raw_key = str(key or '').strip()
+            if not raw_key:
+                return False
+            normalized_key = re.sub(r'[^a-z0-9]', '', raw_key.lower())
+            if normalized_key in {'contratosparamonitoria', 'selecionarcontratosmonitoria'}:
+                return True
+            question_label = resolve_question_label(raw_key) or ''
+            normalized_label = re.sub(r'[^a-z0-9]', '', question_label.lower())
+            return normalized_label.startswith('selecioneoscontratos') or normalized_label == 'contratosparamonitoria'
+
         processed_keys = set()
 
         def add_line(key, label=None):
@@ -668,9 +792,38 @@ class AgendaGeralAPIView(APIView):
         for field in ordered_fields:
             add_line(field, response_labels.get(field))
 
-        remaining_keys = sorted(k for k in responses.keys() if k not in processed_keys)
+        contract_monitoring_keys = {
+            key
+            for key in set(list(responses.keys()) + list(fallback.keys()))
+            if is_contract_monitoring_key(key)
+        }
+
+        remaining_keys = sorted(
+            k for k in responses.keys()
+            if k not in processed_keys and k not in contract_monitoring_keys
+        )
         for key in remaining_keys:
             add_line(key)
+
+        contract_monitoring_key_order = [
+            'contratos_para_monitoria',
+            'selecionar_contratos_monitoria',
+        ] + sorted(
+            key for key in contract_monitoring_keys
+            if key not in {'contratos_para_monitoria', 'selecionar_contratos_monitoria'}
+        )
+        for key in contract_monitoring_key_order:
+            if key not in contract_monitoring_keys:
+                continue
+            value = responses.get(key)
+            if value_is_empty(value):
+                value = fallback.get(key)
+            formatted = format_value(key, value)
+            processed_keys.add(key)
+            if not formatted:
+                continue
+            lines.append(f"Contratos para monitória: {formatted}")
+            break
 
         return lines
 
@@ -945,15 +1098,14 @@ class AgendaGeralAPIView(APIView):
                 custom_supervision_date = prescricao_date
 
             # Regra da agenda:
-            # 1) Se houver data customizada de S e ela ainda estiver vigente, renderiza nessa data.
-            # 2) Se a data customizada venceu, usa a data de prescrição do contrato.
-            # 3) Sem prescrição disponível, mantém a data customizada (quando existir).
-            if custom_supervision_date and custom_supervision_date >= today:
+            # 1) Se houver data customizada de S, ela prevalece sempre.
+            #    Isso garante que o arrastar/soltar na Agenda Geral persista
+            #    exatamente na data escolhida pelo usuário, inclusive no passado.
+            # 2) Sem data customizada, usa a menor data de prescrição disponível.
+            if custom_supervision_date:
                 agenda_date = custom_supervision_date
-            elif prescricao_date:
-                agenda_date = prescricao_date
             else:
-                agenda_date = custom_supervision_date
+                agenda_date = prescricao_date
             if not agenda_date:
                 continue
             analise = card_info['analise']
@@ -1344,6 +1496,16 @@ class AgendaSupervisionDateAPIView(APIView):
         supervision_date = _parse_optional_date(data.get('date'))
         if supervision_date is None:
             return Response({'detail': 'date inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescricao_date = _resolve_supervision_card_prescricao_date(analise, card, respostas)
+        if prescricao_date and supervision_date > prescricao_date:
+            return Response(
+                {
+                    'detail': 'A supervisão não pode ser movida para depois da data de prescrição.',
+                    'prescricao_date': prescricao_date.isoformat(),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         card['supervision_date'] = supervision_date.isoformat()
         analise.respostas = respostas

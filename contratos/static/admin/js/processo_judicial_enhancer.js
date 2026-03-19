@@ -2973,6 +2973,19 @@ document.addEventListener('DOMContentLoaded', function() {
         return parseDateInputValue(raw);
     };
 
+    const serializeAgendaDragEntry = (entry, fallbackType, fallbackDayInfo = null) => ({
+        id: entry?.id,
+        backendId: entry?.backendId,
+        type: entry?.type || fallbackType,
+        prescricao_date: entry?.prescricao_date || null,
+        analise_id: entry?.analise_id || null,
+        card_source: entry?.card_source || '',
+        card_index: typeof entry?.card_index !== 'undefined' ? entry.card_index : null,
+        day: entry?.day ?? fallbackDayInfo?.day,
+        monthIndex: entry?.monthIndex ?? fallbackDayInfo?.monthIndex,
+        year: entry?.year ?? fallbackDayInfo?.year,
+    });
+
     const isSupervisionDropAllowedForEntry = (entry, targetDayInfo) => {
         if (!entry || entry.type !== 'S') {
             return true;
@@ -3684,6 +3697,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof onEntrySelect === 'function') {
             onEntrySelect(null, null, null);
         }
+        const detailsListContainer = detailList?.closest('.agenda-panel__details-list');
         const navWrap = detailList?.__navWrap;
         const navPrev = detailList?.__navPrev;
         const navNext = detailList?.__navNext;
@@ -3692,15 +3706,18 @@ document.addEventListener('DOMContentLoaded', function() {
             : type === 'P'
                 ? dayData.tasksP
                 : type === 'AP'
-                    ? dayData.tasksAP
+                ? dayData.tasksAP
                     : dayData.tasksS;
         if (navWrap) {
             navWrap.style.display = 'none';
         }
         if (!entries.length) {
             detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
-            detailList.scrollTop = 0;
+            if (detailsListContainer) {
+                detailsListContainer.classList.remove('agenda-panel__details-list--expanded-supervision');
+            }
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
+            detailList.scrollTop = 0;
             detailCardBody.scrollTop = 0;
             if (selectionState?.onChange) {
                 selectionState.onChange();
@@ -3712,10 +3729,49 @@ document.addEventListener('DOMContentLoaded', function() {
         detailCardBody.scrollTop = 0;
         const entryElements = [];
         let activeIndex = -1;
+        const syncExpandedSupervisionMode = () => {
+            if (!detailsListContainer || !detailList) return;
+            const shouldExpand = type === 'S' && entryElements.length > 0 && activeIndex >= 0;
+            detailsListContainer.classList.toggle('agenda-panel__details-list--expanded-supervision', shouldExpand);
+            if (!shouldExpand) {
+                detailsListContainer.style.height = '';
+                detailList.style.height = '';
+                detailList.style.maxHeight = '';
+                detailList.style.paddingBottom = '';
+                return;
+            }
+            const computed = window.getComputedStyle(detailsListContainer);
+            const paddingTop = parseFloat(computed.paddingTop || '0') || 0;
+            const paddingBottom = parseFloat(computed.paddingBottom || '0') || 0;
+            const borderTop = parseFloat(computed.borderTopWidth || '0') || 0;
+            const borderBottom = parseFloat(computed.borderBottomWidth || '0') || 0;
+            const listOffsetTop = detailList.offsetTop || 0;
+            const activeEntry = entryElements[activeIndex] || entryElements[0];
+            const innerHeight = activeEntry
+                ? Math.ceil(Math.max(
+                    activeEntry.getBoundingClientRect().height,
+                    activeEntry.scrollHeight || 0,
+                    activeEntry.offsetHeight || 0
+                ))
+                : 0;
+            const containerHeight = Math.ceil(
+                listOffsetTop
+                + innerHeight
+                + paddingTop
+                + paddingBottom
+                + borderTop
+                + borderBottom
+            );
+            detailList.style.height = `${innerHeight}px`;
+            detailList.style.maxHeight = `${innerHeight}px`;
+            detailList.style.paddingBottom = '0px';
+            detailsListContainer.style.height = `${containerHeight}px`;
+        };
         const setActiveDetailItem = (target, index) => {
             activeIndex = index;
             entryElements.forEach((item) => item.classList.remove('agenda-panel__details-item--active'));
             target?.classList.add('agenda-panel__details-item--active');
+            syncExpandedSupervisionMode();
             if (navPrev && navNext) {
                 navPrev.disabled = activeIndex <= 0;
                 navNext.disabled = activeIndex >= entryElements.length - 1;
@@ -4229,11 +4285,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         day: dayData.day,
                         monthIndex: dayData.monthIndex,
                         year: dayData.year,
-                        entry: {
-                            id: entryData.id,
-                            backendId: entryData.backendId,
-                            type,
-                        },
+                        entry: serializeAgendaDragEntry(entryData, type, dayData),
                     }));
                     event.dataTransfer.effectAllowed = 'move';
                 });
@@ -4256,6 +4308,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (enableNav && entryElements.length) {
             selectEntryAt(0);
+        } else {
+            syncExpandedSupervisionMode();
         }
         if (selectionState?.onChange) {
             selectionState.onChange();
@@ -4389,19 +4443,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 if (!isCompletedMode && draggableEntries.length) {
                     tag.addEventListener('dragstart', (event) => {
-                        const listKey = getTypeKey(type);
-                        const payloadEntries = draggableEntries.map(entry => {
-                            entry.type = entry.type || type;
-                            return {
-                                id: entry.id,
-                                backendId: entry.backendId,
-                                type: entry.type,
-                                prescricao_date: entry.prescricao_date || null,
-                                day: entry.day,
-                                monthIndex: entry.monthIndex,
-                                year: entry.year,
-                            };
-                        });
+                        const payloadEntries = draggableEntries.map(entry => serializeAgendaDragEntry(entry, type, dayInfo));
                         const payload = {
                             source: 'calendar',
                             day: dayInfo.day,
@@ -4543,15 +4585,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     card.append(typeEl, textEl);
                     if (canDragCard) {
                         card.addEventListener('dragstart', (event) => {
-                            const payloadEntry = {
-                                id: entry.id,
-                                backendId: entry.backendId,
-                                type: entry.type || type,
-                                prescricao_date: entry.prescricao_date || null,
-                                day: entry.day,
-                                monthIndex: entry.monthIndex,
-                                year: entry.year,
-                            };
+                            const payloadEntry = serializeAgendaDragEntry(entry, type, dayInfo);
                             const payload = {
                                 source: 'detail',
                                 day: dayInfo.day,
@@ -4655,32 +4689,40 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (parsed.source === 'detail') {
-                        if (!isSupervisionDropAllowedForEntry(parsed.entry, dayInfo)) {
-                            showSupervisionLimitViolation(parsed.entry);
-                            return;
-                        }
                         const sourceList = sourceDay[typeKey];
+                        if (!Array.isArray(sourceList)) return;
                         const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
                         if (entryIndex === -1) return;
-                        const [movedEntry] = sourceList.splice(entryIndex, 1);
-                        dayInfo[typeKey].push(movedEntry);
+                        const actualEntry = sourceList[entryIndex];
+                        if (!isSupervisionDropAllowedForEntry(actualEntry, dayInfo)) {
+                            showSupervisionLimitViolation(actualEntry);
+                            return;
+                        }
+                        const [removedEntry] = sourceList.splice(entryIndex, 1);
+                        dayInfo[typeKey].push(removedEntry);
                         normalizeEntryMetadata(sourceDay, parsed.type);
                         normalizeEntryMetadata(dayInfo, parsed.type);
-                        persistEntryDate(movedEntry, dayInfo);
-                        moveAgendaEntries([movedEntry], dayInfo);
+                        persistEntryDate(removedEntry, dayInfo);
+                        moveAgendaEntries([removedEntry], dayInfo);
                     } else if (parsed.source === 'calendar') {
                         const entriesPayload = Array.isArray(parsed.entries) ? parsed.entries.filter(Boolean) : [];
                         if (!entriesPayload.length) return;
-                        const blocked = entriesPayload.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
+                        const sourceList = sourceDay[typeKey];
+                        if (!Array.isArray(sourceList)) return;
+                        const actualEntries = entriesPayload
+                            .map(payloadEntry => sourceList.find(entry => entry.id === payloadEntry.id))
+                            .filter(Boolean);
+                        if (!actualEntries.length) return;
+                        const blocked = actualEntries.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
                         if (blocked) {
                             showSupervisionLimitViolation(blocked);
                             return;
                         }
                         const movedEntries = [];
-                        entriesPayload.forEach(payloadEntry => {
-                            const index = sourceDay[typeKey].findIndex(entry => entry.id === payloadEntry.id);
+                        actualEntries.forEach(actualEntry => {
+                            const index = sourceList.findIndex(entry => entry.id === actualEntry.id);
                             if (index === -1) return;
-                            const [removed] = sourceDay[typeKey].splice(index, 1);
+                            const [removed] = sourceList.splice(index, 1);
                             movedEntries.push(removed);
                         });
                         if (!movedEntries.length) return;
@@ -4909,6 +4951,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const detailList = overlay.querySelector('.agenda-panel__details-list-inner');
         const concludeButton = overlay.querySelector('.agenda-panel__concluir-btn');
         const fullscreenButton = overlay.querySelector('.agenda-panel__split');
+        const detailCard = overlay.querySelector('.agenda-panel__details-card');
         const detailCardBody = overlay.querySelector('.agenda-panel__details-card-body');
         const detailTitleWrapper = overlay.querySelector('.agenda-panel__details-title');
         const detailTitleText = document.createElement('span');
