@@ -4220,6 +4220,32 @@ a.historylink {
     text-transform: uppercase;
     padding: 0 2px;
 }
+.agenda-panel__monitoria-files-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.agenda-panel__monitoria-files-summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #7d8797;
+}
+.agenda-panel__monitoria-files-summary-item.is-present {
+    color: #1d5fbf;
+}
+.agenda-panel__monitoria-files-summary-item.is-missing {
+    color: #9a6b6b;
+}
+.agenda-panel__monitoria-files-summary-mark {
+    font-size: 10px;
+    line-height: 1;
+}
 .agenda-panel__details-item-analyst {
     font-size: 10px;
     color: #6a748a;

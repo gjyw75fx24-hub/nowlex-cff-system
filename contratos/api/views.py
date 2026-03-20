@@ -43,6 +43,7 @@ from ..models import (
     TarefaNotificacao,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
+from ..services.peticao_combo import build_monitoria_required_files_summary
 from ..permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .serializers import (
     TarefaSerializer,
@@ -1025,6 +1026,8 @@ class AgendaGeralAPIView(APIView):
         cards_data = list(cards_by_identity.values())
         contract_ids = set()
         contract_numbers = set()
+        processo_arquivos_cache = {}
+
         for card_info in cards_data:
             contract_ids.update(card_info.get('contract_ids') or set())
             contract_numbers.update(card_info.get('contract_numbers') or set())
@@ -1134,6 +1137,17 @@ class AgendaGeralAPIView(APIView):
                 for c in valid_contracts
             ]
             contract_pk_ids = tuple(sorted(c.pk for c in valid_contracts))
+            processo_files = []
+            if processo and processo.pk:
+                processo_files = processo_arquivos_cache.get(processo.pk)
+                if processo_files is None:
+                    processo_files = list(processo.arquivos.all().order_by('id'))
+                    processo_arquivos_cache[processo.pk] = processo_files
+            monitoria_files_summary = build_monitoria_required_files_summary(
+                processo,
+                contratos=valid_contracts,
+                files=processo_files,
+            )
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = float(valor_total_causa)
@@ -1161,6 +1175,7 @@ class AgendaGeralAPIView(APIView):
                 'prescricao_date': prescricao_date.isoformat() if prescricao_date else None,
                 'contract_numbers': contrato_labels,
                 'contract_ids': contract_pk_ids,
+                'monitoria_files_summary': monitoria_files_summary,
                 'valor_causa': valor_total_causa,
                 'custas_total': float(custas_total_decimal) if custas_total_decimal is not None else None,
                 'status_label': status_label,

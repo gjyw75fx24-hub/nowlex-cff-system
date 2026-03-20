@@ -57,6 +57,63 @@ def build_preview(tipo_id, arquivo_base_id):
     }
 
 
+def build_monitoria_required_files_summary(processo, contratos=None, files=None):
+    if not processo:
+        return []
+
+    contract_numbers = []
+    if contratos is None:
+        contract_numbers = _extract_contracts_from_processo(processo)
+    else:
+        for contrato in contratos:
+            numero = ""
+            if isinstance(contrato, str):
+                numero = str(contrato or "").strip()
+            else:
+                numero = str(getattr(contrato, "numero_contrato", "") or "").strip()
+            if numero and numero not in contract_numbers:
+                contract_numbers.append(numero)
+
+    if not contract_numbers:
+        return []
+
+    available_files = list(files) if files is not None else list(processo.arquivos.all())
+    per_contract = _collect_contract_files(contract_numbers, available_files, set(), [])
+    status_by_key = {
+        "a06": all(entry["files"].get("a06") for entry in per_contract),
+        "a08": all(entry["files"].get("a08") for entry in per_contract),
+        "a07": all(entry["files"].get("a07") for entry in per_contract),
+        "a09": all(entry["files"].get("a09") for entry in per_contract),
+    }
+
+    return [
+        {
+            "key": "a06",
+            "sigla": "C",
+            "label": "Contrato",
+            "present": status_by_key["a06"],
+        },
+        {
+            "key": "a08",
+            "sigla": "SD",
+            "label": "Saldo Devedor",
+            "present": status_by_key["a08"],
+        },
+        {
+            "key": "a07",
+            "sigla": "R",
+            "label": "Relatorio",
+            "present": status_by_key["a07"],
+        },
+        {
+            "key": "a09",
+            "sigla": "T",
+            "label": "TED",
+            "present": status_by_key["a09"],
+        },
+    ]
+
+
 def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None, convert_base_docx=True):
     assets = _collect_combo_assets(tipo_id, arquivo_base_id)
     base_file = assets['base_file']

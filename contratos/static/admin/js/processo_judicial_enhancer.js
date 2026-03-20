@@ -3485,6 +3485,16 @@ document.addEventListener('DOMContentLoaded', function() {
             analysis_lines: Array.isArray(item.analysis_lines)
                 ? item.analysis_lines.filter(line => line !== null && line !== undefined && line !== '')
                 : [],
+            monitoria_files_summary: Array.isArray(item.monitoria_files_summary || item.monitoriaFilesSummary)
+                ? (item.monitoria_files_summary || item.monitoriaFilesSummary)
+                    .map((summaryItem) => ({
+                        key: String(summaryItem?.key || '').trim(),
+                        sigla: String(summaryItem?.sigla || '').trim(),
+                        label: String(summaryItem?.label || summaryItem?.sigla || '').trim(),
+                        present: Boolean(summaryItem?.present),
+                    }))
+                    .filter((summaryItem) => summaryItem.sigla)
+                : [],
             texto_bruto: String(item.texto_bruto || item.detail || item.observacoes || '').trim(),
             data_andamento: item.data_andamento || null,
             data_deteccao: item.data_deteccao || null,
@@ -4175,6 +4185,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     ufLabel.className = 'agenda-panel__details-item-label agenda-panel__details-item-label--uf';
                     ufLabel.textContent = `UF ${ufCode}`;
                     footerGroup.appendChild(ufLabel);
+                }
+                const monitoriaFilesSummary = buildMonitoriaFilesSummaryElement(
+                    entryData.monitoria_files_summary,
+                    'agenda-panel__monitoria-files-summary--footer',
+                );
+                if (monitoriaFilesSummary) {
+                    footerGroup.appendChild(monitoriaFilesSummary);
                 }
                 footer.appendChild(footerGroup);
                 entry.appendChild(footer);
@@ -10514,6 +10531,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         return row;
     }
+    const buildMonitoriaFilesSummaryElement = (summaryItems, extraClassName = '') => {
+        if (!Array.isArray(summaryItems) || !summaryItems.length) {
+            return null;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = `agenda-panel__monitoria-files-summary ${extraClassName}`.trim();
+        wrap.setAttribute('aria-label', 'Resumo dos arquivos essenciais da monitoria');
+        summaryItems.forEach((item) => {
+            if (!item || !item.sigla) return;
+            const chip = document.createElement('span');
+            chip.className = `agenda-panel__monitoria-files-summary-item ${item.present ? 'is-present' : 'is-missing'}`;
+            chip.title = `${item.label || item.sigla}: ${item.present ? 'arquivo localizado' : 'arquivo ausente'}`;
+            const sigla = document.createElement('span');
+            sigla.className = 'agenda-panel__monitoria-files-summary-sigla';
+            sigla.textContent = item.sigla;
+            const mark = document.createElement('span');
+            mark.className = 'agenda-panel__monitoria-files-summary-mark';
+            mark.setAttribute('aria-hidden', 'true');
+            mark.textContent = item.present ? '✓' : 'X';
+            chip.append(sigla, mark);
+            wrap.appendChild(chip);
+        });
+        return wrap.childElementCount ? wrap : null;
+    };
     const herdeirosCache = new Map();
     const OBITO_UFS = ['', 'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
         'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];

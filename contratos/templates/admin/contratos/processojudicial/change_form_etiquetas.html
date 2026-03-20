@@ -316,6 +316,33 @@
         background: #c82333;
         color: #fff;
     }
+    .monitoria-files-summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        min-height: 16px;
+    }
+    .monitoria-files-summary-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #7d8797;
+    }
+    .monitoria-files-summary-item.is-present {
+        color: #1d5fbf;
+    }
+    .monitoria-files-summary-item.is-missing {
+        color: #9a6b6b;
+    }
+    .monitoria-files-summary-mark {
+        font-size: 0.7rem;
+        line-height: 1;
+    }
     .prescrito-p {
         background-color: #dc3545; /* Vermelho */
         color: white;
@@ -611,6 +638,17 @@
                         <div class="viabilidade-pill" tabindex="0" role="button" data-target="id_viabilidade">
                             <span class="viabilidade-label">Viabilidade</span>
                         </div>
+                        {% if parte.info_card_monitoria_files %}
+                            <div class="monitoria-files-summary" aria-label="Resumo dos arquivos essenciais da monitoria">
+                                {% for item in parte.info_card_monitoria_files %}
+                                    <span class="monitoria-files-summary-item {% if item.present %}is-present{% else %}is-missing{% endif %}"
+                                          title="{{ item.label }}: {% if item.present %}arquivo localizado{% else %}arquivo ausente{% endif %}">
+                                        <span class="monitoria-files-summary-sigla">{{ item.sigla }}</span>
+                                        <span class="monitoria-files-summary-mark" aria-hidden="true">{% if item.present %}✓{% else %}X{% endif %}</span>
+                                    </span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     </div>
                     <div class="info-card-header-right">
                         <div class="info-card-header-right-row">

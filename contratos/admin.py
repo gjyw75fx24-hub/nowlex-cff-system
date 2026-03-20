@@ -69,7 +69,13 @@ from .services.demandas import (
     _format_currency,
     _format_cpf,
 )
-from .services.peticao_combo import build_preview, build_zip_bundle, generate_zip, PreviewError
+from .services.peticao_combo import (
+    PreviewError,
+    build_monitoria_required_files_summary,
+    build_preview,
+    build_zip_bundle,
+    generate_zip,
+)
 from .services.online_presence import (
     TOKEN_SALT as ONLINE_PRESENCE_TOKEN_SALT,
     get_presence_settings,
@@ -8651,10 +8657,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return []
 
         contratos = list(processo.contratos.all().order_by("id"))
+        arquivos_monitoria = list(processo.arquivos.all().order_by("id"))
         partes_todas = list(processo.partes_processuais.all().order_by("id"))
         entradas_cnj = list(
             processo.numeros_cnj.select_related("carteira").all().order_by("id")
         )
+        monitoria_summary_cache = {}
 
         def _digits(value):
             return re.sub(r"\D", "", str(value or ""))
@@ -8724,6 +8732,21 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
             if len(cards) == 1 and not getattr(cards[0], "info_card_contratos", None):
                 cards[0].info_card_contratos = list(contratos)
+
+            for parte in cards:
+                contratos_card = list(getattr(parte, "info_card_contratos", []) or [])
+                contratos_key = tuple(
+                    str(getattr(contrato, "numero_contrato", "") or "").strip()
+                    for contrato in contratos_card
+                    if str(getattr(contrato, "numero_contrato", "") or "").strip()
+                )
+                if contratos_key not in monitoria_summary_cache:
+                    monitoria_summary_cache[contratos_key] = build_monitoria_required_files_summary(
+                        processo,
+                        contratos=contratos_card,
+                        files=arquivos_monitoria,
+                    )
+                parte.info_card_monitoria_files = list(monitoria_summary_cache.get(contratos_key, []))
 
             return cards
 
