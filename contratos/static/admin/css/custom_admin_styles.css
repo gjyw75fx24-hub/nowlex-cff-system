@@ -3307,6 +3307,11 @@ a.historylink {
     color: #0f3a5d;
     box-shadow: 0 6px 14px rgba(15, 38, 108, 0.25);
 }
+.agenda-panel__month-switches button.agenda-panel__month-switches-btn--drag-target {
+    background: #edf3ff;
+    color: #0f3a5d;
+    box-shadow: inset 0 0 0 1px #9bb7ea;
+}
 .agenda-panel__calendar-inner {
     display: grid;
     grid-template-columns: 3fr 2fr;
@@ -3354,6 +3359,12 @@ a.historylink {
 }
 .agenda-panel__calendar-nav--next {
     right: -18px;
+}
+.agenda-panel__calendar-nav--drag-target {
+    background: #edf3ff;
+    border-color: #9bb7ea;
+    color: #0f3a5d;
+    box-shadow: 0 8px 18px rgba(45, 95, 171, 0.24);
 }
 .agenda-panel__calendar-grid--weekly {
     background: #eef2ff;

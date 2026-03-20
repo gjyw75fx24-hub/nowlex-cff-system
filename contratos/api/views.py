@@ -1511,6 +1511,11 @@ class AgendaSupervisionDateAPIView(APIView):
         supervision_date = _parse_optional_date(data.get('date'))
         if supervision_date is None:
             return Response({'detail': 'date inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+        if supervision_date < timezone.localdate():
+            return Response(
+                {'detail': 'A supervisão não pode ser movida para datas passadas.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         prescricao_date = _resolve_supervision_card_prescricao_date(analise, card, respostas)
         if prescricao_date and supervision_date > prescricao_date:
@@ -2233,16 +2238,25 @@ class AgendaTarefaUpdateDateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        new_date = request.data.get('date')
-        if not new_date:
+        new_date_raw = request.data.get('date')
+        if not new_date_raw:
             return Response({'error': 'date é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             tarefa = Tarefa.objects.get(pk=pk)
         except Tarefa.DoesNotExist:
             return Response({'error': 'Tarefa não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            parsed_date = date_cls.fromisoformat(str(new_date_raw))
+        except Exception:
+            try:
+                parsed_date = timezone.datetime.fromisoformat(str(new_date_raw)).date()
+            except Exception:
+                return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if parsed_date < timezone.localdate():
+            return Response({'error': 'Não é possível mover para datas passadas.'}, status=status.HTTP_400_BAD_REQUEST)
         if tarefa.data_origem is None:
             tarefa.data_origem = tarefa.data
-        tarefa.data = new_date
+        tarefa.data = parsed_date
         update_fields = ['data', 'data_origem'] if tarefa.data_origem is not None else ['data']
         tarefa.save(update_fields=update_fields)
         return Response({
@@ -2283,6 +2297,8 @@ class AgendaPrazoUpdateDateAPIView(APIView):
                 parsed_date = timezone.datetime.fromisoformat(str(new_date_raw)).date()
             except Exception:
                 return Response({'error': 'Formato de data inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if parsed_date < timezone.localdate():
+            return Response({'error': 'Não é possível mover para datas passadas.'}, status=status.HTTP_400_BAD_REQUEST)
         # Preserva a hora, mas sempre no fuso default para evitar "voltar" um dia
         local_tz = timezone.get_default_timezone()
         if isinstance(current_dt, timezone.datetime):

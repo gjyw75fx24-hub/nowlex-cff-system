@@ -2901,6 +2901,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     const entryOrigins = new Map();
+    let agendaDragSession = null;
     const getOriginKey = (entry) => {
         if (!entry) return null;
         if (entry.backendId) return `${entry.type || ''}-${entry.backendId}`;
@@ -2914,6 +2915,13 @@ document.addEventListener('DOMContentLoaded', function() {
             entryOrigins.set(key, originDate || entry.originalDay || entry.day);
         }
     };
+    const setAgendaDragSession = (payload) => {
+        agendaDragSession = payload || null;
+    };
+    const clearAgendaDragSession = () => {
+        agendaDragSession = null;
+    };
+    const getAgendaDragSession = () => agendaDragSession;
 
     const resolveResponsavelId = (responsavel) => {
         if (!responsavel) return null;
@@ -2985,6 +2993,40 @@ document.addEventListener('DOMContentLoaded', function() {
         monthIndex: entry?.monthIndex ?? fallbackDayInfo?.monthIndex,
         year: entry?.year ?? fallbackDayInfo?.year,
     });
+
+    const buildAgendaDateFromDayInfo = (dayInfo) => {
+        if (!dayInfo) return null;
+        return new Date(dayInfo.year, dayInfo.monthIndex, dayInfo.day);
+    };
+
+    const isSameAgendaDay = (left, right) => {
+        if (!left || !right) return false;
+        return Number(left.day) === Number(right.day)
+            && Number(left.monthIndex) === Number(right.monthIndex)
+            && Number(left.year) === Number(right.year);
+    };
+
+    const isAgendaPastDrop = (targetDayInfo) => {
+        const targetDate = buildAgendaDateFromDayInfo(targetDayInfo);
+        if (!targetDate) return false;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return targetDate < today;
+    };
+
+    const showAgendaPastDateViolation = () => {
+        createSystemAlert('Agenda Geral', 'Não é possível mover para datas passadas.');
+    };
+
+    const validateAgendaDropForEntry = (entry, targetDayInfo) => {
+        if (isAgendaPastDrop(targetDayInfo)) {
+            return { allowed: false, reason: 'past' };
+        }
+        if (!isSupervisionDropAllowedForEntry(entry, targetDayInfo)) {
+            return { allowed: false, reason: 'prescricao' };
+        }
+        return { allowed: true };
+    };
 
     const isSupervisionDropAllowedForEntry = (entry, targetDayInfo) => {
         if (!entry || entry.type !== 'S') {
@@ -4296,16 +4338,19 @@ document.addEventListener('DOMContentLoaded', function() {
             entry.draggable = Boolean(canDragDetailEntry);
             if (canDragDetailEntry) {
                 entry.addEventListener('dragstart', (event) => {
-                    event.dataTransfer.setData('text/plain', JSON.stringify({
+                    const payload = {
                         source: 'detail',
                         type,
                         day: dayData.day,
                         monthIndex: dayData.monthIndex,
                         year: dayData.year,
                         entry: serializeAgendaDragEntry(entryData, type, dayData),
-                    }));
+                    };
+                    setAgendaDragSession(payload);
+                    event.dataTransfer.setData('text/plain', JSON.stringify(payload));
                     event.dataTransfer.effectAllowed = 'move';
                 });
+                entry.addEventListener('dragend', clearAgendaDragSession);
             }
             detailList.appendChild(entry);
         });
@@ -4469,6 +4514,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             type,
                             entries: payloadEntries,
                         };
+                        setAgendaDragSession(payload);
                         const clone = tag.cloneNode(true);
                         clone.style.position = 'absolute';
                         clone.style.top = '-999px';
@@ -4479,6 +4525,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         event.dataTransfer.effectAllowed = 'move';
                         setTimeout(() => document.body.removeChild(clone), 0);
                     });
+                    tag.addEventListener('dragend', clearAgendaDragSession);
                 }
                 tagsWrapper.appendChild(tag);
             };
@@ -4611,6 +4658,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 type,
                                 entry: payloadEntry,
                             };
+                            setAgendaDragSession(payload);
                             const clone = card.cloneNode(true);
                             clone.style.position = 'absolute';
                             clone.style.top = '-999px';
@@ -4626,6 +4674,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                             }, 0);
                         });
+                        card.addEventListener('dragend', clearAgendaDragSession);
                     }
                     card.addEventListener('click', (event) => {
                         event.stopPropagation();
@@ -4698,7 +4747,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch {
                         return;
                     }
-                    if (!parsed || parsed.day === dayInfo.day) return;
+                    if (!parsed || isSameAgendaDay(parsed, dayInfo)) return;
                     const typeKey = getTypeKey(parsed.type);
                     const sourceMonth = getMonthData(parsed.monthIndex ?? effectiveState.monthIndex, parsed.year || effectiveState.year || new Date().getFullYear());
                     const sourceDay = sourceMonth.find(d => d.day === parsed.day);
@@ -4711,8 +4760,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         const entryIndex = sourceList.findIndex(entry => entry.id === parsed.entry?.id);
                         if (entryIndex === -1) return;
                         const actualEntry = sourceList[entryIndex];
-                        if (!isSupervisionDropAllowedForEntry(actualEntry, dayInfo)) {
-                            showSupervisionLimitViolation(actualEntry);
+                        const validation = validateAgendaDropForEntry(actualEntry, dayInfo);
+                        if (!validation.allowed) {
+                            if (validation.reason === 'past') {
+                                showAgendaPastDateViolation();
+                            } else {
+                                showSupervisionLimitViolation(actualEntry);
+                            }
                             return;
                         }
                         const [removedEntry] = sourceList.splice(entryIndex, 1);
@@ -4730,9 +4784,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             .map(payloadEntry => sourceList.find(entry => entry.id === payloadEntry.id))
                             .filter(Boolean);
                         if (!actualEntries.length) return;
-                        const blocked = actualEntries.find(entry => !isSupervisionDropAllowedForEntry(entry, dayInfo));
+                        const blocked = actualEntries.find(entry => !validateAgendaDropForEntry(entry, dayInfo).allowed);
                         if (blocked) {
-                            showSupervisionLimitViolation(blocked);
+                            const validation = validateAgendaDropForEntry(blocked, dayInfo);
+                            if (validation.reason === 'past') {
+                                showAgendaPastDateViolation();
+                            } else {
+                                showSupervisionLimitViolation(blocked);
+                            }
                             return;
                         }
                         const movedEntries = [];
@@ -4756,6 +4815,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Keep the current month/year view after drag-and-drop.
                         state.preserveView = true;
                     }
+                    clearAgendaDragSession();
                     rerender && rerender();
                 };
                 dayCell.addEventListener('dragover', (event) => {
@@ -5979,6 +6039,8 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
         const monthButtons = Array.from(overlay.querySelectorAll('.agenda-panel__month-switches button'));
+        let agendaDragNavigateTimer = null;
+        let agendaDragNavigateKey = '';
         const capitalizeLabel = (value) => {
             if (!value) return '';
             return value
@@ -6243,6 +6305,71 @@ document.addEventListener('DOMContentLoaded', function() {
             const normalized = normalizeMonthIndex(index);
             monthButtons.forEach((btn, idx) => {
                 btn.classList.toggle('agenda-panel__month-switches-btn--active', idx === normalized);
+            });
+        };
+        const clearAgendaDragNavigationTimer = () => {
+            if (agendaDragNavigateTimer) {
+                window.clearTimeout(agendaDragNavigateTimer);
+                agendaDragNavigateTimer = null;
+            }
+        };
+        const clearAgendaDragNavigationTargets = () => {
+            monthButtons.forEach((btn) => {
+                btn.classList.remove('agenda-panel__month-switches-btn--drag-target');
+            });
+            prevNavBtn?.classList.remove('agenda-panel__calendar-nav--drag-target');
+            nextNavBtn?.classList.remove('agenda-panel__calendar-nav--drag-target');
+        };
+        const clearAgendaDragNavigationState = () => {
+            clearAgendaDragNavigationTimer();
+            agendaDragNavigateKey = '';
+            clearAgendaDragNavigationTargets();
+        };
+        const scheduleAgendaDragNavigation = (key, element, navigate) => {
+            if (!getAgendaDragSession()) {
+                clearAgendaDragNavigationState();
+                return;
+            }
+            if (agendaDragNavigateKey === key) {
+                return;
+            }
+            clearAgendaDragNavigationState();
+            agendaDragNavigateKey = key;
+            element?.classList.add(
+                element.matches('.agenda-panel__calendar-nav')
+                    ? 'agenda-panel__calendar-nav--drag-target'
+                    : 'agenda-panel__month-switches-btn--drag-target'
+            );
+            agendaDragNavigateTimer = window.setTimeout(() => {
+                agendaDragNavigateTimer = null;
+                agendaDragNavigateKey = '';
+                clearAgendaDragNavigationTargets();
+                navigate();
+            }, 320);
+        };
+        const bindAgendaDragNavigationTarget = (element, getNavigationConfig) => {
+            if (!element) return;
+            const getHoverClass = () => (
+                element.matches('.agenda-panel__calendar-nav')
+                    ? 'agenda-panel__calendar-nav--drag-target'
+                    : 'agenda-panel__month-switches-btn--drag-target'
+            );
+            const activate = (event) => {
+                if (!getAgendaDragSession()) return;
+                const config = typeof getNavigationConfig === 'function' ? getNavigationConfig() : null;
+                if (!config) return;
+                event.preventDefault();
+                scheduleAgendaDragNavigation(config.key, element, config.navigate);
+            };
+            element.addEventListener('dragenter', activate);
+            element.addEventListener('dragover', activate);
+            element.addEventListener('dragleave', () => {
+                clearAgendaDragNavigationTimer();
+                agendaDragNavigateKey = '';
+                element.classList.remove(getHoverClass());
+            });
+            element.addEventListener('drop', () => {
+                clearAgendaDragNavigationState();
             });
         };
         let navigateToSummarySupervisionEntry = null;
@@ -6761,6 +6888,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 refreshAgendaData();
             });
         }
+        overlay.addEventListener('dragend', () => {
+            clearAgendaDragNavigationState();
+            clearAgendaDragSession();
+        });
+        overlay.addEventListener('drop', () => {
+            clearAgendaDragNavigationState();
+        });
         hydrateAgendaFromApi(agendaEntries, calendarState, () => {
             renderCalendar();
             refreshSummaryOppositeStatus();
@@ -6789,6 +6923,14 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.preserveView = true;
             renderCalendar();
         };
+        bindAgendaDragNavigationTarget(prevNavBtn, () => ({
+            key: `nav-prev-${calendarState.year}-${calendarState.monthIndex}`,
+            navigate: () => handleNavigation('prev'),
+        }));
+        bindAgendaDragNavigationTarget(nextNavBtn, () => ({
+            key: `nav-next-${calendarState.year}-${calendarState.monthIndex}`,
+            navigate: () => handleNavigation('next'),
+        }));
         closeButton.addEventListener('click', () => showAgendaExitConfirm());
         modeButton.addEventListener('click', () => {
             const sequence = ['monthly', 'weekly'];
@@ -6822,6 +6964,22 @@ document.addEventListener('DOMContentLoaded', function() {
         prevNavBtn.addEventListener('click', () => handleNavigation('prev'));
         nextNavBtn.addEventListener('click', () => handleNavigation('next'));
         overlay.querySelectorAll('.agenda-panel__month-switches button').forEach((btn, index) => {
+            bindAgendaDragNavigationTarget(btn, () => {
+                if (calendarState.monthIndex === index) {
+                    return null;
+                }
+                return {
+                    key: `month-${calendarState.year}-${index}`,
+                    navigate: () => {
+                        calendarState.monthIndex = index;
+                        if (calendarState.mode === 'weekly') {
+                            calendarState.weekOffset = clampWeekOffset(calendarState.weekOffset, calendarState);
+                        }
+                        calendarState.preserveView = true;
+                        renderCalendar();
+                    },
+                };
+            });
             btn.addEventListener('click', () => {
                 calendarState.monthIndex = index;
                 if (calendarState.mode === 'weekly') {
@@ -6861,6 +7019,7 @@ document.addEventListener('DOMContentLoaded', function() {
             exitConfirm.remove();
         }
         closeChecagemModal();
+        clearAgendaDragSession();
         overlay.remove();
         document.body.classList.remove('agenda-panel-open');
     };
