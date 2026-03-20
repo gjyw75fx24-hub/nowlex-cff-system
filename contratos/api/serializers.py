@@ -130,27 +130,55 @@ class PrazoMensagemSerializer(serializers.ModelSerializer):
 
 class TarefaNotificacaoSerializer(serializers.ModelSerializer):
     tarefa_id = serializers.IntegerField(source='tarefa.id', read_only=True)
-    descricao = serializers.CharField(source='tarefa.descricao', read_only=True)
+    tipo = serializers.CharField(read_only=True)
+    titulo = serializers.SerializerMethodField()
+    descricao = serializers.SerializerMethodField()
     data = serializers.DateField(source='tarefa.data', read_only=True)
     processo_id = serializers.IntegerField(source='tarefa.processo_id', read_only=True)
     processo_cnj = serializers.CharField(source='tarefa.processo.cnj', read_only=True, default='')
-    criado_por = serializers.SerializerMethodField()
+    autor_nome = serializers.SerializerMethodField()
+    justificativa = serializers.CharField(read_only=True)
 
     class Meta:
         model = TarefaNotificacao
         fields = [
             'id',
+            'tipo',
+            'titulo',
             'tarefa_id',
             'descricao',
             'data',
             'processo_id',
             'processo_cnj',
-            'criado_por',
+            'autor_nome',
+            'justificativa',
             'criada_em',
         ]
 
-    def get_criado_por(self, obj):
-        autor = getattr(obj.tarefa, 'criado_por', None)
+    def get_titulo(self, obj):
+        if obj.titulo:
+            return obj.titulo
+        if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
+            return 'Tarefa solicitada atendida'
+        return 'Nova tarefa recebida'
+
+    def get_descricao(self, obj):
+        if obj.descricao:
+            return obj.descricao
+        descricao_tarefa = getattr(obj.tarefa, 'descricao', '') or ''
+        if descricao_tarefa:
+            return descricao_tarefa
+        if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
+            return 'A tarefa solicitada foi atendida.'
+        return 'Você recebeu uma nova tarefa.'
+
+    def get_autor_nome(self, obj):
+        if obj.autor_nome:
+            return obj.autor_nome
+        if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
+            autor = getattr(obj.tarefa, 'concluido_por', None)
+        else:
+            autor = getattr(obj.tarefa, 'criado_por', None)
         if not autor:
             return ''
         full_name = (autor.get_full_name() or '').strip()

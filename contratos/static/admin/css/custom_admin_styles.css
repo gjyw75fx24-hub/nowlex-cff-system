@@ -6584,6 +6584,11 @@ body.admin-navigation-loading-active * {
     cursor: pointer;
 }
 
+.task-notification-card--return {
+    background: linear-gradient(180deg, #f2f8ff 0%, #e7f2ff 100%);
+    border-color: #c5dcfb;
+}
+
 .task-notification-card.is-visible {
     transform: translateX(0);
     opacity: 1;
@@ -6605,6 +6610,13 @@ body.admin-navigation-loading-active * {
     font-size: 0.95rem;
     line-height: 1.2;
     color: #1f3352;
+}
+
+.task-notification-card__title-meta {
+    margin: -4px 0 0;
+    color: #7a879d;
+    font-size: 0.73rem;
+    line-height: 1.2;
 }
 
 .task-notification-card__close {
@@ -6632,6 +6644,29 @@ body.admin-navigation-loading-active * {
     color: #60708a;
     font-size: 0.78rem;
     line-height: 1.3;
+}
+
+.task-notification-card__justification {
+    background: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(171, 198, 235, 0.9);
+    border-radius: 10px;
+    padding: 8px 10px;
+    display: grid;
+    gap: 4px;
+}
+
+.task-notification-card__justification-label {
+    color: #38557f;
+    font-size: 0.76rem;
+    line-height: 1.1;
+}
+
+.task-notification-card__justification-text {
+    margin: 0;
+    color: #2f4260;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    word-break: break-word;
 }
 
 .task-notification-card__action {

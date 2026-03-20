@@ -1177,6 +1177,13 @@ class Tarefa(models.Model):
 
 
 class TarefaNotificacao(models.Model):
+    TIPO_RECEBIDA = 'recebida'
+    TIPO_DEVOLUTIVA = 'devolutiva'
+    TIPO_CHOICES = (
+        (TIPO_RECEBIDA, 'Recebida'),
+        (TIPO_DEVOLUTIVA, 'Devolutiva'),
+    )
+
     usuario = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -1189,6 +1196,17 @@ class TarefaNotificacao(models.Model):
         related_name='notificacoes',
         verbose_name='Tarefa',
     )
+    tipo = models.CharField(
+        max_length=20,
+        choices=TIPO_CHOICES,
+        default=TIPO_RECEBIDA,
+        db_index=True,
+        verbose_name='Tipo',
+    )
+    titulo = models.CharField(max_length=160, blank=True, default='', verbose_name='Título')
+    descricao = models.TextField(blank=True, default='', verbose_name='Descrição')
+    autor_nome = models.CharField(max_length=150, blank=True, default='', verbose_name='Autor exibido')
+    justificativa = models.TextField(blank=True, default='', verbose_name='Justificativa')
     criada_em = models.DateTimeField(auto_now_add=True, verbose_name='Criada em')
     lida_em = models.DateTimeField(null=True, blank=True, verbose_name='Lida em')
 
@@ -1198,13 +1216,13 @@ class TarefaNotificacao(models.Model):
         ordering = ['-criada_em', '-id']
         constraints = [
             models.UniqueConstraint(
-                fields=['usuario', 'tarefa'],
-                name='uniq_tarefanotificacao_usuario_tarefa',
+                fields=['usuario', 'tarefa', 'tipo'],
+                name='uniq_tarefanotificacao_usuario_tarefa_tipo',
             ),
         ]
 
     def __str__(self):
-        return f'Notificação tarefa #{self.tarefa_id} para {self.usuario}'
+        return f'Notificação {self.tipo} tarefa #{self.tarefa_id} para {self.usuario}'
 
 
 def _has_tarefa_notificacao_table():
@@ -1238,6 +1256,7 @@ def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kw
         TarefaNotificacao.objects.filter(
             tarefa=instance,
             usuario_id=previous_responsavel_id,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
         ).delete()
 
     if not current_responsavel_id:
@@ -1253,9 +1272,19 @@ def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kw
     if created and instance.criado_por_id and instance.criado_por_id == current_responsavel_id:
         return
 
-    TarefaNotificacao.objects.get_or_create(
+    TarefaNotificacao.objects.update_or_create(
         tarefa=instance,
         usuario_id=current_responsavel_id,
+        tipo=TarefaNotificacao.TIPO_RECEBIDA,
+        defaults={
+            'titulo': 'Nova tarefa recebida',
+            'descricao': instance.descricao or '',
+            'autor_nome': (
+                (instance.criado_por.get_full_name() or '').strip()
+                if instance.criado_por_id else ''
+            ) or (instance.criado_por.username if instance.criado_por_id else ''),
+            'justificativa': '',
+        },
     )
 
 @receiver(pre_delete, sender=Tarefa)

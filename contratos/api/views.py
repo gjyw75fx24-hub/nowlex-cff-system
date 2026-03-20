@@ -1729,6 +1729,13 @@ def _parse_datetime_value(value):
     return dt
 
 
+def _display_user_name(user):
+    if not user:
+        return ''
+    full_name = (user.get_full_name() or '').strip()
+    return full_name or user.username or ''
+
+
 def _create_task_notification_for_receiver(tarefa, actor=None):
     if not tarefa:
         return
@@ -1737,7 +1744,38 @@ def _create_task_notification_for_receiver(tarefa, actor=None):
         return
     if actor and receiver.pk == actor.pk:
         return
-    TarefaNotificacao.objects.get_or_create(usuario=receiver, tarefa=tarefa)
+    TarefaNotificacao.objects.update_or_create(
+        usuario=receiver,
+        tarefa=tarefa,
+        tipo=TarefaNotificacao.TIPO_RECEBIDA,
+        defaults={
+            'titulo': 'Nova tarefa recebida',
+            'descricao': tarefa.descricao or '',
+            'autor_nome': _display_user_name(actor) or _display_user_name(getattr(tarefa, 'criado_por', None)),
+            'justificativa': '',
+        },
+    )
+
+
+def _create_task_completion_notification_for_creator(tarefa, actor=None, justificativa=''):
+    if not tarefa:
+        return
+    creator = getattr(tarefa, 'criado_por', None)
+    if not creator or not creator.is_active:
+        return
+    if actor and creator.pk == actor.pk:
+        return
+    TarefaNotificacao.objects.update_or_create(
+        usuario=creator,
+        tarefa=tarefa,
+        tipo=TarefaNotificacao.TIPO_DEVOLUTIVA,
+        defaults={
+            'titulo': 'Tarefa solicitada atendida',
+            'descricao': 'A tarefa solicitada foi atendida.',
+            'autor_nome': _display_user_name(actor),
+            'justificativa': (justificativa or '').strip(),
+        },
+    )
 
 class TarefaBulkCreateAPIView(APIView):
     """
@@ -1841,7 +1879,7 @@ class TarefaNotificacaoListAPIView(APIView):
     def get(self, request):
         notifications = (
             TarefaNotificacao.objects
-            .select_related('tarefa', 'tarefa__processo', 'tarefa__criado_por')
+            .select_related('tarefa', 'tarefa__processo', 'tarefa__criado_por', 'tarefa__concluido_por')
             .filter(usuario=request.user, lida_em__isnull=True)
             .order_by('criada_em', 'id')[:20]
         )
@@ -2427,6 +2465,7 @@ class AgendaConcluirAPIView(APIView):
 
         with transaction.atomic():
             if tarefas_to_close_ids:
+                tarefas_to_close = list(tarefas_qs.filter(id__in=tarefas_to_close_ids))
                 Tarefa.objects.filter(id__in=tarefas_to_close_ids).update(
                     concluida=True,
                     concluido_em=now,
@@ -2440,6 +2479,15 @@ class AgendaConcluirAPIView(APIView):
                     )
                     for tarefa_id in tarefas_to_close_ids
                 ])
+                for tarefa in tarefas_to_close:
+                    tarefa.concluida = True
+                    tarefa.concluido_em = now
+                    tarefa.concluido_por = request.user
+                    _create_task_completion_notification_for_creator(
+                        tarefa,
+                        actor=request.user,
+                        justificativa=comentario_texto,
+                    )
 
             if prazos_to_close_ids:
                 Prazo.objects.filter(id__in=prazos_to_close_ids).update(

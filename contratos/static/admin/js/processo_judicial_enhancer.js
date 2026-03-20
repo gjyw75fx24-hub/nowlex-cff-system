@@ -6211,6 +6211,7 @@ document.addEventListener('DOMContentLoaded', function() {
             calendarState.agendaPage = (calendarState.agendaPage || 1) + 1;
             agendaLoadMoreButton.disabled = true;
             hydrateAgendaFromApi([], calendarState, () => {
+                syncAgendaViewToActiveDay();
                 renderCalendar();
                 restoreActiveDetailControls();
             }, (combined) => {
@@ -6299,6 +6300,22 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 subtitleEl.textContent = 'Expandida para duas telas ou modal.';
             }
+        };
+        const syncAgendaViewToActiveDay = () => {
+            const activeDay = calendarState?.activeDay;
+            if (!activeDay) {
+                return;
+            }
+            if (
+                !Number.isFinite(Number(activeDay.day))
+                || !Number.isFinite(Number(activeDay.monthIndex))
+                || !Number.isFinite(Number(activeDay.year))
+            ) {
+                return;
+            }
+            calendarState.monthIndex = Number(activeDay.monthIndex);
+            calendarState.year = Number(activeDay.year);
+            calendarState.preserveView = true;
         };
         const normalizeMonthIndex = (value) => ((value % MONTHS.length) + MONTHS.length) % MONTHS.length;
         const setActiveMonthButton = (index) => {
@@ -6778,6 +6795,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const inline = calendarState.showCompleted ? [] : getInlineEntries();
             const preferApiOnly = forceApiOnly || calendarState.showCompleted || !currentProcessId;
             hydrateAgendaFromApi(inline, calendarState, () => {
+                syncAgendaViewToActiveDay();
                 renderCalendar();
                 restoreActiveDetailControls();
                 refreshSummaryOppositeStatus();
@@ -6896,6 +6914,7 @@ document.addEventListener('DOMContentLoaded', function() {
             clearAgendaDragNavigationState();
         });
         hydrateAgendaFromApi(agendaEntries, calendarState, () => {
+            syncAgendaViewToActiveDay();
             renderCalendar();
             refreshSummaryOppositeStatus();
         }, (combined) => {
@@ -8331,6 +8350,29 @@ document.addEventListener('DOMContentLoaded', function() {
         return formatDateLabel(formatDateIso(parsed.year, parsed.monthIndex, parsed.day));
     };
 
+    const formatTaskNotificationTimestampLabel = (value) => {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return parsed.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
+    const formatTaskNotificationTimeLabel = (value) => {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return parsed.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
     const markTaskNotificationAsRead = (notificationId) => {
         const id = Number.parseInt(notificationId, 10);
         if (!Number.isFinite(id) || id <= 0) {
@@ -8376,6 +8418,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const card = document.createElement('article');
         card.className = 'task-notification-card';
+        if (notification.tipo === 'devolutiva') {
+            card.classList.add('task-notification-card--return');
+        }
         card.dataset.taskNotificationId = String(notification.id);
 
         const header = document.createElement('div');
@@ -8383,7 +8428,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const title = document.createElement('strong');
         title.className = 'task-notification-card__title';
-        title.textContent = 'Nova tarefa recebida';
+        title.textContent = notification.titulo || 'Nova tarefa recebida';
 
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
@@ -8393,21 +8438,49 @@ document.addEventListener('DOMContentLoaded', function() {
 
         header.append(title, closeBtn);
 
+        let titleMeta = null;
+        const createdAtLabel = formatTaskNotificationTimestampLabel(notification.criada_em);
+        const taskDateLabel = formatTaskNotificationDateLabel(notification.data);
+        const createdTimeLabel = formatTaskNotificationTimeLabel(notification.criada_em);
+        if (notification.tipo !== 'devolutiva' && createdTimeLabel) {
+            titleMeta = document.createElement('p');
+            titleMeta.className = 'task-notification-card__title-meta';
+            titleMeta.textContent = `Recebida às ${createdTimeLabel}`;
+        }
+
         const description = document.createElement('p');
         description.className = 'task-notification-card__description';
         description.textContent = notification.descricao || 'Você recebeu uma nova tarefa.';
 
         const metaParts = [];
-        const dateLabel = formatTaskNotificationDateLabel(notification.data);
-        if (dateLabel) {
-            metaParts.push(`Data: ${dateLabel}`);
+        if (notification.tipo === 'devolutiva') {
+            if (createdAtLabel) {
+                metaParts.push(`Concluída em: ${createdAtLabel}`);
+            }
+        } else if (taskDateLabel) {
+            metaParts.push(`Data: ${taskDateLabel}`);
+        } else if (createdAtLabel) {
+            metaParts.push(`Data: ${createdAtLabel}`);
         }
-        if (notification.criado_por) {
-            metaParts.push(`De: ${notification.criado_por}`);
+        if (notification.autor_nome) {
+            metaParts.push(`${notification.tipo === 'devolutiva' ? 'Por' : 'De'}: ${notification.autor_nome}`);
         }
         const meta = document.createElement('p');
         meta.className = 'task-notification-card__meta';
         meta.textContent = metaParts.join(' · ');
+
+        let justification = null;
+        if (notification.tipo === 'devolutiva' && notification.justificativa) {
+            justification = document.createElement('div');
+            justification.className = 'task-notification-card__justification';
+            const justificationLabel = document.createElement('strong');
+            justificationLabel.className = 'task-notification-card__justification-label';
+            justificationLabel.textContent = 'Justificativa';
+            const justificationText = document.createElement('p');
+            justificationText.className = 'task-notification-card__justification-text';
+            justificationText.textContent = notification.justificativa;
+            justification.append(justificationLabel, justificationText);
+        }
 
         const actionBtn = document.createElement('button');
         actionBtn.type = 'button';
@@ -8431,7 +8504,15 @@ document.addEventListener('DOMContentLoaded', function() {
         actionBtn.addEventListener('click', openFromNotification);
         card.addEventListener('click', openFromNotification);
 
-        card.append(header, description, meta, actionBtn);
+        card.append(header);
+        if (titleMeta) {
+            card.appendChild(titleMeta);
+        }
+        card.append(description, meta);
+        if (justification) {
+            card.appendChild(justification);
+        }
+        card.appendChild(actionBtn);
         stack.appendChild(card);
         requestAnimationFrame(() => {
             card.classList.add('is-visible');
