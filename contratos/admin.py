@@ -11568,7 +11568,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             counter
         )
 
-    @admin.display(description="CPF Passivo")
+    @admin.display(description="CPF/CNPJ Passivo")
     def cpf_passivo(self, obj):
         partes = getattr(obj, '_prefetched_partes_processuais', None)
         if partes is None:
@@ -11576,11 +11576,21 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         else:
             parte = next((item for item in partes if item.tipo_polo == 'PASSIVO'), None)
         if parte and parte.documento:
-            cpf_value = _format_cpf(parte.documento)
+            documento_digits = re.sub(r"\D", "", str(parte.documento or ""))
+            documento_label = "CPF"
+            documento_value = _format_cpf(parte.documento)
+            if len(documento_digits) == 14:
+                documento_label = "CNPJ"
+                documento_value = (
+                    f"{documento_digits[:2]}.{documento_digits[2:5]}.{documento_digits[5:8]}/"
+                    f"{documento_digits[8:12]}-{documento_digits[12:]}"
+                )
             return format_html(
-                '<span class="processo-copyable-token" data-copy-value="{}" data-copy-label="CPF" tabindex="0" title="Clique para copiar o CPF">{}</span>',
-                cpf_value,
-                cpf_value,
+                '<span class="processo-copyable-token" data-copy-value="{}" data-copy-label="{}" tabindex="0" title="Clique para copiar o {}">{}</span>',
+                documento_value,
+                documento_label,
+                documento_label,
+                documento_value,
             )
         return "-"
 

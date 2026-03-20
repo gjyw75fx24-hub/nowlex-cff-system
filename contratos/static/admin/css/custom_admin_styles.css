@@ -24,8 +24,8 @@
 #result_list th.column-cpf_passivo,
 #result_list td.field-cpf_passivo {
     white-space: nowrap;
-    min-width: 128px;
-    max-width: 128px;
+    min-width: 178px;
+    max-width: 178px;
     padding-right: 12px;
 }
 
