@@ -129,13 +129,16 @@ class PrazoMensagemSerializer(serializers.ModelSerializer):
 
 
 class TarefaNotificacaoSerializer(serializers.ModelSerializer):
-    tarefa_id = serializers.IntegerField(source='tarefa.id', read_only=True)
+    item_tipo = serializers.SerializerMethodField()
+    item_id = serializers.SerializerMethodField()
+    tarefa_id = serializers.SerializerMethodField()
+    prazo_id = serializers.SerializerMethodField()
     tipo = serializers.CharField(read_only=True)
     titulo = serializers.SerializerMethodField()
     descricao = serializers.SerializerMethodField()
-    data = serializers.DateField(source='tarefa.data', read_only=True)
-    processo_id = serializers.IntegerField(source='tarefa.processo_id', read_only=True)
-    processo_cnj = serializers.CharField(source='tarefa.processo.cnj', read_only=True, default='')
+    data = serializers.SerializerMethodField()
+    processo_id = serializers.SerializerMethodField()
+    processo_cnj = serializers.SerializerMethodField()
     autor_nome = serializers.SerializerMethodField()
     justificativa = serializers.CharField(read_only=True)
 
@@ -143,9 +146,12 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
         model = TarefaNotificacao
         fields = [
             'id',
+            'item_tipo',
+            'item_id',
+            'tarefa_id',
+            'prazo_id',
             'tipo',
             'titulo',
-            'tarefa_id',
             'descricao',
             'data',
             'processo_id',
@@ -158,6 +164,10 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
     def get_titulo(self, obj):
         if obj.titulo:
             return obj.titulo
+        if obj.prazo_id:
+            if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
+                return 'Prazo solicitado atendido'
+            return 'Novo prazo recebido'
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
             return 'Tarefa solicitada atendida'
         return 'Nova tarefa recebida'
@@ -165,21 +175,49 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
     def get_descricao(self, obj):
         if obj.descricao:
             return obj.descricao
-        descricao_tarefa = getattr(obj.tarefa, 'descricao', '') or ''
-        if descricao_tarefa:
-            return descricao_tarefa
+        descricao_item = (
+            getattr(obj.tarefa, 'descricao', '') if obj.tarefa_id
+            else getattr(obj.prazo, 'titulo', '')
+        ) or ''
+        if descricao_item:
+            return descricao_item
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
-            return 'A tarefa solicitada foi atendida.'
-        return 'Você recebeu uma nova tarefa.'
+            return 'O prazo solicitado foi atendido.' if obj.prazo_id else 'A tarefa solicitada foi atendida.'
+        return 'Você recebeu um novo prazo.' if obj.prazo_id else 'Você recebeu uma nova tarefa.'
 
     def get_autor_nome(self, obj):
         if obj.autor_nome:
             return obj.autor_nome
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
-            autor = getattr(obj.tarefa, 'concluido_por', None)
+            autor = getattr(obj.tarefa, 'concluido_por', None) if obj.tarefa_id else getattr(obj.prazo, 'concluido_por', None)
         else:
-            autor = getattr(obj.tarefa, 'criado_por', None)
+            autor = getattr(obj.tarefa, 'criado_por', None) if obj.tarefa_id else getattr(obj.prazo, 'criado_por', None)
         if not autor:
             return ''
         full_name = (autor.get_full_name() or '').strip()
         return full_name or autor.username or ''
+
+    def get_item_tipo(self, obj):
+        return 'P' if obj.prazo_id else 'T'
+
+    def get_item_id(self, obj):
+        return obj.prazo_id if obj.prazo_id else obj.tarefa_id
+
+    def get_tarefa_id(self, obj):
+        return obj.tarefa_id
+
+    def get_prazo_id(self, obj):
+        return obj.prazo_id
+
+    def get_data(self, obj):
+        if obj.tarefa_id:
+            return getattr(obj.tarefa, 'data', None)
+        data_limite = getattr(obj.prazo, 'data_limite', None)
+        return data_limite.date() if data_limite else None
+
+    def get_processo_id(self, obj):
+        return getattr(obj.tarefa, 'processo_id', None) if obj.tarefa_id else getattr(obj.prazo, 'processo_id', None)
+
+    def get_processo_cnj(self, obj):
+        processo = getattr(obj.tarefa, 'processo', None) if obj.tarefa_id else getattr(obj.prazo, 'processo', None)
+        return getattr(processo, 'cnj', '') or ''

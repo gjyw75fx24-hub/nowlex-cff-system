@@ -1653,7 +1653,8 @@ class PrazoCreateAPIView(generics.CreateAPIView):
         if bool(serializer.validated_data.get('concluido')):
             extra['concluido_em'] = timezone.now()
             extra['concluido_por'] = self.request.user
-        serializer.save(**extra)
+        prazo = serializer.save(**extra)
+        _create_prazo_notification_for_receiver(prazo, actor=self.request.user)
 
 def _bulk_payload_from_request(request):
     payload_raw = request.data.get('payload') if hasattr(request, 'data') else None
@@ -1747,6 +1748,7 @@ def _create_task_notification_for_receiver(tarefa, actor=None):
     TarefaNotificacao.objects.update_or_create(
         usuario=receiver,
         tarefa=tarefa,
+        prazo=None,
         tipo=TarefaNotificacao.TIPO_RECEBIDA,
         defaults={
             'titulo': 'Nova tarefa recebida',
@@ -1768,10 +1770,55 @@ def _create_task_completion_notification_for_creator(tarefa, actor=None, justifi
     TarefaNotificacao.objects.update_or_create(
         usuario=creator,
         tarefa=tarefa,
+        prazo=None,
         tipo=TarefaNotificacao.TIPO_DEVOLUTIVA,
         defaults={
             'titulo': 'Tarefa solicitada atendida',
             'descricao': 'A tarefa solicitada foi atendida.',
+            'autor_nome': _display_user_name(actor),
+            'justificativa': (justificativa or '').strip(),
+        },
+    )
+
+
+def _create_prazo_notification_for_receiver(prazo, actor=None):
+    if not prazo:
+        return
+    receiver = getattr(prazo, 'responsavel', None)
+    if not receiver or not receiver.is_active:
+        return
+    if actor and receiver.pk == actor.pk:
+        return
+    TarefaNotificacao.objects.update_or_create(
+        usuario=receiver,
+        tarefa=None,
+        prazo=prazo,
+        tipo=TarefaNotificacao.TIPO_RECEBIDA,
+        defaults={
+            'titulo': 'Novo prazo recebido',
+            'descricao': prazo.titulo or '',
+            'autor_nome': _display_user_name(actor) or _display_user_name(getattr(prazo, 'criado_por', None)),
+            'justificativa': '',
+        },
+    )
+
+
+def _create_prazo_completion_notification_for_creator(prazo, actor=None, justificativa=''):
+    if not prazo:
+        return
+    creator = getattr(prazo, 'criado_por', None)
+    if not creator or not creator.is_active:
+        return
+    if actor and creator.pk == actor.pk:
+        return
+    TarefaNotificacao.objects.update_or_create(
+        usuario=creator,
+        tarefa=None,
+        prazo=prazo,
+        tipo=TarefaNotificacao.TIPO_DEVOLUTIVA,
+        defaults={
+            'titulo': 'Prazo solicitado atendido',
+            'descricao': 'O prazo solicitado foi atendido.',
             'autor_nome': _display_user_name(actor),
             'justificativa': (justificativa or '').strip(),
         },
@@ -1879,7 +1926,10 @@ class TarefaNotificacaoListAPIView(APIView):
     def get(self, request):
         notifications = (
             TarefaNotificacao.objects
-            .select_related('tarefa', 'tarefa__processo', 'tarefa__criado_por', 'tarefa__concluido_por')
+            .select_related(
+                'tarefa', 'tarefa__processo', 'tarefa__criado_por', 'tarefa__concluido_por',
+                'prazo', 'prazo__processo', 'prazo__criado_por', 'prazo__concluido_por',
+            )
             .filter(usuario=request.user, lida_em__isnull=True)
             .order_by('criada_em', 'id')[:20]
         )
@@ -2036,6 +2086,7 @@ class PrazoBulkCreateAPIView(APIView):
                 criado_por=request.user,
             )
             created_prazos.append(prazo)
+            _create_prazo_notification_for_receiver(prazo, actor=request.user)
             if comentario_texto or arquivo:
                 comentario = PrazoMensagem.objects.create(
                     prazo=prazo,
@@ -2490,6 +2541,7 @@ class AgendaConcluirAPIView(APIView):
                     )
 
             if prazos_to_close_ids:
+                prazos_to_close = list(prazos_qs.filter(id__in=prazos_to_close_ids))
                 Prazo.objects.filter(id__in=prazos_to_close_ids).update(
                     concluido=True,
                     concluido_em=now,
@@ -2503,6 +2555,15 @@ class AgendaConcluirAPIView(APIView):
                     )
                     for prazo_id in prazos_to_close_ids
                 ])
+                for prazo in prazos_to_close:
+                    prazo.concluido = True
+                    prazo.concluido_em = now
+                    prazo.concluido_por = request.user
+                    _create_prazo_completion_notification_for_creator(
+                        prazo,
+                        actor=request.user,
+                        justificativa=comentario_texto,
+                    )
 
         updated_tasks = len(tarefas_to_close_ids)
         updated_prazos = len(prazos_to_close_ids)

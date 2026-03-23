@@ -8446,8 +8446,8 @@ document.addEventListener('DOMContentLoaded', function() {
             badge.type = 'button';
             badge.className = 'task-notification-minimized';
             badge.dataset.taskNotificationMinimizedId = String(notification.id);
-            badge.setAttribute('aria-label', notification.titulo || 'Abrir notificação de tarefa');
-            badge.title = notification.titulo || 'Abrir notificação de tarefa';
+            badge.setAttribute('aria-label', notification.titulo || 'Abrir notificação');
+            badge.title = notification.titulo || 'Abrir notificação';
             badge.textContent = getTaskNotificationBadgeText(notification);
             badge.addEventListener('click', (event) => {
                 event.preventDefault();
@@ -8469,7 +8469,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const focusAgendaFromTaskNotification = (notification) => {
         const focus = normalizeAgendaFocusOptions({
             date: notification?.data,
-            type: 'T',
+            type: getTaskNotificationBadgeText(notification),
         });
         if (focus) {
             openAgendaPanel({ focus });

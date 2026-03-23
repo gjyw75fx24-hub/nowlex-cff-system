@@ -1194,7 +1194,17 @@ class TarefaNotificacao(models.Model):
         Tarefa,
         on_delete=models.CASCADE,
         related_name='notificacoes',
+        null=True,
+        blank=True,
         verbose_name='Tarefa',
+    )
+    prazo = models.ForeignKey(
+        'Prazo',
+        on_delete=models.CASCADE,
+        related_name='notificacoes',
+        null=True,
+        blank=True,
+        verbose_name='Prazo',
     )
     tipo = models.CharField(
         max_length=20,
@@ -1219,10 +1229,22 @@ class TarefaNotificacao(models.Model):
                 fields=['usuario', 'tarefa', 'tipo'],
                 name='uniq_tarefanotificacao_usuario_tarefa_tipo',
             ),
+            models.UniqueConstraint(
+                fields=['usuario', 'prazo', 'tipo'],
+                name='uniq_tarefanotificacao_usuario_prazo_tipo',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(tarefa__isnull=False) & models.Q(prazo__isnull=True))
+                    | (models.Q(tarefa__isnull=True) & models.Q(prazo__isnull=False))
+                ),
+                name='tarefanotificacao_single_target',
+            ),
         ]
 
     def __str__(self):
-        return f'Notificação {self.tipo} tarefa #{self.tarefa_id} para {self.usuario}'
+        target_label = f'tarefa #{self.tarefa_id}' if self.tarefa_id else f'prazo #{self.prazo_id}'
+        return f'Notificação {self.tipo} {target_label} para {self.usuario}'
 
 
 def _has_tarefa_notificacao_table():
@@ -1282,6 +1304,7 @@ def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kw
 
     TarefaNotificacao.objects.update_or_create(
         tarefa=instance,
+        prazo=None,
         usuario_id=current_responsavel_id,
         tipo=TarefaNotificacao.TIPO_RECEBIDA,
         defaults={
@@ -1358,6 +1381,71 @@ class Prazo(models.Model):
 
     def __str__(self):
         return self.titulo
+
+
+@receiver(pre_save, sender=Prazo)
+def prazo_cache_previous_receiver(sender, instance, **kwargs):
+    if not instance.pk:
+        instance._previous_responsavel_id = None
+        return
+    instance._previous_responsavel_id = (
+        sender.objects.filter(pk=instance.pk).values_list('responsavel_id', flat=True).first()
+    )
+
+
+@receiver(post_save, sender=Prazo)
+def prazo_sync_receiver_notification(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
+    if not _has_tarefa_notificacao_table():
+        return
+
+    if instance.concluido:
+        TarefaNotificacao.objects.filter(
+            prazo=instance,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
+            lida_em__isnull=True,
+        ).update(lida_em=timezone.now())
+        return
+
+    previous_responsavel_id = getattr(instance, '_previous_responsavel_id', None)
+    current_responsavel_id = instance.responsavel_id
+
+    if previous_responsavel_id and previous_responsavel_id != current_responsavel_id:
+        TarefaNotificacao.objects.filter(
+            prazo=instance,
+            usuario_id=previous_responsavel_id,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
+        ).delete()
+
+    if not current_responsavel_id:
+        return
+
+    if not created and previous_responsavel_id == current_responsavel_id:
+        return
+
+    receiver = instance.responsavel
+    if not receiver or not receiver.is_active:
+        return
+
+    if created and instance.criado_por_id and instance.criado_por_id == current_responsavel_id:
+        return
+
+    TarefaNotificacao.objects.update_or_create(
+        tarefa=None,
+        prazo=instance,
+        usuario_id=current_responsavel_id,
+        tipo=TarefaNotificacao.TIPO_RECEBIDA,
+        defaults={
+            'titulo': 'Novo prazo recebido',
+            'descricao': instance.titulo or '',
+            'autor_nome': (
+                (instance.criado_por.get_full_name() or '').strip()
+                if instance.criado_por_id else ''
+            ) or (instance.criado_por.username if instance.criado_por_id else ''),
+            'justificativa': '',
+        },
+    )
 
 
 class PrazoMensagem(models.Model):
