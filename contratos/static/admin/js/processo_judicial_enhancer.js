@@ -8331,6 +8331,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const TASK_NOTIFICATION_STACK_ID = 'task-notification-stack';
     const TASK_NOTIFICATION_MINIMIZED_STACK_ID = 'task-notification-minimized-stack';
     const TASK_NOTIFICATION_INIT_KEY = '__nowlexTaskNotificationPollingInit';
+    const TASK_NOTIFICATION_MINIMIZED_STORAGE_KEY = 'nowlex_task_notifications_minimized_v1';
     const taskNotificationPayloads = new Map();
     let taskNotificationFetchInFlight = false;
     let taskNotificationPollHandle = null;
@@ -8353,6 +8354,70 @@ document.addEventListener('DOMContentLoaded', function() {
         stack.className = 'task-notification-minimized-stack';
         document.body.appendChild(stack);
         return stack;
+    };
+
+    const readMinimizedTaskNotificationIds = () => {
+        try {
+            const raw = window.localStorage?.getItem(TASK_NOTIFICATION_MINIMIZED_STORAGE_KEY);
+            if (!raw) return new Set();
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return new Set();
+            return new Set(
+                parsed
+                    .map((value) => Number.parseInt(value, 10))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            );
+        } catch (_error) {
+            return new Set();
+        }
+    };
+
+    const writeMinimizedTaskNotificationIds = (ids) => {
+        try {
+            const serialized = JSON.stringify(
+                Array.from(ids)
+                    .map((value) => Number.parseInt(value, 10))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+                    .sort((a, b) => a - b)
+            );
+            window.localStorage?.setItem(TASK_NOTIFICATION_MINIMIZED_STORAGE_KEY, serialized);
+        } catch (_error) {
+            // noop
+        }
+    };
+
+    const isTaskNotificationMinimizedPersisted = (notificationId) => (
+        readMinimizedTaskNotificationIds().has(Number.parseInt(notificationId, 10))
+    );
+
+    const setTaskNotificationMinimizedPersisted = (notificationId, minimized) => {
+        const id = Number.parseInt(notificationId, 10);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const ids = readMinimizedTaskNotificationIds();
+        if (minimized) {
+            ids.add(id);
+        } else {
+            ids.delete(id);
+        }
+        writeMinimizedTaskNotificationIds(ids);
+    };
+
+    const pruneMinimizedTaskNotificationIds = (activeIds) => {
+        const active = new Set(
+            Array.from(activeIds)
+                .map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isFinite(value) && value > 0)
+        );
+        const persisted = readMinimizedTaskNotificationIds();
+        let changed = false;
+        persisted.forEach((id) => {
+            if (active.has(id)) return;
+            persisted.delete(id);
+            changed = true;
+        });
+        if (changed) {
+            writeMinimizedTaskNotificationIds(persisted);
+        }
     };
 
     const formatTaskNotificationDateLabel = (value) => {
@@ -8434,36 +8499,39 @@ document.addEventListener('DOMContentLoaded', function() {
         return rawType === 'P' ? 'P' : 'T';
     };
 
+    const renderMinimizedTaskNotification = (notification) => {
+        if (!notification || !notification.id) return;
+        const minimizedStack = ensureTaskNotificationMinimizedStack();
+        if (minimizedStack.querySelector(`[data-task-notification-minimized-id="${notification.id}"]`)) {
+            return;
+        }
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'task-notification-minimized';
+        badge.dataset.taskNotificationMinimizedId = String(notification.id);
+        badge.setAttribute('aria-label', notification.titulo || 'Abrir notificação');
+        badge.title = notification.titulo || 'Abrir notificação';
+        badge.textContent = getTaskNotificationBadgeText(notification);
+        badge.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setTaskNotificationMinimizedPersisted(notification.id, false);
+            badge.remove();
+            renderTaskNotificationCard(
+                taskNotificationPayloads.get(Number(notification.id)) || notification,
+                { restore: true }
+            );
+        });
+        minimizedStack.appendChild(badge);
+        requestAnimationFrame(() => {
+            badge.classList.add('is-visible');
+        });
+    };
+
     const minimizeTaskNotificationCard = (card, notification) => {
         if (!card || !notification || !notification.id) return;
-        const minimizedStack = ensureTaskNotificationMinimizedStack();
-        const existing = minimizedStack.querySelector(
-            `[data-task-notification-minimized-id="${notification.id}"]`
-        );
-        const ensureBadge = () => {
-            if (existing) return;
-            const badge = document.createElement('button');
-            badge.type = 'button';
-            badge.className = 'task-notification-minimized';
-            badge.dataset.taskNotificationMinimizedId = String(notification.id);
-            badge.setAttribute('aria-label', notification.titulo || 'Abrir notificação');
-            badge.title = notification.titulo || 'Abrir notificação';
-            badge.textContent = getTaskNotificationBadgeText(notification);
-            badge.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                badge.remove();
-                renderTaskNotificationCard(
-                    taskNotificationPayloads.get(Number(notification.id)) || notification,
-                    { restore: true }
-                );
-            });
-            minimizedStack.appendChild(badge);
-            requestAnimationFrame(() => {
-                badge.classList.add('is-visible');
-            });
-        };
-        dismissTaskNotificationCard(card, ensureBadge);
+        setTaskNotificationMinimizedPersisted(notification.id, true);
+        dismissTaskNotificationCard(card, () => renderMinimizedTaskNotification(notification));
     };
 
     const focusAgendaFromTaskNotification = (notification) => {
@@ -8484,11 +8552,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (stack.querySelector(`[data-task-notification-id="${notification.id}"]`)) {
             return;
         }
-        if (!options.restore) {
-            const { minimized } = getTaskNotificationElements(notification.id);
-            if (minimized) {
-                return;
-            }
+        if (!options.restore && isTaskNotificationMinimizedPersisted(notification.id)) {
+            renderMinimizedTaskNotification(notification);
+            return;
         }
 
         const card = document.createElement('article');
@@ -8568,6 +8634,7 @@ document.addEventListener('DOMContentLoaded', function() {
             focusAgendaFromTaskNotification(notification);
             if (notification.tipo === 'devolutiva') {
                 taskNotificationPayloads.delete(Number(notification.id));
+                setTaskNotificationMinimizedPersisted(notification.id, false);
                 removeTaskNotificationPresentation(notification.id);
                 markTaskNotificationAsRead(notification.id);
                 return;
@@ -8625,9 +8692,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (card || minimized) return;
                     renderTaskNotificationCard(notification);
                 });
+                pruneMinimizedTaskNotificationIds(activeIds);
                 Array.from(taskNotificationPayloads.keys()).forEach((id) => {
                     if (activeIds.has(id)) return;
                     taskNotificationPayloads.delete(id);
+                    setTaskNotificationMinimizedPersisted(id, false);
                     removeTaskNotificationPresentation(id);
                 });
             })
