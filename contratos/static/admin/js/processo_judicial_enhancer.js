@@ -7362,6 +7362,107 @@ document.addEventListener('DOMContentLoaded', function() {
         return agendaBulkCache.listsPromise;
     };
 
+    const TASK_AUTO_TITLE_LABEL = 'Solicitação de Arquivos';
+    const TASK_AUTO_TITLE_AUTOMATION = 'solicitacao_arquivos_massa';
+    const normalizeTaskAutoTitleText = (value) => String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    const resolveTaskAutoTitleFromListValue = async (listValue) => {
+        const normalizedId = String(listValue || '').trim();
+        if (!normalizedId) {
+            return '';
+        }
+        const lists = await fetchListaDeTarefas();
+        const selected = Array.isArray(lists)
+            ? lists.find((item) => String(item?.id || '') === normalizedId)
+            : null;
+        if (!selected) {
+            return '';
+        }
+        return String(selected.automacao_tipo || '') === TASK_AUTO_TITLE_AUTOMATION
+            ? TASK_AUTO_TITLE_LABEL
+            : '';
+    };
+
+    const resolveTaskAutoTitleFromSelect = async (select) => {
+        if (!(select instanceof HTMLSelectElement)) {
+            return '';
+        }
+        const optionLabel = select.options[select.selectedIndex]?.textContent || '';
+        if (normalizeTaskAutoTitleText(optionLabel).includes('solicitacao de arquivos')) {
+            return TASK_AUTO_TITLE_LABEL;
+        }
+        return resolveTaskAutoTitleFromListValue(select.value);
+    };
+
+    const findTaskTitleInputForListSelect = (select) => {
+        if (!(select instanceof Element)) return null;
+        const modal = select.closest('.agenda-form-modal');
+        if (modal) {
+            return modal.querySelector('input[data-field="descricao"]');
+        }
+        const row = select.closest('tr.dynamic-tarefas');
+        if (row) {
+            return row.querySelector('input[id$="-descricao"]');
+        }
+        return null;
+    };
+
+    const applyTaskAutoTitleForListSelect = async (select) => {
+        if (!(select instanceof HTMLSelectElement)) return;
+        const titleInput = findTaskTitleInputForListSelect(select);
+        if (!(titleInput instanceof HTMLInputElement)) return;
+        const previousAutoTitle = String(titleInput.dataset.autoTaskTitle || '');
+        const nextAutoTitle = await resolveTaskAutoTitleFromSelect(select);
+        const currentValue = String(titleInput.value || '');
+
+        if (!nextAutoTitle) {
+            if (previousAutoTitle && currentValue === previousAutoTitle) {
+                titleInput.value = '';
+                titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+                titleInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            titleInput.dataset.autoTaskTitle = '';
+            return;
+        }
+
+        if (!currentValue || currentValue === previousAutoTitle) {
+            titleInput.value = nextAutoTitle;
+            titleInput.dataset.autoTaskTitle = nextAutoTitle;
+            titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+            titleInput.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+
+        titleInput.dataset.autoTaskTitle = nextAutoTitle;
+    };
+
+    const scheduleTaskAutoTitleForListSelect = (select) => {
+        if (!(select instanceof HTMLSelectElement)) return;
+        window.setTimeout(() => {
+            applyTaskAutoTitleForListSelect(select);
+        }, 0);
+    };
+
+    const bindTaskAutoTitleForScope = (root = document) => {
+        const scope = root instanceof Element || root instanceof Document ? root : document;
+        scope.querySelectorAll('#tarefas-group select[id$="-lista"], .agenda-form-modal select[data-field="lista"]').forEach((select) => {
+            if (!(select instanceof HTMLSelectElement)) return;
+            if (select.dataset.taskAutoTitleBound === '1') {
+                return;
+            }
+            select.dataset.taskAutoTitleBound = '1';
+            select.addEventListener('change', () => {
+                applyTaskAutoTitleForListSelect(select);
+            });
+            applyTaskAutoTitleForListSelect(select);
+        });
+    };
+
     const buildBulkCommentPanel = (fileInputId) => {
         const nameLabel = getCurrentUserLabel();
         const timeLabel = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -7704,6 +7805,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         option.textContent = item.nome;
                         listaSelect.appendChild(option);
                     });
+                    bindTaskAutoTitleForScope(modal);
                     reinitTaskSelect2();
                 });
             }
@@ -10225,6 +10327,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 initTarefasSelect2(row);
                 setupTarefasPriorityStyling(row);
                 initTarefaCommentsPanels(row);
+                bindTaskAutoTitleForScope(row);
             }
             if (formsetName === 'prazos') {
                 initPrazoCommentsPanels(row);
@@ -10355,10 +10458,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 initialized = true;
             }
+            if (!/-lista$/.test(this.id || '')) {
+                return;
+            }
+            $el.off('.taskAutoTitle');
+            $el.on('change.taskAutoTitle select2:select.taskAutoTitle select2:clear.taskAutoTitle', () => {
+                scheduleTaskAutoTitleForListSelect(this);
+            });
+            scheduleTaskAutoTitleForListSelect(this);
         });
         return initialized;
     };
     initTarefasSelect2();
+    bindTaskAutoTitleForScope();
+    document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        if (!target.matches('#tarefas-group select[id$="-lista"], .agenda-form-modal select[data-field="lista"]')) {
+            return;
+        }
+        applyTaskAutoTitleForListSelect(target);
+    });
 
     const ensureTarefasSelect2Active = () => {
         const group = document.getElementById('tarefas-group');
