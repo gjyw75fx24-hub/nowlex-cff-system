@@ -2090,6 +2090,89 @@ def _create_prazo_completion_notification_for_creator(prazo, actor=None, justifi
         },
     )
 
+
+def _restore_pending_received_notifications_for_user(user):
+    if not user or not getattr(user, 'is_authenticated', False):
+        return
+
+    pending_tasks = (
+        Tarefa.objects
+        .select_related('criado_por', 'responsavel')
+        .filter(responsavel=user, concluida=False)
+    )
+    for tarefa in pending_tasks:
+        if tarefa.criado_por_id and tarefa.criado_por_id == user.id:
+            continue
+        notification, created = TarefaNotificacao.objects.get_or_create(
+            usuario=user,
+            tarefa=tarefa,
+            prazo=None,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
+            defaults={
+                'titulo': 'Nova tarefa recebida',
+                'descricao': tarefa.descricao or '',
+                'autor_nome': _display_user_name(getattr(tarefa, 'criado_por', None)),
+                'justificativa': '',
+            },
+        )
+        if created or notification.lida_em is None:
+            continue
+        notification.titulo = 'Nova tarefa recebida'
+        notification.descricao = tarefa.descricao or ''
+        notification.autor_nome = _display_user_name(getattr(tarefa, 'criado_por', None))
+        notification.justificativa = ''
+        notification.lida_em = None
+        notification.criada_em = timezone.now()
+        notification.save(
+            update_fields=[
+                'titulo',
+                'descricao',
+                'autor_nome',
+                'justificativa',
+                'lida_em',
+                'criada_em',
+            ]
+        )
+
+    pending_deadlines = (
+        Prazo.objects
+        .select_related('criado_por', 'responsavel')
+        .filter(responsavel=user, concluido=False)
+    )
+    for prazo in pending_deadlines:
+        if prazo.criado_por_id and prazo.criado_por_id == user.id:
+            continue
+        notification, created = TarefaNotificacao.objects.get_or_create(
+            usuario=user,
+            tarefa=None,
+            prazo=prazo,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
+            defaults={
+                'titulo': 'Novo prazo recebido',
+                'descricao': prazo.titulo or '',
+                'autor_nome': _display_user_name(getattr(prazo, 'criado_por', None)),
+                'justificativa': '',
+            },
+        )
+        if created or notification.lida_em is None:
+            continue
+        notification.titulo = 'Novo prazo recebido'
+        notification.descricao = prazo.titulo or ''
+        notification.autor_nome = _display_user_name(getattr(prazo, 'criado_por', None))
+        notification.justificativa = ''
+        notification.lida_em = None
+        notification.criada_em = timezone.now()
+        notification.save(
+            update_fields=[
+                'titulo',
+                'descricao',
+                'autor_nome',
+                'justificativa',
+                'lida_em',
+                'criada_em',
+            ]
+        )
+
 class TarefaBulkCreateAPIView(APIView):
     """
     API para criar tarefas em lote (com ou sem processos selecionados).
@@ -2201,6 +2284,7 @@ class TarefaNotificacaoListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        _restore_pending_received_notifications_for_user(request.user)
         notifications = (
             TarefaNotificacao.objects
             .select_related(
