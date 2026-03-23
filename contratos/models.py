@@ -1249,6 +1249,14 @@ def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kw
     if not _has_tarefa_notificacao_table():
         return
 
+    if instance.concluida:
+        TarefaNotificacao.objects.filter(
+            tarefa=instance,
+            tipo=TarefaNotificacao.TIPO_RECEBIDA,
+            lida_em__isnull=True,
+        ).update(lida_em=timezone.now())
+        return
+
     previous_responsavel_id = getattr(instance, '_previous_responsavel_id', None)
     current_responsavel_id = instance.responsavel_id
 

@@ -8329,8 +8329,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const TASK_NOTIFICATION_POLL_MS = 20000;
     const TASK_NOTIFICATION_STACK_ID = 'task-notification-stack';
+    const TASK_NOTIFICATION_MINIMIZED_STACK_ID = 'task-notification-minimized-stack';
     const TASK_NOTIFICATION_INIT_KEY = '__nowlexTaskNotificationPollingInit';
-    const seenTaskNotificationIds = new Set();
+    const taskNotificationPayloads = new Map();
     let taskNotificationFetchInFlight = false;
     let taskNotificationPollHandle = null;
 
@@ -8340,6 +8341,16 @@ document.addEventListener('DOMContentLoaded', function() {
         stack = document.createElement('div');
         stack.id = TASK_NOTIFICATION_STACK_ID;
         stack.className = 'task-notification-stack';
+        document.body.appendChild(stack);
+        return stack;
+    };
+
+    const ensureTaskNotificationMinimizedStack = () => {
+        let stack = document.getElementById(TASK_NOTIFICATION_MINIMIZED_STACK_ID);
+        if (stack) return stack;
+        stack = document.createElement('div');
+        stack.id = TASK_NOTIFICATION_MINIMIZED_STACK_ID;
+        stack.className = 'task-notification-minimized-stack';
         document.body.appendChild(stack);
         return stack;
     };
@@ -8387,14 +8398,72 @@ document.addEventListener('DOMContentLoaded', function() {
         }).catch(() => null);
     };
 
-    const dismissTaskNotificationCard = (card) => {
+    const dismissTaskNotificationCard = (card, onAfterRemove = null) => {
         if (!card || card.dataset.closing === '1') return;
         card.dataset.closing = '1';
         card.classList.remove('is-visible');
         card.classList.add('is-closing');
         window.setTimeout(() => {
             card.remove();
+            if (typeof onAfterRemove === 'function') {
+                onAfterRemove();
+            }
         }, 240);
+    };
+
+    const getTaskNotificationElements = (notificationId) => {
+        const id = String(notificationId);
+        return {
+            card: document.querySelector(`[data-task-notification-id="${id}"]`),
+            minimized: document.querySelector(`[data-task-notification-minimized-id="${id}"]`),
+        };
+    };
+
+    const removeTaskNotificationPresentation = (notificationId) => {
+        const { card, minimized } = getTaskNotificationElements(notificationId);
+        if (card) {
+            card.remove();
+        }
+        if (minimized) {
+            minimized.remove();
+        }
+    };
+
+    const getTaskNotificationBadgeText = (notification) => {
+        const rawType = String(notification?.item_tipo || 'T').trim().toUpperCase();
+        return rawType === 'P' ? 'P' : 'T';
+    };
+
+    const minimizeTaskNotificationCard = (card, notification) => {
+        if (!card || !notification || !notification.id) return;
+        const minimizedStack = ensureTaskNotificationMinimizedStack();
+        const existing = minimizedStack.querySelector(
+            `[data-task-notification-minimized-id="${notification.id}"]`
+        );
+        const ensureBadge = () => {
+            if (existing) return;
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.className = 'task-notification-minimized';
+            badge.dataset.taskNotificationMinimizedId = String(notification.id);
+            badge.setAttribute('aria-label', notification.titulo || 'Abrir notificação de tarefa');
+            badge.title = notification.titulo || 'Abrir notificação de tarefa';
+            badge.textContent = getTaskNotificationBadgeText(notification);
+            badge.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                badge.remove();
+                renderTaskNotificationCard(
+                    taskNotificationPayloads.get(Number(notification.id)) || notification,
+                    { restore: true }
+                );
+            });
+            minimizedStack.appendChild(badge);
+            requestAnimationFrame(() => {
+                badge.classList.add('is-visible');
+            });
+        };
+        dismissTaskNotificationCard(card, ensureBadge);
     };
 
     const focusAgendaFromTaskNotification = (notification) => {
@@ -8409,11 +8478,17 @@ document.addEventListener('DOMContentLoaded', function() {
         openAgendaPanel();
     };
 
-    const renderTaskNotificationCard = (notification) => {
+    const renderTaskNotificationCard = (notification, options = {}) => {
         if (!notification || !notification.id) return;
         const stack = ensureTaskNotificationStack();
         if (stack.querySelector(`[data-task-notification-id="${notification.id}"]`)) {
             return;
+        }
+        if (!options.restore) {
+            const { minimized } = getTaskNotificationElements(notification.id);
+            if (minimized) {
+                return;
+            }
         }
 
         const card = document.createElement('article');
@@ -8491,15 +8566,19 @@ document.addEventListener('DOMContentLoaded', function() {
             event?.preventDefault?.();
             event?.stopPropagation?.();
             focusAgendaFromTaskNotification(notification);
-            markTaskNotificationAsRead(notification.id);
-            dismissTaskNotificationCard(card);
+            if (notification.tipo === 'devolutiva') {
+                taskNotificationPayloads.delete(Number(notification.id));
+                removeTaskNotificationPresentation(notification.id);
+                markTaskNotificationAsRead(notification.id);
+                return;
+            }
+            minimizeTaskNotificationCard(card, notification);
         };
 
         closeBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            markTaskNotificationAsRead(notification.id);
-            dismissTaskNotificationCard(card);
+            minimizeTaskNotificationCard(card, notification);
         });
         actionBtn.addEventListener('click', openFromNotification);
         card.addEventListener('click', openFromNotification);
@@ -8536,12 +8615,20 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then((items) => {
                 if (!Array.isArray(items)) return;
+                const activeIds = new Set();
                 items.forEach((notification) => {
                     const id = Number.parseInt(notification?.id, 10);
                     if (!Number.isFinite(id) || id <= 0) return;
-                    if (seenTaskNotificationIds.has(id)) return;
-                    seenTaskNotificationIds.add(id);
+                    activeIds.add(id);
+                    taskNotificationPayloads.set(id, notification);
+                    const { card, minimized } = getTaskNotificationElements(id);
+                    if (card || minimized) return;
                     renderTaskNotificationCard(notification);
+                });
+                Array.from(taskNotificationPayloads.keys()).forEach((id) => {
+                    if (activeIds.has(id)) return;
+                    taskNotificationPayloads.delete(id);
+                    removeTaskNotificationPresentation(id);
                 });
             })
             .catch(() => null)
