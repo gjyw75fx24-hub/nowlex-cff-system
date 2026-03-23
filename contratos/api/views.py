@@ -44,7 +44,10 @@ from ..models import (
     TarefaNotificacao,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
-from ..services.peticao_combo import build_monitoria_required_files_summary
+from ..services.peticao_combo import (
+    build_monitoria_contract_file_presence,
+    build_monitoria_required_files_summary,
+)
 from ..permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .serializers import (
     TarefaSerializer,
@@ -1964,6 +1967,57 @@ def _build_mass_file_request_context(processo, lista, manual_observacoes=''):
             nome = str(arquivo.get('nome') or '').strip()
             if nome and nome not in requested_file_names:
                 requested_file_names.append(nome)
+
+    configs = list(lista.arquivos_configurados.filter(ativo=True).order_by('ordem', 'id'))
+
+    def _resolve_mass_status_key(config):
+        label = " ".join(
+            part for part in [
+                str(config.nome or '').strip(),
+                str(config.nome_coluna or '').strip(),
+                str(config.padrao_nome or '').strip(),
+            ] if part
+        ).upper()
+        if 'CONTRATO' in label:
+            return 'a06'
+        if 'SALDO' in label:
+            return 'a08'
+        if 'RELAT' in label:
+            return 'a07'
+        if 'TED' in label:
+            return 'a09'
+        return ''
+
+    if configs:
+        presence_entries = build_monitoria_contract_file_presence(
+            processo,
+            contratos=contract_numbers,
+        )
+        presence_by_contract = {
+            str(entry.get('contrato') or '').strip(): (entry.get('present') or {})
+            for entry in presence_entries
+            if str(entry.get('contrato') or '').strip()
+        }
+        has_missing_requested_file = False
+        for contract_number in contract_numbers:
+            present_map = presence_by_contract.get(contract_number, {})
+            for config in configs:
+                status_key = _resolve_mass_status_key(config)
+                if not status_key or not present_map.get(status_key):
+                    has_missing_requested_file = True
+                    break
+            if has_missing_requested_file:
+                break
+        if not has_missing_requested_file:
+            parte_nome = _to_title_case_name(parte.nome)
+            raise DRFValidationError({
+                'detail': (
+                    f'Não será possível solicitar arquivos para {parte_nome}, pois os arquivos '
+                    'já existem salvos para este cadastro. Se quiser solicitar uma versão '
+                    'atualizada, exclua o arquivo correspondente na aba Arquivos e gere a '
+                    'solicitação novamente.'
+                )
+            })
 
     lines = [
         f'Parte Contrária: {_to_title_case_name(parte.nome)}',
