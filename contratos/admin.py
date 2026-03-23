@@ -8027,21 +8027,23 @@ class CarteiraAdmin(admin.ModelAdmin):
                     }
                     peticao_by_carteira[carteira_id] = carteira_bucket
                 if is_zip:
-                    carteira_bucket["zips"][tipo_slug] += 1
-                    carteira_bucket["process_ids_zips"][tipo_slug].add(int(processo_id))
                     if protocolado:
                         carteira_bucket["protocoladas"][tipo_slug] += 1
                         carteira_bucket["protocol_process_ids"][tipo_slug].add(int(processo_id))
+                    else:
+                        carteira_bucket["zips"][tipo_slug] += 1
+                        carteira_bucket["process_ids_zips"][tipo_slug].add(int(processo_id))
                 else:
                     carteira_bucket["pieces"][tipo_slug] += 1
                     carteira_bucket["process_ids_pieces"][tipo_slug].add(int(processo_id))
 
             if is_zip:
-                peticao_totals[tipo_slug]["zips"] += 1
-                peticao_totals[tipo_slug]["process_ids_zips"].add(int(processo_id))
                 if protocolado:
                     peticao_totals[tipo_slug]["protocoladas"] += 1
                     peticao_totals[tipo_slug]["protocol_process_ids"].add(int(processo_id))
+                else:
+                    peticao_totals[tipo_slug]["zips"] += 1
+                    peticao_totals[tipo_slug]["process_ids_zips"].add(int(processo_id))
             else:
                 peticao_totals[tipo_slug]["pieces"] += 1
                 peticao_totals[tipo_slug]["process_ids_pieces"].add(int(processo_id))
@@ -8050,8 +8052,6 @@ class CarteiraAdmin(admin.ModelAdmin):
         for carteira in sorted(peticao_by_carteira.values(), key=lambda item: (item["carteira_nome"] or "").upper()):
             total_pieces = sum(int(carteira["pieces"].get(slug, 0)) for slug in peticao_slugs)
             total_zips = sum(int(carteira["zips"].get(slug, 0)) for slug in peticao_slugs)
-            if (total_pieces + total_zips) <= 0:
-                continue
             processos_pecas_map = {
                 slug: len(carteira["process_ids_pieces"].get(slug, set()))
                 for slug in peticao_slugs
@@ -8068,6 +8068,8 @@ class CarteiraAdmin(admin.ModelAdmin):
             total_processos_zips = len(set().union(*[carteira["process_ids_zips"].get(slug, set()) for slug in peticao_slugs]))
             total_protocoladas = sum(int(carteira["protocoladas"].get(slug, 0)) for slug in peticao_slugs)
             total_protocol_processos = len(set().union(*[carteira["protocol_process_ids"].get(slug, set()) for slug in peticao_slugs]))
+            if (total_pieces + total_zips + total_protocoladas) <= 0:
+                continue
             serialized_peticao_by_carteira.append(
                 {
                     "carteira_id": carteira["carteira_id"],
@@ -10488,6 +10490,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         arquivo_qs = ProcessoArquivo.objects.filter(processo_id__in=candidate_ids)
         if kind in {'zip', 'protocolada'}:
             arquivo_qs = arquivo_qs.filter(Q(nome__iendswith='.zip') | Q(arquivo__iendswith='.zip'))
+        if kind == 'zip':
+            arquivo_qs = arquivo_qs.filter(protocolado_no_tribunal=False)
         else:
             arquivo_qs = arquivo_qs.exclude(Q(nome__iendswith='.zip') | Q(arquivo__iendswith='.zip'))
         if kind == 'protocolada':
@@ -10648,7 +10652,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             kind = peticao_filter.get('kind') or 'peca'
             kind_label = {
                 'peca': 'Peças geradas',
-                'zip': 'ZIPs gerados',
+                'zip': 'ZIPs pendentes de protocolo',
                 'protocolada': 'ZIPs protocolados',
             }.get(kind, 'Peças geradas')
             return {
