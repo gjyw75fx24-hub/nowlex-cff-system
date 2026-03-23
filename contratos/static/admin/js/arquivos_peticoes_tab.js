@@ -54,6 +54,29 @@
         return window.__tipos_peticao_csrf_token || '';
     };
     const csrfApiToken = window.__tipos_peticao_csrf_token || '';
+    const parseJsonResponseSafe = async (response, fallbackMessage) => {
+        const rawText = await response.text();
+        let data = null;
+        if (rawText) {
+            try {
+                data = JSON.parse(rawText);
+            } catch (_error) {
+                data = null;
+            }
+        }
+        if (data) {
+            return data;
+        }
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        const isHtml = contentType.includes('text/html') || /^\s*</.test(rawText || '');
+        if (response.redirected || (isHtml && response.status === 200)) {
+            throw new Error('Sua sessão expirou ou a página foi redirecionada. Recarregue a tela e tente novamente.');
+        }
+        if (isHtml) {
+            throw new Error(`${fallbackMessage} O servidor retornou uma página HTML em vez de JSON.`);
+        }
+        throw new Error(fallbackMessage);
+    };
     const createDropdown = () => {
         const dropdown = document.createElement('div');
         dropdown.className = 'inline-group-subtab-dropdown';
@@ -1272,7 +1295,7 @@
                     arquivo_base_id: selectedBaseId
                 })
             });
-            const data = await response.json();
+            const data = await parseJsonResponseSafe(response, 'Falha ao gerar o preview.');
             if (!response.ok || !data.ok) {
                 throw new Error(data.error || 'Falha ao gerar o preview.');
             }
@@ -1316,7 +1339,7 @@
                     optional_ids: collectOptionalIds()
                 })
             });
-            const data = await response.json();
+            const data = await parseJsonResponseSafe(response, 'Falha ao gerar o ZIP.');
             if (!response.ok || !data.ok) {
                 throw new Error(data.error || 'Falha ao gerar o ZIP.');
             }

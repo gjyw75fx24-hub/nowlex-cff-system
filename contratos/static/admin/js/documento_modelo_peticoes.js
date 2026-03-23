@@ -27,6 +27,29 @@
         let isSaving = false;
         let previewModal = null;
         let currentPreview = null;
+        const parseJsonResponseSafe = async (response, fallbackMessage) => {
+            const rawText = await response.text();
+            let data = null;
+            if (rawText) {
+                try {
+                    data = JSON.parse(rawText);
+                } catch (_error) {
+                    data = null;
+                }
+            }
+            if (data) {
+                return data;
+            }
+            const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+            const isHtml = contentType.includes('text/html') || /^\s*</.test(rawText || '');
+            if (response.redirected || (isHtml && response.status === 200)) {
+                throw new Error('Sua sessão expirou ou a página foi redirecionada. Recarregue a tela e tente novamente.');
+            }
+            if (isHtml) {
+                throw new Error(`${fallbackMessage} O servidor retornou uma página HTML em vez de JSON.`);
+            }
+            throw new Error(fallbackMessage);
+        };
         const generateTipoKey = () => {
             if (window.crypto?.randomUUID) {
                 return window.crypto.randomUUID();
@@ -599,7 +622,7 @@
                         arquivo_base_id: baseId
                     })
                 });
-                const data = await response.json();
+                const data = await parseJsonResponseSafe(response, 'Falha ao gerar preview.');
                 if (!response.ok || !data.ok) {
                     throw new Error(data.error || 'Falha ao gerar preview');
                 }
@@ -634,7 +657,7 @@
                     credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
-                const data = await response.json();
+                const data = await parseJsonResponseSafe(response, 'Falha ao gerar ZIP.');
                 if (!response.ok || !data.ok) {
                     throw new Error(data.error || 'Falha ao gerar ZIP');
                 }

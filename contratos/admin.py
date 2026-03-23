@@ -54,7 +54,8 @@ logger = logging.getLogger(__name__)
 
 from .models import (
     AnaliseProcesso, AndamentoProcessual, AndamentoProcessualPendente, AdvogadoPassivo, BuscaAtivaConfig,
-    Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas, OpcaoResposta,
+    Carteira, CarteiraUsuarioAcesso, Contrato, DemandaAnaliseLoteSalvo, DocumentoModelo, Etiqueta, ListaDeTarefas,
+    ListaDeTarefasArquivoConfig, OpcaoResposta,
     KpiGlobalConfig, ProcessoCpfLoteSalvo, ProcessoCnjLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
@@ -71,6 +72,7 @@ from .services.demandas import (
 )
 from .services.peticao_combo import (
     PreviewError,
+    build_monitoria_contract_file_presence,
     build_monitoria_required_files_summary,
     build_preview,
     build_zip_bundle,
@@ -98,6 +100,7 @@ from .services.analise_lote_planilha import (
     build_analise_lote_rows_from_file_bytes,
     import_analise_lote_rows,
 )
+from .services.simple_xlsx import build_simple_xlsx, _excel_column_name
 from .integracoes_escavador.api import buscar_processo_por_cnj
 from .integracoes_escavador.partes import collect_partes_from_escavador_payload
 from .integracoes_escavador.parser import build_safe_andamento_fields, build_safe_status_nome
@@ -151,6 +154,148 @@ def normalize_label_title(value: str) -> str:
         else:
             formatted.append(cleaned.title())
     return " ".join(formatted)
+
+
+def _task_export_digits_only(value) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _task_export_display_user_name(user) -> str:
+    if not user:
+        return ""
+    full_name = (user.get_full_name() or "").strip()
+    return (full_name or user.username or "").strip()
+
+
+def _task_export_priority_label(value: str) -> str:
+    mapping = dict(Tarefa.PRIORIDADE_CHOICES)
+    return str(mapping.get(value, value or "")).strip().upper()
+
+
+def _task_export_date_label(value) -> str:
+    parsed = value if isinstance(value, datetime.date) else parse_date(str(value or "").strip())
+    if not parsed:
+        return ""
+    return parsed.strftime("%d/%m/%Y")
+
+
+def _task_export_resolve_payload(tarefa: Tarefa, lista: ListaDeTarefas) -> dict:
+    payload = tarefa.payload if isinstance(tarefa.payload, dict) else {}
+    if payload.get("tipo") == ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+        return payload
+    if not tarefa.processo_id:
+        return {}
+    try:
+        from .api.views import _prepare_task_automation_context
+        _, payload = _prepare_task_automation_context(tarefa.processo, lista, observacoes="")
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas) -> tuple[list[str], list[list[str]]]:
+    configs = list(lista.arquivos_configurados.filter(ativo=True).order_by("ordem", "id"))
+    file_headers = [str(config.nome_coluna or config.nome or "").strip() for config in configs]
+    headers = [
+        "Parte Contrária",
+        "CPF",
+        "CONTRATO",
+        "PRESCRIÇÃO",
+        *file_headers,
+        "SKP",
+        "RESPONSÁVEL",
+        "PRIORIDADE",
+    ]
+
+    rows: list[list[str]] = []
+    for tarefa in tarefas:
+        payload = _task_export_resolve_payload(tarefa, lista)
+        if payload.get("tipo") != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            continue
+        if not tarefa.processo_id:
+            continue
+
+        parte = payload.get("parte_contraria") or {}
+        parte_nome = format_polo_name(parte.get("nome") or "")
+        documento = _task_export_digits_only(parte.get("documento") or "")
+        contratos = payload.get("contratos") or []
+        presence_entries = build_monitoria_contract_file_presence(
+            tarefa.processo,
+            contratos=[str(contract.get("numero") or "").strip() for contract in contratos if str(contract.get("numero") or "").strip()],
+        )
+        presence_by_contract = {
+            str(entry.get("contrato") or "").strip(): (entry.get("present") or {})
+            for entry in presence_entries
+            if str(entry.get("contrato") or "").strip()
+        }
+
+        responsavel_nome = _task_export_display_user_name(tarefa.responsavel).upper()
+        prioridade = _task_export_priority_label(tarefa.prioridade)
+
+        for contrato in contratos:
+            numero = str(contrato.get("numero") or "").strip()
+            if not numero:
+                continue
+            present_map = presence_by_contract.get(numero, {})
+
+            row = [
+                parte_nome,
+                documento,
+                numero,
+                _task_export_date_label(contrato.get("prescricao")),
+            ]
+            all_answered = True
+            for config in configs:
+                status_key = _task_export_status_key_for_config(config)
+                is_present = bool(status_key and present_map.get(status_key))
+                row.append("CONCLUÍDO" if is_present else "")
+                if not is_present:
+                    all_answered = False
+            if all_answered:
+                continue
+            row.extend(["", responsavel_nome, prioridade])
+            rows.append(row)
+
+    return headers, rows
+
+
+def _task_export_build_mass_validations(lista: ListaDeTarefas, row_count: int) -> list[dict]:
+    if row_count <= 0:
+        return []
+    start_row = 2
+    end_row = row_count + 1
+    validations = []
+    configs = list(lista.arquivos_configurados.filter(ativo=True).order_by("ordem", "id"))
+    for offset, config in enumerate(configs, start=5):
+        label = str(config.nome_coluna or config.nome or "").strip().upper()
+        if "CONTRATO" in label:
+            formula1 = '"SOLICITAR IRON MONTAIN,CONCLUÍDO,PROCESSANDO CFBA,EXTRAVIADO,NÃO POSSUI"'
+        else:
+            formula1 = '"PENDENTE,CONCLUÍDO,NÃO POSSUI"'
+        validations.append({
+            "sqref": f"{_excel_column_name(offset)}{start_row}:{_excel_column_name(offset)}{end_row}",
+            "formula1": formula1,
+        })
+    return validations
+
+
+def _task_export_status_key_for_config(config: ListaDeTarefasArquivoConfig) -> str:
+    label = " ".join(
+        part for part in [
+            str(config.nome or "").strip(),
+            str(config.nome_coluna or "").strip(),
+            str(config.padrao_nome or "").strip(),
+        ] if part
+    ).upper()
+    if "CONTRATO" in label:
+        return "a06"
+    if "SALDO" in label:
+        return "a08"
+    if "RELAT" in label:
+        return "a07"
+    if "TED" in label:
+        return "a09"
+    return ""
 
 
 # Form para seleção de usuário na ação de delegar
@@ -739,10 +884,75 @@ class DocumentoModeloAdmin(admin.ModelAdmin):
             'created_at': anexo.criado_em.isoformat()
         }
 
+class ListaDeTarefasArquivoConfigInline(admin.TabularInline):
+    model = ListaDeTarefasArquivoConfig
+    extra = 0
+    fields = ('ordem', 'nome', 'nome_coluna', 'padrao_nome', 'ativo')
+
+
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
-    list_display = ('nome',)
+    list_display = ('nome', 'automacao_tipo', 'exportar_planilha_link')
     search_fields = ('nome',)
+    list_filter = ('automacao_tipo',)
+    inlines = [ListaDeTarefasArquivoConfigInline]
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<int:lista_id>/exportar-planilha/",
+                self.admin_site.admin_view(self.exportar_planilha_view),
+                name="contratos_listadetarefas_exportar_planilha",
+            ),
+        ]
+        return custom_urls + urls
+
+    @admin.display(description="Planilha")
+    def exportar_planilha_link(self, obj):
+        if obj.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            return "-"
+        url = reverse("admin:contratos_listadetarefas_exportar_planilha", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Exportar planilha</a>', url)
+
+    def exportar_planilha_view(self, request, lista_id):
+        lista = get_object_or_404(
+            ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
+            pk=lista_id,
+        )
+        if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            messages.error(request, "Essa lista não possui exportação de planilha configurada.")
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        tarefas = list(
+            Tarefa.objects.select_related("responsavel", "processo")
+            .filter(lista=lista, concluida=False)
+            .order_by("data", "id")
+        )
+        headers, rows = _task_export_build_mass_rows(lista, tarefas)
+        if not rows:
+            messages.warning(request, "Não há tarefas pendentes dessa lista com dados válidos para exportação.")
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        workbook_bytes = build_simple_xlsx(
+            "Solicitar Arquivos",
+            headers,
+            rows,
+            data_validations=_task_export_build_mass_validations(lista, len(rows)),
+        )
+        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(lista.nome or "lista").strip()).strip("_") or "lista"
+        filename = f"{safe_name}_{timestamp}.xlsx"
+
+        response = HttpResponse(
+            workbook_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="{filename}"; '
+            f"filename*=UTF-8''{quote(filename)}"
+        )
+        return response
 
 
 admin.site.site_header = "CFF SYSTEM"
@@ -3067,11 +3277,7 @@ def demandas_analise_planilha_view(request):
 
                                 lista = ListaDeTarefas.objects.filter(id=lista_id).first() if lista_id else None
                                 responsavel = User.objects.filter(id=responsavel_id).first() if responsavel_id else None
-
-                                lote = TarefaLote.objects.create(
-                                    descricao=f"Planilha (pendente): {descricao}",
-                                    criado_por=request.user,
-                                )
+                                from .api.views import _prepare_task_automation_context
 
                                 targets = []
                                 for cpf in target_cpfs:
@@ -3081,8 +3287,22 @@ def demandas_analise_planilha_view(request):
                                 if not targets:
                                     continue
 
-                                applied_tasks_targets += len(targets)
+                                prepared_targets = []
                                 for proc in targets:
+                                    observacoes_final, payload_final = _prepare_task_automation_context(
+                                        proc,
+                                        lista,
+                                        observacoes=observacoes,
+                                    )
+                                    prepared_targets.append((proc, observacoes_final, payload_final))
+
+                                lote = TarefaLote.objects.create(
+                                    descricao=f"Planilha (pendente): {descricao}",
+                                    criado_por=request.user,
+                                )
+
+                                applied_tasks_targets += len(targets)
+                                for proc, observacoes_final, payload_final in prepared_targets:
                                     Tarefa.objects.create(
                                         processo=proc,
                                         lote=lote,
@@ -3092,7 +3312,8 @@ def demandas_analise_planilha_view(request):
                                         responsavel=responsavel,
                                         prioridade=prioridade,
                                         concluida=concluida,
-                                        observacoes=observacoes,
+                                        observacoes=observacoes_final,
+                                        payload=payload_final,
                                         criado_por=request.user,
                                     )
                                     applied_tasks += 1

@@ -4711,6 +4711,15 @@ a.historylink {
 .agenda-panel__details-item--task .agenda-panel__details-item-title-cpf {
     font-size: 0.7rem;
 }
+.agenda-panel__details-item--task .agenda-panel__details-item-task-title {
+    width: 100%;
+    margin-bottom: 4px;
+    font-weight: 700;
+    font-size: 0.86rem;
+    line-height: 1.15;
+    text-align: center;
+    color: #244576;
+}
 .agenda-panel__details-item--task .agenda-panel__details-item-text {
     font-weight: 600;
     color: #1f2a40;

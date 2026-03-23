@@ -3496,6 +3496,9 @@ document.addEventListener('DOMContentLoaded', function() {
             cpf: parteCpf,
             parte_cpf: parteCpf,
             documento: parteCpf || item.documento || '',
+            displayTitle: item.display_title
+                || item.displayTitle
+                || '',
                 description: item.description
                     || item.descricao
                     || item.title
@@ -3993,6 +3996,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 label.textContent = entryData.label;
             }
             const titleRow = isAndamento ? null : buildEntryTitleRow(entryData);
+            const taskDisplayTitle = !isAndamento && type === 'T'
+                ? String(entryData.displayTitle || entryData.display_title || '').trim()
+                : '';
             let footer = null;
             if (isAndamento) {
                 entry.classList.add('agenda-panel__details-item--ap');
@@ -4056,6 +4062,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (titleRow) {
                     entry.appendChild(titleRow);
+                }
+                if (taskDisplayTitle) {
+                    const taskTitle = document.createElement('span');
+                    taskTitle.className = 'agenda-panel__details-item-task-title';
+                    taskTitle.textContent = taskDisplayTitle;
+                    entry.appendChild(taskTitle);
                 }
             }
             if (type !== 'S') {
@@ -10397,6 +10409,7 @@ document.addEventListener('DOMContentLoaded', function() {
             $(target).select2('open');
         }
     }, true);
+
 
     const stripInlineOriginalCells = () => {
         const selectors = [

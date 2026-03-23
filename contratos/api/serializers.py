@@ -5,6 +5,7 @@ from ..models import (
     Tarefa,
     Prazo,
     ListaDeTarefas,
+    ListaDeTarefasArquivoConfig,
     TarefaMensagem,
     PrazoMensagem,
     ProcessoArquivo,
@@ -31,21 +32,42 @@ class UserSerializer(serializers.ModelSerializer):
         ]
 
 class ListaDeTarefasSerializer(serializers.ModelSerializer):
+    arquivos_configurados = serializers.SerializerMethodField()
+
     class Meta:
         model = ListaDeTarefas
-        fields = ['id', 'nome']
+        fields = ['id', 'nome', 'automacao_tipo', 'arquivos_configurados']
+
+    def get_arquivos_configurados(self, obj):
+        arquivos = getattr(obj, 'arquivos_configurados', None)
+        if arquivos is None:
+            queryset = obj.arquivos_configurados.filter(ativo=True).order_by('ordem', 'id')
+        else:
+            queryset = [
+                arquivo for arquivo in arquivos.all()
+                if getattr(arquivo, 'ativo', False)
+            ]
+        return ListaDeTarefasArquivoConfigSerializer(queryset, many=True).data
+
+
+class ListaDeTarefasArquivoConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListaDeTarefasArquivoConfig
+        fields = ['id', 'nome', 'nome_coluna', 'padrao_nome', 'ordem']
 
 class TarefaSerializer(serializers.ModelSerializer):
     responsavel = UserSerializer(read_only=True)
     lista = ListaDeTarefasSerializer(read_only=True)
     prioridade_display = serializers.CharField(source='get_prioridade_display', read_only=True)
     admin_url = serializers.SerializerMethodField()
+    display_title = serializers.SerializerMethodField()
 
     class Meta:
         model = Tarefa
         fields = [
             'id',
             'descricao',
+            'display_title',
             'lista',
             'data',
             'data_origem',
@@ -63,6 +85,12 @@ class TarefaSerializer(serializers.ModelSerializer):
             return reverse('admin:contratos_processojudicial_change', args=[obj.processo_id])
         except Exception:
             return ''
+
+    def get_display_title(self, obj):
+        lista = getattr(obj, 'lista', None)
+        if lista and getattr(lista, 'automacao_tipo', '') == ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            return 'Solicitação de Arquivos'
+        return ''
 
 class PrazoSerializer(serializers.ModelSerializer):
     responsavel = UserSerializer(read_only=True)

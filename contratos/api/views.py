@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 import requests
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.views import APIView
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
@@ -1627,9 +1628,18 @@ class TarefaCreateAPIView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         processo = get_object_or_404(ProcessoJudicial, pk=self.kwargs.get('processo_id'))
+        lista = serializer.validated_data.get('lista')
+        observacoes = serializer.validated_data.get('observacoes')
+        observacoes_final, payload_final = _prepare_task_automation_context(
+            processo,
+            lista,
+            observacoes=observacoes,
+        )
         extra = {
             'processo': processo,
             'criado_por': self.request.user,
+            'observacoes': observacoes_final,
+            'payload': payload_final,
         }
         if bool(serializer.validated_data.get('concluida')):
             extra['concluido_em'] = timezone.now()
@@ -1735,6 +1745,262 @@ def _display_user_name(user):
         return ''
     full_name = (user.get_full_name() or '').strip()
     return full_name or user.username or ''
+
+
+def _normalize_documento_digits_only(value):
+    return ''.join(ch for ch in str(value or '') if ch.isdigit())
+
+
+def _to_title_case_name(value):
+    normalized = re.sub(r'\s+', ' ', str(value or '').strip())
+    if not normalized:
+        return ''
+    return normalized.lower().title()
+
+
+def _normalize_yes_no_token(value):
+    return re.sub(r'[^a-z0-9]', '', str(value or '').strip().lower())
+
+
+def _response_key_token(key):
+    return re.sub(r'[^a-z0-9]', '', str(key or '').strip().lower())
+
+
+def _is_deleted_analysis_card(card):
+    if not isinstance(card, dict):
+        return False
+    text = ' '.join(
+        str(card.get(key) or '').strip()
+        for key in ('observacoes', 'observacao', 'descricao')
+    )
+    return bool(text and re.search(r'an[aá]lise deletada', text, flags=re.IGNORECASE))
+
+
+def _extract_monitoria_contract_values(card):
+    if not isinstance(card, dict):
+        return []
+    responses = card.get('tipo_de_acao_respostas') or {}
+    if not isinstance(responses, dict):
+        responses = {}
+
+    values = []
+    seen_signatures = set()
+
+    def append_value(raw_value):
+        sequence = raw_value if isinstance(raw_value, (list, tuple)) else [raw_value]
+        for item in sequence:
+            signature = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            values.append(item)
+
+    for container in (responses, card):
+        if not isinstance(container, dict):
+            continue
+        for key, raw_value in container.items():
+            token = _response_key_token(key)
+            if token in {'contratosparamonitoria', 'selecionarcontratosmonitoria'}:
+                append_value(raw_value)
+                continue
+            if 'contrato' in token and 'monitor' in token and isinstance(raw_value, (list, tuple)):
+                append_value(raw_value)
+
+    if not values and isinstance(card.get('contratos'), (list, tuple)):
+        append_value(card.get('contratos'))
+
+    return values
+
+
+def _card_requests_monitoria(card):
+    if not isinstance(card, dict):
+        return False
+    responses = card.get('tipo_de_acao_respostas') or {}
+    if not isinstance(responses, dict):
+        responses = {}
+
+    for container in (responses, card):
+        if not isinstance(container, dict):
+            continue
+        for key, raw_value in container.items():
+            token = _response_key_token(key)
+            if 'propormonit' not in token:
+                continue
+            if _normalize_yes_no_token(raw_value) == 'sim':
+                return True
+    return False
+
+
+def _resolve_requested_monitoria_contracts(processo):
+    analise = getattr(processo, 'analise_processo', None)
+    respostas = getattr(analise, 'respostas', {}) or {}
+    if not isinstance(respostas, dict):
+        respostas = {}
+
+    all_contracts = list(processo.contratos.all().only('id', 'numero_contrato', 'data_prescricao').order_by('id'))
+    if not all_contracts:
+        return []
+
+    contract_by_id = {contract.id: contract for contract in all_contracts}
+    contract_by_number = {}
+    for contract in all_contracts:
+        for lookup_key in _agenda_build_contract_lookup_keys(contract.numero_contrato):
+            contract_by_number.setdefault(lookup_key, contract)
+
+    selected_contract_ids = []
+    seen_ids = set()
+
+    def append_contract(contract):
+        if not contract or contract.pk in seen_ids:
+            return
+        seen_ids.add(contract.pk)
+        selected_contract_ids.append(contract.pk)
+
+    cards_found = False
+    for source in ('saved_processos_vinculados', 'processos_vinculados'):
+        raw_cards = respostas.get(source) or []
+        if not isinstance(raw_cards, list):
+            continue
+        for card in raw_cards:
+            if not isinstance(card, dict) or _is_deleted_analysis_card(card):
+                continue
+            cards_found = True
+            if not _card_requests_monitoria(card):
+                continue
+            for raw_contract in _extract_monitoria_contract_values(card):
+                parsed_ids, parsed_numbers = _agenda_extract_contract_refs(raw_contract)
+                for candidate_id in parsed_ids:
+                    append_contract(contract_by_id.get(candidate_id))
+                for candidate_number in parsed_numbers:
+                    append_contract(contract_by_number.get(candidate_number))
+
+    if not cards_found and _card_requests_monitoria(respostas):
+        for raw_contract in _extract_monitoria_contract_values(respostas):
+            parsed_ids, parsed_numbers = _agenda_extract_contract_refs(raw_contract)
+            for candidate_id in parsed_ids:
+                append_contract(contract_by_id.get(candidate_id))
+            for candidate_number in parsed_numbers:
+                append_contract(contract_by_number.get(candidate_number))
+
+    return [contract_by_id[contract_id] for contract_id in selected_contract_ids if contract_id in contract_by_id]
+
+
+def _build_requested_files_payload(lista, contract_number):
+    arquivos = []
+    if not lista:
+        return arquivos
+    configs = list(
+        lista.arquivos_configurados.filter(ativo=True).order_by('ordem', 'id')
+    )
+    for config in configs:
+        pattern = str(config.padrao_nome or '{contrato} - {arquivo}').strip()
+        expected_name = pattern.format(contrato=contract_number, arquivo=config.nome)
+        arquivos.append({
+            'id': config.id,
+            'nome': config.nome,
+            'coluna': config.nome_coluna or config.nome,
+            'padrao_nome': pattern,
+            'arquivo_esperado': expected_name,
+        })
+    return arquivos
+
+
+def _build_mass_file_request_context(processo, lista, manual_observacoes=''):
+    if not processo:
+        raise DRFValidationError({'detail': 'A lista selecionada exige vínculo com um cadastro.'})
+
+    parte = (
+        processo.partes_processuais
+        .filter(tipo_polo='PASSIVO')
+        .only('nome', 'documento')
+        .order_by('id')
+        .first()
+    )
+    if not parte:
+        parte = processo.partes_processuais.only('nome', 'documento').order_by('id').first()
+    if not parte:
+        raise DRFValidationError({
+            'detail': 'Conclua primeiro o cadastro da parte contrária antes de solicitar arquivos da Massa.'
+        })
+
+    documento = _normalize_documento_digits_only(getattr(parte, 'documento', ''))
+    if not documento:
+        raise DRFValidationError({
+            'detail': 'O cadastro atual não possui CPF/CNPJ da parte contrária para a solicitação de arquivos da Massa.'
+        })
+    documento_tipo = 'CPF' if len(documento) <= 11 else 'CNPJ'
+
+    contracts = _resolve_requested_monitoria_contracts(processo)
+    if not contracts:
+        processo_label = str(getattr(processo, 'cnj', '') or processo.pk)
+        raise DRFValidationError({
+            'detail': (
+                'Conclua primeiro a análise via questionário procedural na aba '
+                f'Análise do Processo para o cadastro {processo_label}.'
+            )
+        })
+
+    contract_numbers = [
+        str(contract.numero_contrato or '').strip()
+        for contract in contracts
+        if str(contract.numero_contrato or '').strip()
+    ]
+    if not contract_numbers:
+        raise DRFValidationError({
+            'detail': 'Os contratos selecionados para a solicitação de arquivos da Massa não possuem número válido.'
+        })
+
+    requested_files = [
+        {
+            'contrato': contract_number,
+            'arquivos': _build_requested_files_payload(lista, contract_number),
+        }
+        for contract_number in contract_numbers
+    ]
+
+    requested_file_names = []
+    for contract_entry in requested_files:
+        for arquivo in contract_entry.get('arquivos') or []:
+            nome = str(arquivo.get('nome') or '').strip()
+            if nome and nome not in requested_file_names:
+                requested_file_names.append(nome)
+
+    lines = [
+        f'Parte Contrária: {_to_title_case_name(parte.nome)}',
+        f'CPF/CNPJ: {documento}',
+        f'Contratos selecionados ({len(contract_numbers)}): {", ".join(contract_numbers)}',
+    ]
+    if requested_file_names:
+        lines.append(f'Arquivos solicitados: {", ".join(requested_file_names)}')
+
+    manual_observacoes = str(manual_observacoes or '').strip()
+    if manual_observacoes:
+        lines.extend(['', 'Observações adicionais:', manual_observacoes])
+
+    payload = {
+        'tipo': ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA,
+        'parte_contraria': {
+            'nome': _to_title_case_name(parte.nome),
+            'documento': documento,
+            'tipo_documento': documento_tipo,
+        },
+        'contratos': [
+            {
+                'id': contract.id,
+                'numero': str(contract.numero_contrato or '').strip(),
+                'prescricao': contract.data_prescricao.isoformat() if contract.data_prescricao else None,
+            }
+            for contract in contracts
+        ],
+        'arquivos_solicitados': requested_files,
+    }
+    return '\n'.join(lines), payload
+
+
+def _prepare_task_automation_context(processo, lista, observacoes=''):
+    if not lista or lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+        return str(observacoes or '').strip(), {}
+    return _build_mass_file_request_context(processo, lista, manual_observacoes=observacoes)
 
 
 def _create_task_notification_for_receiver(tarefa, actor=None):
@@ -1873,46 +2139,57 @@ class TarefaBulkCreateAPIView(APIView):
         responsavel = User.objects.filter(id=responsavel_id).first() if responsavel_id else None
         lista = ListaDeTarefas.objects.filter(id=lista_id).first() if lista_id else None
 
-        lote = TarefaLote.objects.create(
-            descricao=descricao,
-            criado_por=request.user,
-        )
-
         created_tasks = []
         targets = processo_ids if processo_ids else [None]
+        prepared_targets = []
         for processo_id in targets:
             processo = processo_map.get(processo_id) if processo_id else None
-            tarefa = Tarefa.objects.create(
-                processo=processo,
-                lote=lote,
-                descricao=descricao,
-                lista=lista,
-                data=data,
-                responsavel=responsavel,
-                prioridade=prioridade,
-                concluida=concluida,
-                concluido_em=timezone.now() if concluida else None,
-                concluido_por=request.user if concluida else None,
+            observacoes_final, payload_final = _prepare_task_automation_context(
+                processo,
+                lista,
                 observacoes=observacoes,
+            )
+            prepared_targets.append((processo, observacoes_final, payload_final))
+
+        with transaction.atomic():
+            lote = TarefaLote.objects.create(
+                descricao=descricao,
                 criado_por=request.user,
             )
-            created_tasks.append(tarefa)
-            _create_task_notification_for_receiver(tarefa, actor=request.user)
-            if comentario_texto or arquivo:
-                comentario = TarefaMensagem.objects.create(
-                    tarefa=tarefa,
-                    autor=request.user,
-                    texto=comentario_texto or '',
+
+            for processo, observacoes_final, payload_final in prepared_targets:
+                tarefa = Tarefa.objects.create(
+                    processo=processo,
+                    lote=lote,
+                    descricao=descricao,
+                    lista=lista,
+                    data=data,
+                    responsavel=responsavel,
+                    prioridade=prioridade,
+                    concluida=concluida,
+                    concluido_em=timezone.now() if concluida else None,
+                    concluido_por=request.user if concluida else None,
+                    observacoes=observacoes_final,
+                    payload=payload_final,
+                    criado_por=request.user,
                 )
-                if arquivo and processo:
-                    arquivo.seek(0)
-                    ProcessoArquivo.objects.create(
-                        processo=processo,
+                created_tasks.append(tarefa)
+                _create_task_notification_for_receiver(tarefa, actor=request.user)
+                if comentario_texto or arquivo:
+                    comentario = TarefaMensagem.objects.create(
                         tarefa=tarefa,
-                        mensagem=comentario,
-                        enviado_por=request.user,
-                        arquivo=arquivo,
+                        autor=request.user,
+                        texto=comentario_texto or '',
                     )
+                    if arquivo and processo:
+                        arquivo.seek(0)
+                        ProcessoArquivo.objects.create(
+                            processo=processo,
+                            tarefa=tarefa,
+                            mensagem=comentario,
+                            enviado_por=request.user,
+                            arquivo=arquivo,
+                        )
 
         return Response({
             'created': len(created_tasks),
@@ -2581,7 +2858,7 @@ class ListaDeTarefasAPIView(generics.ListCreateAPIView):
     API para listar e criar Listas de Tarefas.
     """
     permission_classes = [IsAuthenticated]
-    queryset = ListaDeTarefas.objects.all()
+    queryset = ListaDeTarefas.objects.prefetch_related('arquivos_configurados').all()
     serializer_class = ListaDeTarefasSerializer
 
 # --- NOVAS VIEWS PARA O BOTÃO CIA ---

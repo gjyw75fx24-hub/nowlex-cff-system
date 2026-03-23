@@ -984,7 +984,21 @@ class AndamentoProcessualAdvogado(models.Model):
 # --- Modelos de Tarefas e Prazos ---
 
 class ListaDeTarefas(models.Model):
+    AUTOMACAO_NENHUMA = ''
+    AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA = 'solicitacao_arquivos_massa'
+    AUTOMACAO_CHOICES = [
+        (AUTOMACAO_NENHUMA, 'Sem automação'),
+        (AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA, 'Solicitação de arquivos Massa'),
+    ]
+
     nome = models.CharField(max_length=100, unique=True)
+    automacao_tipo = models.CharField(
+        max_length=64,
+        choices=AUTOMACAO_CHOICES,
+        blank=True,
+        default=AUTOMACAO_NENHUMA,
+        verbose_name='Automação',
+    )
 
     def __str__(self):
         return self.nome
@@ -993,6 +1007,44 @@ class ListaDeTarefas(models.Model):
         verbose_name = "Lista de Tarefas"
         verbose_name_plural = "Listas de Tarefas"
         ordering = ['nome']
+
+
+class ListaDeTarefasArquivoConfig(models.Model):
+    lista = models.ForeignKey(
+        ListaDeTarefas,
+        on_delete=models.CASCADE,
+        related_name='arquivos_configurados',
+        verbose_name='Lista',
+    )
+    nome = models.CharField(max_length=120, verbose_name='Nome do arquivo')
+    nome_coluna = models.CharField(
+        max_length=120,
+        blank=True,
+        verbose_name='Coluna da planilha',
+        help_text='Opcional. Se vazio, usa o nome do arquivo.',
+    )
+    padrao_nome = models.CharField(
+        max_length=160,
+        verbose_name='Padrão do nome',
+        help_text='Use {contrato} para inserir o número do contrato.',
+    )
+    ordem = models.PositiveSmallIntegerField(default=1, verbose_name='Ordem')
+    ativo = models.BooleanField(default=True, verbose_name='Ativo')
+
+    class Meta:
+        verbose_name = 'Configuração de arquivo da lista'
+        verbose_name_plural = 'Configurações de arquivos da lista'
+        ordering = ['ordem', 'id']
+
+    def __str__(self):
+        return f'{self.lista.nome} - {self.nome}'
+
+    def save(self, *args, **kwargs):
+        self.nome = str(self.nome or '').strip()
+        self.nome_coluna = str(self.nome_coluna or '').strip()
+        self.padrao_nome = str(self.padrao_nome or '').strip() or '{contrato} - {arquivo}'
+        super().save(*args, **kwargs)
+
 
 class TarefaLote(models.Model):
     descricao = models.CharField(max_length=255, verbose_name="Descrição")
@@ -1157,6 +1209,7 @@ class Tarefa(models.Model):
         verbose_name="Concluído por",
     )
     observacoes = models.TextField(blank=True, null=True, verbose_name="Observações")
+    payload = models.JSONField(default=dict, blank=True, verbose_name='Payload')
     criado_em = models.DateTimeField(auto_now_add=True, null=True, blank=True, verbose_name="Criado em", editable=True)
     criado_por = models.ForeignKey(
         User,

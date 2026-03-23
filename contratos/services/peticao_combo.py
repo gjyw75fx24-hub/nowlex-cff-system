@@ -114,6 +114,43 @@ def build_monitoria_required_files_summary(processo, contratos=None, files=None)
     ]
 
 
+def build_monitoria_contract_file_presence(processo, contratos=None, files=None):
+    if not processo:
+        return []
+
+    contract_numbers = []
+    if contratos is None:
+        contract_numbers = _extract_contracts_from_processo(processo)
+    else:
+        for contrato in contratos:
+            numero = ""
+            if isinstance(contrato, str):
+                numero = str(contrato or "").strip()
+            else:
+                numero = str(getattr(contrato, "numero_contrato", "") or "").strip()
+            if numero and numero not in contract_numbers:
+                contract_numbers.append(numero)
+
+    if not contract_numbers:
+        return []
+
+    available_files = list(files) if files is not None else list(processo.arquivos.all())
+    per_contract = _collect_contract_files(contract_numbers, available_files, set(), [])
+    summary = []
+    for entry in per_contract:
+        files_by_key = entry.get("files") or {}
+        summary.append({
+            "contrato": str(entry.get("contrato") or "").strip(),
+            "present": {
+                "a06": bool(files_by_key.get("a06")),
+                "a08": bool(files_by_key.get("a08")),
+                "a07": bool(files_by_key.get("a07")),
+                "a09": bool(files_by_key.get("a09")),
+            },
+        })
+    return summary
+
+
 def build_zip_bundle(tipo_id, arquivo_base_id, optional_ids=None, convert_base_docx=True):
     assets = _collect_combo_assets(tipo_id, arquivo_base_id)
     base_file = assets['base_file']
