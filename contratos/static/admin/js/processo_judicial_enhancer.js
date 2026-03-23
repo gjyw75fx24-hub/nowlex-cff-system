@@ -3496,12 +3496,16 @@ document.addEventListener('DOMContentLoaded', function() {
             cpf: parteCpf,
             parte_cpf: parteCpf,
             documento: parteCpf || item.documento || '',
+            title: item.display_title
+                || item.displayTitle
+                || item.title
+                || item.titulo
+                || '',
             displayTitle: item.display_title
                 || item.displayTitle
                 || '',
-                description: item.description
-                    || item.descricao
-                    || item.title
+            description: item.description
+                || item.descricao
                 || item.titulo
                 || '',
             detail: item.detail || item.observacoes || item.texto_bruto || '',
