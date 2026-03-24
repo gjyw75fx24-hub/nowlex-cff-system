@@ -1586,6 +1586,11 @@ class TarefaComentarioListCreateAPIView(APIView):
                 arquivo=arquivo,
             )
             processo_arquivo.save()
+        _create_task_mention_notifications_for_comment(
+            tarefa,
+            actor=request.user,
+            texto=texto,
+        )
         serializer = TarefaMensagemSerializer(comentario, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1637,6 +1642,11 @@ class PrazoComentarioListCreateAPIView(APIView):
                 arquivo=arquivo,
             )
             processo_arquivo.save()
+        _create_prazo_mention_notifications_for_comment(
+            prazo,
+            actor=request.user,
+            texto=texto,
+        )
         serializer = PrazoMensagemSerializer(comentario, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -2097,6 +2107,103 @@ def _create_task_notification_for_receiver(tarefa, actor=None):
     )
 
 
+COMMENT_MENTION_REGEX = re.compile(r'(?<!\w)@([A-Za-z0-9._-]+)')
+
+
+def _extract_mentioned_users(text):
+    raw_text = str(text or '').strip()
+    if not raw_text:
+        return []
+    ordered_keys = []
+    seen = set()
+    for username in COMMENT_MENTION_REGEX.findall(raw_text):
+        normalized = str(username or '').strip().casefold()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered_keys.append(normalized)
+    if not ordered_keys:
+        return []
+    user_map = {
+        user.username.casefold(): user
+        for user in User.objects.filter(is_active=True).only('id', 'username', 'first_name', 'last_name')
+        if user.username
+    }
+    return [user_map[key] for key in ordered_keys if key in user_map]
+
+
+def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None, texto=''):
+    if not usuario or not usuario.is_active:
+        return
+    if tarefa and tarefa.concluida:
+        return
+    if prazo and prazo.concluido:
+        return
+    defaults = {
+        'titulo': 'Você foi mencionado em um prazo' if prazo else 'Você foi mencionado em uma tarefa',
+        'descricao': (prazo.titulo if prazo else tarefa.descricao) or '',
+        'autor_nome': _display_user_name(actor),
+        'justificativa': str(texto or '').strip(),
+        'lida_em': None,
+        'criada_em': timezone.now(),
+    }
+    target_filter = {
+        'usuario': usuario,
+        'tipo': TarefaNotificacao.TIPO_MENCAO,
+        'tarefa': tarefa if tarefa else None,
+        'prazo': prazo if prazo else None,
+    }
+    notification = TarefaNotificacao.objects.filter(**target_filter).first()
+    if notification:
+        for field, value in defaults.items():
+            setattr(notification, field, value)
+        notification.save(
+            update_fields=[
+                'titulo',
+                'descricao',
+                'autor_nome',
+                'justificativa',
+                'lida_em',
+                'criada_em',
+            ]
+        )
+        return
+    TarefaNotificacao.objects.create(
+        **target_filter,
+        **defaults,
+    )
+
+
+def _create_task_mention_notifications_for_comment(tarefa, actor=None, texto=''):
+    if not tarefa or not texto:
+        return
+    actor_id = getattr(actor, 'id', None)
+    for user in _extract_mentioned_users(texto):
+        if actor_id and user.id == actor_id:
+            continue
+        _upsert_mention_notification(
+            usuario=user,
+            tarefa=tarefa,
+            actor=actor,
+            texto=texto,
+        )
+
+
+def _create_prazo_mention_notifications_for_comment(prazo, actor=None, texto=''):
+    if not prazo or not texto:
+        return
+    actor_id = getattr(actor, 'id', None)
+    for user in _extract_mentioned_users(texto):
+        if actor_id and user.id == actor_id:
+            continue
+        _upsert_mention_notification(
+            usuario=user,
+            prazo=prazo,
+            actor=actor,
+            texto=texto,
+        )
+
+
 def _create_task_completion_notification_for_creator(tarefa, actor=None, justificativa=''):
     if not tarefa:
         return
@@ -2340,6 +2447,11 @@ class TarefaBulkCreateAPIView(APIView):
                         autor=request.user,
                         texto=comentario_texto or '',
                     )
+                    _create_task_mention_notifications_for_comment(
+                        tarefa,
+                        actor=request.user,
+                        texto=comentario_texto,
+                    )
                     if arquivos and processo:
                         for arquivo in arquivos:
                             arquivo.seek(0)
@@ -2439,11 +2551,18 @@ class TarefaBulkHistoryActionAPIView(APIView):
 
         tarefas_qs = Tarefa.objects.filter(lote_id__in=allowed_ids)
         if action in ('concluir', 'concluida', 'concluidas', 'finalizar'):
-            updated = tarefas_qs.filter(concluida=False).update(
+            tarefas_para_fechar_ids = list(tarefas_qs.filter(concluida=False).values_list('id', flat=True))
+            updated = Tarefa.objects.filter(id__in=tarefas_para_fechar_ids).update(
                 concluida=True,
                 concluido_em=timezone.now(),
                 concluido_por=request.user,
             )
+            if tarefas_para_fechar_ids:
+                TarefaNotificacao.objects.filter(
+                    tarefa_id__in=tarefas_para_fechar_ids,
+                    tipo__in=[TarefaNotificacao.TIPO_RECEBIDA, TarefaNotificacao.TIPO_MENCAO],
+                    lida_em__isnull=True,
+                ).update(lida_em=timezone.now())
             return Response({'updated': updated, 'action': 'concluir'})
         if action in ('delete', 'deletar', 'excluir', 'remover'):
             deleted = tarefas_qs.count()
@@ -2535,6 +2654,11 @@ class PrazoBulkCreateAPIView(APIView):
                     autor=request.user,
                     texto=comentario_texto or '',
                 )
+                _create_prazo_mention_notifications_for_comment(
+                    prazo,
+                    actor=request.user,
+                    texto=comentario_texto,
+                )
                 if arquivos and processo:
                     for arquivo in arquivos:
                         arquivo.seek(0)
@@ -2576,6 +2700,36 @@ class AgendaUsersAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if (request.GET.get('context') or '').strip().lower() == 'mentions':
+            users = (
+                User.objects.filter(is_active=True)
+                .annotate(
+                    pending_tasks=Count(
+                        'tarefas_responsaveis',
+                        filter=Q(tarefas_responsaveis__concluida=False),
+                        distinct=True,
+                    ),
+                    pending_prazos=Count(
+                        'prazos_responsaveis',
+                        filter=Q(prazos_responsaveis__concluido=False),
+                        distinct=True,
+                    ),
+                    completed_tasks=Count(
+                        'tarefas_responsaveis',
+                        filter=Q(tarefas_responsaveis__concluida=True),
+                        distinct=True,
+                    ),
+                    completed_prazos=Count(
+                        'prazos_responsaveis',
+                        filter=Q(prazos_responsaveis__concluido=True),
+                        distinct=True,
+                    ),
+                )
+                .order_by('first_name', 'last_name', 'username')[:60]
+            )
+            serializer = UserSerializer(users, many=True)
+            return Response(serializer.data)
+
         is_supervisor_flag = is_supervisor_user(request.user)
         if not is_supervisor_flag:
             # Usuário comum não deve navegar agendas de terceiros.
@@ -2965,6 +3119,11 @@ class AgendaConcluirAPIView(APIView):
                     concluido_em=now,
                     concluido_por=request.user,
                 )
+                TarefaNotificacao.objects.filter(
+                    tarefa_id__in=tarefas_to_close_ids,
+                    tipo__in=[TarefaNotificacao.TIPO_RECEBIDA, TarefaNotificacao.TIPO_MENCAO],
+                    lida_em__isnull=True,
+                ).update(lida_em=now)
                 TarefaMensagem.objects.bulk_create([
                     TarefaMensagem(
                         tarefa_id=tarefa_id,
@@ -2990,6 +3149,11 @@ class AgendaConcluirAPIView(APIView):
                     concluido_em=now,
                     concluido_por=request.user,
                 )
+                TarefaNotificacao.objects.filter(
+                    prazo_id__in=prazos_to_close_ids,
+                    tipo__in=[TarefaNotificacao.TIPO_RECEBIDA, TarefaNotificacao.TIPO_MENCAO],
+                    lida_em__isnull=True,
+                ).update(lida_em=now)
                 PrazoMensagem.objects.bulk_create([
                     PrazoMensagem(
                         prazo_id=prazo_id,

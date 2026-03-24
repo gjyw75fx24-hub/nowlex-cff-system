@@ -5056,7 +5056,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                             <input type="text" placeholder="Digite um comentário">
                                             <input type="file" class="tarefa-comments-file" id="agenda-task-comments-file" style="display:none" multiple>
                                             <label class="tarefa-comments-icon" data-role="attachment" for="agenda-task-comments-file">📎</label>
-                                            <span class="tarefa-comments-icon">@</span>
+                                            <button type="button" class="tarefa-comments-icon tarefa-comments-icon--mention" data-role="mention" aria-label="Mencionar usuário">@</button>
                                         </div>
                                         <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
                                     </div>
@@ -5133,6 +5133,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const taskCommentsTime = taskCommentsCard?.querySelector('.tarefa-comments-time');
         const taskCommentsInput = taskCommentsCard?.querySelector('.tarefa-comments-input input');
         const taskCommentsFile = taskCommentsCard?.querySelector('.tarefa-comments-file');
+        const taskCommentsMentionButton = taskCommentsCard?.querySelector('.tarefa-comments-icon[data-role="mention"]');
         const taskCommentsSend = taskCommentsCard?.querySelector('.tarefa-comments-send');
         const taskCommentsAttachmentPreview = taskCommentsCard?.querySelector('.tarefa-comments-attachment-preview');
         const taskCommentsAttachmentPreviewName = taskCommentsCard?.querySelector('.tarefa-comments-attachment-preview-name');
@@ -5343,6 +5344,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (taskCommentsFile) {
                 taskCommentsFile.disabled = agendaTaskCommentsSubmitting;
             }
+            if (taskCommentsMentionButton) {
+                taskCommentsMentionButton.disabled = agendaTaskCommentsSubmitting;
+            }
+            if (agendaTaskCommentsSubmitting) {
+                closeMentionDropdownForPanel(taskCommentsPanel);
+            }
             const hasTask = Boolean(activeTaskCommentsEntry?.backendId);
             const hasText = Boolean(taskCommentsInput?.value?.trim());
             const hasFile = getSelectedCommentFiles(taskCommentsFile).length > 0;
@@ -5357,6 +5364,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (taskCommentsCard) {
                 taskCommentsCard.style.display = 'none';
             }
+            closeMentionDropdownForPanel(taskCommentsPanel);
             if (taskCommentsName) {
                 taskCommentsName.textContent = 'Criado por';
             }
@@ -5420,6 +5428,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     taskCommentsHistory.textContent = 'Não foi possível carregar os comentários.';
                 });
         };
+
+        attachCommentMentionPicker(taskCommentsPanel, {
+            getPreferredUser: () => activeTaskCommentsEntry?.created_by || taskCommentsName?.textContent || '',
+        });
 
         const buildSupervisorNoteKey = (entryData) => {
             if (!entryData) return '';
@@ -7493,8 +7505,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const agendaBulkCache = {
         users: null,
+        mentionUsers: null,
         lists: null,
         usersPromise: null,
+        mentionUsersPromise: null,
         listsPromise: null,
     };
 
@@ -7599,6 +7613,225 @@ document.addEventListener('DOMContentLoaded', function() {
                 return agendaBulkCache.users;
             });
         return agendaBulkCache.usersPromise;
+    };
+
+    const fetchMentionUsersList = () => {
+        if (agendaBulkCache.mentionUsersPromise) {
+            return agendaBulkCache.mentionUsersPromise;
+        }
+        agendaBulkCache.mentionUsersPromise = fetch('/api/agenda/users/?context=mentions')
+            .then((response) => {
+                if (!response.ok) throw new Error('Falha ao carregar usuários para menção');
+                return response.json();
+            })
+            .then((data) => {
+                agendaBulkCache.mentionUsers = Array.isArray(data) ? data : [];
+                return agendaBulkCache.mentionUsers;
+            })
+            .catch(() => {
+                agendaBulkCache.mentionUsers = [];
+                return agendaBulkCache.mentionUsers;
+            });
+        return agendaBulkCache.mentionUsersPromise;
+    };
+
+    let activeMentionDropdownState = null;
+
+    const normalizeMentionComparable = (value) => (
+        String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .toLowerCase()
+    );
+
+    const buildMentionUserDisplayLabel = (user) => {
+        const fullName = formatResponsavelName(user);
+        return fullName || user?.username || '';
+    };
+
+    const resolveMentionPreference = (rawPreferred) => {
+        if (!rawPreferred) return null;
+        if (typeof rawPreferred === 'string') {
+            const normalized = normalizeMentionComparable(rawPreferred);
+            return normalized ? { id: null, username: normalized, label: normalized } : null;
+        }
+        const numericId = Number.parseInt(`${rawPreferred.id || ''}`, 10);
+        return {
+            id: Number.isFinite(numericId) ? numericId : null,
+            username: normalizeMentionComparable(rawPreferred.username),
+            label: normalizeMentionComparable(buildMentionUserDisplayLabel(rawPreferred)),
+        };
+    };
+
+    const isPreferredMentionUser = (user, preferred) => {
+        if (!user || !preferred) return false;
+        const userId = Number.parseInt(`${user.id || ''}`, 10);
+        if (preferred.id && Number.isFinite(userId) && userId === preferred.id) {
+            return true;
+        }
+        return Boolean(
+            (preferred.username && preferred.username === normalizeMentionComparable(user.username))
+            || (preferred.label && preferred.label === normalizeMentionComparable(buildMentionUserDisplayLabel(user)))
+        );
+    };
+
+    const sortMentionUsers = (users, preferred) => (
+        Array.from(users || []).sort((left, right) => {
+            const leftPreferred = isPreferredMentionUser(left, preferred) ? 0 : 1;
+            const rightPreferred = isPreferredMentionUser(right, preferred) ? 0 : 1;
+            if (leftPreferred !== rightPreferred) {
+                return leftPreferred - rightPreferred;
+            }
+            return buildMentionUserDisplayLabel(left).localeCompare(
+                buildMentionUserDisplayLabel(right),
+                'pt-BR',
+                { sensitivity: 'base' }
+            );
+        })
+    );
+
+    const closeActiveMentionDropdown = () => {
+        if (!activeMentionDropdownState) return;
+        const { menu, trigger, cleanup } = activeMentionDropdownState;
+        cleanup?.();
+        trigger?.classList.remove('tarefa-comments-icon-active');
+        menu?.remove();
+        activeMentionDropdownState = null;
+    };
+
+    const closeMentionDropdownForPanel = (panel) => {
+        if (!panel || !activeMentionDropdownState || activeMentionDropdownState.panel !== panel) {
+            return;
+        }
+        closeActiveMentionDropdown();
+    };
+
+    const insertMentionAtCursor = (input, username) => {
+        if (!(input instanceof HTMLInputElement) || !username) return;
+        const value = input.value || '';
+        const selectionStart = input.selectionStart ?? value.length;
+        const selectionEnd = input.selectionEnd ?? selectionStart;
+        const before = value.slice(0, selectionStart);
+        const after = value.slice(selectionEnd);
+        const atIndex = before.lastIndexOf('@');
+        const canReplaceTypedMention = (
+            atIndex >= 0
+            && (atIndex === 0 || /\s/.test(before.charAt(atIndex - 1)))
+            && /^[A-Za-z0-9._-]*$/.test(before.slice(atIndex + 1))
+        );
+        const prefix = canReplaceTypedMention ? before.slice(0, atIndex) : before;
+        const leadingSpace = prefix && !/\s$/.test(prefix) ? ' ' : '';
+        const mentionToken = `@${username}`;
+        const trailingSpace = after && !/^\s/.test(after) ? ' ' : ' ';
+        input.value = `${prefix}${leadingSpace}${mentionToken}${trailingSpace}${after}`;
+        const nextCursor = (prefix + leadingSpace + mentionToken + ' ').length;
+        input.focus();
+        input.setSelectionRange(nextCursor, nextCursor);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const openMentionDropdown = ({ panel, input, trigger, preferredUser }) => {
+        if (!(panel instanceof Element) || !(input instanceof HTMLInputElement) || !(trigger instanceof HTMLElement)) {
+            return;
+        }
+        if (activeMentionDropdownState?.panel === panel) {
+            closeActiveMentionDropdown();
+            return;
+        }
+        closeActiveMentionDropdown();
+        const container = trigger.closest('.tarefa-comments-input');
+        if (!(container instanceof Element)) {
+            return;
+        }
+        trigger.classList.add('tarefa-comments-icon-active');
+        fetchMentionUsersList().then((users) => {
+            if (!Array.isArray(users) || !users.length) {
+                trigger.classList.remove('tarefa-comments-icon-active');
+                return;
+            }
+            const sortedUsers = sortMentionUsers(
+                users,
+                resolveMentionPreference(typeof preferredUser === 'function' ? preferredUser() : preferredUser)
+            );
+            const menu = document.createElement('div');
+            menu.className = 'tarefa-mention-dropdown';
+            sortedUsers.forEach((user) => {
+                if (!user?.username) return;
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'tarefa-mention-item';
+                const label = document.createElement('strong');
+                label.className = 'tarefa-mention-item-label';
+                label.textContent = buildMentionUserDisplayLabel(user) || user.username;
+                const meta = document.createElement('span');
+                meta.className = 'tarefa-mention-item-meta';
+                meta.textContent = `@${user.username}`;
+                item.append(label, meta);
+                item.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    insertMentionAtCursor(input, user.username);
+                    closeActiveMentionDropdown();
+                });
+                menu.appendChild(item);
+            });
+            if (!menu.childElementCount) {
+                trigger.classList.remove('tarefa-comments-icon-active');
+                return;
+            }
+            container.appendChild(menu);
+            const handlePointerDown = (event) => {
+                if (menu.contains(event.target) || trigger.contains(event.target)) {
+                    return;
+                }
+                closeActiveMentionDropdown();
+            };
+            const handleEscape = (event) => {
+                if (event.key !== 'Escape') return;
+                closeActiveMentionDropdown();
+                input.focus();
+            };
+            document.addEventListener('mousedown', handlePointerDown, true);
+            document.addEventListener('keydown', handleEscape, true);
+            activeMentionDropdownState = {
+                panel,
+                trigger,
+                menu,
+                cleanup: () => {
+                    document.removeEventListener('mousedown', handlePointerDown, true);
+                    document.removeEventListener('keydown', handleEscape, true);
+                },
+            };
+        });
+    };
+
+    const attachCommentMentionPicker = (panel, options = {}) => {
+        if (!(panel instanceof Element) || panel.dataset.mentionPickerBound === '1') {
+            return;
+        }
+        const input = panel.querySelector('.tarefa-comments-input input');
+        const trigger = panel.querySelector('.tarefa-comments-icon[data-role="mention"]');
+        if (!(input instanceof HTMLInputElement) || !(trigger instanceof HTMLElement)) {
+            return;
+        }
+        const getPreferredUser = typeof options.getPreferredUser === 'function'
+            ? options.getPreferredUser
+            : () => options.preferredUser || null;
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (trigger.disabled) {
+                return;
+            }
+            openMentionDropdown({
+                panel,
+                input,
+                trigger,
+                preferredUser: getPreferredUser,
+            });
+        });
+        panel.dataset.mentionPickerBound = '1';
     };
 
     const fetchListaDeTarefas = () => {
@@ -7744,7 +7977,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <input type="text" placeholder="Digite um comentário">
                         <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                         <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
-                        <span class="tarefa-comments-icon">@</span>
+                        <button type="button" class="tarefa-comments-icon tarefa-comments-icon--mention" data-role="mention" aria-label="Mencionar usuário">@</button>
                     </div>
                     <button type="button" class="tarefa-comments-send" disabled>Comentar</button>
                 </div>
@@ -7962,6 +8195,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const setupBulkCommentControls = (modal) => {
         if (!modal) return;
+        const panel = modal.querySelector('.tarefa-comments-panel');
         const input = modal.querySelector('.tarefa-comments-input input');
         const fileInput = modal.querySelector('.tarefa-comments-file');
         const sendButton = modal.querySelector('.tarefa-comments-send');
@@ -8031,6 +8265,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         updateButtonState();
+        attachCommentMentionPicker(panel, {
+            getPreferredUser: () => resolveCurrentUser(),
+        });
     };
 
     const fillAgendaBulkSelects = (modal, type) => {
@@ -8970,7 +9207,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (notification.tipo !== 'devolutiva' && createdTimeLabel) {
             titleMeta = document.createElement('p');
             titleMeta.className = 'task-notification-card__title-meta';
-            titleMeta.textContent = `Recebida às ${createdTimeLabel}`;
+            titleMeta.textContent = notification.tipo === 'mencao'
+                ? `Comentado às ${createdTimeLabel}`
+                : `Recebida às ${createdTimeLabel}`;
         }
 
         const description = document.createElement('p');
@@ -8995,12 +9234,12 @@ document.addEventListener('DOMContentLoaded', function() {
         meta.textContent = metaParts.join(' · ');
 
         let justification = null;
-        if (notification.tipo === 'devolutiva' && notification.justificativa) {
+        if ((notification.tipo === 'devolutiva' || notification.tipo === 'mencao') && notification.justificativa) {
             justification = document.createElement('div');
             justification.className = 'task-notification-card__justification';
             const justificationLabel = document.createElement('strong');
             justificationLabel.className = 'task-notification-card__justification-label';
-            justificationLabel.textContent = 'Justificativa';
+            justificationLabel.textContent = notification.tipo === 'mencao' ? 'Comentário' : 'Justificativa';
             const justificationText = document.createElement('p');
             justificationText.className = 'task-notification-card__justification-text';
             justificationText.textContent = notification.justificativa;
@@ -9924,6 +10163,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!input || !button) return;
         input.disabled = false;
         const fileInput = panel.querySelector('.tarefa-comments-file');
+        const mentionButton = panel.querySelector('.tarefa-comments-icon[data-role="mention"]');
         const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
@@ -9933,6 +10173,12 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = isSubmitting;
             if (fileInput) {
                 fileInput.disabled = isSubmitting;
+            }
+            if (mentionButton) {
+                mentionButton.disabled = isSubmitting;
+            }
+            if (isSubmitting) {
+                closeMentionDropdownForPanel(panel);
             }
             updateButtonState();
         };
@@ -10006,6 +10252,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 handleSend();
             }
         });
+        attachCommentMentionPicker(panel, {
+            getPreferredUser: () => getCreatedByFromRow(row),
+        });
         updateButtonState();
         row.dataset[COMMENTS_HANDLER_FLAG] = '1';
     };
@@ -10050,7 +10299,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <input type="text" placeholder="Digite um comentário">
                     <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                     <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
-                    <span class="tarefa-comments-icon">@</span>
+                    <button type="button" class="tarefa-comments-icon tarefa-comments-icon--mention" data-role="mention" aria-label="Mencionar usuário">@</button>
                 </div>
                     <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
                 </div>
@@ -10277,6 +10526,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!input || !button) return;
         input.disabled = false;
         const fileInput = panel.querySelector('.tarefa-comments-file');
+        const mentionButton = panel.querySelector('.tarefa-comments-icon[data-role="mention"]');
         const attachmentPreview = panel.querySelector('.tarefa-comments-attachment-preview');
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
@@ -10286,6 +10536,12 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = isSubmitting;
             if (fileInput) {
                 fileInput.disabled = isSubmitting;
+            }
+            if (mentionButton) {
+                mentionButton.disabled = isSubmitting;
+            }
+            if (isSubmitting) {
+                closeMentionDropdownForPanel(panel);
             }
             updateButtonState();
         };
@@ -10365,6 +10621,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 handleSend();
             }
         });
+        attachCommentMentionPicker(panel, {
+            getPreferredUser: () => getCreatedByFromRow(row),
+        });
         updateButtonState();
         row.dataset[PRAZO_COMMENTS_HANDLER_FLAG] = '1';
     };
@@ -10409,7 +10668,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <input type="text" placeholder="Digite um comentário">
                             <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                             <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
-                            <span class="tarefa-comments-icon">@</span>
+                            <button type="button" class="tarefa-comments-icon tarefa-comments-icon--mention" data-role="mention" aria-label="Mencionar usuário">@</button>
                         </div>
                         <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
                     </div>

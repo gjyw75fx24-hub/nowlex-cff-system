@@ -201,7 +201,11 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
         if obj.prazo_id:
             if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
                 return 'Prazo solicitado atendido'
+            if obj.tipo == TarefaNotificacao.TIPO_MENCAO:
+                return 'Você foi mencionado em um prazo'
             return 'Novo prazo recebido'
+        if obj.tipo == TarefaNotificacao.TIPO_MENCAO:
+            return 'Você foi mencionado em uma tarefa'
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
             return 'Tarefa solicitada atendida'
         return 'Nova tarefa recebida'
@@ -215,6 +219,8 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
         ) or ''
         if descricao_item:
             return descricao_item
+        if obj.tipo == TarefaNotificacao.TIPO_MENCAO:
+            return 'Você foi mencionado em um comentário de prazo.' if obj.prazo_id else 'Você foi mencionado em um comentário de tarefa.'
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
             return 'O prazo solicitado foi atendido.' if obj.prazo_id else 'A tarefa solicitada foi atendida.'
         return 'Você recebeu um novo prazo.' if obj.prazo_id else 'Você recebeu uma nova tarefa.'
@@ -224,6 +230,8 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
             return obj.autor_nome
         if obj.tipo == TarefaNotificacao.TIPO_DEVOLUTIVA:
             autor = getattr(obj.tarefa, 'concluido_por', None) if obj.tarefa_id else getattr(obj.prazo, 'concluido_por', None)
+        elif obj.tipo == TarefaNotificacao.TIPO_MENCAO:
+            autor = getattr(obj.tarefa, 'criado_por', None) if obj.tarefa_id else getattr(obj.prazo, 'criado_por', None)
         else:
             autor = getattr(obj.tarefa, 'criado_por', None) if obj.tarefa_id else getattr(obj.prazo, 'criado_por', None)
         if not autor:

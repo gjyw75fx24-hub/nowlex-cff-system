@@ -1232,6 +1232,7 @@ class Tarefa(models.Model):
 class TarefaNotificacao(models.Model):
     TIPO_RECEBIDA = 'recebida'
     TIPO_DEVOLUTIVA = 'devolutiva'
+    TIPO_MENCAO = 'mencao'
     TIPO_CHOICES = (
         (TIPO_RECEBIDA, 'Recebida'),
         (TIPO_DEVOLUTIVA, 'Devolutiva'),
@@ -1300,6 +1301,23 @@ class TarefaNotificacao(models.Model):
         return f'Notificação {self.tipo} {target_label} para {self.usuario}'
 
 
+def _close_pending_item_notifications(*, tarefa=None, prazo=None):
+    if tarefa is None and prazo is None:
+        return
+    filters = {
+        'lida_em__isnull': True,
+        'tipo__in': [
+            TarefaNotificacao.TIPO_RECEBIDA,
+            TarefaNotificacao.TIPO_MENCAO,
+        ],
+    }
+    if tarefa is not None:
+        filters['tarefa'] = tarefa
+    if prazo is not None:
+        filters['prazo'] = prazo
+    TarefaNotificacao.objects.filter(**filters).update(lida_em=timezone.now())
+
+
 def _has_tarefa_notificacao_table():
     try:
         return TarefaNotificacao._meta.db_table in connection.introspection.table_names()
@@ -1325,11 +1343,7 @@ def tarefa_sync_receiver_notification(sender, instance, created, raw=False, **kw
         return
 
     if instance.concluida:
-        TarefaNotificacao.objects.filter(
-            tarefa=instance,
-            tipo=TarefaNotificacao.TIPO_RECEBIDA,
-            lida_em__isnull=True,
-        ).update(lida_em=timezone.now())
+        _close_pending_item_notifications(tarefa=instance)
         return
 
     previous_responsavel_id = getattr(instance, '_previous_responsavel_id', None)
@@ -1454,11 +1468,7 @@ def prazo_sync_receiver_notification(sender, instance, created, raw=False, **kwa
         return
 
     if instance.concluido:
-        TarefaNotificacao.objects.filter(
-            prazo=instance,
-            tipo=TarefaNotificacao.TIPO_RECEBIDA,
-            lida_em__isnull=True,
-        ).update(lida_em=timezone.now())
+        _close_pending_item_notifications(prazo=instance)
         return
 
     previous_responsavel_id = getattr(instance, '_previous_responsavel_id', None)
