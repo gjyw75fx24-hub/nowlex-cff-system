@@ -13244,7 +13244,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (andamentos && andamentos.length > 0) {
             const addAndamentoButton = document.querySelector('#andamentos-group .add-row a');
-            const totalAndamentosForms = document.querySelectorAll('.dynamic-andamentos').length;
+            const currentAndamentoRows = getInlineRowsByGroup('andamentos-group');
+            const totalAndamentosForms = currentAndamentoRows.length;
 
             for (let i = totalAndamentosForms; i < andamentos.length; i++) {
                 if (addAndamentoButton) {
@@ -13253,13 +13254,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             setTimeout(() => {
-                document.querySelectorAll('.dynamic-andamentos').forEach((inline, i) => {
+                const andamentoRows = getInlineRowsByGroup('andamentos-group');
+                andamentoRows.forEach((inline, i) => {
                     if (i < andamentos.length) {
                         const andamento = andamentos[i];
-                        const prefix = `id_andamentos-${i}-`;
-                        const dataInput = inline.querySelector(`#${prefix}data_0`);
-                        const horaInput = inline.querySelector(`#${prefix}data_1`);
-                        const descricaoInput = inline.querySelector(`#${prefix}descricao`);
+                        const dataInput = inline.querySelector('input[id$="-data_0"]');
+                        const horaInput = inline.querySelector('input[id$="-data_1"]');
+                        const descricaoInput = inline.querySelector('textarea[id$="-descricao"]');
+                        const detalhesInput = inline.querySelector('textarea[id$="-detalhes"]');
 
                         if (dataInput && horaInput && andamento.data) {
                             const dateTime = new Date(andamento.data);
@@ -13267,6 +13269,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             horaInput.value = dateTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                         }
                         if (descricaoInput) descricaoInput.value = andamento.descricao || '';
+                        if (detalhesInput) detalhesInput.value = andamento.detalhes || '';
 
                         const deleteCheckbox = inline.querySelector('input[id$="-DELETE"]');
                         if (deleteCheckbox) deleteCheckbox.checked = false;
