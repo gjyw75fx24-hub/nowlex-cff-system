@@ -405,11 +405,25 @@ class AgendaGeralAPIView(APIView):
         # Por padrão, Agenda Geral mostra apenas itens do próprio usuário.
         # Supervisor pode ver todos com `?all_users=1`.
         if not (is_supervisor_flag and show_all_users):
+            tarefa_mention_filter = Q(
+                notificacoes__usuario=agenda_user,
+                notificacoes__tipo=TarefaNotificacao.TIPO_MENCAO,
+                notificacoes__lida_em__isnull=True,
+            )
+            prazo_mention_filter = Q(
+                notificacoes__usuario=agenda_user,
+                notificacoes__tipo=TarefaNotificacao.TIPO_MENCAO,
+                notificacoes__lida_em__isnull=True,
+            )
             tarefas = tarefas.filter(
                 Q(responsavel=agenda_user) |
-                (Q(responsavel__isnull=True) & Q(criado_por=agenda_user))
-            )
-            prazos = prazos.filter(responsavel=agenda_user)
+                (Q(responsavel__isnull=True) & Q(criado_por=agenda_user)) |
+                tarefa_mention_filter
+            ).distinct()
+            prazos = prazos.filter(
+                Q(responsavel=agenda_user) |
+                prazo_mention_filter
+            ).distinct()
 
         allowed_carteiras = get_user_allowed_carteira_ids(agenda_user)
         if allowed_carteiras not in (None, []) and allowed_carteiras:
