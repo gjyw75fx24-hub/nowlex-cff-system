@@ -1557,13 +1557,17 @@ class TarefaComentarioListCreateAPIView(APIView):
     def post(self, request, tarefa_id):
         tarefa = self.get_tarefa(tarefa_id)
         texto = (request.data.get('texto') or '').strip()
-        arquivo = request.FILES.get('arquivo')
-        if not texto and not arquivo:
+        arquivos = [arquivo for arquivo in request.FILES.getlist('arquivos') if arquivo]
+        if not arquivos:
+            arquivo_unico = request.FILES.get('arquivo')
+            if arquivo_unico:
+                arquivos = [arquivo_unico]
+        if not texto and not arquivos:
             return Response(
                 {'detail': 'É necessário informar texto ou arquivo.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if arquivo and not tarefa.processo_id:
+        if arquivos and not tarefa.processo_id:
             return Response(
                 {'detail': 'Não é possível anexar arquivo em tarefa sem cadastro vinculado.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1573,7 +1577,7 @@ class TarefaComentarioListCreateAPIView(APIView):
             autor=request.user,
             texto=texto,
         )
-        if arquivo:
+        for arquivo in arquivos:
             processo_arquivo = ProcessoArquivo.objects.create(
                 processo=tarefa.processo,
                 tarefa=tarefa,
@@ -1604,13 +1608,17 @@ class PrazoComentarioListCreateAPIView(APIView):
     def post(self, request, prazo_id):
         prazo = self.get_prazo(prazo_id)
         texto = (request.data.get('texto') or '').strip()
-        arquivo = request.FILES.get('arquivo')
-        if not texto and not arquivo:
+        arquivos = [arquivo for arquivo in request.FILES.getlist('arquivos') if arquivo]
+        if not arquivos:
+            arquivo_unico = request.FILES.get('arquivo')
+            if arquivo_unico:
+                arquivos = [arquivo_unico]
+        if not texto and not arquivos:
             return Response(
                 {'detail': 'É necessário informar texto ou arquivo.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if arquivo and not prazo.processo_id:
+        if arquivos and not prazo.processo_id:
             return Response(
                 {'detail': 'Não é possível anexar arquivo em prazo sem cadastro vinculado.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1620,7 +1628,7 @@ class PrazoComentarioListCreateAPIView(APIView):
             autor=request.user,
             texto=texto,
         )
-        if arquivo:
+        for arquivo in arquivos:
             processo_arquivo = ProcessoArquivo.objects.create(
                 processo=prazo.processo,
                 prazo=prazo,
@@ -2254,7 +2262,11 @@ class TarefaBulkCreateAPIView(APIView):
         observacoes = (payload.get('observacoes') or '').strip()
         concluida = bool(payload.get('concluida'))
         comentario_texto = (payload.get('comentario_texto') or '').strip()
-        arquivo = request.FILES.get('arquivo')
+        arquivos = [arquivo for arquivo in request.FILES.getlist('arquivos') if arquivo]
+        if not arquivos:
+            arquivo_unico = request.FILES.get('arquivo')
+            if arquivo_unico:
+                arquivos = [arquivo_unico]
 
         if not descricao:
             return Response({'detail': 'Informe a descrição da tarefa.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2262,7 +2274,7 @@ class TarefaBulkCreateAPIView(APIView):
             return Response({'detail': 'Informe a data da tarefa.'}, status=status.HTTP_400_BAD_REQUEST)
         if not processo_ids and not responsavel_id:
             return Response({'detail': 'Selecione um responsável para criar tarefa geral.'}, status=status.HTTP_400_BAD_REQUEST)
-        if arquivo and not processo_ids:
+        if arquivos and not processo_ids:
             return Response({'detail': 'Anexo exige pelo menos um processo selecionado.'}, status=status.HTTP_400_BAD_REQUEST)
 
         processos = []
@@ -2322,21 +2334,22 @@ class TarefaBulkCreateAPIView(APIView):
                 )
                 created_tasks.append(tarefa)
                 _create_task_notification_for_receiver(tarefa, actor=request.user)
-                if comentario_texto or arquivo:
+                if comentario_texto or arquivos:
                     comentario = TarefaMensagem.objects.create(
                         tarefa=tarefa,
                         autor=request.user,
                         texto=comentario_texto or '',
                     )
-                    if arquivo and processo:
-                        arquivo.seek(0)
-                        ProcessoArquivo.objects.create(
-                            processo=processo,
-                            tarefa=tarefa,
-                            mensagem=comentario,
-                            enviado_por=request.user,
-                            arquivo=arquivo,
-                        )
+                    if arquivos and processo:
+                        for arquivo in arquivos:
+                            arquivo.seek(0)
+                            ProcessoArquivo.objects.create(
+                                processo=processo,
+                                tarefa=tarefa,
+                                mensagem=comentario,
+                                enviado_por=request.user,
+                                arquivo=arquivo,
+                            )
 
         return Response({
             'created': len(created_tasks),
@@ -2457,7 +2470,11 @@ class PrazoBulkCreateAPIView(APIView):
         observacoes = (payload.get('observacoes') or '').strip()
         concluido = bool(payload.get('concluido'))
         comentario_texto = (payload.get('comentario_texto') or '').strip()
-        arquivo = request.FILES.get('arquivo')
+        arquivos = [arquivo for arquivo in request.FILES.getlist('arquivos') if arquivo]
+        if not arquivos:
+            arquivo_unico = request.FILES.get('arquivo')
+            if arquivo_unico:
+                arquivos = [arquivo_unico]
 
         if not titulo:
             return Response({'detail': 'Informe o título do prazo.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2465,7 +2482,7 @@ class PrazoBulkCreateAPIView(APIView):
             return Response({'detail': 'Informe a data do prazo.'}, status=status.HTTP_400_BAD_REQUEST)
         if not processo_ids and not responsavel_id:
             return Response({'detail': 'Selecione um responsável para criar prazo geral.'}, status=status.HTTP_400_BAD_REQUEST)
-        if arquivo and not processo_ids:
+        if arquivos and not processo_ids:
             return Response({'detail': 'Anexo exige pelo menos um processo selecionado.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -2512,21 +2529,22 @@ class PrazoBulkCreateAPIView(APIView):
             )
             created_prazos.append(prazo)
             _create_prazo_notification_for_receiver(prazo, actor=request.user)
-            if comentario_texto or arquivo:
+            if comentario_texto or arquivos:
                 comentario = PrazoMensagem.objects.create(
                     prazo=prazo,
                     autor=request.user,
                     texto=comentario_texto or '',
                 )
-                if arquivo and processo:
-                    arquivo.seek(0)
-                    ProcessoArquivo.objects.create(
-                        processo=processo,
-                        prazo=prazo,
-                        prazo_mensagem=comentario,
-                        enviado_por=request.user,
-                        arquivo=arquivo,
-                    )
+                if arquivos and processo:
+                    for arquivo in arquivos:
+                        arquivo.seek(0)
+                        ProcessoArquivo.objects.create(
+                            processo=processo,
+                            prazo=prazo,
+                            prazo_mensagem=comentario,
+                            enviado_por=request.user,
+                            arquivo=arquivo,
+                        )
 
         return Response({
             'created': len(created_prazos),

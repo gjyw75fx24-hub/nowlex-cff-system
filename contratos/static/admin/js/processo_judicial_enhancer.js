@@ -5054,7 +5054,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <div class="tarefa-comments-input-row">
                                         <div class="tarefa-comments-input">
                                             <input type="text" placeholder="Digite um comentário">
-                                            <input type="file" class="tarefa-comments-file" id="agenda-task-comments-file" style="display:none">
+                                            <input type="file" class="tarefa-comments-file" id="agenda-task-comments-file" style="display:none" multiple>
                                             <label class="tarefa-comments-icon" data-role="attachment" for="agenda-task-comments-file">📎</label>
                                             <span class="tarefa-comments-icon">@</span>
                                         </div>
@@ -5292,11 +5292,37 @@ document.addEventListener('DOMContentLoaded', function() {
             detailAnalystText.style.display = 'inline-flex';
         };
 
-        const setTaskCommentsAttachmentPreview = (fileName = '') => {
+        let agendaTaskCommentsSubmitting = false;
+
+        const getSelectedCommentFiles = (fileInput) => Array.from(fileInput?.files || []).filter(Boolean);
+
+        const normalizeCommentAttachmentNames = (filesOrNames = []) => {
+            if (!filesOrNames) return [];
+            if (typeof filesOrNames === 'string') {
+                return filesOrNames.trim() ? [filesOrNames.trim()] : [];
+            }
+            return Array.from(filesOrNames)
+                .map((item) => {
+                    if (!item) return '';
+                    if (typeof item === 'string') return item.trim();
+                    return String(item.name || '').trim();
+                })
+                .filter(Boolean);
+        };
+
+        const buildCommentAttachmentPreviewLabel = (filesOrNames = []) => {
+            const names = normalizeCommentAttachmentNames(filesOrNames);
+            if (!names.length) return '';
+            if (names.length === 1) return names[0];
+            return `${names.length} arquivos selecionados`;
+        };
+
+        const setTaskCommentsAttachmentPreview = (filesOrNames = []) => {
             if (!taskCommentsAttachmentPreview) return;
-            if (fileName) {
+            const previewLabel = buildCommentAttachmentPreviewLabel(filesOrNames);
+            if (previewLabel) {
                 if (taskCommentsAttachmentPreviewName) {
-                    taskCommentsAttachmentPreviewName.textContent = fileName;
+                    taskCommentsAttachmentPreviewName.textContent = previewLabel;
                 }
                 taskCommentsAttachmentPreview.hidden = false;
                 taskCommentsAttachmentPreview.style.display = 'flex';
@@ -5311,14 +5337,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const updateTaskCommentsSendState = () => {
             if (!taskCommentsSend) return;
+            if (taskCommentsInput) {
+                taskCommentsInput.disabled = agendaTaskCommentsSubmitting;
+            }
+            if (taskCommentsFile) {
+                taskCommentsFile.disabled = agendaTaskCommentsSubmitting;
+            }
             const hasTask = Boolean(activeTaskCommentsEntry?.backendId);
             const hasText = Boolean(taskCommentsInput?.value?.trim());
-            const hasFile = Boolean(taskCommentsFile?.files?.length);
-            taskCommentsSend.disabled = !(hasTask && (hasText || hasFile));
+            const hasFile = getSelectedCommentFiles(taskCommentsFile).length > 0;
+            taskCommentsSend.disabled = agendaTaskCommentsSubmitting || !(hasTask && (hasText || hasFile));
         };
 
         const hideTaskCommentsCard = () => {
             activeTaskCommentsEntry = null;
+            agendaTaskCommentsSubmitting = false;
             agendaTaskCommentsLoadToken += 1;
             overlay.classList.remove('agenda-panel-overlay--task-comments-visible');
             if (taskCommentsCard) {
@@ -6056,8 +6089,8 @@ document.addEventListener('DOMContentLoaded', function() {
             scheduleSupervisorNoteSave(activeSupervisionEntry, nextValue);
         });
         taskCommentsFile?.addEventListener('change', () => {
-            const fileName = taskCommentsFile.files?.[0]?.name || '';
-            setTaskCommentsAttachmentPreview(fileName);
+            const attachments = getSelectedCommentFiles(taskCommentsFile);
+            setTaskCommentsAttachmentPreview(attachments);
             updateTaskCommentsSendState();
         });
         taskCommentsAttachmentPreviewClear?.addEventListener('click', () => {
@@ -6081,15 +6114,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const entryData = activeTaskCommentsEntry;
             const tarefaId = Number.parseInt(`${entryData?.backendId || ''}`, 10);
             const textValue = String(taskCommentsInput?.value || '').trim();
-            const attachment = taskCommentsFile?.files?.[0] || null;
-            if (!Number.isFinite(tarefaId) || tarefaId <= 0 || (!textValue && !attachment)) {
+            const attachments = getSelectedCommentFiles(taskCommentsFile);
+            if (!Number.isFinite(tarefaId) || tarefaId <= 0 || (!textValue && !attachments.length)) {
                 updateTaskCommentsSendState();
                 return;
             }
             const cardTaskId = `${tarefaId}`;
-            taskCommentsSend.disabled = true;
+            agendaTaskCommentsSubmitting = true;
+            updateTaskCommentsSendState();
             try {
-                const comment = await postTaskCommentById(tarefaId, textValue, attachment);
+                const comment = await postTaskCommentById(tarefaId, textValue, attachments);
                 const comments = prependTaskCommentToCache(tarefaId, comment);
                 renderCommentsHistoryElement(taskCommentsHistory, comments);
                 (comment.anexos || []).forEach(appendAttachmentToArquivos);
@@ -6104,6 +6138,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } catch (error) {
                 createSystemAlert('Agenda Geral', error.message || 'Erro ao salvar comentário da tarefa.');
+            } finally {
+                agendaTaskCommentsSubmitting = false;
                 updateTaskCommentsSendState();
             }
         });
@@ -7706,7 +7742,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="tarefa-comments-input-row">
                     <div class="tarefa-comments-input">
                         <input type="text" placeholder="Digite um comentário">
-                        <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                        <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                         <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
                         <span class="tarefa-comments-icon">@</span>
                     </div>
@@ -7936,17 +7972,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const updateButtonState = () => {
             const hasText = (input?.value || '').trim().length > 0;
-            const hasFile = !!fileInput?.files?.length;
+            const hasFile = getSelectedCommentFiles(fileInput).length > 0;
             if (sendButton) {
                 sendButton.disabled = !(hasText || hasFile);
             }
         };
 
-        const showPreview = (file) => {
+        const showPreview = (filesOrNames) => {
             if (!preview || !previewName) return;
-            if (file) {
+            const label = buildCommentAttachmentPreviewLabel(filesOrNames);
+            if (label) {
                 preview.hidden = false;
-                previewName.textContent = file.name;
+                previewName.textContent = label;
             } else {
                 preview.hidden = true;
                 previewName.textContent = '';
@@ -7955,8 +7992,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (fileInput) {
             fileInput.addEventListener('change', () => {
-                const file = fileInput.files?.[0] || null;
-                showPreview(file);
+                const files = getSelectedCommentFiles(fileInput);
+                showPreview(files);
                 updateButtonState();
             });
         }
@@ -7974,12 +8011,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if (sendButton) {
             sendButton.addEventListener('click', () => {
                 const text = (input?.value || '').trim();
-                const file = fileInput?.files?.[0] || null;
-                if (!text && !file) return;
+                const files = getSelectedCommentFiles(fileInput);
+                if (!text && !files.length) return;
                 modal.dataset.pendingCommentText = text;
-                modal._pendingCommentFile = file;
+                modal._pendingCommentFiles = files;
                 if (history) {
-                    history.textContent = text || (file ? `Anexo: ${file.name}` : '');
+                    const parts = [];
+                    if (text) parts.push(text);
+                    if (files.length) {
+                        parts.push(`Anexos: ${buildCommentAttachmentPreviewLabel(files)}`);
+                    }
+                    history.textContent = parts.join(' ') || 'Nenhum comentário gravado.';
                 }
                 if (input) input.value = '';
                 if (fileInput) fileInput.value = '';
@@ -8149,8 +8191,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const stagedText = (modal.dataset.pendingCommentText || '').trim();
         const inputText = (modal.querySelector('.tarefa-comments-input input')?.value || '').trim();
         const text = stagedText || inputText;
-        const file = modal._pendingCommentFile || modal.querySelector('.tarefa-comments-file')?.files?.[0] || null;
-        return { text, file };
+        const stagedFiles = Array.isArray(modal._pendingCommentFiles)
+            ? modal._pendingCommentFiles.filter(Boolean)
+            : [];
+        const files = stagedFiles.length
+            ? stagedFiles
+            : getSelectedCommentFiles(modal.querySelector('.tarefa-comments-file'));
+        return { text, files };
     };
 
     const formatBulkHistoryDate = (iso) => {
@@ -8356,7 +8403,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 createSystemAlert('Agenda Geral', 'Selecione um responsável para criar tarefa geral.');
                 return;
             }
-            if (commentPayload.file && (!effectiveProcessIds.length || isPlanilha)) {
+            if (commentPayload.files.length && (!effectiveProcessIds.length || isPlanilha)) {
                 createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
                 return;
             }
@@ -8425,9 +8472,7 @@ document.addEventListener('DOMContentLoaded', function() {
             };
             const formData = new FormData();
             formData.append('payload', JSON.stringify(payload));
-            if (commentPayload.file) {
-                formData.append('arquivo', commentPayload.file);
-            }
+            commentPayload.files.forEach((file) => formData.append('arquivos', file));
             const submitBtn = modal.querySelector('.agenda-form-modal__submit');
             if (submitBtn) submitBtn.disabled = true;
             try {
@@ -8472,7 +8517,7 @@ document.addEventListener('DOMContentLoaded', function() {
             createSystemAlert('Agenda Geral', 'Selecione um responsável para criar prazo geral.');
             return;
         }
-        if (commentPayload.file && !effectiveProcessIds.length) {
+        if (commentPayload.files.length && !effectiveProcessIds.length) {
             createSystemAlert('Agenda Geral', 'Para anexar arquivo, selecione ao menos um processo.');
             return;
         }
@@ -8490,9 +8535,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const formData = new FormData();
         formData.append('payload', JSON.stringify(payload));
-        if (commentPayload.file) {
-            formData.append('arquivo', commentPayload.file);
-        }
+        commentPayload.files.forEach((file) => formData.append('arquivos', file));
         const submitBtn = modal.querySelector('.agenda-form-modal__submit');
         if (submitBtn) submitBtn.disabled = true;
         try {
@@ -9551,16 +9594,16 @@ document.addEventListener('DOMContentLoaded', function() {
         return next;
     };
 
-    const postTaskCommentById = async (tarefaId, texto, arquivo = null) => {
+    const postTaskCommentById = async (tarefaId, texto, arquivos = []) => {
         const normalizedId = Number.parseInt(`${tarefaId || ''}`, 10);
         if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
             throw new Error('Salve a tarefa antes de comentar.');
         }
         const formData = new FormData();
         formData.append('texto', texto || '');
-        if (arquivo) {
-            formData.append('arquivo', arquivo);
-        }
+        Array.from(arquivos || []).filter(Boolean).forEach((arquivo) => {
+            formData.append('arquivos', arquivo);
+        });
 
         const response = await fetch(`/api/tarefas/${normalizedId}/comentarios/`, {
             method: 'POST',
@@ -9707,12 +9750,12 @@ document.addEventListener('DOMContentLoaded', function() {
         renderCommentsHistoryElement(history, comments);
     };
 
-    const postTaskComment = async (row, texto, arquivo = null) => {
+    const postTaskComment = async (row, texto, arquivos = []) => {
         const tarefaId = getTarefaIdFromRow(row);
         if (!tarefaId) {
             throw new Error('Salve a tarefa antes de concluir e justificar.');
         }
-        const comment = await postTaskCommentById(tarefaId, texto, arquivo);
+        const comment = await postTaskCommentById(tarefaId, texto, arquivos);
         const comments = prependTaskCommentToCache(tarefaId, comment);
         setRowComments(row, comments);
         renderCommentsHistory(row);
@@ -9720,7 +9763,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return comment;
     };
 
-    const postPrazoComment = async (row, texto, arquivo = null) => {
+    const postPrazoComment = async (row, texto, arquivos = []) => {
         const prazoId = ensurePrazoId(row);
         if (!prazoId) {
             throw new Error('Salve o prazo antes de concluir e justificar.');
@@ -9728,9 +9771,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const formData = new FormData();
         formData.append('texto', texto || '');
-        if (arquivo) {
-            formData.append('arquivo', arquivo);
-        }
+        Array.from(arquivos || []).filter(Boolean).forEach((arquivo) => {
+            formData.append('arquivos', arquivo);
+        });
 
         const response = await fetch(`/api/prazos/${prazoId}/comentarios/`, {
             method: 'POST',
@@ -9885,16 +9928,25 @@ document.addEventListener('DOMContentLoaded', function() {
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
         let pendingSend = false;
-        const updateButtonState = () => {
-            button.disabled = !(input.value.trim() || (fileInput && fileInput.files.length));
+        const setSubmittingState = (isSubmitting) => {
+            pendingSend = isSubmitting;
+            input.disabled = isSubmitting;
+            if (fileInput) {
+                fileInput.disabled = isSubmitting;
+            }
+            updateButtonState();
         };
-        const showAttachmentPreview = (name) => {
+        const updateButtonState = () => {
+            button.disabled = pendingSend || !(input.value.trim() || getSelectedCommentFiles(fileInput).length);
+        };
+        const showAttachmentPreview = (filesOrNames) => {
             if (!attachmentPreview) return;
-            if (name) {
-                if (attachmentPreviewName) attachmentPreviewName.textContent = name;
+            const label = buildCommentAttachmentPreviewLabel(filesOrNames);
+            if (label) {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = label;
                 attachmentPreview.style.display = 'flex';
                 attachmentPreview.hidden = false;
-                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !name;
+                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !label;
             } else {
                 if (attachmentPreviewName) attachmentPreviewName.textContent = '';
                 attachmentPreview.style.display = 'none';
@@ -9903,12 +9955,12 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const handleSend = async () => {
             const value = input.value.trim();
-            if (!value && (!fileInput || !fileInput.files.length)) return;
+            const attachments = getSelectedCommentFiles(fileInput);
+            if (!value && !attachments.length) return;
             if (pendingSend) return;
-            pendingSend = true;
-            button.disabled = true;
+            setSubmittingState(true);
             try {
-                await postTaskComment(row, value, fileInput?.files?.[0] || null);
+                await postTaskComment(row, value, attachments);
                 input.value = '';
                 if (fileInput) {
                     fileInput.value = '';
@@ -9919,8 +9971,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error(error);
             } finally {
-                pendingSend = false;
-                updateButtonState();
+                setSubmittingState(false);
                 input.focus();
             }
         };
@@ -9933,19 +9984,19 @@ document.addEventListener('DOMContentLoaded', function() {
             paperclipLabel?.addEventListener('blur', () => deactivateIcon());
 
             fileInput.addEventListener('change', () => {
-            const name = fileInput.files[0]?.name || '';
-            showAttachmentPreview(name);
-            updateButtonState();
-            deactivateIcon();
-        });
-        attachmentPreviewClear?.addEventListener('click', () => {
-            if (fileInput) {
-                fileInput.value = '';
-            }
-            showAttachmentPreview('');
-            updateButtonState();
-            input.focus();
-        });
+                const attachments = getSelectedCommentFiles(fileInput);
+                showAttachmentPreview(attachments);
+                updateButtonState();
+                deactivateIcon();
+            });
+            attachmentPreviewClear?.addEventListener('click', () => {
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+                showAttachmentPreview('');
+                updateButtonState();
+                input.focus();
+            });
         }
         input.addEventListener('input', updateButtonState);
         button.addEventListener('click', handleSend);
@@ -9997,7 +10048,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="tarefa-comments-input-row">
                 <div class="tarefa-comments-input">
                     <input type="text" placeholder="Digite um comentário">
-                    <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                    <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                     <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
                     <span class="tarefa-comments-icon">@</span>
                 </div>
@@ -10230,17 +10281,26 @@ document.addEventListener('DOMContentLoaded', function() {
         const attachmentPreviewName = panel.querySelector('.tarefa-comments-attachment-preview-name');
         const attachmentPreviewClear = panel.querySelector('.tarefa-comments-attachment-preview-clear');
         let pendingSend = false;
+        const setSubmittingState = (isSubmitting) => {
+            pendingSend = isSubmitting;
+            input.disabled = isSubmitting;
+            if (fileInput) {
+                fileInput.disabled = isSubmitting;
+            }
+            updateButtonState();
+        };
         const updateButtonState = () => {
             const prazoId = ensurePrazoId(row);
-            button.disabled = !prazoId || !(input.value.trim() || (fileInput && fileInput.files.length));
+            button.disabled = pendingSend || !prazoId || !(input.value.trim() || getSelectedCommentFiles(fileInput).length);
         };
-        const showAttachmentPreview = (name) => {
+        const showAttachmentPreview = (filesOrNames) => {
             if (!attachmentPreview) return;
-            if (name) {
-                if (attachmentPreviewName) attachmentPreviewName.textContent = name;
+            const label = buildCommentAttachmentPreviewLabel(filesOrNames);
+            if (label) {
+                if (attachmentPreviewName) attachmentPreviewName.textContent = label;
                 attachmentPreview.style.display = 'flex';
                 attachmentPreview.hidden = false;
-                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !name;
+                if (attachmentPreviewClear) attachmentPreviewClear.hidden = !label;
             } else {
                 if (attachmentPreviewName) attachmentPreviewName.textContent = '';
                 attachmentPreview.style.display = 'none';
@@ -10249,17 +10309,17 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const handleSend = async () => {
             const value = input.value.trim();
-            if (!value && (!fileInput || !fileInput.files.length)) return;
+            const attachments = getSelectedCommentFiles(fileInput);
+            if (!value && !attachments.length) return;
             const prazoId = ensurePrazoId(row);
             if (!prazoId) {
                 console.warn('prazo-comments: prazo ainda sem ID, salve o prazo antes de comentar');
                 return;
             }
             if (!prazoId || pendingSend) return;
-            pendingSend = true;
-            button.disabled = true;
+            setSubmittingState(true);
             try {
-                const comment = await postPrazoComment(row, value, fileInput?.files?.[0] || null);
+                const comment = await postPrazoComment(row, value, attachments);
                 input.value = '';
                 if (fileInput) {
                     fileInput.value = '';
@@ -10270,8 +10330,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error(error);
             } finally {
-                pendingSend = false;
-                updateButtonState();
+                setSubmittingState(false);
                 input.focus();
             }
         };
@@ -10284,8 +10343,8 @@ document.addEventListener('DOMContentLoaded', function() {
             paperclipLabel?.addEventListener('blur', () => deactivateIcon());
 
             fileInput.addEventListener('change', () => {
-                const name = fileInput.files[0]?.name || '';
-                showAttachmentPreview(name);
+                const attachments = getSelectedCommentFiles(fileInput);
+                showAttachmentPreview(attachments);
                 updateButtonState();
                 deactivateIcon();
             });
@@ -10348,7 +10407,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="tarefa-comments-input-row">
                         <div class="tarefa-comments-input">
                             <input type="text" placeholder="Digite um comentário">
-                            <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none">
+                            <input type="file" class="tarefa-comments-file" id="${fileInputId}" style="display:none" multiple>
                             <label class="tarefa-comments-icon" data-role="attachment" for="${fileInputId}">📎</label>
                             <span class="tarefa-comments-icon">@</span>
                         </div>
