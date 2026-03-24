@@ -2098,6 +2098,12 @@ document.addEventListener('DOMContentLoaded', function() {
         return removedCount;
     }
 
+    function syncAndamentosManagementForm() {
+        // O management form do inline já é mantido pelo próprio admin.
+        // Recontar manualmente aqui pode quebrar formsets com índices "furados"
+        // (ex.: andamentos-0 e andamentos-2), fazendo o Django ignorar linhas visíveis.
+    }
+
     const createSystemAlert = (title, message) => {
         const existing = document.getElementById('cff-system-alert');
         if (existing) existing.remove();
@@ -9140,7 +9146,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (form) {
         let lastSubmitButton = null;
         form.addEventListener('submit', () => {
-            deduplicateInlineAndamentos();
+            syncAndamentosManagementForm();
         });
         form.addEventListener('click', (event) => {
             const target = event.target;
@@ -13275,6 +13281,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (deleteCheckbox) deleteCheckbox.checked = false;
                     }
                 });
+                syncAndamentosManagementForm();
             }, 500);
         }
     }

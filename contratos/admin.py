@@ -12243,24 +12243,6 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return super().save_formset(request, form, formset, change)
         elif formset.model == AndamentoProcessual:
             self._assign_inline_numero_cnj(request, formset, form.instance)
-            seen_keys = set()
-
-            for inline_form in formset.forms:
-                cleaned = getattr(inline_form, 'cleaned_data', None)
-                if not cleaned or cleaned.get('DELETE'):
-                    continue
-                data = cleaned.get('data')
-                descricao = (cleaned.get('descricao') or '').strip()
-                if not data or not descricao:
-                    continue
-                numero_cnj_obj = cleaned.get('numero_cnj')
-                numero_cnj_id = getattr(numero_cnj_obj, 'id', None)
-                chave = (numero_cnj_id, data, descricao)
-                if chave in seen_keys:
-                    cleaned['DELETE'] = True
-                else:
-                    seen_keys.add(chave)
-
             return super().save_formset(request, form, formset, change)
         elif formset.model == Tarefa:
             return self._save_tarefa_formset_with_audit(request, formset)
