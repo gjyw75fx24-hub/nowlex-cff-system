@@ -4077,6 +4077,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 entry.appendChild(divider);
             } else {
                 if (!isSupervision) {
+                    if (type === 'T') {
+                        label.classList.add('agenda-panel__details-item-task-order');
+                    }
                     entry.appendChild(label);
                 }
                 if (titleRow) {
@@ -4090,12 +4093,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             if (type !== 'S') {
-                const text = document.createElement('span');
-                text.className = 'agenda-panel__details-item-text';
-                text.textContent = isAndamento
+                const summaryText = isAndamento
                     ? buildAgendaSummary(entryData, type)
                     : (entryData.description || entryData.detail || entryData.label || '');
-                entry.appendChild(text);
+                const shouldHideDuplicateTaskSummary = type === 'T'
+                    && taskDisplayTitle
+                    && String(summaryText || '').trim()
+                    && String(taskDisplayTitle).trim().toLowerCase() === String(summaryText).trim().toLowerCase();
+                const text = document.createElement('span');
+                text.className = 'agenda-panel__details-item-text';
+                text.textContent = shouldHideDuplicateTaskSummary ? '' : summaryText;
+                if (!shouldHideDuplicateTaskSummary) {
+                    entry.appendChild(text);
+                }
             } else {
                 entry.classList.add('agenda-panel__details-item--supervision');
                 const analysisTypeShort = resolveEntryAnalysisTypeShort(entryData);
