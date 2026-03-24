@@ -12242,11 +12242,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             self._assign_inline_numero_cnj(request, formset, form.instance)
             return super().save_formset(request, form, formset, change)
         elif formset.model == AndamentoProcessual:
-            from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
-
             self._assign_inline_numero_cnj(request, formset, form.instance)
-            processo = form.instance
-            remover_andamentos_duplicados(processo)
             seen_keys = set()
 
             for inline_form in formset.forms:
@@ -13506,11 +13502,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 self.message_user(request, f"{count} andamento(s) foram excluídos com sucesso.", messages.SUCCESS)
             else:
                 self.message_user(request, "Nenhum andamento foi selecionado para exclusão.", messages.WARNING)
-            
+
             return HttpResponseRedirect(request.path)
 
-        from contratos.integracoes_escavador.parser import remover_andamentos_duplicados
-        remover_andamentos_duplicados(obj)
         messages.success(request, "Processo Salvo!")
         if "_save" in request.POST:
             return HttpResponseRedirect(request.path)
