@@ -3485,6 +3485,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const analystObj = analystRaw && typeof analystRaw === 'object'
             ? analystRaw
             : (analystId ? { id: Number(analystId) } : null);
+        const createdByRaw = item.criado_por
+            || item.created_by
+            || item.createdBy
+            || null;
+        const createdByObj = createdByRaw && typeof createdByRaw === 'object'
+            ? createdByRaw
+            : null;
         const normalizedCustasTotal = normalizeNumericCurrency(item.custas_total ?? item.custasTotal);
         const entry = {
             type,
@@ -3526,6 +3533,8 @@ document.addEventListener('DOMContentLoaded', function() {
             processo_id: item.processo_id,
             responsavel: responsavelObj,
             responsavel_id: responsavelId || null,
+            created_by: createdByObj,
+            created_at: item.criado_em || item.created_at || item.createdAt || '',
             analyst: analystObj,
             analyst_id: analystId || null,
             contract_numbers: Array.isArray(item.contract_numbers)
@@ -5002,7 +5011,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <button type="button" class="agenda-panel__details-card-status-btn" style="display:none;">Status: Pendente</button>
                                 </div>
                                 <div class="agenda-panel__details-card-body" data-agenda-detail-scroll>Selecione um item para visualizar mais informações.</div>
-                                <div class="agenda-panel__details-card-footer">
+                                <div class="agenda-panel__details-card-footer" style="display:none;">
                                     <div class="agenda-panel__details-card-footer-row">
                                         <div class="agenda-panel__details-card-barrar">
                                             <button type="button" class="agenda-panel__details-card-barrar-btn">Barrar</button>
@@ -5012,6 +5021,34 @@ document.addEventListener('DOMContentLoaded', function() {
                                     </div>
                                     <div class="agenda-panel__details-card-analyst">
                                         <span class="agenda-panel__details-card-analyst-text"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="agenda-panel__task-comments-card" style="display:none;">
+                                <div class="agenda-panel__task-comments-card-header">
+                                    <p class="agenda-panel__task-comments-card-title">Comentários e anexos</p>
+                                </div>
+                                <div class="tarefa-comments-panel agenda-panel__task-comments-panel">
+                                    <div class="tarefa-comments-header">
+                                        <div class="tarefa-comments-avatar"></div>
+                                        <div class="tarefa-comments-header-text">
+                                            <div class="tarefa-comments-name">Criado por</div>
+                                            <div class="tarefa-comments-time"></div>
+                                        </div>
+                                    </div>
+                                    <div class="tarefa-comments-history">Nenhum comentário gravado.</div>
+                                    <div class="tarefa-comments-attachment-preview" hidden>
+                                        <span class="tarefa-comments-attachment-preview-name"></span>
+                                        <button type="button" class="tarefa-comments-attachment-preview-clear" aria-label="Remover anexo">×</button>
+                                    </div>
+                                    <div class="tarefa-comments-input-row">
+                                        <div class="tarefa-comments-input">
+                                            <input type="text" placeholder="Digite um comentário">
+                                            <input type="file" class="tarefa-comments-file" id="agenda-task-comments-file" style="display:none">
+                                            <label class="tarefa-comments-icon" data-role="attachment" for="agenda-task-comments-file">📎</label>
+                                            <span class="tarefa-comments-icon">@</span>
+                                        </div>
+                                        <button type="button" class="tarefa-comments-send" disabled>COMENTAR</button>
                                     </div>
                                 </div>
                             </div>
@@ -5073,17 +5110,31 @@ document.addEventListener('DOMContentLoaded', function() {
         detailTitleWrapper.textContent = '';
         detailTitleWrapper.append(detailTitleText, detailTitleType, detailNav);
         const detailStatusButton = overlay.querySelector('.agenda-panel__details-card-status-btn');
+        const detailFooter = overlay.querySelector('.agenda-panel__details-card-footer');
         const detailBarrarGroup = overlay.querySelector('.agenda-panel__details-card-barrar');
         const detailBarrarButton = overlay.querySelector('.agenda-panel__details-card-barrar-btn');
         const detailBarrarDate = overlay.querySelector('.agenda-panel__details-card-barrar-date');
         const detailBarradoNote = overlay.querySelector('.agenda-panel__details-card-barrado-note');
         const detailAnalystText = overlay.querySelector('.agenda-panel__details-card-analyst-text');
+        const taskCommentsCard = overlay.querySelector('.agenda-panel__task-comments-card');
+        const taskCommentsPanel = overlay.querySelector('.agenda-panel__task-comments-panel');
+        const taskCommentsHistory = taskCommentsCard?.querySelector('.tarefa-comments-history');
+        const taskCommentsName = taskCommentsCard?.querySelector('.tarefa-comments-name');
+        const taskCommentsTime = taskCommentsCard?.querySelector('.tarefa-comments-time');
+        const taskCommentsInput = taskCommentsCard?.querySelector('.tarefa-comments-input input');
+        const taskCommentsFile = taskCommentsCard?.querySelector('.tarefa-comments-file');
+        const taskCommentsSend = taskCommentsCard?.querySelector('.tarefa-comments-send');
+        const taskCommentsAttachmentPreview = taskCommentsCard?.querySelector('.tarefa-comments-attachment-preview');
+        const taskCommentsAttachmentPreviewName = taskCommentsCard?.querySelector('.tarefa-comments-attachment-preview-name');
+        const taskCommentsAttachmentPreviewClear = taskCommentsCard?.querySelector('.tarefa-comments-attachment-preview-clear');
         const supervisorNoteCard = overlay.querySelector('.agenda-panel__supervisor-note-card');
         const supervisorNoteInput = overlay.querySelector('.agenda-panel__supervisor-note-input');
         const supervisorNoteStatus = overlay.querySelector('.agenda-panel__supervisor-note-status');
         const supervisorNoteAuthor = overlay.querySelector('.agenda-panel__supervisor-note-author');
         let activeSupervisionEntry = null;
         let activeConcludableEntry = null;
+        let activeTaskCommentsEntry = null;
+        let agendaTaskCommentsLoadToken = 0;
         const selectedConcludeEntries = new Map();
         let persistedSupervisionEntryId = null;
         let supervisorNoteSaveTimer = null;
@@ -5187,6 +5238,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
 
+        const updateDetailFooterVisibility = (entryData, type) => {
+            if (!detailFooter) return;
+            detailFooter.style.display = entryData && type === 'S' ? 'flex' : 'none';
+        };
+
         const updateDetailBarrarControls = (entryData, type) => {
             if (!detailBarrarGroup || !detailBarrarButton) {
                 return;
@@ -5224,6 +5280,102 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             detailAnalystText.textContent = `Analisado por: ${name}`;
             detailAnalystText.style.display = 'inline-flex';
+        };
+
+        const setTaskCommentsAttachmentPreview = (fileName = '') => {
+            if (!taskCommentsAttachmentPreview) return;
+            if (fileName) {
+                if (taskCommentsAttachmentPreviewName) {
+                    taskCommentsAttachmentPreviewName.textContent = fileName;
+                }
+                taskCommentsAttachmentPreview.hidden = false;
+                taskCommentsAttachmentPreview.style.display = 'flex';
+            } else {
+                if (taskCommentsAttachmentPreviewName) {
+                    taskCommentsAttachmentPreviewName.textContent = '';
+                }
+                taskCommentsAttachmentPreview.hidden = true;
+                taskCommentsAttachmentPreview.style.display = 'none';
+            }
+        };
+
+        const updateTaskCommentsSendState = () => {
+            if (!taskCommentsSend) return;
+            const hasTask = Boolean(activeTaskCommentsEntry?.backendId);
+            const hasText = Boolean(taskCommentsInput?.value?.trim());
+            const hasFile = Boolean(taskCommentsFile?.files?.length);
+            taskCommentsSend.disabled = !(hasTask && (hasText || hasFile));
+        };
+
+        const hideTaskCommentsCard = () => {
+            activeTaskCommentsEntry = null;
+            agendaTaskCommentsLoadToken += 1;
+            overlay.classList.remove('agenda-panel-overlay--task-comments-visible');
+            if (taskCommentsCard) {
+                taskCommentsCard.style.display = 'none';
+            }
+            if (taskCommentsName) {
+                taskCommentsName.textContent = 'Criado por';
+            }
+            if (taskCommentsTime) {
+                taskCommentsTime.textContent = '';
+            }
+            if (taskCommentsHistory) {
+                taskCommentsHistory.textContent = 'Nenhum comentário gravado.';
+            }
+            if (taskCommentsInput) {
+                taskCommentsInput.value = '';
+            }
+            if (taskCommentsFile) {
+                taskCommentsFile.value = '';
+            }
+            setTaskCommentsAttachmentPreview('');
+            updateTaskCommentsSendState();
+        };
+
+        const updateTaskCommentsCard = (entryData, type) => {
+            if (!taskCommentsCard || !taskCommentsHistory || !taskCommentsInput || !taskCommentsSend) {
+                return;
+            }
+            if (!entryData || type !== 'T' || !entryData.backendId) {
+                hideTaskCommentsCard();
+                return;
+            }
+            activeTaskCommentsEntry = entryData;
+            overlay.classList.add('agenda-panel-overlay--task-comments-visible');
+            taskCommentsCard.style.display = 'flex';
+            taskCommentsCard.dataset.taskId = `${entryData.backendId}`;
+            taskCommentsCard.dataset.processoId = `${entryData.processo_id || ''}`;
+            const createdBy = formatResponsavelName(entryData.created_by) || resolveCurrentUser();
+            const createdAt = entryData.created_at ? formatNaturalCreatedAt(entryData.created_at) : '';
+            if (taskCommentsName) {
+                taskCommentsName.textContent = createdBy;
+            }
+            if (taskCommentsTime) {
+                taskCommentsTime.textContent = createdAt;
+            }
+            taskCommentsHistory.textContent = 'Carregando comentários...';
+            taskCommentsInput.value = '';
+            if (taskCommentsFile) {
+                taskCommentsFile.value = '';
+            }
+            setTaskCommentsAttachmentPreview('');
+            updateTaskCommentsSendState();
+            const currentToken = ++agendaTaskCommentsLoadToken;
+            fetchTaskCommentsById(entryData.backendId)
+                .then((comments) => {
+                    if (!activeTaskCommentsEntry || `${activeTaskCommentsEntry.backendId}` !== `${entryData.backendId}` || currentToken !== agendaTaskCommentsLoadToken) {
+                        return;
+                    }
+                    renderCommentsHistoryElement(taskCommentsHistory, comments);
+                })
+                .catch((error) => {
+                    console.error('Erro ao carregar comentários da tarefa na agenda:', error);
+                    if (!activeTaskCommentsEntry || `${activeTaskCommentsEntry.backendId}` !== `${entryData.backendId}` || currentToken !== agendaTaskCommentsLoadToken) {
+                        return;
+                    }
+                    taskCommentsHistory.textContent = 'Não foi possível carregar os comentários.';
+                });
         };
 
         const buildSupervisorNoteKey = (entryData) => {
@@ -5893,8 +6045,61 @@ document.addEventListener('DOMContentLoaded', function() {
             updateSupervisorNoteAuthor(activeSupervisionEntry);
             scheduleSupervisorNoteSave(activeSupervisionEntry, nextValue);
         });
+        taskCommentsFile?.addEventListener('change', () => {
+            const fileName = taskCommentsFile.files?.[0]?.name || '';
+            setTaskCommentsAttachmentPreview(fileName);
+            updateTaskCommentsSendState();
+        });
+        taskCommentsAttachmentPreviewClear?.addEventListener('click', () => {
+            if (taskCommentsFile) {
+                taskCommentsFile.value = '';
+            }
+            setTaskCommentsAttachmentPreview('');
+            updateTaskCommentsSendState();
+            taskCommentsInput?.focus();
+        });
+        taskCommentsInput?.addEventListener('input', () => {
+            updateTaskCommentsSendState();
+        });
+        taskCommentsInput?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                taskCommentsSend?.click();
+            }
+        });
+        taskCommentsSend?.addEventListener('click', async () => {
+            const entryData = activeTaskCommentsEntry;
+            const tarefaId = Number.parseInt(`${entryData?.backendId || ''}`, 10);
+            const textValue = String(taskCommentsInput?.value || '').trim();
+            const attachment = taskCommentsFile?.files?.[0] || null;
+            if (!Number.isFinite(tarefaId) || tarefaId <= 0 || (!textValue && !attachment)) {
+                updateTaskCommentsSendState();
+                return;
+            }
+            const cardTaskId = `${tarefaId}`;
+            taskCommentsSend.disabled = true;
+            try {
+                const comment = await postTaskCommentById(tarefaId, textValue, attachment);
+                const comments = prependTaskCommentToCache(tarefaId, comment);
+                renderCommentsHistoryElement(taskCommentsHistory, comments);
+                (comment.anexos || []).forEach(appendAttachmentToArquivos);
+                if (activeTaskCommentsEntry && `${activeTaskCommentsEntry.backendId}` === cardTaskId) {
+                    taskCommentsInput.value = '';
+                    if (taskCommentsFile) {
+                        taskCommentsFile.value = '';
+                    }
+                    setTaskCommentsAttachmentPreview('');
+                    updateTaskCommentsSendState();
+                    taskCommentsInput.focus();
+                }
+            } catch (error) {
+                createSystemAlert('Agenda Geral', error.message || 'Erro ao salvar comentário da tarefa.');
+                updateTaskCommentsSendState();
+            }
+        });
         hideDetailStatusButton();
         hideBarrarControls();
+        hideTaskCommentsCard();
         hideSupervisorNoteCard();
         const handleDetailEntrySelect = (entryData, type) => {
             if (entryData && (type === 'T' || type === 'P')) {
@@ -5904,8 +6109,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             persistedSupervisionEntryId = entryData?.id || null;
             updateDetailStatusButton(entryData, type);
+            updateDetailFooterVisibility(entryData, type);
             updateDetailBarrarControls(entryData, type);
             updateDetailAnalystLabel(entryData, type);
+            updateTaskCommentsCard(entryData, type);
             updateSupervisorNoteCard(entryData, type);
             updateConcludeButtonState();
         };
@@ -9231,6 +9438,40 @@ document.addEventListener('DOMContentLoaded', function() {
     const historyKey = 'tarefaCommentsHistory';
     const COMMENTS_CACHE_TTL_MS = 5 * 60 * 1000;
     const buildCommentsCacheKey = (tarefaId) => `nowlex_cache_v1:tarefa_comments:${tarefaId}`;
+    const buildCommentsHistoryMarkup = (comments = []) => {
+        if (!Array.isArray(comments) || !comments.length) {
+            return '';
+        }
+        return comments
+            .map((comment) => {
+                const author = comment.autor?.username || comment.autor?.display_name || resolveCurrentUser();
+                const timestamp = formatLocalTimestamp(comment.criado_em || comment.timestamp);
+                const attachments = (comment.anexos || [])
+                    .map((attachment) => `
+                        <a class="tarefa-comments-attachment" href="${attachment.arquivo_url}" target="_blank" rel="noopener noreferrer">${attachment.nome || 'Arquivo'}</a>
+                    `)
+                    .join('');
+                return `
+                    <div class="tarefa-comments-history-item">
+                        <div class="tarefa-comments-history-item-header">
+                            <span class="tarefa-comments-history-item-author">${author}</span>
+                            <span class="tarefa-comments-history-item-meta">${timestamp}</span>
+                        </div>
+                        <p>${comment.texto || comment.text || ''}</p>
+                        ${attachments ? `<div class="tarefa-comments-attachment-list">${attachments}</div>` : ''}
+                    </div>
+                `;
+            })
+            .join('');
+    };
+    const renderCommentsHistoryElement = (historyElement, comments = []) => {
+        if (!historyElement) return;
+        if (!Array.isArray(comments) || !comments.length) {
+            historyElement.textContent = 'Nenhum comentário gravado.';
+            return;
+        }
+        historyElement.innerHTML = buildCommentsHistoryMarkup(comments);
+    };
     const readSessionCache = (key, ttlMs) => {
         try {
             const storage = window.sessionStorage;
@@ -9265,16 +9506,16 @@ document.addEventListener('DOMContentLoaded', function() {
         return row.dataset.tarefaId || '';
     };
 
-    const fetchCommentsForRow = async (row) => {
-        const tarefaId = getTarefaIdFromRow(row);
-        if (!tarefaId) return [];
-        const cacheKey = buildCommentsCacheKey(tarefaId);
+    const fetchTaskCommentsById = async (tarefaId) => {
+        const normalizedId = Number.parseInt(`${tarefaId || ''}`, 10);
+        if (!Number.isFinite(normalizedId) || normalizedId <= 0) return [];
+        const cacheKey = buildCommentsCacheKey(normalizedId);
         const cached = readSessionCache(cacheKey, COMMENTS_CACHE_TTL_MS);
         if (cached) {
             return cached;
         }
         try {
-            const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
+            const response = await fetch(`/api/tarefas/${normalizedId}/comentarios/`, {
                 method: 'GET',
                 credentials: 'same-origin',
             });
@@ -9286,6 +9527,59 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Erro ao buscar comentários:', error);
             return [];
         }
+    };
+
+    const prependTaskCommentToCache = (tarefaId, comment) => {
+        const normalizedId = Number.parseInt(`${tarefaId || ''}`, 10);
+        if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+            return Array.isArray(comment) ? comment : [];
+        }
+        const cacheKey = buildCommentsCacheKey(normalizedId);
+        const current = readSessionCache(cacheKey, COMMENTS_CACHE_TTL_MS) || [];
+        const next = [comment, ...current.filter((item) => `${item?.id || ''}` !== `${comment?.id || ''}`)];
+        writeSessionCache(cacheKey, next);
+        return next;
+    };
+
+    const postTaskCommentById = async (tarefaId, texto, arquivo = null) => {
+        const normalizedId = Number.parseInt(`${tarefaId || ''}`, 10);
+        if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+            throw new Error('Salve a tarefa antes de comentar.');
+        }
+        const formData = new FormData();
+        formData.append('texto', texto || '');
+        if (arquivo) {
+            formData.append('arquivo', arquivo);
+        }
+
+        const response = await fetch(`/api/tarefas/${normalizedId}/comentarios/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+            },
+            body: formData,
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+            let detail = 'Erro ao salvar comentário';
+            try {
+                const payload = await response.json();
+                if (payload && payload.detail) {
+                    detail = payload.detail;
+                }
+            } catch (error) {
+                // noop
+            }
+            throw new Error(detail);
+        }
+
+        return response.json();
+    };
+
+    const fetchCommentsForRow = async (row) => {
+        const tarefaId = getTarefaIdFromRow(row);
+        return fetchTaskCommentsById(tarefaId);
     };
 
     const loadCommentsForRow = async (row) => {
@@ -9400,31 +9694,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const history = panel.querySelector('.tarefa-comments-history');
         if (!history) return;
         const comments = getRowComments(row);
-        if (!comments.length) {
-            history.textContent = 'Nenhum comentário gravado.';
-            return;
-        }
-        history.innerHTML = comments
-            .map((comment) => {
-                const author = comment.autor?.username || comment.autor?.display_name || resolveCurrentUser();
-                const timestamp = formatLocalTimestamp(comment.criado_em || comment.timestamp);
-                const attachments = (comment.anexos || [])
-                    .map((attachment) => `
-                        <a class="tarefa-comments-attachment" href="${attachment.arquivo_url}" target="_blank" rel="noopener noreferrer">${attachment.nome || 'Arquivo'}</a>
-                    `)
-                    .join('');
-                return `
-                    <div class="tarefa-comments-history-item">
-                        <div class="tarefa-comments-history-item-header">
-                            <span class="tarefa-comments-history-item-author">${author}</span>
-                            <span class="tarefa-comments-history-item-meta">${timestamp}</span>
-                        </div>
-                        <p>${comment.texto || comment.text || ''}</p>
-                        ${attachments ? `<div class="tarefa-comments-attachment-list">${attachments}</div>` : ''}
-                    </div>
-                `;
-            })
-            .join('');
+        renderCommentsHistoryElement(history, comments);
     };
 
     const postTaskComment = async (row, texto, arquivo = null) => {
@@ -9432,40 +9702,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!tarefaId) {
             throw new Error('Salve a tarefa antes de concluir e justificar.');
         }
-
-        const formData = new FormData();
-        formData.append('texto', texto || '');
-        if (arquivo) {
-            formData.append('arquivo', arquivo);
-        }
-
-        const response = await fetch(`/api/tarefas/${tarefaId}/comentarios/`, {
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': getCsrfToken(),
-            },
-            body: formData,
-            credentials: 'same-origin',
-        });
-
-        if (!response.ok) {
-            let detail = 'Erro ao salvar comentário';
-            try {
-                const payload = await response.json();
-                if (payload && payload.detail) {
-                    detail = payload.detail;
-                }
-            } catch (error) {
-                // noop
-            }
-            throw new Error(detail);
-        }
-
-        const comment = await response.json();
-        const comments = getRowComments(row);
-        comments.unshift(comment);
+        const comment = await postTaskCommentById(tarefaId, texto, arquivo);
+        const comments = prependTaskCommentToCache(tarefaId, comment);
         setRowComments(row, comments);
-        writeSessionCache(buildCommentsCacheKey(tarefaId), comments);
         renderCommentsHistory(row);
         (comment.anexos || []).forEach(appendAttachmentToArquivos);
         return comment;

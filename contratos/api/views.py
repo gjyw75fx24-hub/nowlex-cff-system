@@ -1563,6 +1563,11 @@ class TarefaComentarioListCreateAPIView(APIView):
                 {'detail': 'É necessário informar texto ou arquivo.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if arquivo and not tarefa.processo_id:
+            return Response(
+                {'detail': 'Não é possível anexar arquivo em tarefa sem cadastro vinculado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         comentario = TarefaMensagem.objects.create(
             tarefa=tarefa,
             autor=request.user,
@@ -1603,6 +1608,11 @@ class PrazoComentarioListCreateAPIView(APIView):
         if not texto and not arquivo:
             return Response(
                 {'detail': 'É necessário informar texto ou arquivo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if arquivo and not prazo.processo_id:
+            return Response(
+                {'detail': 'Não é possível anexar arquivo em prazo sem cadastro vinculado.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         comentario = PrazoMensagem.objects.create(

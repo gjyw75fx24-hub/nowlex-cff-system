@@ -3968,6 +3968,9 @@ a.historylink {
     background-repeat: no-repeat;
     overscroll-behavior: contain;
 }
+.agenda-panel-overlay--task-comments-visible .agenda-panel__details-card-body {
+    max-height: min(220px, 27vh);
+}
 .agenda-panel__details-card-body::-webkit-scrollbar {
     width: 8px;
 }
@@ -3989,6 +3992,122 @@ a.historylink {
     padding: 12px;
     border: 1px solid #dae3ed;
     min-height: 144px;
+}
+.agenda-panel__task-comments-card {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 6px 8px;
+    border: 1px solid #dae3ed;
+    min-height: 0;
+    max-height: min(152px, 18vh);
+    overflow: hidden;
+}
+.agenda-panel__task-comments-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.agenda-panel__task-comments-card-title {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #1f2a40;
+}
+.agenda-panel__task-comments-card .tarefa-comments-panel {
+    position: static;
+    inset: auto;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: auto;
+    max-height: none;
+    padding: 6px;
+    border-radius: 10px;
+    background: #fbfcfe;
+    box-shadow: none;
+    overflow: hidden;
+    gap: 4px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-avatar {
+    width: 18px;
+    height: 18px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-header {
+    gap: 5px;
+    padding-bottom: 3px;
+    border-bottom-width: 1px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-header-text {
+    gap: 2px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-name {
+    font-size: 0.66rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-time {
+    font-size: 0.56rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history {
+    margin-top: 0;
+    max-height: min(40px, 5.5vh);
+    min-height: 20px;
+    padding-right: 2px;
+    gap: 3px;
+    font-size: 0.68rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history-item {
+    padding: 4px 6px;
+    border-radius: 7px;
+    box-shadow: none;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history-item-header {
+    margin-bottom: 1px;
+    font-size: 0.58rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history-item-author {
+    font-size: 0.66rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history-item-meta {
+    font-size: 0.48rem;
+    color: #9aa8bd;
+    white-space: nowrap;
+}
+.agenda-panel__task-comments-card .tarefa-comments-attachment-preview {
+    padding: 3px 6px;
+    border-radius: 7px;
+    font-size: 0.62rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-input-row {
+    position: static;
+    margin-top: 0;
+    padding: 0;
+    background: transparent;
+    gap: 4px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-input {
+    min-height: 26px;
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+.agenda-panel__task-comments-card .tarefa-comments-input input {
+    font-size: 0.66rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-icon {
+    font-size: 0.66rem;
+}
+.agenda-panel__task-comments-card .tarefa-comments-send {
+    padding: 4px 8px;
+    font-size: 0.6rem;
+    border-radius: 8px;
+    box-shadow: none;
+    letter-spacing: 0.01em;
+}
+.agenda-panel__task-comments-card .tarefa-comments-history-item p {
+    margin: 0;
+    line-height: 1.3;
 }
 .agenda-panel__supervisor-note-header {
     display: flex;

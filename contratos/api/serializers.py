@@ -57,6 +57,7 @@ class ListaDeTarefasArquivoConfigSerializer(serializers.ModelSerializer):
 
 class TarefaSerializer(serializers.ModelSerializer):
     responsavel = UserSerializer(read_only=True)
+    criado_por = UserSerializer(read_only=True)
     lista = ListaDeTarefasSerializer(read_only=True)
     prioridade_display = serializers.CharField(source='get_prioridade_display', read_only=True)
     admin_url = serializers.SerializerMethodField()
@@ -71,6 +72,8 @@ class TarefaSerializer(serializers.ModelSerializer):
             'lista',
             'data',
             'data_origem',
+            'criado_em',
+            'criado_por',
             'responsavel',
             'prioridade',
             'prioridade_display',
@@ -94,6 +97,7 @@ class TarefaSerializer(serializers.ModelSerializer):
 
 class PrazoSerializer(serializers.ModelSerializer):
     responsavel = UserSerializer(read_only=True)
+    criado_por = UserSerializer(read_only=True)
     alerta_unidade_display = serializers.CharField(source='get_alerta_unidade_display', read_only=True)
     admin_url = serializers.SerializerMethodField()
 
@@ -104,6 +108,8 @@ class PrazoSerializer(serializers.ModelSerializer):
             'titulo',
             'data_limite',
             'data_limite_origem',
+            'criado_em',
+            'criado_por',
             'alerta_valor',
             'alerta_unidade',
             'alerta_unidade_display',
