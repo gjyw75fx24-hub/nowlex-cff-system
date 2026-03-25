@@ -6887,6 +6887,52 @@ body.admin-navigation-loading-active * {
     word-break: break-word;
 }
 
+.task-notification-card__attachment-wrap {
+    display: grid;
+    gap: 5px;
+}
+
+.task-notification-card__attachment-label {
+    color: #5d7090;
+    font-size: 0.72rem;
+    line-height: 1.1;
+}
+
+.task-notification-card__attachment-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.task-notification-card__attachment {
+    border: 1px solid #c8d7ee;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #31588f;
+    padding: 3px 9px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.task-notification-card__attachment:hover {
+    border-color: #8db1e8;
+    background: #f3f8ff;
+    color: #244a7c;
+}
+
+.task-notification-card__attachment--image::before {
+    content: "🖼 ";
+}
+
+.task-notification-card__attachment--pdf::before {
+    content: "PDF ";
+    font-size: 0.68rem;
+    letter-spacing: 0.03em;
+}
+
 .task-notification-card__action {
     justify-self: start;
     border: 1px solid #2d73db;
@@ -6902,6 +6948,68 @@ body.admin-navigation-loading-active * {
 .task-notification-card__action:hover {
     background: #1f64c9;
     border-color: #1f64c9;
+}
+
+.task-notification-preview-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 4300;
+    background: rgba(12, 20, 34, 0.52);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.task-notification-preview-modal__dialog {
+    width: min(820px, calc(100vw - 48px));
+    max-height: calc(100vh - 48px);
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 20px 44px rgba(14, 30, 55, 0.32);
+    padding: 16px 18px 18px;
+    display: grid;
+    gap: 12px;
+}
+
+.task-notification-preview-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.task-notification-preview-modal__title {
+    color: #233a5d;
+    font-size: 0.95rem;
+}
+
+.task-notification-preview-modal__close {
+    border: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #eef3fb;
+    color: #3b5174;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.task-notification-preview-modal__image {
+    width: 100%;
+    max-height: calc(100vh - 180px);
+    object-fit: contain;
+    border-radius: 10px;
+    background: #f5f8fc;
+}
+
+.task-notification-preview-modal__caption {
+    margin: 0;
+    color: #4e617f;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    word-break: break-word;
 }
 
 .task-notification-minimized {

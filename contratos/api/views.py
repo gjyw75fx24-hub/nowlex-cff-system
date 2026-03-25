@@ -1600,12 +1600,13 @@ class TarefaComentarioListCreateAPIView(APIView):
                 arquivo=arquivo,
             )
             processo_arquivo.save()
+        serializer = TarefaMensagemSerializer(comentario, context={'request': request})
         _create_task_mention_notifications_for_comment(
             tarefa,
             actor=request.user,
             texto=texto,
+            anexos=serializer.data.get('anexos', []),
         )
-        serializer = TarefaMensagemSerializer(comentario, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -1656,12 +1657,13 @@ class PrazoComentarioListCreateAPIView(APIView):
                 arquivo=arquivo,
             )
             processo_arquivo.save()
+        serializer = PrazoMensagemSerializer(comentario, context={'request': request})
         _create_prazo_mention_notifications_for_comment(
             prazo,
             actor=request.user,
             texto=texto,
+            anexos=serializer.data.get('anexos', []),
         )
-        serializer = PrazoMensagemSerializer(comentario, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class TarefaCreateAPIView(generics.CreateAPIView):
@@ -2161,7 +2163,25 @@ def _extract_mentioned_users(text):
     return [user_map[key] for key in ordered_keys if key in user_map]
 
 
-def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None, texto=''):
+def _normalize_notification_attachments(attachments):
+    normalized = []
+    for attachment in attachments or []:
+        if not isinstance(attachment, dict):
+            continue
+        nome = str(attachment.get('nome') or '').strip()
+        arquivo_url = str(attachment.get('arquivo_url') or '').strip()
+        if not nome and not arquivo_url:
+            continue
+        normalized.append({
+            'id': attachment.get('id'),
+            'nome': nome,
+            'arquivo_url': arquivo_url,
+            'criado_em': attachment.get('criado_em'),
+        })
+    return normalized
+
+
+def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None, texto='', anexos=None):
     if not usuario or not usuario.is_active:
         return
     if tarefa and tarefa.concluida:
@@ -2173,6 +2193,9 @@ def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None
         'descricao': (prazo.titulo if prazo else tarefa.descricao) or '',
         'autor_nome': _display_user_name(actor),
         'justificativa': str(texto or '').strip(),
+        'payload': {
+            'anexos': _normalize_notification_attachments(anexos),
+        },
         'lida_em': None,
         'criada_em': timezone.now(),
     }
@@ -2192,6 +2215,7 @@ def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None
                 'descricao',
                 'autor_nome',
                 'justificativa',
+                'payload',
                 'lida_em',
                 'criada_em',
             ]
@@ -2203,7 +2227,7 @@ def _upsert_mention_notification(*, usuario, tarefa=None, prazo=None, actor=None
     )
 
 
-def _create_task_mention_notifications_for_comment(tarefa, actor=None, texto=''):
+def _create_task_mention_notifications_for_comment(tarefa, actor=None, texto='', anexos=None):
     if not tarefa or not texto:
         return
     actor_id = getattr(actor, 'id', None)
@@ -2215,10 +2239,11 @@ def _create_task_mention_notifications_for_comment(tarefa, actor=None, texto='')
             tarefa=tarefa,
             actor=actor,
             texto=texto,
+            anexos=anexos,
         )
 
 
-def _create_prazo_mention_notifications_for_comment(prazo, actor=None, texto=''):
+def _create_prazo_mention_notifications_for_comment(prazo, actor=None, texto='', anexos=None):
     if not prazo or not texto:
         return
     actor_id = getattr(actor, 'id', None)
@@ -2230,6 +2255,7 @@ def _create_prazo_mention_notifications_for_comment(prazo, actor=None, texto='')
             prazo=prazo,
             actor=actor,
             texto=texto,
+            anexos=anexos,
         )
 
 
@@ -2476,11 +2502,6 @@ class TarefaBulkCreateAPIView(APIView):
                         autor=request.user,
                         texto=comentario_texto or '',
                     )
-                    _create_task_mention_notifications_for_comment(
-                        tarefa,
-                        actor=request.user,
-                        texto=comentario_texto,
-                    )
                     if arquivos and processo:
                         for arquivo in arquivos:
                             arquivo.seek(0)
@@ -2491,6 +2512,16 @@ class TarefaBulkCreateAPIView(APIView):
                                 enviado_por=request.user,
                                 arquivo=arquivo,
                             )
+                    comentario_data = TarefaMensagemSerializer(
+                        comentario,
+                        context={'request': request},
+                    ).data
+                    _create_task_mention_notifications_for_comment(
+                        tarefa,
+                        actor=request.user,
+                        texto=comentario_texto,
+                        anexos=comentario_data.get('anexos', []),
+                    )
 
         return Response({
             'created': len(created_tasks),
@@ -2512,7 +2543,11 @@ class TarefaNotificacaoListAPIView(APIView):
             .filter(usuario=request.user, lida_em__isnull=True)
             .order_by('criada_em', 'id')[:20]
         )
-        serializer = TarefaNotificacaoSerializer(notifications, many=True)
+        serializer = TarefaNotificacaoSerializer(
+            notifications,
+            many=True,
+            context={'request': request},
+        )
         return Response(serializer.data)
 
 
@@ -2683,11 +2718,6 @@ class PrazoBulkCreateAPIView(APIView):
                     autor=request.user,
                     texto=comentario_texto or '',
                 )
-                _create_prazo_mention_notifications_for_comment(
-                    prazo,
-                    actor=request.user,
-                    texto=comentario_texto,
-                )
                 if arquivos and processo:
                     for arquivo in arquivos:
                         arquivo.seek(0)
@@ -2698,6 +2728,16 @@ class PrazoBulkCreateAPIView(APIView):
                             enviado_por=request.user,
                             arquivo=arquivo,
                         )
+                comentario_data = PrazoMensagemSerializer(
+                    comentario,
+                    context={'request': request},
+                ).data
+                _create_prazo_mention_notifications_for_comment(
+                    prazo,
+                    actor=request.user,
+                    texto=comentario_texto,
+                    anexos=comentario_data.get('anexos', []),
+                )
 
         return Response({
             'created': len(created_prazos),

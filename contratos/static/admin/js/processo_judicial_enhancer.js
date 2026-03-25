@@ -9242,6 +9242,140 @@ document.addEventListener('DOMContentLoaded', function() {
         openAgendaPanel();
     };
 
+    const TASK_NOTIFICATION_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+
+    const getTaskNotificationAttachmentUrl = (attachment) => String(attachment?.arquivo_url || '').trim();
+
+    const getTaskNotificationAttachmentName = (attachment) => {
+        const rawName = String(attachment?.nome || '').trim();
+        if (rawName) return rawName;
+        const rawUrl = getTaskNotificationAttachmentUrl(attachment);
+        if (!rawUrl) return 'Arquivo';
+        const sanitized = rawUrl.split('?')[0].split('#')[0];
+        return decodeURIComponent(sanitized.split('/').pop() || 'Arquivo');
+    };
+
+    const getTaskNotificationAttachmentExtension = (attachment) => {
+        const fileName = getTaskNotificationAttachmentName(attachment).toLowerCase();
+        const match = fileName.match(/\.([a-z0-9]+)$/i);
+        return match ? match[1].toLowerCase() : '';
+    };
+
+    const isTaskNotificationImageAttachment = (attachment) => TASK_NOTIFICATION_IMAGE_EXTENSIONS.has(
+        getTaskNotificationAttachmentExtension(attachment)
+    );
+
+    const isTaskNotificationPdfAttachment = (attachment) => getTaskNotificationAttachmentExtension(attachment) === 'pdf';
+
+    const truncateTaskNotificationAttachmentName = (name, maxLength = 24) => {
+        const value = String(name || '').trim();
+        if (!value || value.length <= maxLength) return value || 'Arquivo';
+        return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+    };
+
+    let taskNotificationAttachmentPreviewModal = null;
+
+    const ensureTaskNotificationAttachmentPreviewModal = () => {
+        if (taskNotificationAttachmentPreviewModal?.isConnected) {
+            return taskNotificationAttachmentPreviewModal;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'task-notification-preview-modal';
+        overlay.hidden = true;
+
+        const dialog = document.createElement('div');
+        dialog.className = 'task-notification-preview-modal__dialog';
+        dialog.addEventListener('click', (event) => event.stopPropagation());
+
+        const header = document.createElement('div');
+        header.className = 'task-notification-preview-modal__header';
+
+        const title = document.createElement('strong');
+        title.className = 'task-notification-preview-modal__title';
+        title.textContent = 'Visualização';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'task-notification-preview-modal__close';
+        closeBtn.setAttribute('aria-label', 'Fechar visualização');
+        closeBtn.textContent = '×';
+
+        const image = document.createElement('img');
+        image.className = 'task-notification-preview-modal__image';
+        image.alt = '';
+
+        const caption = document.createElement('p');
+        caption.className = 'task-notification-preview-modal__caption';
+
+        const closeModal = () => {
+            overlay.hidden = true;
+            image.removeAttribute('src');
+            image.alt = '';
+            caption.textContent = '';
+        };
+
+        closeBtn.addEventListener('click', closeModal);
+        overlay.addEventListener('click', closeModal);
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !overlay.hidden) {
+                closeModal();
+            }
+        });
+
+        header.append(title, closeBtn);
+        dialog.append(header, image, caption);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        taskNotificationAttachmentPreviewModal = {
+            overlay,
+            image,
+            caption,
+            close: closeModal,
+        };
+        return taskNotificationAttachmentPreviewModal;
+    };
+
+    const openTaskNotificationImagePreview = (attachment) => {
+        const url = getTaskNotificationAttachmentUrl(attachment);
+        if (!url) return;
+        const modal = ensureTaskNotificationAttachmentPreviewModal();
+        modal.image.src = url;
+        modal.image.alt = getTaskNotificationAttachmentName(attachment);
+        modal.caption.textContent = getTaskNotificationAttachmentName(attachment);
+        modal.overlay.hidden = false;
+    };
+
+    const buildTaskNotificationAttachmentLink = (attachment) => {
+        const url = getTaskNotificationAttachmentUrl(attachment);
+        if (!url) return null;
+        const fileName = getTaskNotificationAttachmentName(attachment);
+        const link = document.createElement(isTaskNotificationImageAttachment(attachment) ? 'button' : 'a');
+        link.className = 'task-notification-card__attachment';
+        link.title = fileName;
+        link.textContent = truncateTaskNotificationAttachmentName(fileName);
+        if (isTaskNotificationImageAttachment(attachment)) {
+            link.type = 'button';
+            link.classList.add('task-notification-card__attachment--image');
+            link.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openTaskNotificationImagePreview(attachment);
+            });
+        } else {
+            link.href = url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            if (isTaskNotificationPdfAttachment(attachment)) {
+                link.classList.add('task-notification-card__attachment--pdf');
+            }
+            link.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+        }
+        return link;
+    };
+
     const renderTaskNotificationCard = (notification, options = {}) => {
         if (!notification || !notification.id) return;
         const stack = ensureTaskNotificationStack();
@@ -9319,6 +9453,22 @@ document.addEventListener('DOMContentLoaded', function() {
             justificationText.className = 'task-notification-card__justification-text';
             justificationText.textContent = notification.justificativa;
             justification.append(justificationLabel, justificationText);
+            const attachments = Array.isArray(notification.anexos) ? notification.anexos : [];
+            const attachmentLinks = attachments
+                .map(buildTaskNotificationAttachmentLink)
+                .filter(Boolean);
+            if (attachmentLinks.length) {
+                const attachmentWrap = document.createElement('div');
+                attachmentWrap.className = 'task-notification-card__attachment-wrap';
+                const attachmentLabel = document.createElement('span');
+                attachmentLabel.className = 'task-notification-card__attachment-label';
+                attachmentLabel.textContent = 'Anexos';
+                const attachmentList = document.createElement('div');
+                attachmentList.className = 'task-notification-card__attachment-list';
+                attachmentLinks.forEach((link) => attachmentList.appendChild(link));
+                attachmentWrap.append(attachmentLabel, attachmentList);
+                justification.appendChild(attachmentWrap);
+            }
         }
 
         const actionBtn = document.createElement('button');

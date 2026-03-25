@@ -1236,6 +1236,7 @@ class TarefaNotificacao(models.Model):
     TIPO_CHOICES = (
         (TIPO_RECEBIDA, 'Recebida'),
         (TIPO_DEVOLUTIVA, 'Devolutiva'),
+        (TIPO_MENCAO, 'Menção'),
     )
 
     usuario = models.ForeignKey(
@@ -1271,6 +1272,7 @@ class TarefaNotificacao(models.Model):
     descricao = models.TextField(blank=True, default='', verbose_name='Descrição')
     autor_nome = models.CharField(max_length=150, blank=True, default='', verbose_name='Autor exibido')
     justificativa = models.TextField(blank=True, default='', verbose_name='Justificativa')
+    payload = models.JSONField(default=dict, blank=True, verbose_name='Payload')
     criada_em = models.DateTimeField(auto_now_add=True, verbose_name='Criada em')
     lida_em = models.DateTimeField(null=True, blank=True, verbose_name='Lida em')
 

@@ -175,6 +175,7 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
     processo_cnj = serializers.SerializerMethodField()
     autor_nome = serializers.SerializerMethodField()
     justificativa = serializers.CharField(read_only=True)
+    anexos = serializers.SerializerMethodField()
 
     class Meta:
         model = TarefaNotificacao
@@ -192,6 +193,7 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
             'processo_cnj',
             'autor_nome',
             'justificativa',
+            'anexos',
             'criada_em',
         ]
 
@@ -256,6 +258,27 @@ class TarefaNotificacaoSerializer(serializers.ModelSerializer):
             return getattr(obj.tarefa, 'data', None)
         data_limite = getattr(obj.prazo, 'data_limite', None)
         return data_limite.date() if data_limite else None
+
+    def get_anexos(self, obj):
+        payload = obj.payload if isinstance(obj.payload, dict) else {}
+        anexos = payload.get('anexos') or []
+        if not isinstance(anexos, list):
+            return []
+        sanitized = []
+        for attachment in anexos:
+            if not isinstance(attachment, dict):
+                continue
+            nome = str(attachment.get('nome') or '').strip()
+            arquivo_url = str(attachment.get('arquivo_url') or '').strip()
+            if not nome and not arquivo_url:
+                continue
+            sanitized.append({
+                'id': attachment.get('id'),
+                'nome': nome,
+                'arquivo_url': arquivo_url,
+                'criado_em': attachment.get('criado_em'),
+            })
+        return sanitized
 
     def get_processo_id(self, obj):
         return getattr(obj.tarefa, 'processo_id', None) if obj.tarefa_id else getattr(obj.prazo, 'processo_id', None)
