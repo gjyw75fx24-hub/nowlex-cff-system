@@ -298,6 +298,478 @@ def _task_export_status_key_for_config(config: ListaDeTarefasArquivoConfig) -> s
     return ""
 
 
+LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY = "lista_tarefas_batch_uploads_v1"
+LISTA_TAREFAS_BATCH_UPLOAD_TTL_SECONDS = 6 * 60 * 60
+
+
+def _normalize_batch_upload_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(value or ""))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = re.sub(r"[^A-Za-z0-9]+", " ", normalized).strip().lower()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _cleanup_lista_tarefas_batch_uploads(raw_state):
+    if not isinstance(raw_state, dict):
+        return {}, False
+    now_ts = timezone.now().timestamp()
+    cleaned = {}
+    changed = False
+    for token, payload in raw_state.items():
+        if not isinstance(payload, dict):
+            changed = True
+            continue
+        created_at = payload.get("created_at")
+        try:
+            created_ts = float(created_at)
+        except (TypeError, ValueError):
+            created_ts = 0.0
+        expired = (now_ts - created_ts) > LISTA_TAREFAS_BATCH_UPLOAD_TTL_SECONDS
+        if expired:
+            for row in payload.get("rows") or []:
+                temp_path = str((row or {}).get("temp_path") or "").strip()
+                if temp_path:
+                    try:
+                        default_storage.delete(temp_path)
+                    except Exception:
+                        pass
+            changed = True
+            continue
+        cleaned[str(token)] = payload
+    return cleaned, changed
+
+
+def _get_lista_tarefas_batch_state(session):
+    current = session.get(LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY) or {}
+    cleaned, changed = _cleanup_lista_tarefas_batch_uploads(current)
+    if changed:
+        session[LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY] = cleaned
+        session.modified = True
+    return cleaned
+
+
+def _store_lista_tarefas_batch_preview(request, *, lista_id: int, rows: list[dict]):
+    state = _get_lista_tarefas_batch_state(request.session)
+    token = uuid.uuid4().hex
+    state[token] = {
+        "created_at": str(timezone.now().timestamp()),
+        "lista_id": int(lista_id),
+        "rows": rows,
+    }
+    request.session[LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY] = state
+    request.session.modified = True
+    return token
+
+
+def _save_lista_tarefas_batch_preview(request, token: str, payload: dict):
+    token = str(token or "").strip()
+    if not token or not isinstance(payload, dict):
+        return
+    state = _get_lista_tarefas_batch_state(request.session)
+    state[token] = payload
+    request.session[LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY] = state
+    request.session.modified = True
+
+
+def _load_lista_tarefas_batch_preview(request, token: str, *, consume: bool = False):
+    token = str(token or "").strip()
+    if not token:
+        return None
+    state = _get_lista_tarefas_batch_state(request.session)
+    payload = state.get(token)
+    if consume and payload:
+        state.pop(token, None)
+        request.session[LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY] = state
+        request.session.modified = True
+    return payload
+
+
+def _delete_lista_tarefas_batch_preview(request, token: str):
+    payload = _load_lista_tarefas_batch_preview(request, token, consume=True)
+    if not payload:
+        return
+    for row in payload.get("rows") or []:
+        temp_path = str((row or {}).get("temp_path") or "").strip()
+        if temp_path:
+            try:
+                default_storage.delete(temp_path)
+            except Exception:
+                pass
+
+
+def _build_lista_batch_file_type_aliases(lista: ListaDeTarefas):
+    aliases = []
+    configs = list(lista.arquivos_configurados.filter(ativo=True).order_by("ordem", "id"))
+    for config in configs:
+        config_aliases = {
+            _normalize_batch_upload_text(config.nome),
+            _normalize_batch_upload_text(config.nome_coluna),
+        }
+        status_key = _task_export_status_key_for_config(config)
+        if status_key == "a06":
+            config_aliases.update({
+                "contrato",
+                "termo de adesao",
+                "termo de ades",
+            })
+        elif status_key == "a07":
+            config_aliases.update({
+                "relatorio",
+                "relatorio tools",
+            })
+        elif status_key == "a08":
+            config_aliases.update({
+                "saldo devedor",
+                "saldo devedor bcsul",
+                "calculo do saldo devedor",
+                "calculo de saldo devedor",
+                "calculo",
+                "calculo b6",
+            })
+        elif status_key == "a09":
+            config_aliases.update({
+                "ted",
+                "ted apoio producao",
+            })
+        clean_aliases = sorted(
+            {alias for alias in config_aliases if alias},
+            key=lambda value: (-len(value), value),
+        )
+        aliases.append({
+            "config_id": config.id,
+            "nome": str(config.nome or "").strip(),
+            "status_key": status_key,
+            "aliases": clean_aliases,
+        })
+    return aliases
+
+
+def _resolve_lista_batch_file_type(lista: ListaDeTarefas, raw_suffix: str):
+    suffix = _normalize_batch_upload_text(raw_suffix)
+    if not suffix:
+        return None
+    aliases = _build_lista_batch_file_type_aliases(lista)
+    for alias in aliases:
+        for candidate in alias["aliases"]:
+            if suffix == candidate:
+                return alias
+    for alias in aliases:
+        for candidate in alias["aliases"]:
+            if suffix.startswith(f"{candidate} ") or suffix.endswith(f" {candidate}") or candidate in suffix:
+                return alias
+    return None
+
+
+def _parse_lista_batch_uploaded_filename(lista: ListaDeTarefas, filename: str):
+    original_name = os.path.basename(str(filename or "").strip())
+    base_name, extension = os.path.splitext(original_name)
+    match = re.match(r"^\s*(\d{9})\s*-\s*(.+?)\s*$", base_name)
+    if not match:
+        return {
+            "status": "invalid_name",
+            "status_label": "Nome inválido",
+            "status_note": 'Use o padrão "123456789 - Tipo do arquivo".',
+            "contract_number": "",
+            "raw_type": "",
+            "config_id": None,
+            "file_type_label": "",
+            "file_type_key": "",
+            "extension": extension.lower(),
+        }
+    contract_number = match.group(1)
+    raw_type = str(match.group(2) or "").strip()
+    config_match = _resolve_lista_batch_file_type(lista, raw_type)
+    if not config_match:
+        return {
+            "status": "unknown_type",
+            "status_label": "Tipo não reconhecido",
+            "status_note": f'Tipo "{raw_type}" não corresponde aos arquivos configurados nesta lista.',
+            "contract_number": contract_number,
+            "raw_type": raw_type,
+            "config_id": None,
+            "file_type_label": raw_type,
+            "file_type_key": "",
+            "extension": extension.lower(),
+        }
+    return {
+        "status": "ready",
+        "status_label": "Arquivo reconhecido",
+        "status_note": "",
+        "contract_number": contract_number,
+        "raw_type": raw_type,
+        "config_id": config_match["config_id"],
+        "file_type_label": config_match["nome"],
+        "file_type_key": config_match["status_key"],
+        "extension": extension.lower(),
+    }
+
+
+def _get_processo_passivo_summary(processo: ProcessoJudicial):
+    parte = (
+        processo.partes_processuais
+        .filter(tipo_polo="PASSIVO")
+        .only("nome")
+        .order_by("id")
+        .first()
+    )
+    if not parte:
+        parte = processo.partes_processuais.only("nome").order_by("id").first()
+    return format_polo_name(getattr(parte, "nome", "") or "")
+
+
+def _process_has_matching_batch_file(processo: ProcessoJudicial, contract_number: str, matcher: dict):
+    aliases = matcher.get("aliases") or []
+    if not aliases:
+        return False
+    normalized_contract = _normalize_batch_upload_text(contract_number)
+    for arquivo in list(processo.arquivos.all()):
+        name_norm = _normalize_batch_upload_text(arquivo.nome or arquivo.arquivo.name or "")
+        if normalized_contract and normalized_contract not in name_norm:
+            continue
+        if any(alias and alias in name_norm for alias in aliases):
+            return True
+    return False
+
+
+def _build_lista_tarefas_batch_preview(lista: ListaDeTarefas, uploaded_files):
+    rows = []
+    files = [arquivo for arquivo in (uploaded_files or []) if arquivo]
+    parsed_items = []
+    contract_numbers = set()
+    for uploaded in files:
+        parsed = _parse_lista_batch_uploaded_filename(lista, uploaded.name)
+        parsed_items.append((uploaded, parsed))
+        contract_number = parsed.get("contract_number")
+        if contract_number:
+            contract_numbers.add(contract_number)
+
+    contratos_map = {}
+    if contract_numbers:
+        contratos_qs = (
+            Contrato.objects
+            .select_related("processo")
+            .prefetch_related("processo__partes_processuais", "processo__arquivos")
+            .filter(numero_contrato__in=sorted(contract_numbers))
+            .order_by("numero_contrato", "processo_id", "id")
+        )
+        for contrato in contratos_qs:
+            key = str(contrato.numero_contrato or "").strip()
+            if not key:
+                continue
+            contratos_map.setdefault(key, []).append(contrato)
+
+    batch_prefix = f"tmp/lista-tarefas-batch/{uuid.uuid4().hex}"
+    for index, (uploaded, parsed) in enumerate(parsed_items, start=1):
+        safe_name = sanitize_processo_arquivo_filename(uploaded.name)
+        temp_path = default_storage.save(f"{batch_prefix}/{uuid.uuid4().hex}_{safe_name}", uploaded)
+        row = {
+            "row_id": f"row-{index}",
+            "upload_name": safe_name,
+            "temp_path": temp_path,
+            "contract_number": parsed.get("contract_number") or "",
+            "raw_type": parsed.get("raw_type") or "",
+            "file_type_label": parsed.get("file_type_label") or "",
+            "file_type_key": parsed.get("file_type_key") or "",
+            "config_id": parsed.get("config_id"),
+            "status": parsed.get("status") or "invalid_name",
+            "status_label": parsed.get("status_label") or "Bloqueado",
+            "status_note": parsed.get("status_note") or "",
+            "selected_process_id": "",
+            "selected_uf": "",
+            "candidates": [],
+            "allow_import": False,
+        }
+        if row["status"] != "ready":
+            rows.append(row)
+            continue
+
+        matcher = _resolve_lista_batch_file_type(lista, row["raw_type"])
+        matched_contracts = contratos_map.get(row["contract_number"], [])
+        if not matched_contracts:
+            row["status"] = "no_match"
+            row["status_label"] = "Contrato não encontrado"
+            row["status_note"] = f'Nenhum cadastro ativo foi encontrado para o contrato {row["contract_number"]}.'
+            rows.append(row)
+            continue
+
+        candidates = []
+        for contrato in matched_contracts:
+            processo = contrato.processo
+            candidate = {
+                "processo_id": processo.id,
+                "processo_cnj": processo.cnj or "Não Judicializado",
+                "uf": (processo.uf or "").strip().upper() or "--",
+                "parte_nome": _get_processo_passivo_summary(processo),
+                "contrato": str(contrato.numero_contrato or "").strip(),
+                "ja_existe": bool(matcher and _process_has_matching_batch_file(processo, row["contract_number"], matcher)),
+            }
+            candidates.append(candidate)
+        row["candidates"] = candidates
+
+        if len(candidates) == 1:
+            row["status"] = "matched"
+            row["status_label"] = "Destino encontrado"
+            row["status_note"] = "Cadastro encontrado automaticamente."
+            row["selected_process_id"] = str(candidates[0]["processo_id"])
+            row["selected_uf"] = candidates[0]["uf"]
+            row["allow_import"] = True
+        else:
+            row["status"] = "multiple"
+            row["status_label"] = "Mais de um destino"
+            row["status_note"] = "Escolha o cadastro correto antes de importar."
+            row["selected_process_id"] = ""
+            row["selected_uf"] = ""
+            row["allow_import"] = True
+        rows.append(row)
+    return rows
+
+
+def _build_lista_tarefas_batch_preview_groups(preview_rows: list[dict]):
+    groups = []
+    group_positions = {}
+    for row in preview_rows or []:
+        selected_process_id = str((row or {}).get("selected_process_id") or "").strip()
+        selected_candidate = None
+        if selected_process_id:
+            for candidate in (row or {}).get("candidates") or []:
+                if str(candidate.get("processo_id") or "") == selected_process_id:
+                    selected_candidate = candidate
+                    break
+
+        if selected_candidate:
+            group_key = f"processo:{selected_process_id}"
+            if group_key not in group_positions:
+                groups.append({
+                    "group_key": group_key,
+                    "grouped": True,
+                    "processo_id": selected_process_id,
+                    "uf": str(selected_candidate.get("uf") or "").strip() or "--",
+                    "parte_nome": str(selected_candidate.get("parte_nome") or "").strip() or "-",
+                    "processo_cnj": str(selected_candidate.get("processo_cnj") or "").strip() or "Nao Judicializado",
+                    "destino_url": reverse("admin:contratos_processojudicial_change", args=[selected_process_id]),
+                    "rows": [],
+                    "_contracts": {},
+                })
+                group_positions[group_key] = len(groups) - 1
+            group = groups[group_positions[group_key]]
+        else:
+            groups.append({
+                "group_key": f'row:{str((row or {}).get("row_id") or "").strip()}',
+                "grouped": False,
+                "processo_id": "",
+                "uf": str((row or {}).get("selected_uf") or "").strip() or "--",
+                "parte_nome": "",
+                "processo_cnj": "",
+                "destino_url": str((row or {}).get("destino_url") or "").strip(),
+                "rows": [],
+                "_contracts": {},
+            })
+            group = groups[-1]
+
+        group["rows"].append(row)
+        contract_number = str((row or {}).get("contract_number") or "").strip()
+        file_type_label = str((row or {}).get("file_type_label") or "").strip()
+        contract_key = contract_number or str((row or {}).get("row_id") or "").strip()
+        contract_entry = group["_contracts"].setdefault(
+            contract_key,
+            {
+                "contract_number": contract_number or "-",
+                "types": [],
+            },
+        )
+        if file_type_label and file_type_label not in contract_entry["types"]:
+            contract_entry["types"].append(file_type_label)
+
+    for group in groups:
+        group["imported_count"] = sum(
+            1 for row in group["rows"]
+            if str((row or {}).get("import_status") or "").strip() == "imported"
+        )
+        group["row_count"] = len(group["rows"])
+        group["contract_items"] = list(group.pop("_contracts", {}).values())
+    return groups
+
+
+def _import_lista_tarefas_batch_rows(*, request, lista: ListaDeTarefas, preview_payload: dict, selected_row_ids: set[str], selected_process_ids: dict[str, str]):
+    imported = 0
+    skipped = 0
+    selected = 0
+    rows = preview_payload.get("rows") or []
+    process_ids = {
+        int(process_id)
+        for process_id in selected_process_ids.values()
+        if str(process_id or "").strip().isdigit()
+    }
+    processos = {
+        processo.id: processo
+        for processo in ProcessoJudicial.objects.filter(id__in=process_ids)
+    }
+    with transaction.atomic():
+        for row in rows:
+            row_id = str((row or {}).get("row_id") or "").strip()
+            if not row_id or row_id not in selected_row_ids:
+                continue
+            selected += 1
+            if str(row.get("import_status") or "").strip() == "imported":
+                skipped += 1
+                continue
+            temp_path = str((row or {}).get("temp_path") or "").strip()
+            if not temp_path or not default_storage.exists(temp_path):
+                row["import_status"] = "blocked"
+                row["import_status_label"] = "Arquivo indisponivel"
+                row["import_status_note"] = "O arquivo temporario nao esta mais disponivel. Refaça o upload para importar novamente."
+                skipped += 1
+                continue
+            chosen_process_id = str(selected_process_ids.get(row_id) or row.get("selected_process_id") or "").strip()
+            if not chosen_process_id.isdigit():
+                row["import_status"] = "blocked"
+                row["import_status_label"] = "Destino pendente"
+                row["import_status_note"] = "Selecione um cadastro valido antes de importar."
+                skipped += 1
+                continue
+            processo = processos.get(int(chosen_process_id))
+            if not processo:
+                row["import_status"] = "blocked"
+                row["import_status_label"] = "Cadastro invalido"
+                row["import_status_note"] = "O cadastro escolhido nao foi encontrado. Atualize o preview e tente novamente."
+                skipped += 1
+                continue
+            with default_storage.open(temp_path, "rb") as stored_file:
+                content = stored_file.read()
+            arquivo = ProcessoArquivo(
+                processo=processo,
+                enviado_por=request.user if request.user.is_authenticated else None,
+                nome=str((row or {}).get("upload_name") or "").strip(),
+            )
+            arquivo.arquivo.save(
+                str((row or {}).get("upload_name") or "arquivo"),
+                ContentFile(content),
+                save=False,
+            )
+            arquivo.save()
+            row["selected_process_id"] = str(processo.id)
+            row["selected_uf"] = (processo.uf or "").strip().upper() or row.get("selected_uf") or ""
+            row["import_status"] = "imported"
+            row["import_status_label"] = "Concluido"
+            row["import_status_note"] = "Arquivo importado com sucesso para o cadastro destino."
+            row["destino_url"] = reverse("admin:contratos_processojudicial_change", args=[processo.pk])
+            row["destino_label"] = processo.cnj or "Nao Judicializado"
+            row["allow_import"] = False
+            row["temp_path"] = ""
+            try:
+                default_storage.delete(temp_path)
+            except Exception:
+                pass
+            imported += 1
+    preview_payload["rows"] = rows
+    _save_lista_tarefas_batch_preview(request, str(preview_payload.get("token") or ""), preview_payload)
+    return {
+        "selected": selected,
+        "imported": imported,
+        "skipped": skipped,
+    }
+
+
 # Form para seleção de usuário na ação de delegar
 class UserForm(forms.Form):
     user = forms.ModelChoiceField(
@@ -896,10 +1368,16 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
     search_fields = ('nome',)
     list_filter = ('automacao_tipo',)
     inlines = [ListaDeTarefasArquivoConfigInline]
+    actions = ('abrir_arquivos_em_lote_action',)
 
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
+            path(
+                "<int:lista_id>/arquivos-em-lote/",
+                self.admin_site.admin_view(self.arquivos_em_lote_view),
+                name="contratos_listadetarefas_arquivos_em_lote",
+            ),
             path(
                 "<int:lista_id>/exportar-planilha/",
                 self.admin_site.admin_view(self.exportar_planilha_view),
@@ -914,6 +1392,144 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             return "-"
         url = reverse("admin:contratos_listadetarefas_exportar_planilha", args=[obj.pk])
         return format_html('<a class="button" href="{}">Exportar planilha</a>', url)
+
+    @admin.action(description="Arquivos em lote")
+    def abrir_arquivos_em_lote_action(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(
+                request,
+                "Selecione exatamente uma lista para usar Arquivos em Lote.",
+                level=messages.WARNING,
+            )
+            return None
+        lista = queryset.first()
+        if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            self.message_user(
+                request,
+                "Arquivos em Lote está disponível apenas para listas com automação de solicitação de arquivos Massa.",
+                level=messages.ERROR,
+            )
+            return None
+        return HttpResponseRedirect(
+            reverse("admin:contratos_listadetarefas_arquivos_em_lote", args=[lista.pk])
+        )
+
+    def arquivos_em_lote_view(self, request, lista_id):
+        lista = get_object_or_404(
+            ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
+            pk=lista_id,
+        )
+        if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            messages.error(request, "Essa lista não possui Arquivos em Lote configurado.")
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        preview_token = str(request.GET.get("preview") or "").strip()
+        preview_rows = []
+        preview_groups = []
+        uf_buttons = []
+        preview_summary = {
+            "total": 0,
+            "imported": 0,
+            "matched": 0,
+            "multiple": 0,
+            "no_match": 0,
+            "invalid": 0,
+        }
+
+        if request.method == "POST":
+            action = str(request.POST.get("batch_action") or "").strip()
+            if action == "preview":
+                upload_files = [arquivo for arquivo in request.FILES.getlist("arquivos") if arquivo]
+                if not upload_files:
+                    messages.error(request, "Selecione ao menos um arquivo para localizar o destino.")
+                else:
+                    preview_rows = _build_lista_tarefas_batch_preview(lista, upload_files)
+                    preview_token = _store_lista_tarefas_batch_preview(
+                        request,
+                        lista_id=lista.id,
+                        rows=preview_rows,
+                    )
+            elif action == "import":
+                preview_token = str(request.POST.get("preview_token") or "").strip()
+                preview_payload = _load_lista_tarefas_batch_preview(request, preview_token)
+                if not preview_payload or int(preview_payload.get("lista_id") or 0) != lista.id:
+                    messages.error(request, "O preview expirou. Faça o upload novamente.")
+                    return HttpResponseRedirect(
+                        reverse("admin:contratos_listadetarefas_arquivos_em_lote", args=[lista.pk])
+                    )
+                preview_payload["token"] = preview_token
+                preview_rows = list(preview_payload.get("rows") or [])
+                selected_row_ids = {str(value).strip() for value in request.POST.getlist("selected_rows") if str(value).strip()}
+                selected_process_ids = {
+                    str(key).replace("destino_", "", 1): str(value or "").strip()
+                    for key, value in request.POST.items()
+                    if str(key).startswith("destino_")
+                }
+                if not selected_row_ids:
+                    messages.warning(request, "Selecione ao menos um arquivo para importar.")
+                else:
+                    result = _import_lista_tarefas_batch_rows(
+                        request=request,
+                        lista=lista,
+                        preview_payload=preview_payload,
+                        selected_row_ids=selected_row_ids,
+                        selected_process_ids=selected_process_ids,
+                    )
+                    messages.success(
+                        request,
+                        f'Importação concluída. {result["imported"]} arquivo(s) importado(s) e {result["skipped"]} pulado(s).',
+                    )
+                    return HttpResponseRedirect(
+                        f'{reverse("admin:contratos_listadetarefas_arquivos_em_lote", args=[lista.pk])}?{urlencode({"preview": preview_token})}'
+                    )
+
+        if not preview_rows and preview_token:
+            preview_payload = _load_lista_tarefas_batch_preview(request, preview_token)
+            if preview_payload and int(preview_payload.get("lista_id") or 0) == lista.id:
+                preview_rows = list(preview_payload.get("rows") or [])
+
+        if preview_rows:
+            preview_groups = _build_lista_tarefas_batch_preview_groups(preview_rows)
+            uf_counts = {}
+            for row in preview_rows:
+                status = str(row.get("status") or "")
+                import_status = str(row.get("import_status") or "")
+                preview_summary["total"] += 1
+                if import_status == "imported":
+                    preview_summary["imported"] += 1
+                elif status == "matched":
+                    preview_summary["matched"] += 1
+                elif status == "multiple":
+                    preview_summary["multiple"] += 1
+                elif status == "no_match":
+                    preview_summary["no_match"] += 1
+                else:
+                    preview_summary["invalid"] += 1
+                uf_value = str(row.get("selected_uf") or "").strip()
+                if uf_value:
+                    uf_counts[uf_value] = uf_counts.get(uf_value, 0) + 1
+            uf_buttons = [
+                {"uf": uf, "count": count}
+                for uf, count in sorted(uf_counts.items(), key=lambda item: item[0])
+            ]
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": f"Arquivos em Lote - {lista.nome}",
+            "lista": lista,
+            "preview_token": preview_token,
+            "preview_rows": preview_rows,
+            "preview_groups": preview_groups,
+            "preview_summary": preview_summary,
+            "uf_buttons": uf_buttons,
+            "media": self.media,
+        }
+        return render(
+            request,
+            "admin/contratos/listadetarefas/arquivos_em_lote.html",
+            context,
+        )
 
     def exportar_planilha_view(self, request, lista_id):
         lista = get_object_or_404(

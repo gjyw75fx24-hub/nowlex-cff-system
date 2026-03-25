@@ -1,0 +1,689 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+  <style>
+    .lista-batch-import-page {
+      max-width: 1240px;
+      margin: 0 auto;
+    }
+    .lista-batch-import-toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 0 0 18px 0;
+    }
+    .lista-batch-import-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin: 16px 0 18px 0;
+    }
+    .lista-batch-import-summary__card {
+      border: 1px solid #d8e2ee;
+      border-radius: 14px;
+      background: #fff;
+      padding: 14px 16px;
+      box-shadow: 0 12px 28px rgba(19, 40, 67, 0.06);
+    }
+    .lista-batch-import-summary__label {
+      display: block;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #61778f;
+      margin-bottom: 4px;
+    }
+    .lista-batch-import-summary__value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1f2f46;
+    }
+    .lista-batch-import-form,
+    .lista-batch-import-preview {
+      border: 1px solid #d8e2ee;
+      border-radius: 16px;
+      background: #fff;
+      padding: 18px 20px;
+      box-shadow: 0 14px 30px rgba(17, 36, 61, 0.07);
+    }
+    .lista-batch-import-form + .lista-batch-import-preview {
+      margin-top: 18px;
+    }
+    .lista-batch-import-section-title {
+      margin: 0 0 6px 0;
+      font-size: 1.12rem;
+      font-weight: 700;
+      color: #20324c;
+    }
+    .lista-batch-import-section-subtitle {
+      margin: 0 0 14px 0;
+      color: #5f7387;
+      line-height: 1.45;
+    }
+    .lista-batch-import-file-input {
+      width: 100%;
+      padding: 12px;
+      border: 1px dashed #9ab0ca;
+      border-radius: 12px;
+      background: #f8fbff;
+      box-sizing: border-box;
+    }
+    .lista-batch-import-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .lista-batch-import-selectors {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .lista-batch-import-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border-radius: 999px;
+      border: 1px solid #c7d5e7;
+      background: #f4f8fd;
+      color: #244261;
+      padding: 9px 16px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .lista-batch-import-button--primary {
+      background: #1f5fa8;
+      border-color: #1f5fa8;
+      color: #fff;
+    }
+    .lista-batch-import-button--primary:link,
+    .lista-batch-import-button--primary:visited,
+    .lista-batch-import-button--primary:hover,
+    .lista-batch-import-button--primary:focus,
+    .lista-batch-import-button--primary:active {
+      color: #fff;
+    }
+    .lista-batch-import-button--import {
+      background: #1f7b49;
+      border-color: #1f7b49;
+      color: #fff;
+    }
+    .lista-batch-import-button--busy {
+      opacity: 0.88;
+      cursor: wait;
+      pointer-events: none;
+      position: relative;
+    }
+    .lista-batch-import-button__spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.42);
+      border-top-color: rgba(255, 255, 255, 0.96);
+      border-radius: 50%;
+      display: inline-block;
+      animation: lista-batch-import-spin 0.75s linear infinite;
+    }
+    @keyframes lista-batch-import-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    .lista-batch-import-button--ghost {
+      background: #fff;
+    }
+    .lista-batch-import-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .lista-batch-import-group {
+      border: 1px solid #dbe4ef;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .lista-batch-import-group--grouped {
+      border-color: #c9d9ec;
+      box-shadow: 0 10px 24px rgba(17, 36, 61, 0.05);
+    }
+    .lista-batch-import-group__header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px 12px 16px;
+      background: linear-gradient(180deg, rgba(247, 250, 253, 0.98) 0%, rgba(255, 255, 255, 0.98) 100%);
+      border-bottom: 1px solid #e6edf5;
+    }
+    .lista-batch-import-group__title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #20324c;
+    }
+    .lista-batch-import-group__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: 4px;
+      color: #60758c;
+      font-size: 0.92rem;
+    }
+    .lista-batch-import-group__contracts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .lista-batch-import-group__contract {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      border: 1px solid #d9e4f0;
+      border-radius: 999px;
+      background: #f8fbff;
+      padding: 5px 10px;
+      font-size: 0.84rem;
+      color: #244261;
+    }
+    .lista-batch-import-group__contract strong {
+      color: #1d3351;
+    }
+    .lista-batch-import-group__rows {
+      display: grid;
+    }
+    .lista-batch-import-row {
+      background: #fff;
+    }
+    .lista-batch-import-group .lista-batch-import-row + .lista-batch-import-row {
+      border-top: 1px solid #e8eef5;
+    }
+    .lista-batch-import-row[data-status="matched"] {
+      border-color: #beddc5;
+      background: #fbfefb;
+    }
+    .lista-batch-import-row[data-status="multiple"] {
+      border-color: #efd89a;
+      background: #fffdf8;
+    }
+    .lista-batch-import-row[data-status="no_match"],
+    .lista-batch-import-row[data-status="invalid_name"],
+    .lista-batch-import-row[data-status="unknown_type"] {
+      border-color: #efc4c4;
+      background: #fffafa;
+    }
+    .lista-batch-import-row__header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-bottom: 1px solid #e6edf5;
+      background: rgba(247, 250, 253, 0.92);
+    }
+    .lista-batch-import-row__main {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .lista-batch-import-row__checkbox {
+      margin-top: 4px;
+      width: 18px;
+      height: 18px;
+    }
+    .lista-batch-import-row__title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1e3048;
+      word-break: break-word;
+    }
+    .lista-batch-import-row__meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+      color: #60758c;
+      font-size: 0.9rem;
+    }
+    .lista-batch-import-row__badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border: 1px solid #d4e0ed;
+      background: #eef4fb;
+      color: #294663;
+      white-space: nowrap;
+    }
+    .lista-batch-import-row__badge--matched {
+      background: #ebf8ef;
+      border-color: #b8ddc3;
+      color: #1f6d3d;
+    }
+    .lista-batch-import-row__badge--imported {
+      background: #e8f1ff;
+      border-color: #b8cdef;
+      color: #1d4f96;
+    }
+    .lista-batch-import-row__badge--multiple {
+      background: #fff6df;
+      border-color: #f0d18a;
+      color: #8b5b00;
+    }
+    .lista-batch-import-row__badge--blocked {
+      background: #fdeeee;
+      border-color: #efbebd;
+      color: #8b2d2d;
+    }
+    .lista-batch-import-row__body {
+      padding: 14px 16px 16px 16px;
+    }
+    .lista-batch-import-row__note {
+      margin: 0 0 12px 0;
+      color: #5d7389;
+      line-height: 1.45;
+    }
+    .lista-batch-import-row__match-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px 16px;
+      margin-bottom: 12px;
+    }
+    .lista-batch-import-row__cell strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 0.77rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #60758c;
+    }
+    .lista-batch-import-row__destination-select {
+      width: 100%;
+      max-width: 460px;
+      min-height: 38px;
+      border: 1px solid #cbd8e6;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 0.94rem;
+      color: #20324c;
+      background: #fff;
+    }
+    .lista-batch-import-row__existing {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: #6d5a00;
+      background: #fff6db;
+      border: 1px solid #efd78b;
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .lista-batch-import-row__result-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .lista-batch-import-empty {
+      margin: 0;
+      color: #61778f;
+      font-style: italic;
+    }
+  </style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:contratos_listadetarefas_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; Arquivos em Lote
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="lista-batch-import-page">
+  <div class="lista-batch-import-toolbar">
+    <a href="{% url 'admin:contratos_listadetarefas_changelist' %}" class="lista-batch-import-button lista-batch-import-button--ghost">Voltar para listas</a>
+    <a href="{% url 'admin:contratos_listadetarefas_exportar_planilha' lista.pk %}" class="lista-batch-import-button">Exportar planilha</a>
+  </div>
+
+  <div class="lista-batch-import-form">
+    <h1 class="lista-batch-import-section-title">Arquivos em Lote</h1>
+    <p class="lista-batch-import-section-subtitle">
+      Lista: <strong>{{ lista.nome }}</strong>. Envie um ou centenas de arquivos com nomes no padrão
+      <strong>123456789 - Tipo do arquivo</strong>, por exemplo: <em>123456789 - Contrato</em>,
+      <em>123456789 - Saldo Devedor</em>, <em>123456789 - Relatório</em>, <em>123456789 - TED</em>.
+    </p>
+    <form method="post" enctype="multipart/form-data" id="lista-batch-preview-form">
+      {% csrf_token %}
+      <input type="hidden" name="batch_action" value="preview">
+      <input class="lista-batch-import-file-input" type="file" name="arquivos" multiple required data-preview-files>
+      <div class="lista-batch-import-actions">
+        <span class="help">O sistema vai localizar os cadastros pelo número do contrato presente no nome do arquivo.</span>
+        <button type="submit" class="lista-batch-import-button lista-batch-import-button--primary" data-preview-submit>Encontrar Destino</button>
+      </div>
+    </form>
+  </div>
+
+  {% if preview_rows %}
+    <div class="lista-batch-import-summary">
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Arquivos enviados</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.total }}</span>
+      </div>
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Concluídos</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.imported }}</span>
+      </div>
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Destino encontrado</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.matched }}</span>
+      </div>
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Exigem escolha</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.multiple }}</span>
+      </div>
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Sem match</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.no_match }}</span>
+      </div>
+      <div class="lista-batch-import-summary__card">
+        <span class="lista-batch-import-summary__label">Bloqueados</span>
+        <span class="lista-batch-import-summary__value">{{ preview_summary.invalid }}</span>
+      </div>
+    </div>
+
+    <div class="lista-batch-import-preview">
+      <div class="lista-batch-import-selectors">
+        <button type="button" class="lista-batch-import-button" data-select-all="1">Todos geral</button>
+        <button type="button" class="lista-batch-import-button" data-clear-all="1">Limpar seleção</button>
+        {% for item in uf_buttons %}
+          <button type="button" class="lista-batch-import-button" data-select-uf="{{ item.uf }}">Todos {{ item.uf }} ({{ item.count }})</button>
+        {% endfor %}
+      </div>
+
+      <form method="post" id="lista-batch-import-form">
+        {% csrf_token %}
+        <input type="hidden" name="batch_action" value="import">
+        <input type="hidden" name="preview_token" value="{{ preview_token }}">
+
+        <div class="lista-batch-import-grid">
+          {% for group in preview_groups %}
+            <section class="lista-batch-import-group {% if group.grouped %}lista-batch-import-group--grouped{% endif %}">
+              {% if group.grouped %}
+                <div class="lista-batch-import-group__header">
+                  <div>
+                    <h3 class="lista-batch-import-group__title">{{ group.parte_nome }}</h3>
+                    <div class="lista-batch-import-group__meta">
+                      <span>UF {{ group.uf }}</span>
+                      <span>{{ group.processo_cnj }}</span>
+                      <span>{{ group.row_count }} arquivo(s)</span>
+                      {% if group.imported_count %}<span>{{ group.imported_count }} concluido(s)</span>{% endif %}
+                    </div>
+                    {% if group.contract_items %}
+                      <div class="lista-batch-import-group__contracts">
+                        {% for contract_item in group.contract_items %}
+                          <span class="lista-batch-import-group__contract">
+                            <strong>{{ contract_item.contract_number }}</strong>
+                            <span>{{ contract_item.types|join:", " }}</span>
+                          </span>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                  </div>
+                  {% if group.destino_url %}
+                    <a href="{{ group.destino_url }}" class="lista-batch-import-button lista-batch-import-button--primary" target="_blank" rel="noopener">
+                      Abrir cadastro
+                    </a>
+                  {% endif %}
+                </div>
+              {% endif %}
+
+              <div class="lista-batch-import-group__rows">
+                {% for row in group.rows %}
+                  <article class="lista-batch-import-row" data-status="{{ row.status }}" data-uf="{{ row.selected_uf|default:'' }}">
+                    <div class="lista-batch-import-row__header">
+                      <div class="lista-batch-import-row__main">
+                        <input
+                          class="lista-batch-import-row__checkbox"
+                          type="checkbox"
+                          name="selected_rows"
+                          value="{{ row.row_id }}"
+                          {% if row.status == "matched" and row.import_status != "imported" %}checked{% endif %}
+                          {% if not row.allow_import or row.import_status == "imported" %}disabled{% endif %}
+                        >
+                        <div>
+                          <div class="lista-batch-import-row__title">{{ row.upload_name }}</div>
+                          <div class="lista-batch-import-row__meta">
+                            {% if row.contract_number %}<span>Contrato {{ row.contract_number }}</span>{% endif %}
+                            {% if row.file_type_label %}<span>Tipo: {{ row.file_type_label }}</span>{% endif %}
+                            {% if row.raw_type and row.raw_type != row.file_type_label %}<span>Recebido como: {{ row.raw_type }}</span>{% endif %}
+                          </div>
+                        </div>
+                      </div>
+                      <span class="lista-batch-import-row__badge {% if row.import_status == 'imported' %}lista-batch-import-row__badge--imported{% elif row.status == 'matched' %}lista-batch-import-row__badge--matched{% elif row.status == 'multiple' %}lista-batch-import-row__badge--multiple{% else %}lista-batch-import-row__badge--blocked{% endif %}">
+                        {% if row.import_status_label %}{{ row.import_status_label }}{% else %}{{ row.status_label }}{% endif %}
+                      </span>
+                    </div>
+                    <div class="lista-batch-import-row__body">
+                      <p class="lista-batch-import-row__note">{% if row.import_status_note %}{{ row.import_status_note }}{% else %}{{ row.status_note }}{% endif %}</p>
+
+                      {% if row.candidates and not group.grouped %}
+                        {% if row.candidates|length == 1 %}
+                          {% with candidate=row.candidates.0 %}
+                            {% if row.import_status != "imported" %}
+                              <input type="hidden" name="destino_{{ row.row_id }}" value="{{ candidate.processo_id }}">
+                            {% endif %}
+                            <div class="lista-batch-import-row__match-grid">
+                              <div class="lista-batch-import-row__cell">
+                                <strong>UF</strong>
+                                <span>{{ candidate.uf }}</span>
+                              </div>
+                              <div class="lista-batch-import-row__cell">
+                                <strong>Parte</strong>
+                                <span>{{ candidate.parte_nome|default:"-" }}</span>
+                              </div>
+                              <div class="lista-batch-import-row__cell">
+                                <strong>Contrato</strong>
+                                <span>{{ candidate.contrato }}</span>
+                              </div>
+                              <div class="lista-batch-import-row__cell">
+                                <strong>Cadastro</strong>
+                                <span>{{ candidate.processo_cnj }}</span>
+                              </div>
+                            </div>
+                            {% if candidate.ja_existe %}
+                              <div class="lista-batch-import-row__existing">
+                                Já existe arquivo semelhante salvo nesse cadastro. A importação continua permitida para atualização.
+                              </div>
+                            {% endif %}
+                          {% endwith %}
+                        {% else %}
+                          <div class="lista-batch-import-row__match-grid">
+                            <div class="lista-batch-import-row__cell">
+                              <strong>Destino</strong>
+                              <select class="lista-batch-import-row__destination-select" name="destino_{{ row.row_id }}" {% if row.import_status == "imported" %}disabled{% endif %}>
+                                <option value="">Selecione o cadastro correto</option>
+                                {% for candidate in row.candidates %}
+                                  <option value="{{ candidate.processo_id }}" data-uf="{{ candidate.uf }}" {% if row.selected_process_id|stringformat:"s" == candidate.processo_id|stringformat:"s" %}selected{% endif %}>
+                                    {{ candidate.uf }} · {{ candidate.parte_nome|default:"-" }} · {{ candidate.contrato }} · {{ candidate.processo_cnj }}
+                                  </option>
+                                {% endfor %}
+                              </select>
+                            </div>
+                          </div>
+                        {% endif %}
+                      {% elif row.candidates and group.grouped and row.import_status != "imported" %}
+                        <input type="hidden" name="destino_{{ row.row_id }}" value="{{ group.processo_id }}">
+                        {% for candidate in row.candidates %}
+                          {% if candidate.processo_id|stringformat:"s" == group.processo_id|stringformat:"s" and candidate.ja_existe %}
+                            <div class="lista-batch-import-row__existing">
+                              Já existe arquivo semelhante salvo nesse cadastro. A importação continua permitida para atualização.
+                            </div>
+                          {% endif %}
+                        {% endfor %}
+                      {% endif %}
+
+                      {% if row.import_status == "imported" and row.destino_url and not group.grouped %}
+                        <div class="lista-batch-import-row__result-actions">
+                          <a href="{{ row.destino_url }}" class="lista-batch-import-button lista-batch-import-button--primary" target="_blank" rel="noopener">
+                            Abrir cadastro
+                          </a>
+                          <span class="help">{{ row.destino_label|default:"Cadastro vinculado" }}</span>
+                        </div>
+                      {% endif %}
+                    </div>
+                  </article>
+                {% endfor %}
+              </div>
+            </section>
+          {% endfor %}
+        </div>
+
+        <div class="lista-batch-import-actions">
+          <p class="help">Selecione os arquivos desejados, ajuste o destino quando houver mais de um match e conclua em Importar.</p>
+          <button type="submit" class="lista-batch-import-button lista-batch-import-button--import" data-import-submit>Importar selecionados</button>
+        </div>
+      </form>
+    </div>
+  {% else %}
+    <div class="lista-batch-import-preview" style="margin-top:18px;">
+      <p class="lista-batch-import-empty">Nenhum preview gerado ainda.</p>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  (function() {
+    const previewForm = document.getElementById('lista-batch-preview-form');
+    if (previewForm) {
+      const previewButton = previewForm.querySelector('[data-preview-submit]');
+      const previewButtonLabel = previewButton ? previewButton.textContent : '';
+
+      previewForm.addEventListener('submit', (event) => {
+        if (!previewButton) return;
+        if (previewForm.dataset.busy === '1') {
+          event.preventDefault();
+          return;
+        }
+        previewForm.dataset.busy = '1';
+        previewButton.disabled = true;
+        previewButton.classList.add('lista-batch-import-button--busy');
+        previewButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Encontrando destino...</span>';
+        window.setTimeout(() => {
+          if (previewButton && document.body.contains(previewButton)) {
+            previewButton.disabled = false;
+            previewButton.classList.remove('lista-batch-import-button--busy');
+            previewButton.textContent = previewButtonLabel;
+          }
+          delete previewForm.dataset.busy;
+        }, 45000);
+      });
+    }
+
+    const form = document.getElementById('lista-batch-import-form');
+    if (!form) return;
+    const importButton = form.querySelector('[data-import-submit]');
+    const importButtonLabel = importButton ? importButton.textContent : '';
+
+    const rows = () => Array.from(form.querySelectorAll('.lista-batch-import-row'));
+    const checkboxFor = (row) => row.querySelector('.lista-batch-import-row__checkbox');
+    const selectFor = (row) => row.querySelector('.lista-batch-import-row__destination-select');
+
+    const rowCanBeSelected = (row) => {
+      const checkbox = checkboxFor(row);
+      if (!checkbox || checkbox.disabled) return false;
+      const select = selectFor(row);
+      if (!select) return true;
+      return !!String(select.value || '').trim();
+    };
+
+    const syncRowState = (row) => {
+      const select = selectFor(row);
+      const checkbox = checkboxFor(row);
+      if (!checkbox) return;
+      if (!select) return;
+      const chosen = select.options[select.selectedIndex];
+      row.dataset.uf = chosen?.dataset?.uf || '';
+      if (!select.value) {
+        checkbox.checked = false;
+      }
+    };
+
+    rows().forEach((row) => {
+      const select = selectFor(row);
+      if (!select) return;
+      select.addEventListener('change', () => syncRowState(row));
+      syncRowState(row);
+    });
+
+    document.querySelectorAll('[data-select-all="1"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        rows().forEach((row) => {
+          const checkbox = checkboxFor(row);
+          if (!checkbox || checkbox.disabled) return;
+          if (rowCanBeSelected(row)) checkbox.checked = true;
+        });
+      });
+    });
+
+    document.querySelectorAll('[data-clear-all="1"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        rows().forEach((row) => {
+          const checkbox = checkboxFor(row);
+          if (!checkbox || checkbox.disabled) return;
+          checkbox.checked = false;
+        });
+      });
+    });
+
+    document.querySelectorAll('[data-select-uf]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const uf = button.getAttribute('data-select-uf') || '';
+        rows().forEach((row) => {
+          const checkbox = checkboxFor(row);
+          if (!checkbox || checkbox.disabled) return;
+          if ((row.dataset.uf || '') === uf && rowCanBeSelected(row)) {
+            checkbox.checked = true;
+          }
+        });
+      });
+    });
+
+    form.addEventListener('submit', (event) => {
+      if (!importButton) return;
+      if (form.dataset.busy === '1') {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.busy = '1';
+      importButton.disabled = true;
+      importButton.classList.add('lista-batch-import-button--busy');
+      importButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Importando...</span>';
+      window.setTimeout(() => {
+        if (importButton && document.body.contains(importButton)) {
+          importButton.disabled = false;
+          importButton.classList.remove('lista-batch-import-button--busy');
+          importButton.textContent = importButtonLabel;
+        }
+        delete form.dataset.busy;
+      }, 45000);
+    });
+  })();
+</script>
+{% endblock %}

@@ -120,7 +120,13 @@ document.addEventListener('DOMContentLoaded', function () {
 .documento-peticoes-remove-wrapper {
   display: flex;
   justify-content: flex-end;
-  margin-top: 6px;
+  margin-top: 0;
+  padding-right: 0;
+  position: absolute;
+  top: 50%;
+  right: 88px;
+  transform: translateY(-50%);
+  z-index: 2;
 }
 
 .documento-peticoes-modify-row {
@@ -153,6 +159,30 @@ document.addEventListener('DOMContentLoaded', function () {
   color: #5f6b7a;
   margin-top: 4px;
   text-transform: capitalize;
+}
+
+#arquivos-group td.field-nome,
+#processoarquivo_set-group td.field-nome {
+  position: relative;
+  box-sizing: border-box;
+}
+
+#arquivos-group .documento-peticoes-action-bar,
+#processoarquivo_set-group .documento-peticoes-action-bar {
+  width: auto !important;
+  margin-bottom: 0 !important;
+  padding-right: 0 !important;
+  position: absolute;
+  top: 50%;
+  right: 88px;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+#arquivos-group .documento-peticoes-download-row,
+#processoarquivo_set-group .documento-peticoes-download-row {
+  width: 100% !important;
+  box-sizing: border-box;
 }
 
 .documento-peticoes-selected-file {
@@ -1120,7 +1150,7 @@ document.addEventListener('DOMContentLoaded', function() {
       actionBar.style.display = 'flex';
       actionBar.style.justifyContent = 'flex-end';
       actionBar.style.gap = '6px';
-      actionBar.style.marginBottom = '6px';
+      actionBar.style.marginBottom = '0';
 
       const btnRow = document.createElement('div');
       btnRow.className = 'documento-peticoes-download-row';
