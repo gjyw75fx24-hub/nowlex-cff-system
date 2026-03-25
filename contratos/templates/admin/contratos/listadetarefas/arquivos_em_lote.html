@@ -360,6 +360,7 @@
   <div class="lista-batch-import-toolbar">
     <a href="{% url 'admin:contratos_listadetarefas_changelist' %}" class="lista-batch-import-button lista-batch-import-button--ghost">Voltar para listas</a>
     <a href="{% url 'admin:contratos_listadetarefas_exportar_planilha' lista.pk %}" class="lista-batch-import-button">Exportar planilha</a>
+    <a href="{% url 'admin:contratos_listadetarefas_exportar_slack' lista.pk %}" class="lista-batch-import-button">Exportar ao Slack</a>
   </div>
 
   <div class="lista-batch-import-form">

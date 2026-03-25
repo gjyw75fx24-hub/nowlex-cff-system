@@ -218,6 +218,10 @@ if ONLINE_PRESENCE_IDLE_SECONDS < ONLINE_PRESENCE_HEARTBEAT_SECONDS:
 # Gotenberg - Serviço de conversão de documentos (DOCX -> PDF)
 GOTENBERG_URL = os.getenv("GOTENBERG_URL", "")
 
+# Slack - exportações administrativas
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_ARQUIVOS_MASSA_CHANNEL_ID = os.getenv("SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip()
+
 # Arquivos enviados (uploads)
 # Configuração do AWS S3 para armazenamento de arquivos
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')

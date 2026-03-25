@@ -2288,7 +2288,6 @@ document.addEventListener('DOMContentLoaded', function() {
 	                <div class="agenda-placeholder-card__body">
 	                    <p class="agenda-placeholder-card__title">Agenda Geral</p>
 	                    <p class="agenda-placeholder-card__text">Tarefas e prazos reunidos em um só calendário.</p>
-	                    <p class="agenda-placeholder-card__note">Área em construção para centralizar compromissos.</p>
 	                </div>
 	                <div class="agenda-placeholder-card__actions">
 	                    <button type="button" class="agenda-placeholder-card__btn" data-agenda-action="tarefas">Tarefas</button>
@@ -7838,18 +7837,26 @@ document.addEventListener('DOMContentLoaded', function() {
         if (agendaBulkCache.listsPromise) {
             return agendaBulkCache.listsPromise;
         }
-        agendaBulkCache.listsPromise = fetch('/api/listas-de-tarefas/')
+        agendaBulkCache.listsPromise = fetch('/api/listas-de-tarefas/', {
+            credentials: 'same-origin',
+        })
             .then((response) => {
                 if (!response.ok) throw new Error('Falha ao carregar listas');
                 return response.json();
             })
             .then((data) => {
-                agendaBulkCache.lists = Array.isArray(data) ? data : [];
+                const items = Array.isArray(data)
+                    ? data
+                    : (Array.isArray(data?.results)
+                        ? data.results
+                        : (Array.isArray(data?.items) ? data.items : []));
+                agendaBulkCache.lists = items;
                 return agendaBulkCache.lists;
             })
-            .catch(() => {
+            .catch((error) => {
                 agendaBulkCache.lists = [];
-                return agendaBulkCache.lists;
+                agendaBulkCache.listsPromise = null;
+                throw error;
             });
         return agendaBulkCache.listsPromise;
     };
@@ -8203,10 +8210,30 @@ document.addEventListener('DOMContentLoaded', function() {
         const preview = modal.querySelector('.tarefa-comments-attachment-preview');
         const previewName = modal.querySelector('.tarefa-comments-attachment-preview-name');
         const previewClear = modal.querySelector('.tarefa-comments-attachment-preview-clear');
+        const readSelectedFiles = (inputEl) => (
+            typeof getSelectedCommentFiles === 'function'
+                ? getSelectedCommentFiles(inputEl)
+                : Array.from(inputEl?.files || []).filter(Boolean)
+        );
+        const buildPreviewLabel = (filesOrNames) => (
+            typeof buildCommentAttachmentPreviewLabel === 'function'
+                ? buildCommentAttachmentPreviewLabel(filesOrNames)
+                : (() => {
+                    const names = Array.from(filesOrNames || [])
+                        .map((item) => {
+                            if (!item) return '';
+                            if (typeof item === 'string') return item.trim();
+                            return String(item.name || '').trim();
+                        })
+                        .filter(Boolean);
+                    if (!names.length) return '';
+                    return names.length === 1 ? names[0] : `${names.length} arquivos selecionados`;
+                })()
+        );
 
         const updateButtonState = () => {
             const hasText = (input?.value || '').trim().length > 0;
-            const hasFile = getSelectedCommentFiles(fileInput).length > 0;
+            const hasFile = readSelectedFiles(fileInput).length > 0;
             if (sendButton) {
                 sendButton.disabled = !(hasText || hasFile);
             }
@@ -8214,7 +8241,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const showPreview = (filesOrNames) => {
             if (!preview || !previewName) return;
-            const label = buildCommentAttachmentPreviewLabel(filesOrNames);
+            const label = buildPreviewLabel(filesOrNames);
             if (label) {
                 preview.hidden = false;
                 previewName.textContent = label;
@@ -8226,7 +8253,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (fileInput) {
             fileInput.addEventListener('change', () => {
-                const files = getSelectedCommentFiles(fileInput);
+                const files = readSelectedFiles(fileInput);
                 showPreview(files);
                 updateButtonState();
             });
@@ -8245,7 +8272,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (sendButton) {
             sendButton.addEventListener('click', () => {
                 const text = (input?.value || '').trim();
-                const files = getSelectedCommentFiles(fileInput);
+                const files = readSelectedFiles(fileInput);
                 if (!text && !files.length) return;
                 modal.dataset.pendingCommentText = text;
                 modal._pendingCommentFiles = files;
@@ -8253,7 +8280,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const parts = [];
                     if (text) parts.push(text);
                     if (files.length) {
-                        parts.push(`Anexos: ${buildCommentAttachmentPreviewLabel(files)}`);
+                        parts.push(`Anexos: ${buildPreviewLabel(files)}`);
                     }
                     history.textContent = parts.join(' ') || 'Nenhum comentário gravado.';
                 }
@@ -8272,6 +8299,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const fillAgendaBulkSelects = (modal, type) => {
         if (!modal) return;
+        const refreshTaskListSelect2 = (select) => {
+            const $ = getSelect2JQuery();
+            if (!select || !$) {
+                return;
+            }
+            const $select = $(select);
+            if ($select.data('select2')) {
+                try {
+                    $select.select2('destroy');
+                } catch (error) {
+                    // Ignore stale select2 state and rebuild below.
+                }
+                const sibling = $select.next('.select2');
+                if (sibling.length) {
+                    sibling.remove();
+                }
+            }
+        };
         const reinitTaskSelect2 = () => {
             if (type !== 'tarefas' || typeof initTarefasSelect2 !== 'function') {
                 return;
@@ -8282,6 +8327,8 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         const responsavelSelect = modal.querySelector('[data-field="responsavel"]');
         if (responsavelSelect) {
+            responsavelSelect.disabled = true;
+            responsavelSelect.innerHTML = '<option value="">Carregando...</option>';
             fetchAgendaUsersList().then((users) => {
                 responsavelSelect.innerHTML = '<option value="">---------</option>';
                 users.forEach((user) => {
@@ -8293,13 +8340,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     option.textContent = label;
                     responsavelSelect.appendChild(option);
                 });
+                responsavelSelect.disabled = false;
                 reinitTaskSelect2();
+            }).catch(() => {
+                responsavelSelect.innerHTML = '<option value="">Falha ao carregar</option>';
+                responsavelSelect.disabled = false;
             });
         }
         if (type === 'tarefas') {
             const listaSelect = modal.querySelector('[data-field="lista"]');
             if (listaSelect) {
+                listaSelect.disabled = true;
+                listaSelect.dataset.loading = '1';
+                listaSelect.innerHTML = '<option value="">Carregando listas...</option>';
                 fetchListaDeTarefas().then((lists) => {
+                    refreshTaskListSelect2(listaSelect);
                     listaSelect.innerHTML = '<option value="">---------</option>';
                     lists.forEach((item) => {
                         const option = document.createElement('option');
@@ -8307,7 +8362,22 @@ document.addEventListener('DOMContentLoaded', function() {
                         option.textContent = item.nome;
                         listaSelect.appendChild(option);
                     });
+                    if (!lists.length) {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = 'Nenhuma lista cadastrada';
+                        listaSelect.appendChild(option);
+                    }
+                    delete listaSelect.dataset.loading;
+                    listaSelect.disabled = false;
                     bindTaskAutoTitleForScope(modal);
+                    reinitTaskSelect2();
+                    listaSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }).catch(() => {
+                    refreshTaskListSelect2(listaSelect);
+                    listaSelect.innerHTML = '<option value="">Falha ao carregar listas</option>';
+                    delete listaSelect.dataset.loading;
+                    listaSelect.disabled = false;
                     reinitTaskSelect2();
                 });
             }
@@ -8431,9 +8501,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const stagedFiles = Array.isArray(modal._pendingCommentFiles)
             ? modal._pendingCommentFiles.filter(Boolean)
             : [];
+        const readSelectedFiles = (inputEl) => (
+            typeof getSelectedCommentFiles === 'function'
+                ? getSelectedCommentFiles(inputEl)
+                : Array.from(inputEl?.files || []).filter(Boolean)
+        );
         const files = stagedFiles.length
             ? stagedFiles
-            : getSelectedCommentFiles(modal.querySelector('.tarefa-comments-file'));
+            : readSelectedFiles(modal.querySelector('.tarefa-comments-file'));
         return { text, files };
     };
 
@@ -11007,6 +11082,8 @@ document.addEventListener('DOMContentLoaded', function() {
         scope.find('select[id$="-lista"], select[id$="-prioridade"]').each(function () {
             const $el = $(this);
             if (($el.attr('name') || '').includes('__prefix__')) return;
+            const isLista = /-lista$/.test(this.id || '');
+            if (isLista && this.dataset.loading === '1') return;
             const hasData = !!$el.data('select2');
             const hasContainer = $el.next('.select2').length > 0;
             if (hasData && hasContainer) return;
@@ -11031,7 +11108,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 initialized = true;
             }
-            if (!/-lista$/.test(this.id || '')) {
+            if (!isLista) {
                 return;
             }
             $el.off('.taskAutoTitle');
@@ -11078,6 +11155,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!container) return;
         const select = container.previousElementSibling;
         if (!(select instanceof HTMLSelectElement)) return;
+        if (select.disabled || select.dataset.loading === '1') return;
         if ((select.name || '').includes('__prefix__')) return;
         const $select2Pointer = getSelect2JQuery();
         if (!$select2Pointer) return;
@@ -11095,6 +11173,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const target = event.target;
         if (!(target instanceof HTMLSelectElement)) return;
         if (!target.matches('#tarefas-group select[id$="-lista"], #tarefas-group select[id$="-prioridade"]')) return;
+        if (target.disabled || target.dataset.loading === '1') return;
         const $ = getSelect2JQuery();
         if (!$) return;
         if (!$(target).data('select2')) {

@@ -8,6 +8,7 @@ import re
 import uuid
 import unicodedata
 import zipfile
+import requests
 from dataclasses import asdict, is_dataclass
 from types import SimpleNamespace
 from urllib.parse import quote, unquote, urlparse, urlencode
@@ -296,6 +297,65 @@ def _task_export_status_key_for_config(config: ListaDeTarefasArquivoConfig) -> s
     if "TED" in label:
         return "a09"
     return ""
+
+
+def _build_lista_tarefas_mass_export_workbook(lista: ListaDeTarefas):
+    tarefas = list(
+        Tarefa.objects.select_related("responsavel", "processo")
+        .filter(lista=lista, concluida=False)
+        .order_by("data", "id")
+    )
+    headers, rows = _task_export_build_mass_rows(lista, tarefas)
+    if not rows:
+        return b"", "", 0
+    workbook_bytes = build_simple_xlsx(
+        "Solicitar Arquivos",
+        headers,
+        rows,
+        data_validations=_task_export_build_mass_validations(lista, len(rows)),
+    )
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(lista.nome or "lista").strip()).strip("_") or "lista"
+    filename = f"{safe_name}_{timestamp}.xlsx"
+    return workbook_bytes, filename, len(rows)
+
+
+def _send_lista_tarefas_export_to_slack(*, token: str, channel_id: str, filename: str, workbook_bytes: bytes, initial_comment: str):
+    if not token:
+        raise ValidationError("SLACK_BOT_TOKEN não configurado.")
+    if not channel_id:
+        raise ValidationError("SLACK_ARQUIVOS_MASSA_CHANNEL_ID não configurado.")
+    try:
+        response = requests.post(
+            "https://slack.com/api/files.upload",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "channels": channel_id,
+                "filename": filename,
+                "title": filename,
+                "initial_comment": initial_comment,
+            },
+            files={
+                "file": (
+                    filename,
+                    workbook_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+            timeout=90,
+        )
+    except requests.RequestException as exc:
+        raise ValidationError(f"Falha ao enviar para o Slack: {exc}") from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ValidationError("O Slack retornou uma resposta inválida ao receber a planilha.") from exc
+
+    if not payload.get("ok"):
+        error_message = str(payload.get("error") or "erro_desconhecido")
+        raise ValidationError(f"Falha ao enviar para o Slack: {error_message}")
+    return payload
 
 
 LISTA_TAREFAS_BATCH_UPLOAD_SESSION_KEY = "lista_tarefas_batch_uploads_v1"
@@ -1364,7 +1424,7 @@ class ListaDeTarefasArquivoConfigInline(admin.TabularInline):
 
 @admin.register(ListaDeTarefas)
 class ListaDeTarefasAdmin(admin.ModelAdmin):
-    list_display = ('nome', 'automacao_tipo', 'exportar_planilha_link')
+    list_display = ('nome', 'automacao_tipo', 'exportacoes_link')
     search_fields = ('nome',)
     list_filter = ('automacao_tipo',)
     inlines = [ListaDeTarefasArquivoConfigInline]
@@ -1383,15 +1443,28 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.exportar_planilha_view),
                 name="contratos_listadetarefas_exportar_planilha",
             ),
+            path(
+                "<int:lista_id>/exportar-slack/",
+                self.admin_site.admin_view(self.exportar_slack_view),
+                name="contratos_listadetarefas_exportar_slack",
+            ),
         ]
         return custom_urls + urls
 
-    @admin.display(description="Planilha")
-    def exportar_planilha_link(self, obj):
+    @admin.display(description="Exportações")
+    def exportacoes_link(self, obj):
         if obj.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
             return "-"
-        url = reverse("admin:contratos_listadetarefas_exportar_planilha", args=[obj.pk])
-        return format_html('<a class="button" href="{}">Exportar planilha</a>', url)
+        planilha_url = reverse("admin:contratos_listadetarefas_exportar_planilha", args=[obj.pk])
+        slack_url = reverse("admin:contratos_listadetarefas_exportar_slack", args=[obj.pk])
+        return format_html(
+            '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;">'
+            '<a class="button" href="{}">Exportar planilha</a>'
+            '<a class="button" href="{}">Exportar ao Slack</a>'
+            "</span>",
+            planilha_url,
+            slack_url,
+        )
 
     @admin.action(description="Arquivos em lote")
     def abrir_arquivos_em_lote_action(self, request, queryset):
@@ -1540,25 +1613,10 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             messages.error(request, "Essa lista não possui exportação de planilha configurada.")
             return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
 
-        tarefas = list(
-            Tarefa.objects.select_related("responsavel", "processo")
-            .filter(lista=lista, concluida=False)
-            .order_by("data", "id")
-        )
-        headers, rows = _task_export_build_mass_rows(lista, tarefas)
-        if not rows:
+        workbook_bytes, filename, row_count = _build_lista_tarefas_mass_export_workbook(lista)
+        if not row_count:
             messages.warning(request, "Não há tarefas pendentes dessa lista com dados válidos para exportação.")
             return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
-
-        workbook_bytes = build_simple_xlsx(
-            "Solicitar Arquivos",
-            headers,
-            rows,
-            data_validations=_task_export_build_mass_validations(lista, len(rows)),
-        )
-        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
-        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(lista.nome or "lista").strip()).strip("_") or "lista"
-        filename = f"{safe_name}_{timestamp}.xlsx"
 
         response = HttpResponse(
             workbook_bytes,
@@ -1569,6 +1627,42 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             f"filename*=UTF-8''{quote(filename)}"
         )
         return response
+
+    def exportar_slack_view(self, request, lista_id):
+        lista = get_object_or_404(
+            ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
+            pk=lista_id,
+        )
+        if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            messages.error(request, "Essa lista não possui exportação para Slack configurada.")
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        workbook_bytes, filename, row_count = _build_lista_tarefas_mass_export_workbook(lista)
+        if not row_count:
+            messages.warning(request, "Não há tarefas pendentes dessa lista com dados válidos para exportação.")
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        exporter_name = (request.user.get_full_name() or request.user.username or "").strip()
+        exported_at = timezone.localtime().strftime("%d/%m/%Y às %H:%M")
+        initial_comment = (
+            f'Lista "{lista.nome}" exportada com {row_count} linha(s) em {exported_at}'
+            + (f" por {exporter_name}." if exporter_name else ".")
+        )
+
+        try:
+            _send_lista_tarefas_export_to_slack(
+                token=getattr(settings, "SLACK_BOT_TOKEN", "").strip() or os.getenv("SLACK_BOT_TOKEN", "").strip(),
+                channel_id=getattr(settings, "SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip() or os.getenv("SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip(),
+                filename=filename,
+                workbook_bytes=workbook_bytes,
+                initial_comment=initial_comment,
+            )
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+
+        messages.success(request, f"Planilha enviada ao Slack com sucesso ({row_count} linha(s)).")
+        return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
 
 
 admin.site.site_header = "CFF SYSTEM"
