@@ -1,0 +1,316 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+  <style>
+    .lista-export-preview-page {
+      max-width: 1380px;
+      margin: 0 auto;
+    }
+    .lista-export-preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .lista-export-preview-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-radius: 999px;
+      border: 1px solid #c7d5e7;
+      background: #f4f8fd;
+      color: #244261;
+      padding: 10px 18px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .lista-export-preview-button--primary {
+      background: #1f5fa8;
+      border-color: #1f5fa8;
+      color: #fff;
+    }
+    .lista-export-preview-button--primary:link,
+    .lista-export-preview-button--primary:visited,
+    .lista-export-preview-button--primary:hover,
+    .lista-export-preview-button--primary:focus,
+    .lista-export-preview-button--primary:active {
+      color: #fff;
+    }
+    .lista-export-preview-button--busy {
+      cursor: wait;
+      pointer-events: none;
+      opacity: 0.9;
+    }
+    .lista-export-preview-button__spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      border-top-color: rgba(255, 255, 255, 0.96);
+      border-radius: 50%;
+      animation: lista-export-preview-spin 0.75s linear infinite;
+    }
+    @keyframes lista-export-preview-spin {
+      to { transform: rotate(360deg); }
+    }
+    .lista-export-preview-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .lista-export-preview-summary__card {
+      border: 1px solid #d8e2ee;
+      border-radius: 14px;
+      background: #fff;
+      padding: 16px;
+      box-shadow: 0 12px 28px rgba(19, 40, 67, 0.06);
+    }
+    .lista-export-preview-summary__label {
+      display: block;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #61778f;
+      margin-bottom: 4px;
+    }
+    .lista-export-preview-summary__value {
+      display: block;
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #1f2f46;
+    }
+    .lista-export-preview-card {
+      border: 1px solid #d8e2ee;
+      border-radius: 16px;
+      background: #fff;
+      padding: 20px;
+      box-shadow: 0 14px 30px rgba(17, 36, 61, 0.07);
+    }
+    .lista-export-preview-card + .lista-export-preview-card {
+      margin-top: 18px;
+    }
+    .lista-export-preview-title {
+      margin: 0 0 4px 0;
+      font-size: 1.12rem;
+      font-weight: 700;
+      color: #20324c;
+    }
+    .lista-export-preview-subtitle {
+      margin: 0;
+      color: #5f7387;
+      line-height: 1.45;
+    }
+    .lista-export-preview-alert {
+      margin-top: 14px;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .lista-export-preview-alert--warning {
+      background: #fff6df;
+      border: 1px solid #f0d18a;
+      color: #8b5b00;
+    }
+    .lista-export-preview-table-wrap {
+      margin-top: 18px;
+      border: 1px solid #d8e2ee;
+      border-radius: 14px;
+      overflow: auto;
+      background: #fff;
+    }
+    .lista-export-preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 960px;
+    }
+    .lista-export-preview-table th,
+    .lista-export-preview-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5edf5;
+      text-align: left;
+      vertical-align: top;
+    }
+    .lista-export-preview-table th {
+      background: #f7fafc;
+      color: #4c637c;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    .lista-export-preview-table tr:last-child td {
+      border-bottom: none;
+    }
+    .lista-export-preview-occurrences {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 34px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #edf5ff;
+      border: 1px solid #bfd8ff;
+      color: #1f4f8b;
+      font-weight: 700;
+    }
+    .lista-export-preview-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    .lista-export-preview-empty {
+      margin: 0;
+      color: #61778f;
+      font-style: italic;
+    }
+  </style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:contratos_listadetarefas_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ export_target_label }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="lista-export-preview-page">
+  <div class="lista-export-preview-toolbar">
+    <a href="{{ back_url }}" class="lista-export-preview-button">Voltar</a>
+    <div class="help">Lista: <strong>{{ lista.nome }}</strong></div>
+  </div>
+
+  <div class="lista-export-preview-summary">
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Linhas finais</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.linhas_finais }}</span>
+    </div>
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Contratos lidos</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.contratos_lidos }}</span>
+    </div>
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Duplicidades removidas</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.duplicidades_removidas }}</span>
+    </div>
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Ja atendidos</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.ja_atendidos }}</span>
+    </div>
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Tarefas pendentes lidas</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.tarefas_lidas }}</span>
+    </div>
+    <div class="lista-export-preview-summary__card">
+      <span class="lista-export-preview-summary__label">Tarefas ignoradas</span>
+      <span class="lista-export-preview-summary__value">{{ preview_summary.tarefas_ignoradas }}</span>
+    </div>
+  </div>
+
+  <div class="lista-export-preview-card">
+    <h1 class="lista-export-preview-title">{{ export_target_label }}</h1>
+    <p class="lista-export-preview-subtitle">
+      O preview abaixo mostra exatamente as linhas que serao geradas na planilha e, no caso do Slack, enviadas no arquivo final.
+      Duplicidades iguais por contrato/CPF/prescricao sao consolidadas automaticamente antes da exportacao.
+    </p>
+
+    {% if export_target == "slack" and not slack_ready %}
+      <div class="lista-export-preview-alert lista-export-preview-alert--warning">
+        O Slack ainda nao esta configurado neste ambiente. Preencha <code>SLACK_BOT_TOKEN</code> e <code>SLACK_ARQUIVOS_MASSA_CHANNEL_ID</code> antes de confirmar.
+      </div>
+    {% endif %}
+
+    {% if preview_rows %}
+      <div class="lista-export-preview-table-wrap">
+        <table class="lista-export-preview-table">
+          <thead>
+            <tr>
+              {% for header in preview_headers %}
+                <th>{{ header }}</th>
+              {% endfor %}
+              <th>Ocorrencias</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview_rows %}
+              <tr>
+                {% for cell in row.cells %}
+                  <td>{{ cell|default:"-" }}</td>
+                {% endfor %}
+                <td><span class="lista-export-preview-occurrences">{{ row.occurrences }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="lista-export-preview-card" style="margin-top:18px;">
+        <p class="lista-export-preview-empty">Nenhuma linha valida restou para exportacao depois dos filtros e da deduplicacao.</p>
+      </div>
+    {% endif %}
+
+    <div class="lista-export-preview-actions">
+      <div class="help">
+        Arquivo final: <strong>{{ preview_filename }}</strong>
+      </div>
+      <form method="post" action="{{ confirm_url }}" id="lista-export-preview-confirm-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <input type="hidden" name="scope" value="{{ export_scope }}">
+        <button
+          type="submit"
+          class="lista-export-preview-button lista-export-preview-button--primary"
+          data-export-confirm
+          data-busy-text="{{ busy_text }}"
+          {% if not preview_rows or export_target == "slack" and not slack_ready %}disabled{% endif %}
+        >
+          {{ confirm_text }}
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const form = document.getElementById('lista-export-preview-confirm-form');
+    if (!form) return;
+    const button = form.querySelector('[data-export-confirm]');
+    if (!button) return;
+    const originalLabel = button.textContent.trim();
+    const busyText = button.getAttribute('data-busy-text') || 'Processando...';
+
+    form.addEventListener('submit', (event) => {
+      if (form.dataset.busy === '1') {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.busy = '1';
+      button.disabled = true;
+      button.classList.add('lista-export-preview-button--busy');
+      button.innerHTML = '<span class="lista-export-preview-button__spinner" aria-hidden="true"></span><span>' + busyText + '</span>';
+      window.setTimeout(() => {
+        if (button && document.body.contains(button)) {
+          button.disabled = false;
+          button.classList.remove('lista-export-preview-button--busy');
+          button.textContent = originalLabel;
+        }
+        delete form.dataset.busy;
+      }, 45000);
+    });
+  })();
+</script>
+{% endblock %}

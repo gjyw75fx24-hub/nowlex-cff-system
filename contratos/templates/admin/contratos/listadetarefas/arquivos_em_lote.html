@@ -359,8 +359,10 @@
 <div class="lista-batch-import-page">
   <div class="lista-batch-import-toolbar">
     <a href="{% url 'admin:contratos_listadetarefas_changelist' %}" class="lista-batch-import-button lista-batch-import-button--ghost">Voltar para listas</a>
-    <a href="{% url 'admin:contratos_listadetarefas_exportar_planilha' lista.pk %}" class="lista-batch-import-button">Exportar planilha</a>
-    <a href="{% url 'admin:contratos_listadetarefas_exportar_slack' lista.pk %}" class="lista-batch-import-button">Exportar ao Slack</a>
+    <a href="{{ export_preview_planilha_url }}" class="lista-batch-import-button">Exportar planilha</a>
+    <a href="{{ export_preview_slack_url }}" class="lista-batch-import-button">Exportar ao Slack</a>
+    <a href="{{ export_preview_iron_planilha_url }}" class="lista-batch-import-button">Planilha Iron Mountain</a>
+    <a href="{{ export_preview_iron_slack_url }}" class="lista-batch-import-button">Slack Iron Mountain</a>
   </div>
 
   <div class="lista-batch-import-form">

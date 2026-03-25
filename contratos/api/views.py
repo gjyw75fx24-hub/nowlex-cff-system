@@ -1824,9 +1824,13 @@ def _is_deleted_analysis_card(card):
 def _extract_monitoria_contract_values(card):
     if not isinstance(card, dict):
         return []
-    responses = card.get('tipo_de_acao_respostas') or {}
-    if not isinstance(responses, dict):
-        responses = {}
+    response_containers = []
+    for raw_container in (
+        card.get('tipo_de_acao_respostas'),
+        card.get('responses'),
+    ):
+        if isinstance(raw_container, dict):
+            response_containers.append(raw_container)
 
     values = []
     seen_signatures = set()
@@ -1840,7 +1844,7 @@ def _extract_monitoria_contract_values(card):
             seen_signatures.add(signature)
             values.append(item)
 
-    for container in (responses, card):
+    for container in [*response_containers, card]:
         if not isinstance(container, dict):
             continue
         for key, raw_value in container.items():
@@ -1851,8 +1855,9 @@ def _extract_monitoria_contract_values(card):
             if 'contrato' in token and 'monitor' in token and isinstance(raw_value, (list, tuple)):
                 append_value(raw_value)
 
-    if not values and isinstance(card.get('contratos'), (list, tuple)):
-        append_value(card.get('contratos'))
+    for fallback_key in ('contratos', 'contracts'):
+        if isinstance(card.get(fallback_key), (list, tuple)):
+            append_value(card.get(fallback_key))
 
     return values
 
@@ -1860,11 +1865,15 @@ def _extract_monitoria_contract_values(card):
 def _card_requests_monitoria(card):
     if not isinstance(card, dict):
         return False
-    responses = card.get('tipo_de_acao_respostas') or {}
-    if not isinstance(responses, dict):
-        responses = {}
+    response_containers = []
+    for raw_container in (
+        card.get('tipo_de_acao_respostas'),
+        card.get('responses'),
+    ):
+        if isinstance(raw_container, dict):
+            response_containers.append(raw_container)
 
-    for container in (responses, card):
+    for container in [*response_containers, card]:
         if not isinstance(container, dict):
             continue
         for key, raw_value in container.items():
@@ -1901,7 +1910,7 @@ def _resolve_requested_monitoria_contracts(processo):
         seen_ids.add(contract.pk)
         selected_contract_ids.append(contract.pk)
 
-    cards_found = False
+    candidate_cards = []
     for source in ('saved_processos_vinculados', 'processos_vinculados'):
         raw_cards = respostas.get(source) or []
         if not isinstance(raw_cards, list):
@@ -1909,17 +1918,23 @@ def _resolve_requested_monitoria_contracts(processo):
         for card in raw_cards:
             if not isinstance(card, dict) or _is_deleted_analysis_card(card):
                 continue
-            cards_found = True
-            if not _card_requests_monitoria(card):
-                continue
-            for raw_contract in _extract_monitoria_contract_values(card):
-                parsed_ids, parsed_numbers = _agenda_extract_contract_refs(raw_contract)
-                for candidate_id in parsed_ids:
-                    append_contract(contract_by_id.get(candidate_id))
-                for candidate_number in parsed_numbers:
-                    append_contract(contract_by_number.get(candidate_number))
+            candidate_cards.append(card)
 
-    if not cards_found and _card_requests_monitoria(respostas):
+    general_card = respostas.get('general_card')
+    if isinstance(general_card, dict) and not _is_deleted_analysis_card(general_card):
+        candidate_cards.append(general_card)
+
+    for card in candidate_cards:
+        if not _card_requests_monitoria(card):
+            continue
+        for raw_contract in _extract_monitoria_contract_values(card):
+            parsed_ids, parsed_numbers = _agenda_extract_contract_refs(raw_contract)
+            for candidate_id in parsed_ids:
+                append_contract(contract_by_id.get(candidate_id))
+            for candidate_number in parsed_numbers:
+                append_contract(contract_by_number.get(candidate_number))
+
+    if not selected_contract_ids and _card_requests_monitoria(respostas):
         for raw_contract in _extract_monitoria_contract_values(respostas):
             parsed_ids, parsed_numbers = _agenda_extract_contract_refs(raw_contract)
             for candidate_id in parsed_ids:

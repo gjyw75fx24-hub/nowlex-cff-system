@@ -3,6 +3,7 @@ import calendar
 import io
 import logging
 import json
+import mimetypes
 import os
 import re
 import uuid
@@ -48,6 +49,7 @@ from django.utils.dateparse import parse_datetime, parse_date
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _, ngettext
+from django.utils.http import url_has_allowed_host_and_scheme
 from decimal import Decimal, InvalidOperation
 from rq.job import Job
 
@@ -59,7 +61,7 @@ from .models import (
     ListaDeTarefasArquivoConfig, OpcaoResposta,
     KpiGlobalConfig, ProcessoCpfLoteSalvo, ProcessoCnjLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
-    QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
+    QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TarefaMensagem, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
     _generate_tipo_peticao_key, sanitize_processo_arquivo_filename,
 )
 from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
@@ -109,6 +111,9 @@ from .queue import get_passivas_import_queue, get_queue_connection
 from .tasks import run_passivas_planilha_import_job, run_analise_lote_planilha_import_job
 
 PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'a', 'o'}
+TASK_EXPORT_SCOPE_DEFAULT = "default"
+TASK_EXPORT_SCOPE_IRON_MOUNTAIN = "iron_mountain"
+IRON_MOUNTAIN_OBSERVACAO = "SOLICITAR CONTRATO VIA IRON MOUNTAIN."
 
 
 def strip_related_widget(formfield):
@@ -173,6 +178,20 @@ def _task_export_priority_label(value: str) -> str:
     return str(mapping.get(value, value or "")).strip().upper()
 
 
+def _task_export_scope_label(scope: str) -> str:
+    if str(scope or "").strip() == TASK_EXPORT_SCOPE_IRON_MOUNTAIN:
+        return "Solicitação via Iron Mountain"
+    return "Solicitação de Arquivos"
+
+
+def _task_export_priority_rank(value: str) -> int:
+    return {
+        "A": 3,
+        "M": 2,
+        "B": 1,
+    }.get(str(value or "").strip().upper(), 0)
+
+
 def _task_export_date_label(value) -> str:
     parsed = value if isinstance(value, datetime.date) else parse_date(str(value or "").strip())
     if not parsed:
@@ -194,7 +213,292 @@ def _task_export_resolve_payload(tarefa: Tarefa, lista: ListaDeTarefas) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas) -> tuple[list[str], list[list[str]]]:
+def _task_export_dedupe_key(parte_nome: str, documento: str, contrato_numero: str, prescricao: str):
+    identity = documento or _normalize_batch_upload_text(parte_nome or "")
+    return (
+        str(identity or "").strip(),
+        str(contrato_numero or "").strip(),
+        str(prescricao or "").strip(),
+    )
+
+
+def _task_export_scope_from_payload(payload: dict) -> str:
+    if not isinstance(payload, dict):
+        return TASK_EXPORT_SCOPE_DEFAULT
+    if bool(payload.get("iron_mountain_only")):
+        return TASK_EXPORT_SCOPE_IRON_MOUNTAIN
+    scope = str(payload.get("export_scope") or "").strip().lower()
+    return scope if scope == TASK_EXPORT_SCOPE_IRON_MOUNTAIN else TASK_EXPORT_SCOPE_DEFAULT
+
+
+def _task_export_allowed_in_scope(payload: dict, scope: str) -> bool:
+    resolved_scope = _task_export_scope_from_payload(payload)
+    if scope == TASK_EXPORT_SCOPE_IRON_MOUNTAIN:
+        return resolved_scope == TASK_EXPORT_SCOPE_IRON_MOUNTAIN
+    return resolved_scope != TASK_EXPORT_SCOPE_IRON_MOUNTAIN
+
+
+def _task_export_get_active_configs(lista: ListaDeTarefas) -> list[ListaDeTarefasArquivoConfig]:
+    return list(lista.arquivos_configurados.filter(ativo=True).order_by("ordem", "id"))
+
+
+def _task_export_find_contract_config(lista: ListaDeTarefas):
+    for config in _task_export_get_active_configs(lista):
+        if _task_export_status_key_for_config(config) == "a06":
+            return config
+    return None
+
+
+def _task_export_build_requested_file_entry(config: ListaDeTarefasArquivoConfig, contract_number: str) -> dict:
+    pattern = str(config.padrao_nome or "{contrato} - {arquivo}").strip()
+    expected_name = pattern.format(contrato=contract_number, arquivo=config.nome)
+    return {
+        "id": config.id,
+        "nome": config.nome,
+        "coluna": config.nome_coluna or config.nome,
+        "padrao_nome": pattern,
+        "arquivo_esperado": expected_name,
+    }
+
+
+def _task_export_file_status_key(config_map_by_id: dict[int, ListaDeTarefasArquivoConfig], item: dict) -> str:
+    if not isinstance(item, dict):
+        return ""
+    item_id = item.get("id")
+    if str(item_id or "").isdigit():
+        config = config_map_by_id.get(int(item_id))
+        if config:
+            return _task_export_status_key_for_config(config)
+    label = " ".join(
+        part for part in [
+            str(item.get("nome") or "").strip(),
+            str(item.get("coluna") or "").strip(),
+            str(item.get("padrao_nome") or "").strip(),
+        ] if part
+    ).upper()
+    if "CONTRATO" in label:
+        return "a06"
+    if "SALDO" in label or "CALCULO" in label:
+        return "a08"
+    if "RELAT" in label:
+        return "a07"
+    if "TED" in label:
+        return "a09"
+    return ""
+
+
+def _task_export_requested_statuses_by_contract(lista: ListaDeTarefas, payload: dict) -> dict[str, list[str]]:
+    configs = _task_export_get_active_configs(lista)
+    config_map_by_id = {config.id: config for config in configs}
+    default_statuses = []
+    for config in configs:
+        status_key = _task_export_status_key_for_config(config)
+        if status_key and status_key not in default_statuses:
+            default_statuses.append(status_key)
+
+    result: dict[str, list[str]] = {}
+    raw_requests = payload.get("arquivos_solicitados") or []
+    if isinstance(raw_requests, list):
+        for request_entry in raw_requests:
+            if not isinstance(request_entry, dict):
+                continue
+            contract_number = str(request_entry.get("contrato") or "").strip()
+            if not contract_number:
+                continue
+            statuses = []
+            for file_item in request_entry.get("arquivos") or []:
+                status_key = _task_export_file_status_key(config_map_by_id, file_item)
+                if status_key and status_key not in statuses:
+                    statuses.append(status_key)
+            if statuses:
+                result[contract_number] = statuses
+
+    if result:
+        return result
+
+    for contract_entry in payload.get("contratos") or []:
+        if not isinstance(contract_entry, dict):
+            continue
+        contract_number = str(contract_entry.get("numero") or "").strip()
+        if contract_number:
+            result[contract_number] = list(default_statuses)
+    return result
+
+
+def _task_export_collect_contract_metadata(payload: dict) -> dict[str, dict]:
+    metadata = {}
+    for contract_entry in payload.get("contratos") or []:
+        if not isinstance(contract_entry, dict):
+            continue
+        contract_number = str(contract_entry.get("numero") or "").strip()
+        if contract_number:
+            metadata[contract_number] = contract_entry
+    return metadata
+
+
+def _task_export_update_observacoes_for_iron_mountain(observacoes: str) -> str:
+    raw_lines = [line.rstrip() for line in str(observacoes or "").splitlines()]
+    kept_lines = [line for line in raw_lines if line.strip().upper() != IRON_MOUNTAIN_OBSERVACAO]
+    while kept_lines and not kept_lines[0].strip():
+        kept_lines.pop(0)
+    if kept_lines:
+        return IRON_MOUNTAIN_OBSERVACAO + "\n\n" + "\n".join(kept_lines).strip()
+    return IRON_MOUNTAIN_OBSERVACAO
+
+
+def _task_export_conclude_or_renew_after_batch_import(*, request, lista: ListaDeTarefas, imported_rows: list[dict]):
+    if not imported_rows:
+        return
+
+    imported_map: dict[int, dict[str, dict[str, list[str]]]] = {}
+    for row in imported_rows:
+        process_id = str(row.get("selected_process_id") or "").strip()
+        contract_number = str(row.get("contract_number") or "").strip()
+        status_key = str(row.get("file_type_key") or "").strip()
+        upload_name = str(row.get("upload_name") or "").strip()
+        if not process_id.isdigit() or not contract_number or not status_key:
+            continue
+        process_bucket = imported_map.setdefault(int(process_id), {})
+        contract_bucket = process_bucket.setdefault(contract_number, {})
+        status_bucket = contract_bucket.setdefault(status_key, [])
+        if upload_name and upload_name not in status_bucket:
+            status_bucket.append(upload_name)
+
+    if not imported_map:
+        return
+
+    task_qs = (
+        Tarefa.objects
+        .select_related("processo", "criado_por", "responsavel", "lista")
+        .filter(
+            processo_id__in=sorted(imported_map.keys()),
+            lista=lista,
+            concluida=False,
+        )
+        .order_by("data", "id")
+    )
+
+    contract_config = _task_export_find_contract_config(lista)
+    contract_label = str(contract_config.nome or "Contrato").strip() if contract_config else "Contrato"
+
+    from .api.views import _create_task_completion_notification_for_creator
+
+    for tarefa in task_qs:
+        payload = tarefa.payload if isinstance(tarefa.payload, dict) else {}
+        if payload.get("tipo") != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            continue
+
+        requested_by_contract = _task_export_requested_statuses_by_contract(lista, payload)
+        if not requested_by_contract:
+            continue
+
+        imported_for_process = imported_map.get(tarefa.processo_id, {})
+        affected_contracts = sorted(set(requested_by_contract.keys()) & set(imported_for_process.keys()))
+        if not affected_contracts:
+            continue
+
+        presence_entries = build_monitoria_contract_file_presence(
+            tarefa.processo,
+            contratos=sorted(requested_by_contract.keys()),
+        )
+        presence_by_contract = {
+            str(entry.get("contrato") or "").strip(): (entry.get("present") or {})
+            for entry in presence_entries
+            if str(entry.get("contrato") or "").strip()
+        }
+
+        missing_by_contract: dict[str, list[str]] = {}
+        for contract_number, requested_statuses in requested_by_contract.items():
+            present_map = presence_by_contract.get(contract_number, {})
+            missing_statuses = [
+                status_key
+                for status_key in requested_statuses
+                if status_key and not bool(present_map.get(status_key))
+            ]
+            if missing_statuses:
+                missing_by_contract[contract_number] = missing_statuses
+
+        imported_fragments = []
+        for contract_number in affected_contracts:
+            imported_statuses = imported_for_process.get(contract_number, {})
+            labels = []
+            for status_key, file_names in imported_statuses.items():
+                label = {
+                    "a06": contract_label,
+                    "a07": "Relatorio",
+                    "a08": "Saldo Devedor",
+                    "a09": "TED",
+                }.get(status_key, status_key.upper())
+                if label not in labels:
+                    labels.append(label)
+            if labels:
+                imported_fragments.append(f"{contract_number}: {', '.join(labels)}")
+
+        if not missing_by_contract:
+            comment_lines = [
+                "Arquivos importados em lote e vinculados ao cadastro.",
+            ]
+            if imported_fragments:
+                comment_lines.append("Arquivos recebidos: " + " | ".join(imported_fragments))
+            comment_lines.append("Tarefa concluida automaticamente apos o atendimento integral da solicitacao.")
+            comentario_texto = "\n".join(comment_lines)
+            TarefaMensagem.objects.create(
+                tarefa=tarefa,
+                autor=request.user if getattr(request.user, "is_authenticated", False) else None,
+                texto=comentario_texto,
+            )
+            now = timezone.now()
+            tarefa.concluida = True
+            tarefa.concluido_em = now
+            tarefa.concluido_por = request.user if getattr(request.user, "is_authenticated", False) else None
+            tarefa.save(update_fields=["concluida", "concluido_em", "concluido_por"])
+            _create_task_completion_notification_for_creator(
+                tarefa,
+                actor=request.user if getattr(request.user, "is_authenticated", False) else None,
+                justificativa=comentario_texto,
+            )
+            continue
+
+        missing_status_set = {status_key for statuses in missing_by_contract.values() for status_key in statuses}
+        if missing_status_set == {"a06"} and contract_config:
+            contract_metadata = _task_export_collect_contract_metadata(payload)
+            renewed_contracts = []
+            renewed_requests = []
+            for contract_number in sorted(missing_by_contract.keys()):
+                contract_entry = contract_metadata.get(contract_number) or {"numero": contract_number}
+                renewed_contracts.append(contract_entry)
+                renewed_requests.append({
+                    "contrato": contract_number,
+                    "arquivos": [
+                        _task_export_build_requested_file_entry(contract_config, contract_number),
+                    ],
+                })
+            payload["iron_mountain_only"] = True
+            payload["export_scope"] = TASK_EXPORT_SCOPE_IRON_MOUNTAIN
+            payload["solicitacao_label"] = "Solicitação via Iron Mountain"
+            payload["contratos"] = renewed_contracts
+            payload["arquivos_solicitados"] = renewed_requests
+            tarefa.payload = payload
+            tarefa.observacoes = _task_export_update_observacoes_for_iron_mountain(tarefa.observacoes or "")
+            tarefa.save(update_fields=["payload", "observacoes"])
+
+            comment_lines = [
+                "Arquivos importados parcialmente em lote.",
+            ]
+            if imported_fragments:
+                comment_lines.append("Arquivos recebidos: " + " | ".join(imported_fragments))
+            comment_lines.append(
+                "Restou pendente apenas o Contrato. A tarefa foi renovada para Solicitação via Iron Mountain "
+                f"nos contratos: {', '.join(sorted(missing_by_contract.keys()))}."
+            )
+            TarefaMensagem.objects.create(
+                tarefa=tarefa,
+                autor=request.user if getattr(request.user, "is_authenticated", False) else None,
+                texto="\n".join(comment_lines),
+            )
+
+
+def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas, *, scope: str = TASK_EXPORT_SCOPE_DEFAULT) -> tuple[list[str], list[list[str]], dict]:
     configs = list(lista.arquivos_configurados.filter(ativo=True).order_by("ordem", "id"))
     file_headers = [str(config.nome_coluna or config.nome or "").strip() for config in configs]
     headers = [
@@ -209,11 +513,23 @@ def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas) -> tuple[list[s
     ]
 
     rows: list[list[str]] = []
+    preview_rows: list[dict] = []
+    dedupe_map: dict[tuple[str, str, str], dict] = {}
+    source_contract_rows = 0
+    duplicate_rows = 0
+    already_answered_rows = 0
+    skipped_tasks = 0
+
     for tarefa in tarefas:
         payload = _task_export_resolve_payload(tarefa, lista)
         if payload.get("tipo") != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            skipped_tasks += 1
+            continue
+        if not _task_export_allowed_in_scope(payload, scope):
+            skipped_tasks += 1
             continue
         if not tarefa.processo_id:
+            skipped_tasks += 1
             continue
 
         parte = payload.get("parte_contraria") or {}
@@ -237,13 +553,15 @@ def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas) -> tuple[list[s
             numero = str(contrato.get("numero") or "").strip()
             if not numero:
                 continue
+            source_contract_rows += 1
             present_map = presence_by_contract.get(numero, {})
+            prescricao_label = _task_export_date_label(contrato.get("prescricao"))
 
             row = [
                 parte_nome,
                 documento,
                 numero,
-                _task_export_date_label(contrato.get("prescricao")),
+                prescricao_label,
             ]
             all_answered = True
             for config in configs:
@@ -253,11 +571,47 @@ def _task_export_build_mass_rows(lista: ListaDeTarefas, tarefas) -> tuple[list[s
                 if not is_present:
                     all_answered = False
             if all_answered:
+                already_answered_rows += 1
                 continue
             row.extend(["", responsavel_nome, prioridade])
-            rows.append(row)
+            dedupe_key = _task_export_dedupe_key(parte_nome, documento, numero, prescricao_label)
+            existing_entry = dedupe_map.get(dedupe_key)
+            if existing_entry:
+                duplicate_rows += 1
+                existing_entry["occurrences"] += 1
+                existing_entry["source_task_ids"].append(tarefa.id)
+                if not existing_entry["responsavel"] and responsavel_nome:
+                    existing_entry["responsavel"] = responsavel_nome
+                    existing_entry["row"][-2] = responsavel_nome
+                current_priority_rank = _task_export_priority_rank(tarefa.prioridade)
+                if current_priority_rank > existing_entry["priority_rank"]:
+                    existing_entry["priority_rank"] = current_priority_rank
+                    existing_entry["row"][-1] = prioridade
+                    existing_entry["prioridade"] = prioridade
+                continue
 
-    return headers, rows
+            preview_entry = {
+                "row": row,
+                "cells": row,
+                "occurrences": 1,
+                "source_task_ids": [tarefa.id],
+                "responsavel": responsavel_nome,
+                "prioridade": prioridade,
+                "priority_rank": _task_export_priority_rank(tarefa.prioridade),
+            }
+            dedupe_map[dedupe_key] = preview_entry
+            rows.append(row)
+            preview_rows.append(preview_entry)
+
+    metadata = {
+        "task_count": len(tarefas),
+        "source_contract_rows": source_contract_rows,
+        "duplicate_rows": duplicate_rows,
+        "already_answered_rows": already_answered_rows,
+        "skipped_tasks": skipped_tasks,
+        "preview_rows": preview_rows,
+    }
+    return headers, rows, metadata
 
 
 def _task_export_build_mass_validations(lista: ListaDeTarefas, row_count: int) -> list[dict]:
@@ -299,25 +653,52 @@ def _task_export_status_key_for_config(config: ListaDeTarefasArquivoConfig) -> s
     return ""
 
 
-def _build_lista_tarefas_mass_export_workbook(lista: ListaDeTarefas):
+def _build_lista_tarefas_mass_export_dataset(lista: ListaDeTarefas, *, scope: str = TASK_EXPORT_SCOPE_DEFAULT) -> dict:
     tarefas = list(
         Tarefa.objects.select_related("responsavel", "processo")
         .filter(lista=lista, concluida=False)
         .order_by("data", "id")
     )
-    headers, rows = _task_export_build_mass_rows(lista, tarefas)
+    headers, rows, metadata = _task_export_build_mass_rows(lista, tarefas, scope=scope)
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    base_name = _task_export_scope_label(scope)
+    normalized_name = unicodedata.normalize("NFD", str(base_name or lista.nome or "lista").strip())
+    normalized_name = "".join(ch for ch in normalized_name if not unicodedata.combining(ch))
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", normalized_name).strip("_") or "lista"
+    filename = f"{safe_name}_{timestamp}.xlsx"
+    return {
+        "headers": headers,
+        "rows": rows,
+        "filename": filename,
+        "row_count": len(rows),
+        "metadata": metadata,
+        "scope": scope,
+    }
+
+
+def _build_lista_tarefas_mass_export_workbook(lista: ListaDeTarefas, *, scope: str = TASK_EXPORT_SCOPE_DEFAULT):
+    dataset = _build_lista_tarefas_mass_export_dataset(lista, scope=scope)
+    rows = list(dataset.get("rows") or [])
     if not rows:
-        return b"", "", 0
+        return b"", str(dataset.get("filename") or ""), 0, dataset
     workbook_bytes = build_simple_xlsx(
         "Solicitar Arquivos",
-        headers,
+        dataset["headers"],
         rows,
         data_validations=_task_export_build_mass_validations(lista, len(rows)),
     )
-    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
-    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(lista.nome or "lista").strip()).strip("_") or "lista"
-    filename = f"{safe_name}_{timestamp}.xlsx"
-    return workbook_bytes, filename, len(rows)
+    return workbook_bytes, str(dataset.get("filename") or ""), len(rows), dataset
+
+
+def _task_export_safe_next_url(request, fallback_url: str) -> str:
+    candidate = str(request.GET.get("next") or request.POST.get("next") or "").strip()
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return fallback_url
 
 
 def _send_lista_tarefas_export_to_slack(*, token: str, channel_id: str, filename: str, workbook_bytes: bytes, initial_comment: str):
@@ -325,22 +706,17 @@ def _send_lista_tarefas_export_to_slack(*, token: str, channel_id: str, filename
         raise ValidationError("SLACK_BOT_TOKEN não configurado.")
     if not channel_id:
         raise ValidationError("SLACK_ARQUIVOS_MASSA_CHANNEL_ID não configurado.")
+    content_type = (
+        mimetypes.guess_type(filename or "")[0]
+        or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     try:
-        response = requests.post(
-            "https://slack.com/api/files.upload",
+        ticket_response = requests.post(
+            "https://slack.com/api/files.getUploadURLExternal",
             headers={"Authorization": f"Bearer {token}"},
             data={
-                "channels": channel_id,
                 "filename": filename,
-                "title": filename,
-                "initial_comment": initial_comment,
-            },
-            files={
-                "file": (
-                    filename,
-                    workbook_bytes,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                "length": len(workbook_bytes or b""),
             },
             timeout=90,
         )
@@ -348,9 +724,53 @@ def _send_lista_tarefas_export_to_slack(*, token: str, channel_id: str, filename
         raise ValidationError(f"Falha ao enviar para o Slack: {exc}") from exc
 
     try:
-        payload = response.json()
+        ticket_payload = ticket_response.json()
     except ValueError as exc:
-        raise ValidationError("O Slack retornou uma resposta inválida ao receber a planilha.") from exc
+        raise ValidationError("O Slack retornou uma resposta inválida ao solicitar a URL de upload.") from exc
+
+    if not ticket_payload.get("ok"):
+        error_message = str(ticket_payload.get("error") or "erro_desconhecido")
+        raise ValidationError(f"Falha ao enviar para o Slack: {error_message}")
+
+    upload_url = str(ticket_payload.get("upload_url") or "").strip()
+    file_id = str(ticket_payload.get("file_id") or "").strip()
+    if not upload_url or not file_id:
+        raise ValidationError("O Slack não retornou os dados necessários para concluir o upload.")
+
+    try:
+        upload_response = requests.post(
+            upload_url,
+            data={"filename": filename},
+            files={"file": (filename, workbook_bytes, content_type)},
+            timeout=180,
+        )
+    except requests.RequestException as exc:
+        raise ValidationError(f"Falha ao enviar o arquivo para o Slack: {exc}") from exc
+
+    if upload_response.status_code != 200:
+        raise ValidationError("O Slack recusou o arquivo durante o upload.")
+
+    try:
+        complete_response = requests.post(
+            "https://slack.com/api/files.completeUploadExternal",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            json={
+                "files": [{"id": file_id, "title": filename}],
+                "channel_id": channel_id,
+                "initial_comment": initial_comment,
+            },
+            timeout=90,
+        )
+    except requests.RequestException as exc:
+        raise ValidationError(f"Falha ao finalizar o envio para o Slack: {exc}") from exc
+
+    try:
+        payload = complete_response.json()
+    except ValueError as exc:
+        raise ValidationError("O Slack retornou uma resposta inválida ao finalizar o upload.") from exc
 
     if not payload.get("ok"):
         error_message = str(payload.get("error") or "erro_desconhecido")
@@ -754,6 +1174,7 @@ def _import_lista_tarefas_batch_rows(*, request, lista: ListaDeTarefas, preview_
     imported = 0
     skipped = 0
     selected = 0
+    automation_rows = []
     rows = preview_payload.get("rows") or []
     process_ids = {
         int(process_id)
@@ -816,6 +1237,12 @@ def _import_lista_tarefas_batch_rows(*, request, lista: ListaDeTarefas, preview_
             row["destino_label"] = processo.cnj or "Nao Judicializado"
             row["allow_import"] = False
             row["temp_path"] = ""
+            automation_rows.append({
+                "selected_process_id": str(processo.id),
+                "contract_number": str((row or {}).get("contract_number") or "").strip(),
+                "file_type_key": str((row or {}).get("file_type_key") or "").strip(),
+                "upload_name": str((row or {}).get("upload_name") or "").strip(),
+            })
             try:
                 default_storage.delete(temp_path)
             except Exception:
@@ -823,10 +1250,22 @@ def _import_lista_tarefas_batch_rows(*, request, lista: ListaDeTarefas, preview_
             imported += 1
     preview_payload["rows"] = rows
     _save_lista_tarefas_batch_preview(request, str(preview_payload.get("token") or ""), preview_payload)
+    automation_error = ""
+    if automation_rows:
+        try:
+            _task_export_conclude_or_renew_after_batch_import(
+                request=request,
+                lista=lista,
+                imported_rows=automation_rows,
+            )
+        except Exception as exc:
+            logger.exception("Falha ao concluir/renovar tarefas apos importacao em lote", exc_info=exc)
+            automation_error = str(exc)
     return {
         "selected": selected,
         "imported": imported,
         "skipped": skipped,
+        "automation_error": automation_error,
     }
 
 
@@ -1439,6 +1878,11 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
                 name="contratos_listadetarefas_arquivos_em_lote",
             ),
             path(
+                "<int:lista_id>/exportar-preview/<str:target>/",
+                self.admin_site.admin_view(self.exportar_preview_view),
+                name="contratos_listadetarefas_exportar_preview",
+            ),
+            path(
                 "<int:lista_id>/exportar-planilha/",
                 self.admin_site.admin_view(self.exportar_planilha_view),
                 name="contratos_listadetarefas_exportar_planilha",
@@ -1455,15 +1899,21 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
     def exportacoes_link(self, obj):
         if obj.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
             return "-"
-        planilha_url = reverse("admin:contratos_listadetarefas_exportar_planilha", args=[obj.pk])
-        slack_url = reverse("admin:contratos_listadetarefas_exportar_slack", args=[obj.pk])
+        planilha_url = reverse("admin:contratos_listadetarefas_exportar_preview", args=[obj.pk, "planilha"])
+        slack_url = reverse("admin:contratos_listadetarefas_exportar_preview", args=[obj.pk, "slack"])
+        iron_planilha_url = planilha_url + "?" + urlencode({"scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
+        iron_slack_url = slack_url + "?" + urlencode({"scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
         return format_html(
             '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;">'
             '<a class="button" href="{}">Exportar planilha</a>'
             '<a class="button" href="{}">Exportar ao Slack</a>'
+            '<a class="button" href="{}">Planilha Iron Mountain</a>'
+            '<a class="button" href="{}">Slack Iron Mountain</a>'
             "</span>",
             planilha_url,
             slack_url,
+            iron_planilha_url,
+            iron_slack_url,
         )
 
     @admin.action(description="Arquivos em lote")
@@ -1552,6 +2002,11 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
                         request,
                         f'Importação concluída. {result["imported"]} arquivo(s) importado(s) e {result["skipped"]} pulado(s).',
                     )
+                    if result.get("automation_error"):
+                        messages.warning(
+                            request,
+                            "A importação foi concluída, mas a atualização automática das tarefas não pôde ser finalizada."
+                        )
                     return HttpResponseRedirect(
                         f'{reverse("admin:contratos_listadetarefas_arquivos_em_lote", args=[lista.pk])}?{urlencode({"preview": preview_token})}'
                     )
@@ -1597,10 +2052,111 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             "preview_summary": preview_summary,
             "uf_buttons": uf_buttons,
             "media": self.media,
+            "export_preview_planilha_url": (
+                reverse("admin:contratos_listadetarefas_exportar_preview", args=[lista.pk, "planilha"])
+                + "?"
+                + urlencode({"next": request.get_full_path()})
+            ),
+            "export_preview_slack_url": (
+                reverse("admin:contratos_listadetarefas_exportar_preview", args=[lista.pk, "slack"])
+                + "?"
+                + urlencode({"next": request.get_full_path()})
+            ),
+            "export_preview_iron_planilha_url": (
+                reverse("admin:contratos_listadetarefas_exportar_preview", args=[lista.pk, "planilha"])
+                + "?"
+                + urlencode({"next": request.get_full_path(), "scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
+            ),
+            "export_preview_iron_slack_url": (
+                reverse("admin:contratos_listadetarefas_exportar_preview", args=[lista.pk, "slack"])
+                + "?"
+                + urlencode({"next": request.get_full_path(), "scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
+            ),
         }
         return render(
             request,
             "admin/contratos/listadetarefas/arquivos_em_lote.html",
+            context,
+        )
+
+    def exportar_preview_view(self, request, lista_id, target):
+        lista = get_object_or_404(
+            ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
+            pk=lista_id,
+        )
+        changelist_url = reverse("admin:contratos_listadetarefas_changelist")
+        back_url = _task_export_safe_next_url(request, changelist_url)
+        if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
+            messages.error(request, "Essa lista não possui exportação configurada.")
+            return HttpResponseRedirect(back_url)
+
+        target = str(target or "").strip().lower()
+        if target not in {"planilha", "slack"}:
+            messages.error(request, "Tipo de exportação inválido.")
+            return HttpResponseRedirect(back_url)
+
+        scope = str(request.GET.get("scope") or request.POST.get("scope") or TASK_EXPORT_SCOPE_DEFAULT).strip().lower()
+        if scope not in {TASK_EXPORT_SCOPE_DEFAULT, TASK_EXPORT_SCOPE_IRON_MOUNTAIN}:
+            scope = TASK_EXPORT_SCOPE_DEFAULT
+
+        dataset = _build_lista_tarefas_mass_export_dataset(lista, scope=scope)
+        scope_label = _task_export_scope_label(scope)
+        target_label = (
+            f'Exportar planilha - {scope_label}'
+            if target == "planilha"
+            else f'Exportar ao Slack - {scope_label}'
+        )
+        confirm_url = reverse(
+            f"admin:contratos_listadetarefas_exportar_{'planilha' if target == 'planilha' else 'slack'}",
+            args=[lista.pk],
+        )
+        confirm_text = "Gerar planilha" if target == "planilha" else "Enviar ao Slack"
+        busy_text = "Gerando planilha..." if target == "planilha" else "Enviando ao Slack..."
+        slack_ready = True
+        if target == "slack":
+            slack_ready = bool(
+                (getattr(settings, "SLACK_BOT_TOKEN", "").strip() or os.getenv("SLACK_BOT_TOKEN", "").strip())
+                and (getattr(settings, "SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip() or os.getenv("SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip())
+            )
+
+        preview_rows = []
+        for item in dataset.get("metadata", {}).get("preview_rows", []):
+            preview_rows.append({
+                "cells": list(item.get("cells") or []),
+                "occurrences": int(item.get("occurrences") or 1),
+            })
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": f"{target_label} - {lista.nome}",
+            "lista": lista,
+            "back_url": back_url,
+            "confirm_url": confirm_url,
+            "confirm_text": confirm_text,
+            "busy_text": busy_text,
+            "next_url": back_url,
+            "export_target": target,
+            "export_target_label": target_label,
+            "export_scope": scope,
+            "export_scope_label": scope_label,
+            "preview_headers": list(dataset.get("headers") or []),
+            "preview_rows": preview_rows,
+            "preview_filename": str(dataset.get("filename") or ""),
+            "preview_summary": {
+                "linhas_finais": int(dataset.get("row_count") or 0),
+                "contratos_lidos": int(dataset.get("metadata", {}).get("source_contract_rows") or 0),
+                "duplicidades_removidas": int(dataset.get("metadata", {}).get("duplicate_rows") or 0),
+                "ja_atendidos": int(dataset.get("metadata", {}).get("already_answered_rows") or 0),
+                "tarefas_lidas": int(dataset.get("metadata", {}).get("task_count") or 0),
+                "tarefas_ignoradas": int(dataset.get("metadata", {}).get("skipped_tasks") or 0),
+            },
+            "slack_ready": slack_ready,
+            "media": self.media,
+        }
+        return render(
+            request,
+            "admin/contratos/listadetarefas/export_preview.html",
             context,
         )
 
@@ -1609,14 +2165,18 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
             pk=lista_id,
         )
+        next_url = _task_export_safe_next_url(request, reverse("admin:contratos_listadetarefas_changelist"))
+        scope = str(request.GET.get("scope") or request.POST.get("scope") or TASK_EXPORT_SCOPE_DEFAULT).strip().lower()
+        if scope not in {TASK_EXPORT_SCOPE_DEFAULT, TASK_EXPORT_SCOPE_IRON_MOUNTAIN}:
+            scope = TASK_EXPORT_SCOPE_DEFAULT
         if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
             messages.error(request, "Essa lista não possui exportação de planilha configurada.")
-            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+            return HttpResponseRedirect(next_url)
 
-        workbook_bytes, filename, row_count = _build_lista_tarefas_mass_export_workbook(lista)
+        workbook_bytes, filename, row_count, _dataset = _build_lista_tarefas_mass_export_workbook(lista, scope=scope)
         if not row_count:
             messages.warning(request, "Não há tarefas pendentes dessa lista com dados válidos para exportação.")
-            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+            return HttpResponseRedirect(next_url)
 
         response = HttpResponse(
             workbook_bytes,
@@ -1633,19 +2193,28 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             ListaDeTarefas.objects.prefetch_related("arquivos_configurados"),
             pk=lista_id,
         )
+        next_url = _task_export_safe_next_url(request, reverse("admin:contratos_listadetarefas_changelist"))
+        scope = str(request.GET.get("scope") or request.POST.get("scope") or TASK_EXPORT_SCOPE_DEFAULT).strip().lower()
+        if scope not in {TASK_EXPORT_SCOPE_DEFAULT, TASK_EXPORT_SCOPE_IRON_MOUNTAIN}:
+            scope = TASK_EXPORT_SCOPE_DEFAULT
         if lista.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
             messages.error(request, "Essa lista não possui exportação para Slack configurada.")
-            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+            return HttpResponseRedirect(next_url)
 
-        workbook_bytes, filename, row_count = _build_lista_tarefas_mass_export_workbook(lista)
+        workbook_bytes, filename, row_count, _dataset = _build_lista_tarefas_mass_export_workbook(lista, scope=scope)
         if not row_count:
             messages.warning(request, "Não há tarefas pendentes dessa lista com dados válidos para exportação.")
-            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+            return HttpResponseRedirect(next_url)
 
         exporter_name = (request.user.get_full_name() or request.user.username or "").strip()
         exported_at = timezone.localtime().strftime("%d/%m/%Y às %H:%M")
+        comment_title = (
+            "Solicitação via Iron Mountain"
+            if scope == TASK_EXPORT_SCOPE_IRON_MOUNTAIN
+            else f'Lista "{lista.nome}"'
+        )
         initial_comment = (
-            f'Lista "{lista.nome}" exportada com {row_count} linha(s) em {exported_at}'
+            f'{comment_title} exportada com {row_count} linha(s) em {exported_at}'
             + (f" por {exporter_name}." if exporter_name else ".")
         )
 
@@ -1659,10 +2228,10 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
             )
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
-            return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+            return HttpResponseRedirect(next_url)
 
         messages.success(request, f"Planilha enviada ao Slack com sucesso ({row_count} linha(s)).")
-        return HttpResponseRedirect(reverse("admin:contratos_listadetarefas_changelist"))
+        return HttpResponseRedirect(next_url)
 
 
 admin.site.site_header = "CFF SYSTEM"
