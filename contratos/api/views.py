@@ -451,71 +451,120 @@ def _get_supervisor_by_slack_user_id(slack_user_id):
     return slack_config.user
 
 
-def _build_slack_delivery_entry_payload(delivery, request_user):
-    supervisor = getattr(delivery, 'supervisor', None) or request_user
+def _safe_processo_label(delivery):
+    processo = getattr(delivery, 'processo', None)
     try:
-        entry = get_supervision_entry_for_card(
-            supervisor=supervisor,
-            analise_id=delivery.analise_id,
-            source=delivery.card_source,
-            index=delivery.card_index,
-        )
+        cnj = str(getattr(processo, 'cnj', '') or '').strip()
+    except Exception:
+        cnj = ''
+    if cnj:
+        return cnj
+    processo_id = getattr(delivery, 'processo_id', None)
+    if processo_id:
+        return f'Processo #{processo_id}'
+    return ''
+
+
+def _build_slack_delivery_entry_payload(delivery, request_user):
+    try:
+        supervisor = getattr(delivery, 'supervisor', None) or request_user
+        try:
+            entry = get_supervision_entry_for_card(
+                supervisor=supervisor,
+                analise_id=delivery.analise_id,
+                source=delivery.card_source,
+                index=delivery.card_index,
+            )
+        except Exception as exc:
+            logger.exception(
+                'Falha ao montar payload de entrega Slack id=%s supervisor=%s',
+                delivery.pk,
+                getattr(supervisor, 'pk', None),
+                exc_info=exc,
+            )
+            entry = {}
+        entry = entry if isinstance(entry, dict) else {}
+        cnj_label = str(entry.get('cnj_label') or '').strip()
+        if not cnj_label:
+            cnj_label = str(delivery.card_id or '').strip() or f'Card {delivery.card_source}:{delivery.card_index}'
+        analysis_type_name = str(
+            entry.get('analysis_type_nome')
+            or entry.get('analysis_type_short')
+            or ''
+        ).strip() or 'Análise'
+        analysis_type_slug = str(entry.get('analysis_type_slug') or '').strip().lower()
+        notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
+        updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
+        has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
+        status_key = str(delivery.last_status or entry.get('supervisor_status') or '').strip().lower()
+        is_pending = status_key in {'pendente', 'pre_aprovado'}
+        is_responded = status_key in {'aprovado', 'reprovado'}
+        dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
+        supervisor_name = ''
+        if supervisor:
+            supervisor_name = str(supervisor.get_full_name() or '').strip() or str(supervisor.username or '').strip()
+        return {
+            'id': delivery.pk,
+            'analise_id': delivery.analise_id,
+            'processo_id': delivery.processo_id,
+            'processo_label': _safe_processo_label(delivery),
+            'supervisor_id': getattr(supervisor, 'pk', None),
+            'supervisor_name': supervisor_name,
+            'card_id': str(delivery.card_id or '').strip(),
+            'card_source': str(delivery.card_source or '').strip(),
+            'card_index': int(delivery.card_index or 0),
+            'cnj_label': cnj_label,
+            'analysis_type_name': analysis_type_name,
+            'analysis_type_slug': analysis_type_slug,
+            'last_status': str(delivery.last_status or '').strip(),
+            'status_key': status_key,
+            'is_pending': is_pending,
+            'is_responded': is_responded,
+            'dispatch_state': dispatch_state,
+            'agenda_date': str(entry.get('date') or '').strip(),
+            'notified_at': notified_at.isoformat() if notified_at else '',
+            'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
+            'updated_at': updated_at.isoformat() if updated_at else '',
+            'updated_at_display': updated_at.strftime('%d/%m/%Y %H:%M') if updated_at else '',
+            'slack_channel_id': str(delivery.slack_channel_id or '').strip(),
+            'slack_message_ts': str(delivery.slack_message_ts or '').strip(),
+            'has_message': has_message,
+            'queue_position': 0,
+        }
     except Exception as exc:
-        logger.exception(
-            'Falha ao montar payload de entrega Slack id=%s supervisor=%s',
-            delivery.pk,
-            getattr(supervisor, 'pk', None),
-            exc_info=exc,
-        )
-        entry = {}
-    entry = entry if isinstance(entry, dict) else {}
-    cnj_label = str(entry.get('cnj_label') or '').strip()
-    if not cnj_label:
-        cnj_label = str(delivery.card_id or '').strip() or f'Card {delivery.card_source}:{delivery.card_index}'
-    analysis_type_name = str(
-        entry.get('analysis_type_nome')
-        or entry.get('analysis_type_short')
-        or ''
-    ).strip() or 'Análise'
-    analysis_type_slug = str(entry.get('analysis_type_slug') or '').strip().lower()
-    notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
-    updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
-    has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
-    status_key = str(delivery.last_status or entry.get('supervisor_status') or '').strip().lower()
-    is_pending = status_key in {'pendente', 'pre_aprovado'}
-    is_responded = status_key in {'aprovado', 'reprovado'}
-    dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
-    supervisor_name = ''
-    if supervisor:
-        supervisor_name = str(supervisor.get_full_name() or '').strip() or str(supervisor.username or '').strip()
-    return {
-        'id': delivery.pk,
-        'analise_id': delivery.analise_id,
-        'processo_id': delivery.processo_id,
-        'processo_label': str(delivery.processo or '').strip(),
-        'supervisor_id': getattr(supervisor, 'pk', None),
-        'supervisor_name': supervisor_name,
-        'card_id': str(delivery.card_id or '').strip(),
-        'card_source': str(delivery.card_source or '').strip(),
-        'card_index': int(delivery.card_index or 0),
-        'cnj_label': cnj_label,
-        'analysis_type_name': analysis_type_name,
-        'analysis_type_slug': analysis_type_slug,
-        'last_status': str(delivery.last_status or '').strip(),
-        'status_key': status_key,
-        'is_pending': is_pending,
-        'is_responded': is_responded,
-        'dispatch_state': dispatch_state,
-        'agenda_date': str(entry.get('date') or '').strip(),
-        'notified_at': notified_at.isoformat() if notified_at else '',
-        'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
-        'updated_at': updated_at.isoformat() if updated_at else '',
-        'updated_at_display': updated_at.strftime('%d/%m/%Y %H:%M') if updated_at else '',
-        'slack_channel_id': str(delivery.slack_channel_id or '').strip(),
-        'slack_message_ts': str(delivery.slack_message_ts or '').strip(),
-        'has_message': has_message,
-        'queue_position': 0,
-    }
+        logger.exception('Falha fatal ao serializar entrega Slack id=%s', getattr(delivery, 'pk', None), exc_info=exc)
+        status_key = str(getattr(delivery, 'last_status', '') or '').strip().lower()
+        has_message = bool(str(getattr(delivery, 'slack_channel_id', '') or '').strip() and str(getattr(delivery, 'slack_message_ts', '') or '').strip())
+        is_pending = status_key in {'pendente', 'pre_aprovado'}
+        is_responded = status_key in {'aprovado', 'reprovado'}
+        return {
+            'id': getattr(delivery, 'pk', None),
+            'analise_id': getattr(delivery, 'analise_id', None),
+            'processo_id': getattr(delivery, 'processo_id', None),
+            'processo_label': _safe_processo_label(delivery),
+            'supervisor_id': getattr(delivery, 'supervisor_id', None),
+            'supervisor_name': '',
+            'card_id': str(getattr(delivery, 'card_id', '') or '').strip(),
+            'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
+            'card_index': int(getattr(delivery, 'card_index', 0) or 0),
+            'cnj_label': str(getattr(delivery, 'card_id', '') or '').strip() or 'Card',
+            'analysis_type_name': 'Análise',
+            'analysis_type_slug': '',
+            'last_status': str(getattr(delivery, 'last_status', '') or '').strip(),
+            'status_key': status_key,
+            'is_pending': is_pending,
+            'is_responded': is_responded,
+            'dispatch_state': 'sent' if has_message else ('queued' if is_pending else 'unsent'),
+            'agenda_date': '',
+            'notified_at': '',
+            'notified_at_display': '',
+            'updated_at': '',
+            'updated_at_display': '',
+            'slack_channel_id': str(getattr(delivery, 'slack_channel_id', '') or '').strip(),
+            'slack_message_ts': str(getattr(delivery, 'slack_message_ts', '') or '').strip(),
+            'has_message': has_message,
+            'queue_position': 0,
+        }
 
 
 def _annotate_slack_delivery_queue(results):
