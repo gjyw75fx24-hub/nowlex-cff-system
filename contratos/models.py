@@ -1,16 +1,20 @@
+import logging
 import os
 import re
+import threading
 import unicodedata
 import uuid
 
 from django.conf import settings
 from django.core.validators import RegexValidator
-from django.db import connection, models, transaction
+from django.db import close_old_connections, connection, models, transaction
 from django.db.utils import ProgrammingError
 from django.db.models.signals import pre_delete, pre_save, post_save
 from django.dispatch import receiver
 from django.utils.text import slugify
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def _generate_tipo_peticao_key():
@@ -1930,12 +1934,35 @@ def userslackconfig_sync_supervision_slack(sender, instance, raw=False, **kwargs
     if not _has_supervisao_slack_tables():
         return
 
-    def _sync():
+    def _sync_async(user_id):
+        close_old_connections()
         try:
             from contratos.services.slack_supervisao import sync_supervision_slack_for_supervisor
-            sync_supervision_slack_for_supervisor(instance.user_id)
-        except Exception:
-            pass
+            sync_supervision_slack_for_supervisor(user_id)
+        except BaseException as exc:
+            logger.exception(
+                'Falha no sync assíncrono da supervisão Slack para user_id=%s',
+                user_id,
+                exc_info=exc,
+            )
+        finally:
+            close_old_connections()
+
+    def _sync():
+        try:
+            thread = threading.Thread(
+                target=_sync_async,
+                args=(instance.user_id,),
+                name=f'slack-supervision-sync-{instance.user_id}',
+                daemon=True,
+            )
+            thread.start()
+        except BaseException as exc:
+            logger.exception(
+                'Falha ao disparar sync assíncrono da supervisão Slack para user_id=%s',
+                instance.user_id,
+                exc_info=exc,
+            )
 
     transaction.on_commit(_sync)
 
