@@ -475,7 +475,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
                 source=delivery.card_source,
                 index=delivery.card_index,
             )
-        except Exception as exc:
+        except BaseException as exc:
             logger.exception(
                 'Falha ao montar payload de entrega Slack id=%s supervisor=%s',
                 delivery.pk,
@@ -531,7 +531,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'has_message': has_message,
             'queue_position': 0,
         }
-    except Exception as exc:
+    except BaseException as exc:
         logger.exception('Falha fatal ao serializar entrega Slack id=%s', getattr(delivery, 'pk', None), exc_info=exc)
         status_key = str(getattr(delivery, 'last_status', '') or '').strip().lower()
         has_message = bool(str(getattr(delivery, 'slack_channel_id', '') or '').strip() and str(getattr(delivery, 'slack_message_ts', '') or '').strip())
@@ -1676,21 +1676,28 @@ class SlackSupervisionDeliveryListAPIView(APIView):
     def get(self, request):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
-
-        deliveries = (
-            SupervisaoSlackEntrega.objects
-            .select_related('processo', 'supervisor')
-            .order_by('-updated_at', '-created_at', '-id')
-        )
-        results = [
-            _build_slack_delivery_entry_payload(delivery, request.user)
-            for delivery in deliveries
-        ]
-        _annotate_slack_delivery_queue(results)
-        return Response({
-            'summary': _build_slack_delivery_summary(results),
-            'results': results,
-        })
+        try:
+            deliveries = (
+                SupervisaoSlackEntrega.objects
+                .select_related('processo', 'supervisor')
+                .order_by('-updated_at', '-created_at', '-id')
+            )
+            results = [
+                _build_slack_delivery_entry_payload(delivery, request.user)
+                for delivery in deliveries
+            ]
+            _annotate_slack_delivery_queue(results)
+            return Response({
+                'summary': _build_slack_delivery_summary(results),
+                'results': results,
+            })
+        except BaseException as exc:
+            logger.exception('Falha ao listar entregas Slack globais', exc_info=exc)
+            return Response({
+                'summary': _build_slack_delivery_summary([]),
+                'results': [],
+                'detail': 'Falha ao carregar mensagens Slack.',
+            })
 
 
 class SlackSupervisionDeliveryDeleteAPIView(APIView):

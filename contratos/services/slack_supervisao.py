@@ -105,7 +105,7 @@ def _collect_supervision_entries_for_supervisor(supervisor, analise_id=None):
     for show_completed in (False, True):
         try:
             entries = view._get_supervision_entries(show_completed, dummy_request, target_user=supervisor)
-        except Exception as exc:
+        except BaseException as exc:
             logger.exception('Falha ao montar entradas de supervisao para Slack', exc_info=exc)
             return []
         for entry in entries or []:
