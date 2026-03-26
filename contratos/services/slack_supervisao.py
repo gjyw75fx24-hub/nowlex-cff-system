@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from contratos.models import AnaliseProcesso, SupervisaoSlackEntrega, UserSlackConfig
+from contratos.services.supervisao_resumo import format_date_br
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +161,192 @@ def _format_analysis_lines(entry):
         text = str(raw_line or '').strip()
         if not text:
             continue
+        normalized_text = text.casefold()
+        if normalized_text.startswith('contratos para monit') or normalized_text.startswith('selecione os contratos'):
+            continue
         lines.append(f'• {text}')
     return '\n'.join(lines) if lines else 'Sem resumo procedural.'
+
+
+def _append_markdown_section(blocks, title, lines):
+    prepared_lines = [str(line or '').strip() for line in (lines or []) if str(line or '').strip()]
+    if not prepared_lines:
+        return
+    chunk = []
+    for line in prepared_lines:
+        candidate = chunk + [line]
+        heading = f'*{title}*'
+        text = heading + '\n' + '\n'.join(candidate)
+        if len(text) > 2900 and chunk:
+            blocks.append({
+                'type': 'section',
+                'text': {'type': 'mrkdwn', 'text': heading + '\n' + '\n'.join(chunk)},
+            })
+            chunk = [line]
+            continue
+        chunk = candidate
+    if chunk:
+        blocks.append({
+            'type': 'section',
+            'text': {'type': 'mrkdwn', 'text': f'*{title}*\n' + '\n'.join(chunk)},
+        })
+
+
+def _format_checagem_sistemas_lines(entry):
+    lines = []
+    for section in entry.get('checagem_sistemas_sections') or []:
+        title = str(section.get('title') or '').strip()
+        items = section.get('items') or []
+        if not title or not items:
+            continue
+        lines.append(f'*{title}*')
+        for item in items:
+            label = str(item.get('label') or '').strip()
+            notes = str(item.get('notes') or '').strip()
+            confirmed = bool(item.get('confirmed'))
+            link = str(item.get('link') or '').strip()
+            parts = []
+            if notes:
+                parts.append(notes.replace('\r\n', ' ').replace('\n', ' '))
+            if confirmed:
+                parts.append('Confirmado')
+            if link:
+                parts.append(f'<{link}|Link>')
+            if not label:
+                continue
+            if parts:
+                lines.append(f'• *{label}*: ' + ' | '.join(parts))
+            else:
+                lines.append(f'• *{label}*')
+    return lines
+
+
+def _format_contract_detail_lines(entry):
+    lines = [str(line or '').strip() for line in (entry.get('contract_detail_lines') or []) if str(line or '').strip()]
+    custas = str(entry.get('custas_estimativa_text') or '').strip()
+    if custas:
+        lines.append(f'Estimativa de Custas (2%): {custas}')
+    return lines
+
+
+def _format_files_detail_lines(entry):
+    lines = []
+    detail_items = entry.get('monitoria_files_detail') or []
+    if len(detail_items) > 1:
+        summary_items = []
+        for summary_item in entry.get('monitoria_files_summary') or []:
+            sigla = str(summary_item.get('sigla') or '').strip()
+            if not sigla:
+                continue
+            summary_items.append(f'{sigla} {"OK" if summary_item.get("present") else "FALTA"}')
+        if summary_items:
+            lines.append('Resumo: ' + ' | '.join(summary_items))
+    elif not detail_items:
+        summary_items = []
+        for summary_item in entry.get('monitoria_files_summary') or []:
+            sigla = str(summary_item.get('sigla') or '').strip()
+            if not sigla:
+                continue
+            summary_items.append(f'{sigla} {"OK" if summary_item.get("present") else "FALTA"}')
+        if summary_items:
+            lines.append('Resumo: ' + ' | '.join(summary_items))
+
+    for detail_item in detail_items:
+        line = str(detail_item.get('line') or '').strip()
+        if line:
+            lines.append(f'• {line}')
+    return lines
+
+
+def _build_pending_decision_hint_lines():
+    return [
+        'Ao tocar em Aprovar, Reprovar ou Barrar, o Slack abrira um formulario para registrar a devolutiva.',
+    ]
+
+
+def _split_lines(value):
+    return [line for line in str(value or '').replace('\r\n', '\n').split('\n') if line.strip()]
+
+
+def _build_decision_modal_blocks(desired_status, entry):
+    existing_note = str(entry.get('supervisor_observacoes') or '').strip()
+    if desired_status == 'barrado':
+        barrado = entry.get('barrado') if isinstance(entry.get('barrado'), dict) else {}
+        barrado_text = str(entry.get('barrado_text') or '').strip()
+        blocks = []
+        if barrado_text:
+            blocks.append({
+                'type': 'section',
+                'text': {
+                    'type': 'mrkdwn',
+                    'text': f'*Barramento atual*\n{barrado_text}',
+                },
+            })
+        datepicker = {
+            'type': 'datepicker',
+            'action_id': 'retorno_picker',
+            'placeholder': {'type': 'plain_text', 'text': 'Opcional'},
+        }
+        current_retorno = str(barrado.get('retorno_em') or '').strip()
+        if current_retorno:
+            datepicker['initial_date'] = current_retorno
+        note_element = {
+            'type': 'plain_text_input',
+            'action_id': 'devolutiva_input',
+            'multiline': True,
+            'placeholder': {'type': 'plain_text', 'text': 'Explique o motivo do barramento.'},
+        }
+        if existing_note:
+            note_element['initial_value'] = existing_note[:3000]
+        blocks.extend([
+            {
+                'type': 'input',
+                'block_id': 'retorno_block',
+                'optional': True,
+                'label': {'type': 'plain_text', 'text': 'Retorno em'},
+                'element': datepicker,
+            },
+            {
+                'type': 'input',
+                'block_id': 'devolutiva_block',
+                'optional': False,
+                'label': {'type': 'plain_text', 'text': 'Devolutiva do supervisor'},
+                'element': note_element,
+            },
+        ])
+        return blocks
+
+    note_element = {
+        'type': 'plain_text_input',
+        'action_id': 'devolutiva_input',
+        'multiline': True,
+        'placeholder': {'type': 'plain_text', 'text': 'Escreva a devolutiva do supervisor.'},
+    }
+    if existing_note:
+        note_element['initial_value'] = existing_note[:3000]
+    return [{
+        'type': 'input',
+        'block_id': 'devolutiva_block',
+        'optional': desired_status == 'aprovado',
+        'label': {'type': 'plain_text', 'text': 'Devolutiva do supervisor'},
+        'element': note_element,
+    }]
+
+
+def _format_barrado_lines(entry):
+    barrado_text = str(entry.get('barrado_text') or '').strip()
+    if not barrado_text:
+        return []
+    lines = [barrado_text]
+    status_key = str(entry.get('supervisor_status') or '').strip().lower()
+    note = str(entry.get('supervisor_observacoes') or '').strip()
+    if note and status_key not in SUPERVISION_FINAL_STATUSES:
+        lines.extend(
+            f'Observação: {line.strip()}'
+            for line in note.replace('\r\n', '\n').split('\n')
+            if line.strip()
+        )
+    return lines
 
 
 def _build_supervision_message(entry, *, request=None):
@@ -169,7 +354,7 @@ def _build_supervision_message(entry, *, request=None):
     cpf = str(entry.get('cpf') or entry.get('documento') or '').strip()
     uf = str(entry.get('uf') or '').strip().upper() or 'UF não informada'
     tipo = str(entry.get('analysis_type_nome') or entry.get('analysis_type_short') or 'Análise').strip()
-    date_label = str(entry.get('date') or '').strip()
+    date_label = format_date_br(entry.get('date'))
     status_key = str(entry.get('supervisor_status') or 'pendente').strip().lower()
     status_label = SUPERVISION_STATUS_LABELS.get(status_key, status_key.capitalize() or 'Pendente')
     title = (
@@ -186,7 +371,6 @@ def _build_supervision_message(entry, *, request=None):
     note = str(entry.get('supervisor_observacoes') or '').strip()
     note_author = str(entry.get('supervisor_observacoes_autor') or '').strip()
     focus_url = _build_entry_focus_url(entry, request=request)
-    files_summary = _entry_file_summary(entry)
     analysis_summary = _format_analysis_lines(entry)
     cnj_label = str(entry.get('cnj_label') or '').strip() or 'Não Judicializado'
     top_text = (
@@ -219,22 +403,23 @@ def _build_supervision_message(entry, *, request=None):
                 'text': f'*Resumo procedural*\n{analysis_summary}'[:2900],
             },
         },
-        {
-            'type': 'section',
-            'text': {
-                'type': 'mrkdwn',
-                'text': f'*Checagem de arquivos*\n{files_summary}'[:2900],
-            },
-        },
     ]
+    _append_markdown_section(blocks, 'Contratos da análise', _format_contract_detail_lines(entry))
+    _append_markdown_section(blocks, 'Checagem de arquivos', _format_files_detail_lines(entry))
+    _append_markdown_section(blocks, 'Checagem de sistemas', _format_checagem_sistemas_lines(entry))
+    analyst_observation = str(entry.get('analyst_observation') or '').strip()
+    if analyst_observation:
+        _append_markdown_section(
+            blocks,
+            'Observação do analista',
+            [line for line in analyst_observation.replace('\r\n', '\n').split('\n') if line.strip()],
+        )
+    _append_markdown_section(blocks, 'Barrar', _format_barrado_lines(entry))
     if note and status_key in SUPERVISION_FINAL_STATUSES:
-        note_text = f'*Devolutiva*\n{note}'
+        note_lines = _split_lines(note)
         if note_author:
-            note_text += f'\nPor: {note_author}'
-        blocks.append({
-            'type': 'section',
-            'text': {'type': 'mrkdwn', 'text': note_text[:2900]},
-        })
+            note_lines.append(f'Por: {note_author}')
+        _append_markdown_section(blocks, 'Devolutiva', note_lines)
     action_elements = []
     if focus_url:
         action_elements.append({
@@ -250,6 +435,8 @@ def _build_supervision_message(entry, *, request=None):
             'index': entry.get('card_index'),
             'card_id': entry.get('cardId'),
         }, ensure_ascii=True)
+        barrado = entry.get('barrado') if isinstance(entry.get('barrado'), dict) else {}
+        barrado_active = bool(barrado.get('ativo'))
         action_elements.extend([
             {
                 'type': 'button',
@@ -265,13 +452,24 @@ def _build_supervision_message(entry, *, request=None):
                 'action_id': 'supervision_reprove',
                 'value': json.dumps({'metadata': metadata, 'status': 'reprovado'}),
             },
+            {
+                'type': 'button',
+                'text': {
+                    'type': 'plain_text',
+                    'text': 'Editar barrar' if barrado_active else 'Barrar',
+                    'emoji': True,
+                },
+                'action_id': 'supervision_barrar',
+                'value': json.dumps({'metadata': metadata, 'status': 'barrado'}),
+            },
         ])
+        _append_markdown_section(blocks, 'Devolutiva', _build_pending_decision_hint_lines())
     if action_elements:
         blocks.append({'type': 'actions', 'elements': action_elements})
     fallback_text = (
         f'{title} - {nome} - {cpf or "Sem CPF"} - {tipo} - {status_label}\n'
         f'{analysis_summary}\n'
-        f'Arquivos: {files_summary}'
+        f'Arquivos: {_entry_file_summary(entry)}'
     )
     message_hash = hashlib.sha256(
         json.dumps({'text': fallback_text, 'blocks': blocks}, ensure_ascii=True, sort_keys=True).encode('utf-8')
@@ -325,6 +523,13 @@ def update_slack_message(channel_id, message_ts, *, text, blocks):
     )
 
 
+def delete_slack_message(channel_id, message_ts):
+    return _slack_api_post(
+        'chat.delete',
+        json_payload={'channel': channel_id, 'ts': message_ts},
+    )
+
+
 def post_slack_thread_reply(channel_id, thread_ts, text):
     return _slack_api_post(
         'chat.postMessage',
@@ -348,33 +553,20 @@ def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status
     api_token = _slack_bot_token()
     if not api_token:
         raise ValueError('SLACK_BOT_TOKEN não configurado.')
-    status_label = SUPERVISION_STATUS_LABELS.get(desired_status, desired_status.capitalize())
+    status_label = 'Barrar' if desired_status == 'barrado' else SUPERVISION_STATUS_LABELS.get(desired_status, desired_status.capitalize())
     nome = str(entry.get('nome') or 'Parte').strip()
     cpf = str(entry.get('cpf') or '').strip()
-    blocks = [
-        {
-            'type': 'section',
-            'text': {
-                'type': 'mrkdwn',
-                'text': (
-                    f'*{status_label} supervisão*\n'
-                    f'{nome} · CPF {cpf or "Não informado"}'
-                ),
-            },
+    blocks = [{
+        'type': 'section',
+        'text': {
+            'type': 'mrkdwn',
+            'text': (
+                f'*{status_label} supervisão*\n'
+                f'{nome} · CPF {cpf or "Não informado"}'
+            ),
         },
-        {
-            'type': 'input',
-            'block_id': 'devolutiva_block',
-            'optional': True,
-            'label': {'type': 'plain_text', 'text': 'Devolutiva'},
-            'element': {
-                'type': 'plain_text_input',
-                'action_id': 'devolutiva_input',
-                'multiline': True,
-                'placeholder': {'type': 'plain_text', 'text': 'Escreva a devolutiva do supervisor.'},
-            },
-        },
-    ]
+    }]
+    blocks.extend(_build_decision_modal_blocks(desired_status, entry))
     return _slack_api_post(
         'views.open',
         token=api_token,
@@ -409,6 +601,9 @@ def _thread_update_text(entry, actor_name, status_key):
     ]
     if note:
         lines.append(f'Devolutiva: {note}')
+    barrado_text = str(entry.get('barrado_text') or '').strip()
+    if barrado_text:
+        lines.append(f'Barrar: {barrado_text}')
     return '\n'.join(lines)
 
 
@@ -608,3 +803,39 @@ def get_supervision_entry_for_card(*, supervisor, analise_id, source, index):
         if entry_index == int(index):
             return entry
     return None
+
+
+def delete_supervision_slack_deliveries(deliveries):
+    deleted_ids = []
+    errors = []
+    for delivery in deliveries or []:
+        if not delivery:
+            continue
+        try:
+            channel_id = str(delivery.slack_channel_id or '').strip()
+            message_ts = str(delivery.slack_message_ts or '').strip()
+            if channel_id and message_ts:
+                try:
+                    delete_slack_message(channel_id, message_ts)
+                except ValueError as exc:
+                    error_text = str(exc or '').strip()
+                    if error_text not in {'message_not_found', 'channel_not_found'}:
+                        raise
+            deleted_ids.append(int(delivery.pk))
+        except Exception as exc:
+            errors.append({
+                'delivery_id': int(delivery.pk),
+                'error': str(exc),
+            })
+            logger.exception(
+                'Falha ao apagar entrega Slack da supervisao delivery=%s',
+                delivery.pk,
+                exc_info=exc,
+            )
+    if deleted_ids:
+        SupervisaoSlackEntrega.objects.filter(pk__in=deleted_ids).delete()
+    return {
+        'deleted_ids': deleted_ids,
+        'deleted_count': len(deleted_ids),
+        'errors': errors,
+    }

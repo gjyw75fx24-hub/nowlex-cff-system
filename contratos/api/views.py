@@ -43,6 +43,7 @@ from ..models import (
     Prazo,
     PrazoMensagem,
     QuestaoAnalise,
+    SupervisaoSlackEntrega,
     Tarefa,
     TarefaLote,
     TarefaMensagem,
@@ -53,6 +54,14 @@ from ..services.demandas import DemandasImportError, DemandasImportService
 from ..services.peticao_combo import (
     build_monitoria_contract_file_presence,
     build_monitoria_required_files_summary,
+)
+from ..services.supervisao_resumo import (
+    build_barrado_text,
+    build_checagem_sistemas_sections,
+    build_contract_detail_items,
+    build_monitoria_files_detail,
+    format_currency_brl,
+    resolve_custas_estimativa,
 )
 from ..permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .serializers import (
@@ -71,6 +80,7 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 from ..services.slack_supervisao import (
+    delete_supervision_slack_deliveries,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
@@ -327,6 +337,16 @@ def is_supervisor_user(user):
     )
 
 
+def is_supervisor_developer_user(user):
+    return bool(
+        user
+        and (
+            user.is_superuser
+            or user.groups.filter(name='Supervisor Desenvolvedor').exists()
+        )
+    )
+
+
 def _load_supervision_card(analise_id, source, index):
     if source not in ('processos_vinculados', 'saved_processos_vinculados'):
         raise DRFValidationError('source inválido.')
@@ -394,6 +414,43 @@ def _get_supervisor_by_slack_user_id(slack_user_id):
     if not is_supervisor_user(slack_config.user):
         return None
     return slack_config.user
+
+
+def _build_slack_delivery_entry_payload(delivery, request_user):
+    entry = get_supervision_entry_for_card(
+        supervisor=request_user,
+        analise_id=delivery.analise_id,
+        source=delivery.card_source,
+        index=delivery.card_index,
+    )
+    entry = entry if isinstance(entry, dict) else {}
+    cnj_label = str(entry.get('cnj_label') or '').strip()
+    if not cnj_label:
+        cnj_label = str(delivery.card_id or '').strip() or f'Card {delivery.card_source}:{delivery.card_index}'
+    analysis_type_name = str(
+        entry.get('analysis_type_nome')
+        or entry.get('analysis_type_short')
+        or ''
+    ).strip() or 'Análise'
+    notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
+    updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
+    return {
+        'id': delivery.pk,
+        'analise_id': delivery.analise_id,
+        'card_id': str(delivery.card_id or '').strip(),
+        'card_source': str(delivery.card_source or '').strip(),
+        'card_index': int(delivery.card_index or 0),
+        'cnj_label': cnj_label,
+        'analysis_type_name': analysis_type_name,
+        'last_status': str(delivery.last_status or '').strip(),
+        'notified_at': notified_at.isoformat() if notified_at else '',
+        'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
+        'updated_at': updated_at.isoformat() if updated_at else '',
+        'updated_at_display': updated_at.strftime('%d/%m/%Y %H:%M') if updated_at else '',
+        'slack_channel_id': str(delivery.slack_channel_id or '').strip(),
+        'slack_message_ts': str(delivery.slack_message_ts or '').strip(),
+        'has_message': bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip()),
+    }
 
 
 class AgendaAPIView(APIView):
@@ -1147,6 +1204,7 @@ class AgendaGeralAPIView(APIView):
         contracts = Contrato.objects.filter(contract_filter).only(
             'id',
             'numero_contrato',
+            'valor_total_devido',
             'valor_causa',
             'data_prescricao',
         )
@@ -1246,6 +1304,13 @@ class AgendaGeralAPIView(APIView):
                 contratos=valid_contracts,
                 files=processo_files,
             )
+            monitoria_files_detail = build_monitoria_files_detail(
+                build_monitoria_contract_file_presence(
+                    processo,
+                    contratos=valid_contracts,
+                    files=processo_files,
+                )
+            )
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = float(valor_total_causa)
@@ -1263,6 +1328,12 @@ class AgendaGeralAPIView(APIView):
             analysis_type_slug = str(analysis_type.get('slug') or '').strip()
             analysis_type_short = _build_analysis_type_short(analysis_type)
             custas_total_decimal = _parse_decimal_value(card.get('custas_total'))
+            contract_details = build_contract_detail_items(valid_contracts)
+            checagem_sistemas_sections = build_checagem_sistemas_sections(
+                processo.checagem_sistemas if processo else {}
+            )
+            barrado_payload = card.get('barrado') if isinstance(card.get('barrado'), dict) else {}
+            custas_estimativa = resolve_custas_estimativa(custas_total_decimal, valor_total_causa)
             entries.append({
                 'type': 'S',
                 'id': f"s-{analise.pk}-{card_info['source']}-{card_info['index']}",
@@ -1275,8 +1346,10 @@ class AgendaGeralAPIView(APIView):
                 'contract_numbers': contrato_labels,
                 'contract_ids': contract_pk_ids,
                 'monitoria_files_summary': monitoria_files_summary,
+                'monitoria_files_detail': monitoria_files_detail,
                 'valor_causa': valor_total_causa,
                 'custas_total': float(custas_total_decimal) if custas_total_decimal is not None else None,
+                'custas_estimativa_text': format_currency_brl(custas_estimativa),
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
@@ -1302,12 +1375,17 @@ class AgendaGeralAPIView(APIView):
                 'analysis_type_nome': analysis_type_nome,
                 'analysis_type_slug': analysis_type_slug,
                 'analysis_type_short': analysis_type_short,
-                'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
+                'barrado': barrado_payload,
+                'barrado_text': build_barrado_text(barrado_payload),
                 'nome': parte_nome,
                 'parte_nome': parte_nome,
                 'cpf': parte_documento,
                 'parte_cpf': parte_documento,
                 'documento': parte_documento,
+                'contract_details': contract_details,
+                'contract_detail_lines': [item['line'] for item in contract_details],
+                'checagem_sistemas_sections': checagem_sistemas_sections,
+                'analyst_observation': observation_fallback_text,
                 'observation_target': observation_target,
                 'observation_mention_type': observation_mention_type,
                 'observation_mention_label': raw_nj_label,
@@ -1433,6 +1511,80 @@ class AgendaSupervisionNoteAPIView(APIView):
         })
 
 
+class SlackSupervisionDeliveryListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not is_supervisor_developer_user(request.user):
+            return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
+
+        processo_id = request.query_params.get('processo_id')
+        if not processo_id:
+            return Response({'detail': 'processo_id é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        processo = get_object_or_404(
+            filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
+            pk=processo_id,
+        )
+        deliveries = (
+            SupervisaoSlackEntrega.objects
+            .filter(processo=processo, supervisor=request.user)
+            .exclude(slack_message_ts='')
+            .order_by('-notified_at', '-created_at', '-id')
+        )
+        return Response({
+            'results': [
+                _build_slack_delivery_entry_payload(delivery, request.user)
+                for delivery in deliveries
+            ],
+        })
+
+
+class SlackSupervisionDeliveryDeleteAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_supervisor_developer_user(request.user):
+            return Response({'detail': 'Apenas Supervisor Desenvolvedor pode apagar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        processo_id = data.get('processo_id')
+        mode = str(data.get('mode') or '').strip().lower()
+        if not processo_id:
+            return Response({'detail': 'processo_id é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+        if mode not in {'last', 'selected', 'all'}:
+            return Response({'detail': 'mode inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        processo = get_object_or_404(
+            filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
+            pk=processo_id,
+        )
+        deliveries_qs = (
+            SupervisaoSlackEntrega.objects
+            .filter(processo=processo, supervisor=request.user)
+            .exclude(slack_message_ts='')
+            .order_by('-notified_at', '-created_at', '-id')
+        )
+
+        if mode == 'last':
+            deliveries = list(deliveries_qs[:1])
+        elif mode == 'all':
+            deliveries = list(deliveries_qs)
+        else:
+            raw_ids = data.get('delivery_ids') or []
+            try:
+                delivery_ids = [int(value) for value in raw_ids]
+            except (TypeError, ValueError):
+                return Response({'detail': 'delivery_ids inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            deliveries = list(deliveries_qs.filter(pk__in=delivery_ids))
+
+        if not deliveries:
+            return Response({'detail': 'Nenhuma mensagem Slack encontrada para apagar.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = delete_supervision_slack_deliveries(deliveries)
+        return Response(result)
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class SlackSupervisionInteractionAPIView(View):
     http_method_names = ['post']
@@ -1470,7 +1622,7 @@ class SlackSupervisionInteractionAPIView(View):
             return HttpResponse('')
         action = actions[0] or {}
         action_id = str(action.get('action_id') or '').strip()
-        if action_id not in {'supervision_approve', 'supervision_reprove'}:
+        if action_id not in {'supervision_approve', 'supervision_reprove', 'supervision_barrar'}:
             return HttpResponse('')
         try:
             action_payload = json.loads(str(action.get('value') or '{}'))
@@ -1537,22 +1689,24 @@ class SlackSupervisionInteractionAPIView(View):
         analise_id = metadata.get('analise_id')
         source = metadata.get('source')
         index = metadata.get('index')
-        if desired_status not in {'aprovado', 'reprovado'} or not analise_id or not source or index is None:
+        if desired_status not in {'aprovado', 'reprovado', 'barrado'} or not analise_id or not source or index is None:
             return JsonResponse({'response_action': 'clear'})
 
         values = (((view_payload.get('state') or {}).get('values')) or {})
         devolutiva_value = ''
+        retorno_em_value = ''
         for block_values in values.values():
             if not isinstance(block_values, dict):
                 continue
             for action_data in block_values.values():
                 if not isinstance(action_data, dict):
                     continue
-                if str(action_data.get('type') or '') == 'plain_text_input':
+                action_type = str(action_data.get('type') or '')
+                action_id = str(action_data.get('action_id') or '')
+                if action_type == 'plain_text_input' and action_id == 'devolutiva_input':
                     devolutiva_value = str(action_data.get('value') or '')
-                    break
-            if devolutiva_value:
-                break
+                elif action_type == 'datepicker' and action_id == 'retorno_picker':
+                    retorno_em_value = str(action_data.get('selected_date') or '').strip()
 
         try:
             entry = get_supervision_entry_for_card(
@@ -1574,11 +1728,28 @@ class SlackSupervisionInteractionAPIView(View):
             })
 
         actor_name = supervisor.get_full_name().strip() or supervisor.username
-        card['supervisor_status'] = desired_status
-        card['supervisor_status_autor'] = actor_name
         note_value = str(devolutiva_value or '').replace('\r\n', '\n')
-        card['supervisor_observacoes'] = note_value
-        card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
+        if desired_status == 'barrado':
+            barrado = card.get('barrado')
+            if not isinstance(barrado, dict):
+                barrado = {}
+            barrado.setdefault('ativo', False)
+            barrado.setdefault('inicio', None)
+            barrado.setdefault('retorno_em', None)
+            barrado['ativo'] = True
+            if not barrado.get('inicio'):
+                barrado['inicio'] = timezone.localdate().isoformat()
+            retorno_em_date = _parse_optional_date(retorno_em_value)
+            barrado['retorno_em'] = retorno_em_date.isoformat() if retorno_em_date else None
+            card['barrado'] = barrado
+            if note_value.strip():
+                card['supervisor_observacoes'] = note_value
+                card['supervisor_observacoes_autor'] = actor_name
+        else:
+            card['supervisor_status'] = desired_status
+            card['supervisor_status_autor'] = actor_name
+            card['supervisor_observacoes'] = note_value
+            card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
         _save_supervision_card(analise, respostas, request_user=supervisor)
         return JsonResponse({'response_action': 'clear'})
 

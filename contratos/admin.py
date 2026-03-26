@@ -13350,6 +13350,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             )
         extra_context['delegar_users'] = User.objects.order_by('username')
         extra_context['is_supervisor'] = is_user_supervisor(request.user)
+        extra_context['is_supervisor_developer'] = is_user_supervisor_developer(request.user)
         extra_context['tipos_peticao_api_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao')
         extra_context['tipos_peticao_preview_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_preview')
         extra_context['tipos_peticao_generate_url'] = reverse('admin:contratos_documentomodelo_tipos_peticao_generate')

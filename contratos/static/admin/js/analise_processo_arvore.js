@@ -267,7 +267,10 @@
         });
 
         const isSupervisorUser = Boolean(window.__analise_is_supervisor);
+        const isSupervisorDeveloperUser = Boolean(window.__analise_is_supervisor_developer);
         const TAB_STORAGE_KEY = 'analise_active_tab';
+        const SLACK_SUPERVISION_DELIVERIES_URL = '/api/slack/supervisao/entregas/';
+        const SLACK_SUPERVISION_DELIVERIES_DELETE_URL = '/api/slack/supervisao/entregas/delete/';
         const desiredTab = sessionStorage.getItem(TAB_STORAGE_KEY);
         const $analysisTabButton = $(
             '<button type="button" class="analise-inner-tab-button" data-tab="analise">Análise do Processo</button>'
@@ -2885,6 +2888,314 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             });
         }
 
+        function fetchSlackSupervisionDeliveries() {
+            return $.ajax({
+                url: SLACK_SUPERVISION_DELIVERIES_URL,
+                method: 'GET',
+                dataType: 'json',
+                data: {
+                    processo_id: currentProcessoId
+                }
+            });
+        }
+
+        function deleteSlackSupervisionDeliveries(mode, deliveryIds = []) {
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            return $.ajax({
+                url: SLACK_SUPERVISION_DELIVERIES_DELETE_URL,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                contentType: 'application/json; charset=utf-8',
+                dataType: 'json',
+                data: JSON.stringify({
+                    processo_id: currentProcessoId,
+                    mode,
+                    delivery_ids: deliveryIds
+                })
+            });
+        }
+
+        function openSlackDeliveryManagerDialog() {
+            if (!isSupervisorDeveloperUser || !currentProcessoId) {
+                return;
+            }
+            const existing = document.getElementById('analise-slack-deliveries-dialog');
+            if (existing) {
+                existing.remove();
+            }
+
+            const overlay = document.createElement('div');
+            overlay.id = 'analise-slack-deliveries-dialog';
+            overlay.className = 'analise-slack-deliveries-modal-overlay';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'analise-slack-deliveries-modal';
+
+            const header = document.createElement('div');
+            header.className = 'analise-slack-deliveries-modal__header';
+            const title = document.createElement('h3');
+            title.textContent = 'Mensagens enviadas ao Slack';
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'analise-slack-deliveries-modal__close';
+            closeBtn.textContent = '×';
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+
+            const body = document.createElement('div');
+            body.className = 'analise-slack-deliveries-modal__body';
+
+            const hint = document.createElement('p');
+            hint.className = 'analise-slack-deliveries-modal__hint';
+            hint.textContent = 'Apaga as mensagens Slack deste processo para o seu usuário. Um novo envio pode ser recriado ao sincronizar novamente.';
+
+            const toolbar = document.createElement('div');
+            toolbar.className = 'analise-slack-deliveries-toolbar';
+            const refreshBtn = document.createElement('button');
+            refreshBtn.type = 'button';
+            refreshBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
+            refreshBtn.textContent = 'Atualizar';
+            const deleteLastBtn = document.createElement('button');
+            deleteLastBtn.type = 'button';
+            deleteLastBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
+            deleteLastBtn.textContent = 'Apagar última';
+            const deleteSelectedBtn = document.createElement('button');
+            deleteSelectedBtn.type = 'button';
+            deleteSelectedBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
+            deleteSelectedBtn.textContent = 'Apagar selecionadas';
+            const deleteAllBtn = document.createElement('button');
+            deleteAllBtn.type = 'button';
+            deleteAllBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger';
+            deleteAllBtn.textContent = 'Apagar todas';
+            toolbar.appendChild(refreshBtn);
+            toolbar.appendChild(deleteLastBtn);
+            toolbar.appendChild(deleteSelectedBtn);
+            toolbar.appendChild(deleteAllBtn);
+
+            const feedback = document.createElement('div');
+            feedback.className = 'analise-slack-deliveries-modal__feedback';
+            feedback.style.display = 'none';
+
+            const list = document.createElement('div');
+            list.className = 'analise-slack-deliveries-list';
+
+            const footer = document.createElement('div');
+            footer.className = 'analise-slack-deliveries-modal__footer';
+            const footerClose = document.createElement('button');
+            footerClose.type = 'button';
+            footerClose.className = 'button button-secondary';
+            footerClose.textContent = 'Fechar';
+            footer.appendChild(footerClose);
+
+            body.appendChild(hint);
+            body.appendChild(toolbar);
+            body.appendChild(feedback);
+            body.appendChild(list);
+            dialog.appendChild(header);
+            dialog.appendChild(body);
+            dialog.appendChild(footer);
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+
+            let deliveries = [];
+            let isBusy = false;
+
+            const setBusy = (busy) => {
+                isBusy = busy;
+                [refreshBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn, closeBtn, footerClose].forEach((button) => {
+                    button.disabled = busy;
+                });
+                list.classList.toggle('is-loading', busy);
+            };
+
+            const setActionLoadingState = (button, active, activeText) => {
+                if (!button) {
+                    return;
+                }
+                if (!button.dataset.defaultLabel) {
+                    button.dataset.defaultLabel = button.textContent || '';
+                }
+                if (active) {
+                    button.textContent = activeText;
+                    button.classList.add('is-loading');
+                } else {
+                    button.textContent = button.dataset.defaultLabel || button.textContent;
+                    button.classList.remove('is-loading');
+                }
+            };
+
+            const setFeedback = (message, variant = 'info') => {
+                const text = String(message || '').trim();
+                if (!text) {
+                    feedback.style.display = 'none';
+                    feedback.textContent = '';
+                    feedback.className = 'analise-slack-deliveries-modal__feedback';
+                    return;
+                }
+                feedback.style.display = '';
+                feedback.textContent = text;
+                feedback.className = `analise-slack-deliveries-modal__feedback analise-slack-deliveries-modal__feedback--${variant}`;
+            };
+
+            const getSelectedIds = () => (
+                Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-id]:checked'))
+                    .map((input) => parseInt(input.getAttribute('data-delivery-id') || '', 10))
+                    .filter((value) => Number.isFinite(value))
+            );
+
+            const refreshActionState = () => {
+                const selectedCount = getSelectedIds().length;
+                deleteSelectedBtn.disabled = isBusy || selectedCount === 0;
+                deleteLastBtn.disabled = isBusy || deliveries.length === 0;
+                deleteAllBtn.disabled = isBusy || deliveries.length === 0;
+            };
+
+            const renderList = () => {
+                list.innerHTML = '';
+                if (!deliveries.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'analise-slack-deliveries-empty';
+                    empty.textContent = 'Nenhuma mensagem Slack enviada foi encontrada para este processo.';
+                    list.appendChild(empty);
+                    refreshActionState();
+                    return;
+                }
+                deliveries.forEach((delivery) => {
+                    const item = document.createElement('label');
+                    item.className = 'analise-slack-deliveries-item';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.setAttribute('data-delivery-id', delivery.id);
+
+                    const content = document.createElement('div');
+                    content.className = 'analise-slack-deliveries-item__content';
+
+                    const titleEl = document.createElement('div');
+                    titleEl.className = 'analise-slack-deliveries-item__title';
+                    titleEl.textContent = `${delivery.analysis_type_name || 'Análise'} · ${delivery.cnj_label || 'Card'}`;
+
+                    const meta = document.createElement('div');
+                    meta.className = 'analise-slack-deliveries-item__meta';
+                    const statusText = delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado';
+                    meta.textContent = [
+                        delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : '',
+                        statusText,
+                        delivery.card_source ? `Origem: ${delivery.card_source}:${delivery.card_index}` : ''
+                    ].filter(Boolean).join(' · ');
+
+                    content.appendChild(titleEl);
+                    content.appendChild(meta);
+                    item.appendChild(checkbox);
+                    item.appendChild(content);
+                    list.appendChild(item);
+                });
+                list.querySelectorAll('input[type="checkbox"][data-delivery-id]').forEach((input) => {
+                    input.addEventListener('change', refreshActionState);
+                });
+                refreshActionState();
+            };
+
+            const closeDialog = () => {
+                document.removeEventListener('keydown', handleKeydown);
+                overlay.remove();
+            };
+
+            const loadDeliveries = () => {
+                setBusy(true);
+                setActionLoadingState(refreshBtn, true, 'Atualizando...');
+                setFeedback('');
+                fetchSlackSupervisionDeliveries()
+                    .done((response) => {
+                        deliveries = Array.isArray(response?.results) ? response.results : [];
+                        renderList();
+                    })
+                    .fail((xhr) => {
+                        const message = xhr?.responseJSON?.detail || 'Falha ao carregar mensagens Slack.';
+                        deliveries = [];
+                        renderList();
+                        setFeedback(message, 'error');
+                    })
+                    .always(() => {
+                        setActionLoadingState(refreshBtn, false);
+                        setBusy(false);
+                        refreshActionState();
+                    });
+            };
+
+            const runDelete = async (mode) => {
+                let actionButton = null;
+                let selectedIds = [];
+                let confirmMessage = '';
+                if (mode === 'last') {
+                    actionButton = deleteLastBtn;
+                    confirmMessage = 'Apagar a última mensagem Slack enviada deste processo?';
+                } else if (mode === 'all') {
+                    actionButton = deleteAllBtn;
+                    confirmMessage = 'Apagar todas as mensagens Slack listadas deste processo?';
+                } else {
+                    actionButton = deleteSelectedBtn;
+                    selectedIds = getSelectedIds();
+                    if (!selectedIds.length) {
+                        setFeedback('Selecione ao menos uma mensagem Slack para apagar.', 'warning');
+                        refreshActionState();
+                        return;
+                    }
+                    confirmMessage = `Apagar ${selectedIds.length} mensagem(ns) Slack selecionada(s)?`;
+                }
+
+                const confirmed = await showCffConfirmDialog(
+                    confirmMessage,
+                    'Apagar mensagens Slack',
+                    { okLabel: 'Apagar', cancelLabel: 'Cancelar', variant: 'danger' }
+                );
+                if (!confirmed) {
+                    return;
+                }
+
+                setBusy(true);
+                setActionLoadingState(actionButton, true, 'Apagando...');
+                setFeedback('');
+                deleteSlackSupervisionDeliveries(mode, selectedIds)
+                    .done((response) => {
+                        const deletedCount = parseInt(response?.deleted_count || 0, 10) || 0;
+                        const errors = Array.isArray(response?.errors) ? response.errors : [];
+                        if (errors.length) {
+                            setFeedback(
+                                `Foram apagadas ${deletedCount} mensagem(ns), mas houve falhas: ${errors.map(item => item.error || 'erro').join(' | ')}`,
+                                'warning'
+                            );
+                        } else {
+                            setFeedback(`Foram apagadas ${deletedCount} mensagem(ns) Slack.`, 'success');
+                        }
+                        loadDeliveries();
+                    })
+                    .fail((xhr) => {
+                        const message = xhr?.responseJSON?.detail || 'Falha ao apagar mensagens Slack.';
+                        setActionLoadingState(actionButton, false);
+                        setBusy(false);
+                        setFeedback(message, 'error');
+                        refreshActionState();
+                    });
+            };
+
+            const handleKeydown = (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeDialog();
+                }
+            };
+
+            refreshBtn.addEventListener('click', loadDeliveries);
+            deleteLastBtn.addEventListener('click', () => { void runDelete('last'); });
+            deleteSelectedBtn.addEventListener('click', () => { void runDelete('selected'); });
+            deleteAllBtn.addEventListener('click', () => { void runDelete('all'); });
+            closeBtn.addEventListener('click', closeDialog);
+            footerClose.addEventListener('click', closeDialog);
+            document.addEventListener('keydown', handleKeydown);
+            loadDeliveries();
+        }
+
         function getSavedProcessCards() {
             if (!Array.isArray(userResponses[SAVED_PROCESSOS_KEY])) {
                 return [];
@@ -3484,6 +3795,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 hashtag: activeAnalysisType.hashtag,
                 versao: activeAnalysisType.versao
             } : null;
+            const resolveSnapshotAnalysisType = (snapshot) => {
+                if (snapshot && snapshot.analysis_type && snapshot.analysis_type.id != null) {
+                    return deepClone(snapshot.analysis_type);
+                }
+                if (activeEditingCard && activeEditingCard.analysis_type && activeEditingCard.analysis_type.id != null) {
+                    return deepClone(activeEditingCard.analysis_type);
+                }
+                return analysisTypeSnapshot ? deepClone(analysisTypeSnapshot) : null;
+            };
 
             const snapshotsToPersist = snapshots.slice();
             if (
@@ -3496,11 +3816,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const previousTypeKey = getCardAnalysisTypeKey(snapshotToUpdate);
                 snapshotToUpdate.saved_at = timestamp;
                 snapshotToUpdate.updated_at = timestamp;
-                if (analysisTypeSnapshot) {
-                    snapshotToUpdate.analysis_type = analysisTypeSnapshot;
+                const snapshotType = resolveSnapshotAnalysisType(snapshotToUpdate);
+                if (snapshotType) {
+                    snapshotToUpdate.analysis_type = snapshotType;
                 }
                 const nextTypeKey = getCardAnalysisTypeKey(snapshotToUpdate);
-                if (!previousTypeKey || (analysisTypeSnapshot && previousTypeKey !== nextTypeKey)) {
+                if (!previousTypeKey || (snapshotType && previousTypeKey !== nextTypeKey)) {
                     snapshotToUpdate.analysis_author = currentAnalysisAuthor;
                 } else {
                     snapshotToUpdate.analysis_author = resolveCardAnalysisAuthor(
@@ -3527,11 +3848,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const previousTypeKey = getCardAnalysisTypeKey(snapshot);
                 snapshot.saved_at = timestamp;
                 snapshot.updated_at = timestamp;
-                if (analysisTypeSnapshot) {
-                    snapshot.analysis_type = analysisTypeSnapshot;
+                const snapshotType = resolveSnapshotAnalysisType(snapshot);
+                if (snapshotType) {
+                    snapshot.analysis_type = snapshotType;
                 }
                 const nextTypeKey = getCardAnalysisTypeKey(snapshot);
-                if (!previousTypeKey || (analysisTypeSnapshot && previousTypeKey !== nextTypeKey)) {
+                if (!previousTypeKey || (snapshotType && previousTypeKey !== nextTypeKey)) {
                     snapshot.analysis_author = currentAnalysisAuthor;
                 } else {
                     snapshot.analysis_author = resolveCardAnalysisAuthor(
@@ -3851,6 +4173,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
         }
 
+        function compactComparisonText(value) {
+            return normalizeTextForComparison(value).replace(/[^a-z0-9]+/g, '');
+        }
+
         function inferAnalysisTypeForCard(types, cardData) {
             const list = Array.isArray(types)
                 ? types.filter(tipo => tipo && tipo.id != null)
@@ -3879,6 +4205,37 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 cardData && cardData.tipo_de_acao_respostas && typeof cardData.tipo_de_acao_respostas === 'object'
                     ? cardData.tipo_de_acao_respostas
                     : {};
+            const responseKeys = Object.keys(responses);
+            const normalizedResponseKeyText = normalizeTextForComparison(responseKeys.join(' '));
+            const compactResponseKeyText = compactComparisonText(responseKeys.join(' '));
+
+            if (normalizedResponseKeyText || compactResponseKeyText) {
+                const responseKeyMatches = list.filter(tipo => {
+                    const candidateTexts = [tipo.slug, tipo.nome, tipo.hashtag]
+                        .map(value => String(value || '').trim())
+                        .filter(Boolean);
+                    return candidateTexts.some(candidate => {
+                        const normalizedCandidate = normalizeTextForComparison(candidate);
+                        const compactCandidate = compactComparisonText(candidate);
+                        if (!normalizedCandidate && !compactCandidate) {
+                            return false;
+                        }
+                        if (normalizedCandidate && normalizedResponseKeyText.includes(normalizedCandidate)) {
+                            return true;
+                        }
+                        if (compactCandidate && compactResponseKeyText.includes(compactCandidate)) {
+                            return true;
+                        }
+                        const tokens = normalizedCandidate
+                            .split(/[^a-z0-9]+/)
+                            .filter(token => token.length >= 3);
+                        return tokens.length > 1 && tokens.every(token => normalizedResponseKeyText.includes(token));
+                    });
+                });
+                if (responseKeyMatches.length === 1) {
+                    return responseKeyMatches[0];
+                }
+            }
 
             const hasMonitoriaSignals = [
                 'judicializado_pela_massa',
@@ -3944,6 +4301,21 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 analysisTypeSelectionInProgress = false;
                 updateActionButtons();
                 deferred.reject(reason || {});
+            };
+
+            const fallbackToCurrentOrPrompt = () => {
+                if (currentTipoId) {
+                    if (hasCurrentTreeConfig) {
+                        finalizeSuccess(activeAnalysisType || null);
+                    } else {
+                        loadTreeForType(activeAnalysisType || { id: currentTipoId }, {
+                            allowSelectionFallback: true,
+                            failMessage: 'Não foi possível restaurar a configuração atual. Selecione o tipo de análise para editar o card.'
+                        });
+                    }
+                    return;
+                }
+                promptForTypeSelection('Este card legado não informa o tipo de análise. Selecione o tipo para editar.');
             };
 
             const promptForTypeSelection = (contextMessage) => {
@@ -4037,19 +4409,30 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 return deferred.promise();
             }
 
-            if (currentTipoId) {
-                if (hasCurrentTreeConfig) {
-                    finalizeSuccess(activeAnalysisType || null);
-                } else {
-                    loadTreeForType(activeAnalysisType || { id: currentTipoId }, {
-                        allowSelectionFallback: true,
-                        failMessage: 'Não foi possível restaurar a configuração atual. Selecione o tipo de análise para editar o card.'
+            const inferTypeBeforeFallback = () => {
+                fetchAnalysisTypes()
+                    .done(types => {
+                        const inferredType = inferAnalysisTypeForCard(types, cardData);
+                        if (inferredType) {
+                            loadTreeForType(inferredType, {
+                                allowSelectionFallback: true,
+                                failMessage: 'Não foi possível carregar o tipo inferido para este card.'
+                            });
+                            return;
+                        }
+                        fallbackToCurrentOrPrompt();
+                    })
+                    .fail(() => {
+                        fallbackToCurrentOrPrompt();
                     });
-                }
+            };
+
+            if (cardData && cardData.tipo_de_acao_respostas && typeof cardData.tipo_de_acao_respostas === 'object') {
+                inferTypeBeforeFallback();
                 return deferred.promise();
             }
 
-            promptForTypeSelection('Este card legado não informa o tipo de análise. Selecione o tipo para editar.');
+            fallbackToCurrentOrPrompt();
             return deferred.promise();
         }
 
@@ -7584,13 +7967,20 @@ function formatCnjDigits(raw) {
                 return;
             }
             const { active: processos, archived: archivedProcessos } = getProcessCardsForSupervisionPanel();
-            if (processos.length === 0 && archivedProcessos.length === 0) {
-                $supervisionPanelContent.html(
-                    '<p>Nenhum processo está aguardando supervisão.</p>'
+            $supervisionPanelContent.empty();
+            if (isSupervisorDeveloperUser && currentProcessoId) {
+                const $toolbar = $('<div class="analise-supervision-toolbar"></div>');
+                const $slackButton = $(
+                    '<button type="button" class="button button-secondary analise-supervision-slack-trigger" title="Listar mensagens enviadas ao Slack">Msgs Slack</button>'
                 );
+                $slackButton.on('click', openSlackDeliveryManagerDialog);
+                $toolbar.append($slackButton);
+                $supervisionPanelContent.append($toolbar);
+            }
+            if (processos.length === 0 && archivedProcessos.length === 0) {
+                $supervisionPanelContent.append('<p>Nenhum processo está aguardando supervisão.</p>');
                 return;
             }
-            $supervisionPanelContent.empty();
             if (processos.length) {
                 const $list = $('<div class="analise-supervision-card-list"></div>');
                 processos.forEach((processo, index) => {
@@ -8601,6 +8991,148 @@ function formatCnjDigits(raw) {
             return true;
         }
 
+        function getProcessCardDataByIndex(cardIndex) {
+            const normalizedCardIndex = Number(cardIndex);
+            if (!Number.isFinite(normalizedCardIndex) || normalizedCardIndex < 0) {
+                return null;
+            }
+
+            const keys = getAllProcessoVinculadoResponseKeys();
+            for (let index = 0; index < keys.length; index += 1) {
+                const key = keys[index];
+                const cardList = Array.isArray(userResponses[key]) ? userResponses[key] : [];
+                if (cardList[normalizedCardIndex]) {
+                    return cardList[normalizedCardIndex];
+                }
+            }
+            return null;
+        }
+
+        function buildCardSupervisionField(cardData, cardIndex) {
+            const $supervisionWrapper = $('<div class="field-supervision"></div>');
+            const $supervisionToggle = $(`
+                <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
+                    <input type="checkbox" class="supervision-toggle-input">
+                    <span class="supervision-switch" aria-hidden="true"></span>
+                    <span class="supervision-label-text">Supervisionar</span>
+                </label>
+            `);
+            const supervisionDateInputId = `supervision_date_${cardIndex}`;
+            const $supervisionDateWrapper = $('<div class="supervision-date-wrapper"></div>');
+            const $supervisionDateLabel = $(
+                `<label class="supervision-date-label" for="${supervisionDateInputId}">Data S</label>`
+            );
+            const $supervisionDateInput = $(
+                `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
+            );
+            const initialSupervisionDate = resolveInitialSupervisionDate(
+                cardData.supervision_date,
+                getMaxSupervisionDateForCard(cardData)
+            );
+            cardData.supervision_date = initialSupervisionDate;
+            $supervisionDateInput.val(initialSupervisionDate || '');
+            applySupervisionDateLimit($supervisionDateInput, cardData);
+            $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
+
+            $supervisionWrapper.append($supervisionToggle);
+            $supervisionWrapper.append($supervisionDateWrapper);
+
+            const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
+            $supervisionInput.prop('checked', cardData.supervisionado);
+            const syncSupervisionDateFromInput = () => {
+                const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
+                $supervisionDateInput.val(normalizedDate);
+                const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                cardData.supervision_date = clampedDate;
+                syncEditingCardWithSaved(cardData);
+                userResponses.processos_vinculados = [cardData];
+                saveResponses();
+                renderSupervisionPanel();
+            };
+            $supervisionDateInput.on('change input blur', syncSupervisionDateFromInput);
+            $supervisionInput.on('change', function () {
+                const checked = $(this).is(':checked');
+                cardData.supervisionado = checked;
+
+                if (checked) {
+                    const defaultSupervisionDate = resolveInitialSupervisionDate(
+                        cardData.supervision_date,
+                        getMaxSupervisionDateForCard(cardData)
+                    );
+                    if (defaultSupervisionDate) {
+                        cardData.supervision_date = defaultSupervisionDate;
+                        $supervisionDateInput.val(defaultSupervisionDate);
+                    }
+                    cardData.supervisor_status = 'pendente';
+                    cardData.awaiting_supervision_confirm = false;
+                } else {
+                    cardData.awaiting_supervision_confirm = false;
+                }
+
+                syncEditingCardWithSaved(cardData);
+
+                // Mantem o card ativo sempre em processos_vinculados[0]
+                // (evita array esparso que impede atualizar o snapshot ao concluir).
+                userResponses.processos_vinculados = [cardData];
+                saveResponses();
+                renderSupervisionPanel();
+            });
+
+            return $supervisionWrapper;
+        }
+
+        function syncCardSupervisionToggle(cardData, cardIndex, $card) {
+            const targetCardData = cardData || getProcessCardDataByIndex(cardIndex);
+            if (!targetCardData) {
+                return;
+            }
+
+            const $resolvedCard = $card && $card.length
+                ? $card
+                : $dynamicQuestionsContainer
+                    .find(`.processo-card[data-card-index="${cardIndex}"]`)
+                    .first();
+            if (!$resolvedCard.length) {
+                return;
+            }
+
+            const $body = $resolvedCard.children('.processo-card-body').first();
+            if (!$body.length) {
+                return;
+            }
+
+            const shouldRenderSupervision = shouldShowCardSupervisionToggle(
+                targetCardData.tipo_de_acao_respostas,
+                targetCardData
+            );
+            const $existingWrapper = $body.children('.field-supervision').first();
+
+            if (!shouldRenderSupervision) {
+                $existingWrapper.remove();
+                return;
+            }
+
+            targetCardData.supervision_date = resolveInitialSupervisionDate(
+                targetCardData.supervision_date,
+                getMaxSupervisionDateForCard(targetCardData)
+            );
+
+            if (!$existingWrapper.length) {
+                $body.append(buildCardSupervisionField(targetCardData, cardIndex));
+                return;
+            }
+
+            const $supervisionInput = $existingWrapper.find('.supervision-toggle-input').first();
+            const $supervisionDateInput = $existingWrapper.find('.supervision-date-input').first();
+            if ($supervisionInput.length) {
+                $supervisionInput.prop('checked', Boolean(targetCardData.supervisionado));
+            }
+            if ($supervisionDateInput.length) {
+                $supervisionDateInput.val(targetCardData.supervision_date || '');
+                applySupervisionDateLimit($supervisionDateInput, targetCardData);
+            }
+        }
+
         function isIniciarCsOptionEl(optEl) {
             const value = normalizeDecisionText(optEl?.value || '');
             const text = normalizeDecisionText(optEl?.textContent || '');
@@ -9086,6 +9618,8 @@ function formatCnjDigits(raw) {
                             );
                             if (cardIndex === null) {
                                 syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+                            } else {
+                                syncCardSupervisionToggle(null, cardIndex);
                             }
 
                             // tenta focar o primeiro campo renderizado após avançar
@@ -9138,6 +9672,8 @@ function formatCnjDigits(raw) {
                 updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
                 if (cardIndex === null) {
                     syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+                } else {
+                    syncCardSupervisionToggle(null, cardIndex);
                 }
             });
 
@@ -9161,6 +9697,8 @@ function formatCnjDigits(raw) {
 
             if (cardIndex === null) {
                 syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+            } else {
+                syncCardSupervisionToggle(null, cardIndex);
             }
         }
 
@@ -9242,6 +9780,9 @@ function formatCnjDigits(raw) {
 
                 saveResponses();
                 updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
+                if (cardIndex !== null) {
+                    syncCardSupervisionToggle(null, cardIndex);
+                }
                 return;
             }
 
@@ -9309,6 +9850,9 @@ function formatCnjDigits(raw) {
             }
 
             updateCumprimentoSentencaEligibility(currentResponses, cardIndex);
+            if (cardIndex !== null) {
+                syncCardSupervisionToggle(null, cardIndex);
+            }
         }
 
         /* =========================================================
@@ -9677,76 +10221,9 @@ function formatCnjDigits(raw) {
                 );
             }
 
-            const shouldRenderSupervision = shouldShowCardSupervisionToggle(
-                cardData.tipo_de_acao_respostas,
-                cardData
-            );
-            if (shouldRenderSupervision) {
-                const $supervisionWrapper = $('<div class="field-supervision"></div>');
-                const $supervisionToggle = $(`
-                    <label class="supervision-toggle" title="Ative ao concluir a análise processual e o caso será delegado a seu supervisor.">
-                        <input type="checkbox" class="supervision-toggle-input">
-                        <span class="supervision-switch" aria-hidden="true"></span>
-                        <span class="supervision-label-text">Supervisionar</span>
-                    </label>
-                `);
-                const supervisionDateInputId = `supervision_date_${cardIndex}`;
-                const $supervisionDateWrapper = $('<div class="supervision-date-wrapper"></div>');
-                const $supervisionDateLabel = $(
-                    `<label class="supervision-date-label" for="${supervisionDateInputId}">Data S</label>`
-                );
-                const $supervisionDateInput = $(
-                    `<input type="date" id="${supervisionDateInputId}" class="supervision-date-input">`
-                );
-                const initialSupervisionDate = clampIsoDateToMax(
-                    normalizeIsoDateValue(cardData.supervision_date),
-                    getMaxSupervisionDateForCard(cardData)
-                );
-                cardData.supervision_date = initialSupervisionDate;
-                $supervisionDateInput.val(initialSupervisionDate || '');
-                applySupervisionDateLimit($supervisionDateInput, cardData);
-                $supervisionDateWrapper.append($supervisionDateLabel).append($supervisionDateInput);
-
-                $supervisionWrapper.append($supervisionToggle);
-                $supervisionWrapper.append($supervisionDateWrapper);
-                $body.append($supervisionWrapper);
-
-                const $supervisionInput = $supervisionToggle.find('.supervision-toggle-input');
-                $supervisionInput.prop('checked', cardData.supervisionado);
-                const syncSupervisionDateFromInput = () => {
-                    const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
-                    $supervisionDateInput.val(normalizedDate);
-                    const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
-                    cardData.supervision_date = clampedDate;
-                    syncEditingCardWithSaved(cardData);
-                    userResponses.processos_vinculados = [cardData];
-                    saveResponses();
-                    renderSupervisionPanel();
-                };
-                $supervisionDateInput.on('change input blur', syncSupervisionDateFromInput);
-                $supervisionInput.on('change', function () {
-                    const checked = $(this).is(':checked');
-                    cardData.supervisionado = checked;
-
-                    if (checked) {
-                        cardData.supervisor_status = 'pendente';
-                        cardData.awaiting_supervision_confirm = false;
-                    } else {
-                        cardData.awaiting_supervision_confirm = false;
-                    }
-
-                    syncEditingCardWithSaved(cardData);
-
-                    // Mantém o card ativo sempre em processos_vinculados[0]
-                    // (evita array esparso que impede atualizar o snapshot ao concluir).
-                    userResponses.processos_vinculados = [cardData];
-                    saveResponses();
-                    renderSupervisionPanel();
-                });
-            }
-
             $card.append($body);
             $cardsContainer.append($card);
+            syncCardSupervisionToggle(cardData, cardIndex, $card);
         }
 
         function isCardNonJudicialized(card) {
@@ -9948,6 +10425,14 @@ function formatCnjDigits(raw) {
             return getMaxSupervisionDateForContractRefs(
                 getCardContractRefsForSupervision(cardData)
             );
+        }
+
+        function resolveInitialSupervisionDate(currentDate, maxDate) {
+            const normalizedCurrentDate = normalizeIsoDateValue(currentDate);
+            if (!maxDate) {
+                return normalizedCurrentDate;
+            }
+            return clampIsoDateToMax(normalizedCurrentDate || maxDate, maxDate);
         }
 
         function applySupervisionDateLimit($dateInput, cardData) {
@@ -10204,6 +10689,8 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 
                 if (cardIndex === null) {
                     syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+                } else {
+                    syncCardSupervisionToggle(null, cardIndex);
                 }
 
                 saveResponses();
@@ -10211,6 +10698,8 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 
             if (cardIndex === null) {
                 syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+            } else {
+                syncCardSupervisionToggle(null, cardIndex);
             }
 
             $container.append($selectorDiv);

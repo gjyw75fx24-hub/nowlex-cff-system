@@ -5,6 +5,7 @@
 {{ block.super }}
 <script>
 window.__analise_is_supervisor = {{ is_supervisor|default_if_none:False|yesno:"true,false" }};
+window.__analise_is_supervisor_developer = {{ is_supervisor_developer|default_if_none:False|yesno:"true,false" }};
 window.__documento_peticoes_css_url = "{% static 'admin/css/documento_modelo_peticoes.css' %}";
 window.__pdfjs_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 window.__pdfjs_worker_url = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
