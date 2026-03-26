@@ -476,11 +476,11 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
                 index=delivery.card_index,
             )
         except BaseException as exc:
-            logger.exception(
-                'Falha ao montar payload de entrega Slack id=%s supervisor=%s',
+            logger.warning(
+                'Falha ao montar payload de entrega Slack id=%s supervisor=%s: %s',
                 delivery.pk,
                 getattr(supervisor, 'pk', None),
-                exc_info=exc,
+                exc,
             )
             entry = {}
         entry = entry if isinstance(entry, dict) else {}
@@ -532,7 +532,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'queue_position': 0,
         }
     except BaseException as exc:
-        logger.exception('Falha fatal ao serializar entrega Slack id=%s', getattr(delivery, 'pk', None), exc_info=exc)
+        logger.warning('Falha fatal ao serializar entrega Slack id=%s: %s', getattr(delivery, 'pk', None), exc)
         status_key = str(getattr(delivery, 'last_status', '') or '').strip().lower()
         has_message = bool(str(getattr(delivery, 'slack_channel_id', '') or '').strip() and str(getattr(delivery, 'slack_message_ts', '') or '').strip())
         is_pending = status_key in {'pendente', 'pre_aprovado'}
@@ -1218,12 +1218,16 @@ class AgendaGeralAPIView(APIView):
             cache_key = normalized_name.lower()
             if cache_key in analyst_cache_by_username:
                 return analyst_cache_by_username[cache_key]
-            user_obj = (
-                User.objects
-                .filter(username__iexact=normalized_name)
-                .only('id', 'username', 'first_name', 'last_name')
-                .first()
-            )
+            try:
+                user_obj = (
+                    User.objects
+                    .filter(username__iexact=normalized_name)
+                    .only('id', 'username', 'first_name', 'last_name')
+                    .first()
+                )
+            except BaseException as exc:
+                logger.warning('Falha ao resolver analista "%s": %s', normalized_name, exc)
+                user_obj = None
             if user_obj:
                 serialized = self._serialize_user(user_obj)
             else:
@@ -1435,8 +1439,12 @@ class AgendaGeralAPIView(APIView):
             )
             parte_passiva = None
             if processo:
-                partes_qs = processo.partes_processuais.order_by('tipo_polo', 'id')
-                parte_passiva = partes_qs.filter(tipo_polo='PASSIVO').first() or partes_qs.first()
+                try:
+                    partes_qs = processo.partes_processuais.order_by('tipo_polo', 'id')
+                    parte_passiva = partes_qs.filter(tipo_polo='PASSIVO').first() or partes_qs.first()
+                except BaseException as exc:
+                    logger.warning('Falha ao carregar parte passiva do processo %s: %s', getattr(processo, 'pk', None), exc)
+                    parte_passiva = None
             parte_nome = parte_passiva.nome if parte_passiva else ''
             parte_documento = parte_passiva.documento if parte_passiva else ''
             contrato_labels = [
@@ -1448,7 +1456,11 @@ class AgendaGeralAPIView(APIView):
             if processo and processo.pk:
                 processo_files = processo_arquivos_cache.get(processo.pk)
                 if processo_files is None:
-                    processo_files = list(processo.arquivos.all().order_by('id'))
+                    try:
+                        processo_files = list(processo.arquivos.all().order_by('id'))
+                    except BaseException as exc:
+                        logger.warning('Falha ao carregar arquivos do processo %s: %s', processo.pk, exc)
+                        processo_files = []
                     processo_arquivos_cache[processo.pk] = processo_files
             monitoria_files_summary = build_monitoria_required_files_summary(
                 processo,
@@ -1470,7 +1482,11 @@ class AgendaGeralAPIView(APIView):
             # Supervisão é fila do supervisor (não do analista que atualizou o card).
             responsavel_user = agenda_supervisor_user
             responsavel = self._serialize_user(responsavel_user)
-            analyst = _resolve_card_analyst(card, analise.updated_by)
+            try:
+                analyst = _resolve_card_analyst(card, analise.updated_by)
+            except BaseException as exc:
+                logger.warning('Falha ao resolver analista do card de supervisao analise=%s: %s', analise.pk, exc)
+                analyst = self._serialize_user(analise.updated_by)
             active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
