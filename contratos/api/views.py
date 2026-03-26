@@ -1321,7 +1321,8 @@ class AgendaGeralAPIView(APIView):
             active = agenda_date >= today
             status_label = self._supervision_status_labels().get(card_info['status'], card_info['status'].capitalize())
             viabilidade_value = (processo.viabilidade or '').strip().upper() if processo else ''
-            viabilidade_label = viability_labels.get(viabilidade_value, 'Viabilidade')
+            viabilidade_label = viability_labels.get(viabilidade_value, 'Não informada')
+            cpf_status_label = 'Óbito' if getattr(parte_passiva, 'obito', False) else 'Regular'
             analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
             analysis_hashtag = str(analysis_type.get('hashtag') or '').strip()
             analysis_type_nome = str(analysis_type.get('nome') or '').strip()
@@ -1353,6 +1354,7 @@ class AgendaGeralAPIView(APIView):
                 'status_label': status_label,
                 'viabilidade': viabilidade_value,
                 'viabilidade_label': viabilidade_label,
+                'cpf_status_label': cpf_status_label,
                 'cnj_label': cnj_label,
                 'custom_supervision_date': custom_supervision_date.isoformat() if custom_supervision_date else None,
                 'cardId': card_info.get('card_key_id') or f"supervision-{analise.pk}-{card_info['source']}-{card_info['index']}",

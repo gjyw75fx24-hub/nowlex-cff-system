@@ -164,6 +164,8 @@ def _format_analysis_lines(entry):
         normalized_text = text.casefold()
         if normalized_text.startswith('contratos para monit') or normalized_text.startswith('selecione os contratos'):
             continue
+        if normalized_text.startswith('botão de monit') or normalized_text.startswith('botao de monit'):
+            continue
         lines.append(f'• {text}')
     return '\n'.join(lines) if lines else 'Sem resumo procedural.'
 
@@ -352,7 +354,9 @@ def _format_barrado_lines(entry):
 def _build_supervision_message(entry, *, request=None):
     nome = str(entry.get('nome') or entry.get('parte_nome') or 'Parte não informada').strip()
     cpf = str(entry.get('cpf') or entry.get('documento') or '').strip()
+    cpf_status_label = str(entry.get('cpf_status_label') or '').strip() or 'Não informado'
     uf = str(entry.get('uf') or '').strip().upper() or 'UF não informada'
+    viabilidade_label = str(entry.get('viabilidade_label') or '').strip() or 'Não informada'
     tipo = str(entry.get('analysis_type_nome') or entry.get('analysis_type_short') or 'Análise').strip()
     date_label = format_date_br(entry.get('date'))
     status_key = str(entry.get('supervisor_status') or 'pendente').strip().lower()
@@ -375,7 +379,8 @@ def _build_supervision_message(entry, *, request=None):
     cnj_label = str(entry.get('cnj_label') or '').strip() or 'Não Judicializado'
     top_text = (
         f'*{nome}*\n'
-        f'CPF: {cpf or "Não informado"} | UF: {uf}\n'
+        f'CPF: {cpf or "Não informado"} | Status CPF: {cpf_status_label} | UF: {uf}\n'
+        f'Viabilidade: {viabilidade_label}\n'
         f'Tipo: {tipo} | Data S: {date_label or "Não informada"}\n'
         f'CNJ: {cnj_label}\n'
         f'Analista: {analyst_name}'
