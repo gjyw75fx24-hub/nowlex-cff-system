@@ -634,6 +634,7 @@
                 sel => sel !== GENERAL_MONITORIA_CARD_KEY
             );
             delete userResponses._editing_card_index;
+            delete userResponses._editing_card_identity;
             isSavedCardEditRestoreInProgress = false;
             userResponses.saved_entries_migrated = true;
             $('.edit-mode-indicator').remove();
@@ -1172,11 +1173,14 @@
             const contracts = Array.isArray(card.contratos)
                 ? card.contratos.map(item => String(item).trim()).filter(Boolean).sort().join(',')
                 : '';
+            const njLabel = typeof card.nj_label === 'string' ? card.nj_label.trim().toUpperCase() : '';
             const payload = card.tipo_de_acao_respostas && typeof card.tipo_de_acao_respostas === 'object'
                 ? JSON.stringify(card.tipo_de_acao_respostas)
                 : '';
             if (contracts || payload) {
-                return `payload:${contracts}:${payload}`;
+                const typeSegment = typeKey ? `:type:${typeKey}` : '';
+                const njSegment = njLabel ? `:nj:${njLabel}` : '';
+                return `payload:${contracts}:${payload}${typeSegment}${njSegment}`;
             }
             return `${fallbackSource}:${fallbackIndex}`;
         }
@@ -1203,6 +1207,7 @@
                 return '';
             }
             const cnjDigits = String(normalizedCard.cnj || '').replace(/\D/g, '');
+            const typeKey = getCardAnalysisTypeKey(normalizedCard);
             const responses = normalizedCard.tipo_de_acao_respostas && typeof normalizedCard.tipo_de_acao_respostas === 'object'
                 ? normalizedCard.tipo_de_acao_respostas
                 : {};
@@ -1210,7 +1215,11 @@
                 ? normalizedCard.barrado
                 : {};
             const signaturePayload = {
+                analysis_type: typeKey || '',
                 cnj: cnjDigits || String(normalizedCard.cnj || '').trim(),
+                nj_label: typeof normalizedCard.nj_label === 'string'
+                    ? normalizedCard.nj_label.trim().toUpperCase()
+                    : '',
                 contratos: parseContractsField(normalizedCard.contratos).map(String).sort(),
                 valor_causa: parseCurrencyValue(normalizedCard.valor_causa),
                 observacoes: typeof normalizedCard.observacoes === 'string' ? normalizedCard.observacoes.trim() : '',
@@ -1253,6 +1262,7 @@
             }
             clearProcessoVinculadoResponseLists(targetResponses, { deleteKeys: true });
             delete targetResponses._editing_card_index;
+            delete targetResponses._editing_card_identity;
             return true;
         }
 
@@ -1435,6 +1445,7 @@
                 : [];
             if (!savedCards[rawIndex]) {
                 delete userResponses._editing_card_index;
+                delete userResponses._editing_card_identity;
                 return null;
             }
 
@@ -1442,10 +1453,57 @@
             const hasEditIndicator = $('.edit-mode-indicator').length > 0;
             if (!hasEditIndicator && !(allowRestorePending && isSavedCardEditRestoreInProgress)) {
                 delete userResponses._editing_card_index;
+                delete userResponses._editing_card_identity;
                 return null;
             }
 
             return rawIndex;
+        }
+
+        function getEditingCardIdentity() {
+            ensureUserResponsesShape();
+            const rawIdentity = typeof userResponses._editing_card_identity === 'string'
+                ? userResponses._editing_card_identity.trim()
+                : '';
+            return rawIdentity || '';
+        }
+
+        function resolveEditingSavedCardIndex(cardData = null) {
+            ensureUserResponsesShape();
+            const savedCards = Array.isArray(userResponses[SAVED_PROCESSOS_KEY])
+                ? userResponses[SAVED_PROCESSOS_KEY]
+                : [];
+            if (!savedCards.length) {
+                return null;
+            }
+
+            const editingIdentity = getEditingCardIdentity();
+            if (editingIdentity) {
+                const identityIndex = savedCards.findIndex((savedCard, idx) => {
+                    const normalizedSaved = normalizeProcessCardForSummary(savedCard) || savedCard;
+                    return getSummaryCardIdentity(normalizedSaved, idx, 'saved') === editingIdentity;
+                });
+                if (identityIndex > -1) {
+                    return identityIndex;
+                }
+            }
+
+            const editIndex = getEditingCardIndex();
+            if (editIndex === null || !savedCards[editIndex]) {
+                return null;
+            }
+            if (!cardData) {
+                return editIndex;
+            }
+
+            const normalizedTarget = normalizeProcessCardForSummary(cardData) || cardData;
+            const normalizedSaved = normalizeProcessCardForSummary(savedCards[editIndex]) || savedCards[editIndex];
+            const targetTypeKey = getCardAnalysisTypeKey(normalizedTarget);
+            const savedTypeKey = getCardAnalysisTypeKey(normalizedSaved);
+            if (targetTypeKey && savedTypeKey && targetTypeKey !== savedTypeKey) {
+                return null;
+            }
+            return editIndex;
         }
 
         function getProcessoVinculadoQuestionKey() {
@@ -2892,6 +2950,31 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 return combined;
             }
 
+            const buildNonJudicialSummarySlotKey = (card) => {
+                if (!card || typeof card !== 'object') {
+                    return '';
+                }
+                const typeKey = getCardAnalysisTypeKey(card) || '';
+                const njLabel = typeof card.nj_label === 'string'
+                    ? card.nj_label.trim().toUpperCase()
+                    : '';
+                const contractKey = Array.isArray(card.contratos)
+                    ? card.contratos.map(item => String(item).trim()).filter(Boolean).sort().join(',')
+                    : '';
+                const value = `type:${typeKey}|nj:${njLabel}|contracts:${contractKey}`;
+                return value === 'type:|nj:|contracts:' ? '' : value;
+            };
+
+            const explicitNonJudicialSlots = new Set(
+                combined
+                    .filter(card => {
+                        const cnjText = String(card && card.cnj ? card.cnj : '').trim().toLowerCase();
+                        return cnjText.includes('não judicializado');
+                    })
+                    .map(card => buildNonJudicialSummarySlotKey(card))
+                    .filter(Boolean)
+            );
+
             return combined.filter(card => {
                 const cnjText = String(card && card.cnj ? card.cnj : '').trim();
                 const normalizedCnj = normalizeDecisionText(cnjText);
@@ -2901,7 +2984,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const responses = normalizeResponsesForCurrentTree(
                     card && card.tipo_de_acao_respostas ? card.tipo_de_acao_respostas : {}
                 );
-                return !isNoResponse(getJudicializadoPelaMassaValue(responses));
+                if (!isNoResponse(getJudicializadoPelaMassaValue(responses))) {
+                    return true;
+                }
+                const slotKey = buildNonJudicialSummarySlotKey(card);
+                if (slotKey && explicitNonJudicialSlots.has(slotKey)) {
+                    return false;
+                }
+                return true;
             });
         }
 
@@ -3330,9 +3420,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
         }
 
         function syncEditingCardWithCurrentResponses() {
-            const editingIndex = getEditingCardIndex();
             if (
-                editingIndex === null ||
                 !Array.isArray(userResponses.processos_vinculados) ||
                 userResponses.processos_vinculados.length === 0
             ) {
@@ -3340,6 +3428,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
             const card = userResponses.processos_vinculados[0];
             if (!card) {
+                return null;
+            }
+            const editingIndex = resolveEditingSavedCardIndex(card);
+            if (editingIndex === null) {
                 return null;
             }
 
@@ -3357,7 +3449,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             syncRenderedProcessCardsBeforePersist();
             ensureRootNaoJudicializadoCardFromCurrentResponses();
             const savedCards = userResponses[SAVED_PROCESSOS_KEY] || [];
-            const editingIndex = getEditingCardIndex();
+            const activeEditingCard = Array.isArray(userResponses.processos_vinculados) &&
+                userResponses.processos_vinculados.length
+                ? userResponses.processos_vinculados[0]
+                : null;
+            const editingIndex = resolveEditingSavedCardIndex(activeEditingCard);
 
             if (editingIndex !== null) {
                 // Só sincroniza automaticamente o fluxo especial de "Não Judicializado" (Monitórias).
@@ -3449,6 +3545,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             clearProcessoVinculadoResponseLists(userResponses);
             if (editingIndex !== null) {
                 delete userResponses._editing_card_index;
+                delete userResponses._editing_card_identity;
                 isSavedCardEditRestoreInProgress = false;
                 $('.edit-mode-indicator').remove();
             }
@@ -3531,7 +3628,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             ['judicializado_pela_massa', 'propor_monitoria', 'tipo_de_acao', 'transitado', 'procedencia', 'data_de_transito', 'cumprimento_de_sentenca'].forEach(key => {
                 delete userResponses[key];
             });
+            ['supervisionado', 'supervisor_status', 'supervision_date', 'awaiting_supervision_confirm', 'barrado'].forEach(key => {
+                delete userResponses[key];
+            });
             delete userResponses._editing_card_index;
+            delete userResponses._editing_card_identity;
             isSavedCardEditRestoreInProgress = false;
             userResponses.supervisionado_nao_judicializado = false;
             userResponses.supervisor_status_nao_judicializado = '';
@@ -3552,7 +3653,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 return;
             }
             ensureUserResponsesShape();
-            const editIndex = getEditingCardIndex();
+            const editIndex = resolveEditingSavedCardIndex(cardData);
             if (editIndex === null) {
                 return;
             }
@@ -3721,6 +3822,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     if (confirmar) {
                         $('.edit-mode-indicator').remove();
                         delete userResponses._editing_card_index;
+                        delete userResponses._editing_card_identity;
                         isSavedCardEditRestoreInProgress = false;
                         clearTreeResponsesForNewAnalysis();
                         renderDecisionTree();
@@ -4066,9 +4168,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             if (resolvedEditIndex !== null) {
                 userResponses._editing_card_index = resolvedEditIndex;
+                const identityCard = normalizeProcessCardForSummary(savedCards[resolvedEditIndex]) || savedCards[resolvedEditIndex];
+                userResponses._editing_card_identity = getSummaryCardIdentity(identityCard, resolvedEditIndex, 'saved');
                 isSavedCardEditRestoreInProgress = true;
             } else {
                 delete userResponses._editing_card_index;
+                delete userResponses._editing_card_identity;
                 isSavedCardEditRestoreInProgress = false;
             }
 
@@ -4269,6 +4374,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                             updateGenerateButtonState();
                         }
 
+                        syncGeneralSupervisionTogglePlacement(userResponses);
+
                         saveResponses();
 
                         const $finalFields = $dynamicQuestionsContainer.find('[name]');
@@ -4296,6 +4403,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 clearTreeResponsesForNewAnalysis();
                 if (resolvedEditIndex !== null) {
                     userResponses._editing_card_index = resolvedEditIndex;
+                    const identityCard = normalizeProcessCardForSummary(savedCards[resolvedEditIndex]) || savedCards[resolvedEditIndex] || cardData;
+                    userResponses._editing_card_identity = getSummaryCardIdentity(identityCard, resolvedEditIndex, 'saved');
                     isSavedCardEditRestoreInProgress = true;
                 }
                 userResponses.processos_vinculados = [deepClone(cardData)];
@@ -4361,6 +4470,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     'contratos_status',
                     'general_card',
                     '_editing_card_index',
+                    '_editing_card_identity',
                     '__savedIndex',
                     '__source'
                 ]);
@@ -4437,6 +4547,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 .done(proceedRestore)
                 .fail(reason => {
                     delete userResponses._editing_card_index;
+                    delete userResponses._editing_card_identity;
                     isSavedCardEditRestoreInProgress = false;
                     if (reason && reason.cancelled) {
                         return;
@@ -4513,7 +4624,6 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }
             ensureUserResponsesShape();
             const savedCards = getSavedProcessCards();
-            const existingGeneralIndex = savedCards.findIndex(entry => entry && entry.general_card_snapshot);
             const snapshotAnalysisType =
                 snapshot.analysis_type && typeof snapshot.analysis_type === 'object'
                     ? deepClone(snapshot.analysis_type)
@@ -4528,6 +4638,17 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                             }
                             : null
                     );
+            const snapshotAnalysisTypeKey = getCardAnalysisTypeKey({ analysis_type: snapshotAnalysisType });
+            const existingGeneralIndex = savedCards.findIndex(entry => {
+                if (!entry || !entry.general_card_snapshot) {
+                    return false;
+                }
+                const entryTypeKey = getCardAnalysisTypeKey(entry);
+                if (snapshotAnalysisTypeKey && entryTypeKey) {
+                    return entryTypeKey === snapshotAnalysisTypeKey;
+                }
+                return !snapshotAnalysisTypeKey && !entryTypeKey;
+            });
             const cardData = {
                 cnj: snapshot.responses && snapshot.responses.cnj ? snapshot.responses.cnj : 'Não Judicializado',
                 contratos: [...snapshot.contracts],
@@ -8452,8 +8573,8 @@ function formatCnjDigits(raw) {
 
         function shouldShowGeneralSupervisionToggle(responses) {
             const reachedByConfig = hasReachedSupervisionTrigger(responses);
-            if (reachedByConfig !== null) {
-                return reachedByConfig;
+            if (reachedByConfig === true) {
+                return true;
             }
 
             const proporMonitoriaSelecionada = isYesResponse(
@@ -10081,6 +10202,10 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                     onSelectionChanged();
                 }
 
+                if (cardIndex === null) {
+                    syncGeneralSupervisionTogglePlacement(currentResponses || userResponses);
+                }
+
                 saveResponses();
             });
 
@@ -10494,6 +10619,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
 		                    return;
 		                }
 		                delete userResponses._editing_card_index;
+                        delete userResponses._editing_card_identity;
 		                isSavedCardEditRestoreInProgress = false;
 		                clearTreeResponsesForNewAnalysis();
 		                saveResponses();

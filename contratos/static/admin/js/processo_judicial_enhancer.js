@@ -3575,15 +3575,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 : { ativo: false, inicio: null, retorno_em: null },
             cnj_label: item.cnj_label || item.cnj || '',
             analise_id: item.analise_id || item.analiseId || null,
+            cardId: String(item.cardId || item.card_id || '').trim(),
             card_source: item.card_source || item.cardSource || '',
             card_index: typeof item.card_index !== 'undefined'
                 ? item.card_index
                 : (typeof item.cardIndex !== 'undefined' ? item.cardIndex : null),
             supervisor_status: item.supervisor_status || item.supervisorStatus || '',
+            supervisor_status_autor: String(item.supervisor_status_autor || item.supervisorStatusAutor || '').trim(),
             supervisor_observacoes: String(item.supervisor_observacoes || item.supervisorObservacoes || '').trim(),
             supervisor_observacoes_autor: String(item.supervisor_observacoes_autor || item.supervisorObservacoesAutor || '').trim(),
             analysis_hashtag: (item.analysis_hashtag || item.analysisHashtag || '').toString().trim(),
             analysis_type_nome: (item.analysis_type_nome || item.analysisTypeNome || '').toString().trim(),
+            analysis_type_slug: (item.analysis_type_slug || item.analysisTypeSlug || '').toString().trim().toLowerCase(),
             analysis_type_short: normalizeAnalysisTypeShort(item.analysis_type_short || item.analysisTypeShort || item.analysis_type_nome || item.analysisTypeNome || item.analysis_hashtag || item.analysisHashtag || ''),
             observation_target: (item.observation_target || item.observationTarget || '').toString().trim(),
             observation_mention_type: (item.observation_mention_type || item.observationMentionType || '').toString().trim().toLowerCase(),
@@ -3765,7 +3768,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     };
 
-    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null, selectionState = null) => {
+    const populateDetailEntries = (dayData, type, detailList, detailCardBody, setDetailTitle, isCompletedMode = false, onEntrySelect = null, selectionState = null, entryFocus = null) => {
         setDetailTitle?.(dayData?.day, type);
         if (typeof onEntrySelect === 'function') {
             onEntrySelect(null, null, null);
@@ -4395,6 +4398,27 @@ document.addEventListener('DOMContentLoaded', function() {
             detailList.appendChild(entry);
         });
         const enableNav = (type === 'T' || type === 'P' || type === 'AP') && entryElements.length > 1;
+        const focusCardId = String(entryFocus?.cardId || '').trim();
+        const focusAnaliseId = Number.parseInt(`${entryFocus?.analiseId ?? ''}`, 10);
+        const focusCardSource = String(entryFocus?.cardSource || '').trim();
+        const focusCardIndex = Number.parseInt(`${entryFocus?.cardIndex ?? ''}`, 10);
+        const initialIndex = entryElements.findIndex((_entryElement, index) => {
+            const entryData = entries[index] || {};
+            if (focusCardId && String(entryData.cardId || '').trim() === focusCardId) {
+                return true;
+            }
+            if (
+                Number.isFinite(focusAnaliseId)
+                && focusCardSource
+                && Number.isFinite(focusCardIndex)
+                && Number.parseInt(`${entryData.analise_id ?? ''}`, 10) === focusAnaliseId
+                && String(entryData.card_source || '').trim() === focusCardSource
+                && Number.parseInt(`${entryData.card_index ?? ''}`, 10) === focusCardIndex
+            ) {
+                return true;
+            }
+            return false;
+        });
         if (navWrap) {
             navWrap.style.display = enableNav ? 'inline-flex' : 'none';
         }
@@ -4408,7 +4432,9 @@ document.addEventListener('DOMContentLoaded', function() {
             navPrev.disabled = !enableNav;
             navNext.disabled = !enableNav;
         }
-        if (enableNav && entryElements.length) {
+        if (entryElements.length && initialIndex >= 0) {
+            selectEntryAt(initialIndex);
+        } else if (enableNav && entryElements.length) {
             selectEntryAt(0);
         } else {
             syncExpandedSupervisionMode();
@@ -4425,6 +4451,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const todayFallback = new Date();
         const effectiveState = state || { mode: 'monthly', weekOffset: 0, monthIndex: todayFallback.getMonth(), year: todayFallback.getFullYear() };
         const isCompletedMode = Boolean(state?.showCompleted);
+        const entryFocus = state?.entryFocus || null;
         const resetDetailCardBody = () => {
             detailCardBody.innerHTML = '';
             detailCardBody.textContent = 'Selecione um item para visualizar mais informações.';
@@ -4539,7 +4566,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tag.addEventListener('click', (event) => {
                     event.stopPropagation();
                     resetDetailCardBody();
-                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, type);
                     setActiveDay(dayCell);
                 });
@@ -4719,7 +4746,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     card.addEventListener('click', (event) => {
                         event.stopPropagation();
                         resetDetailCardBody();
-                        populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                        populateDetailEntries(dayInfo, type, detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                         recordActiveDay(dayInfo, type);
                         setActiveDay(dayCell);
                         const detailEntry = detailList.querySelector(`[data-entry-id="${entry.id}"]`);
@@ -4748,16 +4775,16 @@ document.addEventListener('DOMContentLoaded', function() {
             dayCell.addEventListener('click', () => {
                 resetDetailCardBody();
                 if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksAP.length) {
-                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'AP');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'P');
                 } else {
                     detailList.innerHTML = '<p class="agenda-panel__details-empty">Nenhuma atividade registrada.</p>';
@@ -4875,24 +4902,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 setActiveDay(dayCell);
                 const preferredType = state.activeType;
                 if (preferredType === 'S' && dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                 } else if (preferredType === 'AP' && dayInfo.tasksAP.length) {
-                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                 } else if (preferredType === 'T' && dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                 } else if (preferredType === 'P' && dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                 } else if (dayInfo.tasksS.length) {
-                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'S', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'S');
                 } else if (dayInfo.tasksAP.length) {
-                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'AP', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'AP');
                 } else if (dayInfo.tasksT.length) {
-                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'T', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'T');
                 } else if (dayInfo.tasksP.length) {
-                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState);
+                    populateDetailEntries(dayInfo, 'P', detailList, detailCardBody, setDetailTitle, isCompletedMode, onEntrySelect, selectionState, entryFocus);
                     recordActiveDay(dayInfo, 'P');
                 }
             }
@@ -4931,11 +4958,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const rawType = String(source.type || '').trim().toUpperCase();
         const type = ['T', 'P', 'S', 'AP'].includes(rawType) ? rawType : null;
+        const rawCardIndex = source.cardIndex ?? source.card_index ?? null;
+        const parsedCardIndex = rawCardIndex === null || rawCardIndex === undefined || rawCardIndex === ''
+            ? null
+            : Number.parseInt(`${rawCardIndex}`, 10);
+        const rawAnaliseId = source.analiseId ?? source.analise_id ?? null;
+        const parsedAnaliseId = rawAnaliseId === null || rawAnaliseId === undefined || rawAnaliseId === ''
+            ? null
+            : Number.parseInt(`${rawAnaliseId}`, 10);
         return {
             year: parsedDate.year,
             monthIndex: parsedDate.monthIndex,
             day: parsedDate.day,
             type,
+            cardId: String(source.cardId || source.card_id || '').trim(),
+            analiseId: Number.isFinite(parsedAnaliseId) ? parsedAnaliseId : null,
+            cardSource: String(source.cardSource || source.card_source || '').trim(),
+            cardIndex: Number.isFinite(parsedCardIndex) ? parsedCardIndex : null,
         };
     };
 
@@ -6362,6 +6401,12 @@ document.addEventListener('DOMContentLoaded', function() {
             focused: false,
             activeDay: null,
             activeType: null,
+            entryFocus: requestedFocus ? {
+                cardId: requestedFocus.cardId || '',
+                analiseId: requestedFocus.analiseId ?? null,
+                cardSource: requestedFocus.cardSource || '',
+                cardIndex: requestedFocus.cardIndex ?? null,
+            } : null,
             preserveView: false,
             lastAppliedEntries: [],
             users: [],
@@ -6391,6 +6436,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 year: focus.year,
             };
             calendarState.activeType = focus.type || calendarState.activeType || 'T';
+            calendarState.entryFocus = {
+                cardId: focus.cardId || '',
+                analiseId: focus.analiseId ?? null,
+                cardSource: focus.cardSource || '',
+                cardIndex: focus.cardIndex ?? null,
+            };
             calendarState.preserveView = true;
             usersToggle?.classList.remove('agenda-panel__users-toggle--active');
             renderCalendar();
@@ -9022,6 +9073,53 @@ document.addEventListener('DOMContentLoaded', function() {
     window.nowlexAgenda = window.nowlexAgenda || {};
     window.nowlexAgenda.openPanel = openAgendaPanel;
     window.nowlexAgenda.openForm = openAgendaForm;
+
+    const getAgendaFocusFromUrl = () => {
+        let searchParams = null;
+        try {
+            searchParams = new URLSearchParams(window.location.search || '');
+        } catch (_error) {
+            return null;
+        }
+        if (searchParams.get('open_agenda') !== '1') {
+            return null;
+        }
+        return normalizeAgendaFocusOptions({
+            date: searchParams.get('agenda_focus_date') || '',
+            type: searchParams.get('agenda_focus_type') || '',
+            cardId: searchParams.get('agenda_focus_card') || '',
+            analiseId: searchParams.get('agenda_focus_analise_id') || '',
+            cardSource: searchParams.get('agenda_focus_source') || '',
+            cardIndex: searchParams.get('agenda_focus_index') || '',
+        });
+    };
+
+    const clearAgendaFocusFromUrl = () => {
+        try {
+            const url = new URL(window.location.href);
+            [
+                'open_agenda',
+                'agenda_focus_type',
+                'agenda_focus_date',
+                'agenda_focus_card',
+                'agenda_focus_analise_id',
+                'agenda_focus_source',
+                'agenda_focus_index',
+            ].forEach((key) => url.searchParams.delete(key));
+            const nextUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ''}${url.hash || ''}`;
+            window.history.replaceState({}, '', nextUrl);
+        } catch (_error) {
+            // No-op.
+        }
+    };
+
+    const initialAgendaFocus = getAgendaFocusFromUrl();
+    if (initialAgendaFocus) {
+        window.requestAnimationFrame(() => {
+            openAgendaPanel({ focus: initialAgendaFocus });
+            clearAgendaFocusFromUrl();
+        });
+    }
 
     const TASK_NOTIFICATION_POLL_MS = 20000;
     const TASK_NOTIFICATION_STACK_ID = 'task-notification-stack';

@@ -1303,6 +1303,108 @@ class TarefaNotificacao(models.Model):
         return f'Notificação {self.tipo} {target_label} para {self.usuario}'
 
 
+class UserSlackConfig(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='slack_config',
+        verbose_name='Usuário',
+    )
+    slack_user_id = models.CharField(
+        max_length=32,
+        blank=True,
+        default='',
+        verbose_name='Slack User ID',
+        help_text='ID do membro no Slack, por exemplo U012ABC34.',
+    )
+    analysis_type_slugs = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='Tipos de análise para supervisão no Slack',
+        help_text='Slugs dos tipos de análise que este supervisor recebe no Slack. Em branco = todos.',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
+    atualizado_em = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
+
+    class Meta:
+        verbose_name = 'Configuração Slack do usuário'
+        verbose_name_plural = 'Configurações Slack dos usuários'
+        ordering = ['user__username']
+
+    def __str__(self):
+        return f'{self.user} -> {self.slack_user_id or "sem Slack ID"}'
+
+    @staticmethod
+    def normalize_analysis_type_slugs(values):
+        if not isinstance(values, (list, tuple, set)):
+            return []
+        normalized = []
+        seen = set()
+        for raw_value in values:
+            value = str(raw_value or '').strip().lower()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        return normalized
+
+    def allowed_analysis_type_slugs(self):
+        return self.normalize_analysis_type_slugs(self.analysis_type_slugs)
+
+
+class SupervisaoSlackEntrega(models.Model):
+    STATUS_PENDENTE = 'pendente'
+    STATUS_PRE_APROVADO = 'pre_aprovado'
+    STATUS_APROVADO = 'aprovado'
+    STATUS_REPROVADO = 'reprovado'
+
+    analise = models.ForeignKey(
+        'AnaliseProcesso',
+        on_delete=models.CASCADE,
+        related_name='slack_entregas_supervisao',
+        verbose_name='Análise',
+    )
+    processo = models.ForeignKey(
+        ProcessoJudicial,
+        on_delete=models.CASCADE,
+        related_name='slack_entregas_supervisao',
+        verbose_name='Processo judicial',
+    )
+    supervisor = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='slack_entregas_supervisao',
+        verbose_name='Supervisor',
+    )
+    card_id = models.CharField(max_length=120, verbose_name='Card ID')
+    card_source = models.CharField(max_length=64, verbose_name='Origem do card')
+    card_index = models.PositiveIntegerField(verbose_name='Indice do card')
+    slack_user_id = models.CharField(max_length=32, verbose_name='Slack User ID')
+    slack_channel_id = models.CharField(max_length=64, blank=True, default='', verbose_name='Slack Channel ID')
+    slack_message_ts = models.CharField(max_length=64, blank=True, default='', verbose_name='Slack Message TS')
+    slack_thread_ts = models.CharField(max_length=64, blank=True, default='', verbose_name='Slack Thread TS')
+    last_status = models.CharField(max_length=20, blank=True, default='', verbose_name='Ultimo status')
+    message_hash = models.CharField(max_length=64, blank=True, default='', verbose_name='Hash da mensagem')
+    notified_at = models.DateTimeField(null=True, blank=True, verbose_name='Notificado em')
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name='Resolvido em')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Criado em')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Atualizado em')
+
+    class Meta:
+        verbose_name = 'Entrega Slack de supervisão'
+        verbose_name_plural = 'Entregas Slack de supervisão'
+        ordering = ['-updated_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['analise', 'supervisor', 'card_source', 'card_index'],
+                name='uniq_supervisaoslackentrega_card_supervisor',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.analise_id}:{self.card_source}:{self.card_index} -> {self.supervisor}'
+
+
 def _close_pending_item_notifications(*, tarefa=None, prazo=None):
     if tarefa is None and prazo is None:
         return
@@ -1807,3 +1909,49 @@ class AnaliseProcesso(models.Model):
                     continue
                 return True
         return False
+
+
+def _has_supervisao_slack_tables():
+    try:
+        table_names = set(connection.introspection.table_names())
+    except Exception:
+        return False
+    required = {
+        UserSlackConfig._meta.db_table,
+        SupervisaoSlackEntrega._meta.db_table,
+    }
+    return required.issubset(table_names)
+
+
+@receiver(post_save, sender=UserSlackConfig)
+def userslackconfig_sync_supervision_slack(sender, instance, raw=False, **kwargs):
+    if raw or not instance.slack_user_id:
+        return
+    if not _has_supervisao_slack_tables():
+        return
+
+    def _sync():
+        try:
+            from contratos.services.slack_supervisao import sync_supervision_slack_for_supervisor
+            sync_supervision_slack_for_supervisor(instance.user_id)
+        except Exception:
+            pass
+
+    transaction.on_commit(_sync)
+
+
+@receiver(post_save, sender=AnaliseProcesso)
+def analiseprocesso_sync_supervision_slack(sender, instance, raw=False, **kwargs):
+    if raw or not instance.pk or getattr(instance, '_skip_auto_slack_sync', False):
+        return
+    if not _has_supervisao_slack_tables():
+        return
+
+    def _sync():
+        try:
+            from contratos.services.slack_supervisao import sync_supervision_slack_for_analysis
+            sync_supervision_slack_for_analysis(instance.pk)
+        except Exception:
+            pass
+
+    transaction.on_commit(_sync)

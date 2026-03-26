@@ -1,8 +1,11 @@
 import json
 import os
 import re
+import hmac
+import hashlib
 from datetime import datetime, date as date_cls, time as time_cls
 from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qs
 
 import requests
 from rest_framework import generics, status
@@ -11,6 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import SessionAuthentication
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
@@ -23,7 +27,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
+from django.views.decorators.csrf import csrf_exempt
 
 from ..models import (
     AndamentoProcessualPendente,
@@ -42,6 +47,7 @@ from ..models import (
     TarefaLote,
     TarefaMensagem,
     TarefaNotificacao,
+    UserSlackConfig,
 )
 from ..services.demandas import DemandasImportError, DemandasImportService
 from ..services.peticao_combo import (
@@ -63,6 +69,11 @@ from ..services.nowlex_calc import (
     create_calc,
     download_pdf_with_fallback,
     parse_decimal,
+)
+from ..services.slack_supervisao import (
+    get_supervision_entry_for_card,
+    open_supervision_decision_modal,
+    slack_supervisao_interactive_enabled,
 )
 from ..integracoes_escavador.partes import collect_partes_from_escavador_payload
 
@@ -314,6 +325,75 @@ def is_supervisor_user(user):
             or user.groups.filter(name__in=['Supervisor', 'Supervisor Desenvolvedor']).exists()
         )
     )
+
+
+def _load_supervision_card(analise_id, source, index):
+    if source not in ('processos_vinculados', 'saved_processos_vinculados'):
+        raise DRFValidationError('source inválido.')
+    try:
+        analise = AnaliseProcesso.objects.get(pk=analise_id)
+    except AnaliseProcesso.DoesNotExist as exc:
+        raise DRFValidationError('Análise não encontrada.') from exc
+
+    respostas = analise.respostas or {}
+    cards = respostas.get(source)
+    try:
+        entry_index = int(index)
+    except (TypeError, ValueError) as exc:
+        raise DRFValidationError('index inválido.') from exc
+    if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
+        raise DRFValidationError('Cartão não encontrado.')
+    card = cards[entry_index]
+    if not isinstance(card, dict):
+        raise DRFValidationError('Cartão inválido.')
+    return analise, respostas, cards, card, entry_index
+
+
+def _save_supervision_card(analise, respostas, *, request_user=None):
+    analise.respostas = respostas
+    if request_user is not None:
+        analise.updated_by = request_user
+        analise.save(update_fields=['respostas', 'updated_by'])
+    else:
+        analise.save(update_fields=['respostas'])
+
+
+def _slack_verify_signature(request):
+    signing_secret = str(getattr(settings, 'SLACK_SIGNING_SECRET', '') or '').strip()
+    if not signing_secret:
+        return False
+    timestamp = str(request.META.get('HTTP_X_SLACK_REQUEST_TIMESTAMP') or '').strip()
+    signature = str(request.META.get('HTTP_X_SLACK_SIGNATURE') or '').strip()
+    if not timestamp or not signature:
+        return False
+    try:
+        request_ts = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+    if abs(int(timezone.now().timestamp()) - request_ts) > 60 * 5:
+        return False
+    body = request.body or b''
+    basestring = f'v0:{timestamp}:'.encode('utf-8') + body
+    digest = hmac.new(signing_secret.encode('utf-8'), basestring, hashlib.sha256).hexdigest()
+    expected = f'v0={digest}'
+    return hmac.compare_digest(expected, signature)
+
+
+def _get_supervisor_by_slack_user_id(slack_user_id):
+    normalized = str(slack_user_id or '').strip()
+    if not normalized:
+        return None
+    slack_config = (
+        UserSlackConfig.objects
+        .select_related('user')
+        .filter(user__is_active=True, slack_user_id=normalized)
+        .first()
+    )
+    if not slack_config:
+        return None
+    if not is_supervisor_user(slack_config.user):
+        return None
+    return slack_config.user
 
 
 class AgendaAPIView(APIView):
@@ -1180,6 +1260,7 @@ class AgendaGeralAPIView(APIView):
             analysis_type = card.get('analysis_type') if isinstance(card.get('analysis_type'), dict) else {}
             analysis_hashtag = str(analysis_type.get('hashtag') or '').strip()
             analysis_type_nome = str(analysis_type.get('nome') or '').strip()
+            analysis_type_slug = str(analysis_type.get('slug') or '').strip()
             analysis_type_short = _build_analysis_type_short(analysis_type)
             custas_total_decimal = _parse_decimal_value(card.get('custas_total'))
             entries.append({
@@ -1214,10 +1295,12 @@ class AgendaGeralAPIView(APIView):
                 'card_source': card_info['source'],
                 'card_index': card_info['index'],
                 'supervisor_status': card_info['status'],
+                'supervisor_status_autor': str(card.get('supervisor_status_autor') or '').strip(),
                 'supervisor_observacoes': str(card.get('supervisor_observacoes') or '').strip(),
                 'supervisor_observacoes_autor': str(card.get('supervisor_observacoes_autor') or '').strip(),
                 'analysis_hashtag': analysis_hashtag,
                 'analysis_type_nome': analysis_type_nome,
+                'analysis_type_slug': analysis_type_slug,
                 'analysis_type_short': analysis_type_short,
                 'barrado': card.get('barrado') if isinstance(card.get('barrado'), dict) else {},
                 'nome': parte_nome,
@@ -1300,31 +1383,18 @@ class AgendaSupervisionStatusAPIView(APIView):
         index = data.get('index')
         if not analise_id or not source or index is None:
             return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
-        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
-            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            analise = AnaliseProcesso.objects.get(pk=analise_id)
-        except AnaliseProcesso.DoesNotExist:
-            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
-        respostas = analise.respostas or {}
-        cards = respostas.get(source)
-        try:
-            entry_index = int(index)
-        except (TypeError, ValueError):
-            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
-            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
-        card = cards[entry_index]
-        if not isinstance(card, dict):
-            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            analise, respostas, cards, card, _entry_index = _load_supervision_card(analise_id, source, index)
+        except DRFValidationError as exc:
+            return Response({'detail': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
         current_status = (card.get('supervisor_status') or 'pendente').lower()
         new_status = get_next_supervision_status(current_status)
         card['supervisor_status'] = new_status
-        analise.respostas = respostas
-        analise.updated_by = request.user
-        analise.save(update_fields=['respostas', 'updated_by'])
+        card['supervisor_status_autor'] = request.user.get_full_name().strip() or request.user.username
+        _save_supervision_card(analise, respostas, request_user=request.user)
         return Response({
             'supervisor_status': new_status,
+            'supervisor_status_autor': card['supervisor_status_autor'],
             'status_label': SUPERVISION_STATUS_LABELS.get(new_status, new_status.capitalize()),
         })
 
@@ -1345,37 +1415,172 @@ class AgendaSupervisionNoteAPIView(APIView):
         index = data.get('index')
         if not analise_id or not source or index is None:
             return Response({'detail': 'analise_id, source e index são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
-        if source not in ('processos_vinculados', 'saved_processos_vinculados'):
-            return Response({'detail': 'source inválido.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            analise = AnaliseProcesso.objects.get(pk=analise_id)
-        except AnaliseProcesso.DoesNotExist:
-            return Response({'detail': 'Análise não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
-
-        respostas = analise.respostas or {}
-        cards = respostas.get(source)
-        try:
-            entry_index = int(index)
-        except (TypeError, ValueError):
-            return Response({'detail': 'index inválido.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not isinstance(cards, list) or not (0 <= entry_index < len(cards)):
-            return Response({'detail': 'Cartão não encontrado.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        card = cards[entry_index]
-        if not isinstance(card, dict):
-            return Response({'detail': 'Cartão inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            analise, respostas, cards, card, _entry_index = _load_supervision_card(analise_id, source, index)
+        except DRFValidationError as exc:
+            return Response({'detail': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
 
         note_value = str(data.get('supervisor_observacoes') or '').replace('\r\n', '\n')
         card['supervisor_observacoes'] = note_value
-        card['supervisor_observacoes_autor'] = request.user.username if note_value.strip() else ''
-        analise.respostas = respostas
-        analise.updated_by = request.user
-        analise.save(update_fields=['respostas', 'updated_by'])
+        card['supervisor_observacoes_autor'] = (
+            request.user.get_full_name().strip() or request.user.username
+        ) if note_value.strip() else ''
+        _save_supervision_card(analise, respostas, request_user=request.user)
 
         return Response({
             'supervisor_observacoes': card['supervisor_observacoes'],
             'supervisor_observacoes_autor': card['supervisor_observacoes_autor'],
         })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class SlackSupervisionInteractionAPIView(View):
+    http_method_names = ['post']
+
+    def post(self, request, *args, **kwargs):
+        if not slack_supervisao_interactive_enabled():
+            return HttpResponse('Slack interactivity disabled.', status=503)
+        if not _slack_verify_signature(request):
+            return HttpResponseForbidden('Invalid Slack signature.')
+
+        payload_raw = (parse_qs((request.body or b'').decode('utf-8')).get('payload') or [''])[0]
+        if not payload_raw:
+            return HttpResponse('Missing payload.', status=400)
+        try:
+            payload = json.loads(payload_raw)
+        except json.JSONDecodeError:
+            return HttpResponse('Invalid payload.', status=400)
+
+        payload_type = str(payload.get('type') or '').strip()
+        if payload_type == 'block_actions':
+            return self._handle_block_actions(payload)
+        if payload_type == 'view_submission':
+            return self._handle_view_submission(payload)
+        return HttpResponse('')
+
+    def _handle_block_actions(self, payload):
+        trigger_id = str(payload.get('trigger_id') or '').strip()
+        slack_user_id = str(((payload.get('user') or {}).get('id')) or '').strip()
+        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+        if not trigger_id or not supervisor:
+            return HttpResponse('')
+
+        actions = payload.get('actions') or []
+        if not actions:
+            return HttpResponse('')
+        action = actions[0] or {}
+        action_id = str(action.get('action_id') or '').strip()
+        if action_id not in {'supervision_approve', 'supervision_reprove'}:
+            return HttpResponse('')
+        try:
+            action_payload = json.loads(str(action.get('value') or '{}'))
+            metadata_raw = action_payload.get('metadata')
+            metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else (metadata_raw or {})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return HttpResponse('')
+
+        desired_status = str(action_payload.get('status') or '').strip().lower()
+        analise_id = metadata.get('analise_id')
+        source = metadata.get('source')
+        index = metadata.get('index')
+        if not analise_id or not source or index is None:
+            return HttpResponse('')
+
+        entry = get_supervision_entry_for_card(
+            supervisor=supervisor,
+            analise_id=analise_id,
+            source=source,
+            index=index,
+        )
+        if not entry:
+            return HttpResponse('')
+
+        open_supervision_decision_modal(
+            trigger_id,
+            metadata_json=json.dumps({
+                'analise_id': analise_id,
+                'source': source,
+                'index': index,
+                'card_id': metadata.get('card_id') or '',
+            }, ensure_ascii=True),
+            desired_status=desired_status,
+            entry=entry,
+            slack_user_id=slack_user_id,
+        )
+        return HttpResponse('')
+
+    def _handle_view_submission(self, payload):
+        view_payload = payload.get('view') or {}
+        if str(view_payload.get('callback_id') or '').strip() != 'supervision_decision_modal':
+            return JsonResponse({'response_action': 'clear'})
+        private_metadata_raw = str(view_payload.get('private_metadata') or '').strip()
+        try:
+            private_metadata = json.loads(private_metadata_raw or '{}')
+        except json.JSONDecodeError:
+            return JsonResponse({'response_action': 'clear'})
+
+        slack_user_id = str(private_metadata.get('slack_user_id') or '').strip()
+        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+        if not supervisor:
+            return JsonResponse({
+                'response_action': 'errors',
+                'errors': {'devolutiva_block': 'Supervisor não configurado para Slack.'},
+            })
+
+        metadata_raw = private_metadata.get('metadata')
+        try:
+            metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else (metadata_raw or {})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return JsonResponse({'response_action': 'clear'})
+
+        desired_status = str(private_metadata.get('status') or '').strip().lower()
+        analise_id = metadata.get('analise_id')
+        source = metadata.get('source')
+        index = metadata.get('index')
+        if desired_status not in {'aprovado', 'reprovado'} or not analise_id or not source or index is None:
+            return JsonResponse({'response_action': 'clear'})
+
+        values = (((view_payload.get('state') or {}).get('values')) or {})
+        devolutiva_value = ''
+        for block_values in values.values():
+            if not isinstance(block_values, dict):
+                continue
+            for action_data in block_values.values():
+                if not isinstance(action_data, dict):
+                    continue
+                if str(action_data.get('type') or '') == 'plain_text_input':
+                    devolutiva_value = str(action_data.get('value') or '')
+                    break
+            if devolutiva_value:
+                break
+
+        try:
+            entry = get_supervision_entry_for_card(
+                supervisor=supervisor,
+                analise_id=analise_id,
+                source=source,
+                index=index,
+            )
+            if not entry:
+                return JsonResponse({
+                    'response_action': 'errors',
+                    'errors': {'devolutiva_block': 'Este card de supervisão não está disponível para você.'},
+                })
+            analise, respostas, cards, card, _entry_index = _load_supervision_card(analise_id, source, index)
+        except DRFValidationError as exc:
+            return JsonResponse({
+                'response_action': 'errors',
+                'errors': {'devolutiva_block': str(exc.detail)},
+            })
+
+        actor_name = supervisor.get_full_name().strip() or supervisor.username
+        card['supervisor_status'] = desired_status
+        card['supervisor_status_autor'] = actor_name
+        note_value = str(devolutiva_value or '').replace('\r\n', '\n')
+        card['supervisor_observacoes'] = note_value
+        card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
+        _save_supervision_card(analise, respostas, request_user=supervisor)
+        return JsonResponse({'response_action': 'clear'})
 
 
 class AgendaSupervisionBarradoAPIView(APIView):

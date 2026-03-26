@@ -221,6 +221,7 @@ GOTENBERG_URL = os.getenv("GOTENBERG_URL", "")
 # Slack - exportações administrativas
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
 SLACK_ARQUIVOS_MASSA_CHANNEL_ID = os.getenv("SLACK_ARQUIVOS_MASSA_CHANNEL_ID", "").strip()
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "").strip()
 
 # Arquivos enviados (uploads)
 # Configuração do AWS S3 para armazenamento de arquivos

@@ -62,7 +62,7 @@ from .models import (
     KpiGlobalConfig, ProcessoCpfLoteSalvo, ProcessoCnjLoteSalvo,
     Parte, Pessoa, ProcessoArquivo, ProcessoJudicial, ProcessoJudicialNumeroCnj, Prazo,
     QuestaoAnalise, StatusProcessual, Tarefa, TarefaLote, TarefaMensagem, TipoAnaliseObjetiva, TipoPeticao, TipoPeticaoAnexoContinua,
-    _generate_tipo_peticao_key, sanitize_processo_arquivo_filename,
+    UserSlackConfig, _has_supervisao_slack_tables, _generate_tipo_peticao_key, sanitize_processo_arquivo_filename,
 )
 from .permissoes import filter_processos_queryset_for_user, get_user_allowed_carteira_ids
 from .widgets import EnderecoWidget
@@ -1308,6 +1308,7 @@ def is_user_supervisor(user):
         return False
     return user.groups.filter(name__in=[SUPERVISOR_GROUP_NAME, SUPERVISOR_DEVELOPER_GROUP_NAME]).exists()
 
+
 class SupervisorUserCreationForm(UserCreationForm):
     is_supervisor = forms.BooleanField(
         required=False,
@@ -1318,6 +1319,17 @@ class SupervisorUserCreationForm(UserCreationForm):
         required=False,
         label="Supervisor Desenvolvedor",
         help_text="Herda os poderes de Supervisor e pode ocultar/excluir listas salvas de terceiros."
+    )
+    slack_user_id = forms.CharField(
+        required=False,
+        label='Slack User ID',
+        help_text='ID do membro no Slack, por exemplo U012ABC34.',
+    )
+    slack_analysis_types = forms.MultipleChoiceField(
+        required=False,
+        label='Tipos de análise para supervisão no Slack',
+        widget=forms.CheckboxSelectMultiple,
+        help_text='Em branco = recebe todos os tipos de análise permitidos pelas carteiras.',
     )
 
     class Meta(UserCreationForm.Meta):
@@ -1332,12 +1344,28 @@ class SupervisorUserCreationForm(UserCreationForm):
         help_text="Selecione as carteiras que este usuário pode acessar. Em branco = sem restrição (compatibilidade).",
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['slack_analysis_types'].choices = self._build_slack_analysis_type_choices()
+
+    @staticmethod
+    def _build_slack_analysis_type_choices():
+        return [
+            (str(tipo.slug).strip(), str(tipo.nome).strip())
+            for tipo in TipoAnaliseObjetiva.objects.filter(ativo=True).order_by('nome')
+            if str(tipo.slug).strip()
+        ]
+
     def save(self, commit=True):
         user = super().save(commit=False)
         developer_flag = self.cleaned_data.get('is_supervisor_developer', False)
         user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False) or developer_flag
         user._is_supervisor_developer_flag = developer_flag
         user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
+        user._slack_user_id = str(self.cleaned_data.get('slack_user_id') or '').strip()
+        user._slack_analysis_types = UserSlackConfig.normalize_analysis_type_slugs(
+            self.cleaned_data.get('slack_analysis_types', [])
+        )
         if commit:
             user.save()
             self.save_m2m()
@@ -1354,15 +1382,36 @@ class SupervisorUserChangeForm(UserChangeForm):
         label="Supervisor Desenvolvedor",
         help_text="Herda os poderes de Supervisor e pode ocultar/excluir listas salvas de terceiros."
     )
+    slack_user_id = forms.CharField(
+        required=False,
+        label='Slack User ID',
+        help_text='ID do membro no Slack, por exemplo U012ABC34.',
+    )
+    slack_analysis_types = forms.MultipleChoiceField(
+        required=False,
+        label='Tipos de análise para supervisão no Slack',
+        widget=forms.CheckboxSelectMultiple,
+        help_text='Em branco = recebe todos os tipos de análise permitidos pelas carteiras.',
+    )
 
     class Meta(UserChangeForm.Meta):
         model = User
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['slack_analysis_types'].choices = SupervisorUserCreationForm._build_slack_analysis_type_choices()
         if self.instance and self.instance.pk:
             self.fields['is_supervisor'].initial = is_user_supervisor(self.instance)
             self.fields['is_supervisor_developer'].initial = is_user_supervisor_developer(self.instance)
+            slack_config = None
+            if _has_supervisao_slack_tables():
+                try:
+                    slack_config = getattr(self.instance, 'slack_config', None)
+                except (ProgrammingError, OperationalError):
+                    slack_config = None
+            if slack_config:
+                self.fields['slack_user_id'].initial = slack_config.slack_user_id
+                self.fields['slack_analysis_types'].initial = slack_config.allowed_analysis_type_slugs()
             if 'carteiras_permitidas' in self.fields:
                 self.fields['carteiras_permitidas'].initial = list(
                     Carteira.objects.filter(usuario_acessos__usuario=self.instance).values_list('id', flat=True)
@@ -1382,6 +1431,10 @@ class SupervisorUserChangeForm(UserChangeForm):
         user._is_supervisor_flag = self.cleaned_data.get('is_supervisor', False) or developer_flag
         user._is_supervisor_developer_flag = developer_flag
         user._carteiras_permitidas = list(self.cleaned_data.get('carteiras_permitidas', []))
+        user._slack_user_id = str(self.cleaned_data.get('slack_user_id') or '').strip()
+        user._slack_analysis_types = UserSlackConfig.normalize_analysis_type_slugs(
+            self.cleaned_data.get('slack_analysis_types', [])
+        )
         if commit:
             user.save()
             self.save_m2m()
@@ -1399,14 +1452,14 @@ class SupervisorUserAdmin(DjangoUserAdmin):
         (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
         (
             _('Permissions'),
-            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor', 'is_supervisor_developer', 'carteiras_permitidas')}
+            {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'is_supervisor', 'is_supervisor_developer', 'slack_user_id', 'slack_analysis_types', 'carteiras_permitidas')}
         ),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'password1', 'password2', 'is_supervisor', 'is_supervisor_developer', 'carteiras_permitidas'),
+            'fields': ('username', 'password1', 'password2', 'is_supervisor', 'is_supervisor_developer', 'slack_user_id', 'slack_analysis_types', 'carteiras_permitidas'),
         }),
     )
 
@@ -1429,6 +1482,11 @@ class SupervisorUserAdmin(DjangoUserAdmin):
             form.instance,
             should_be_supervisor=bool(supervisor_flag or supervisor_developer_flag),
             should_be_supervisor_developer=bool(supervisor_developer_flag),
+        )
+        self._sync_slack_user_config(
+            form.instance,
+            slack_user_id=str(getattr(form.instance, '_slack_user_id', '') or '').strip(),
+            analysis_type_slugs=list(getattr(form.instance, '_slack_analysis_types', []) or []),
         )
 
         carteiras = getattr(form.instance, '_carteiras_permitidas', None)
@@ -1463,6 +1521,22 @@ class SupervisorUserAdmin(DjangoUserAdmin):
             user.groups.add(supervisor_developer_group)
         else:
             user.groups.remove(supervisor_developer_group)
+
+    def _sync_slack_user_config(self, user, slack_user_id, analysis_type_slugs=None):
+        if not _has_supervisao_slack_tables():
+            return
+        normalized = str(slack_user_id or '').strip()
+        normalized_types = UserSlackConfig.normalize_analysis_type_slugs(analysis_type_slugs or [])
+        if normalized:
+            UserSlackConfig.objects.update_or_create(
+                user=user,
+                defaults={
+                    'slack_user_id': normalized,
+                    'analysis_type_slugs': normalized_types,
+                },
+            )
+            return
+        UserSlackConfig.objects.filter(user=user).delete()
 
 
 # --- Filtros ---
@@ -13504,6 +13578,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     if not instance.processo_judicial_id:
                         instance.processo_judicial = form.instance
                     instance.updated_by = request.user
+                    instance._skip_auto_slack_sync = True
 
                 is_new = instance.pk is None
                 instance.save()
@@ -13559,6 +13634,84 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             obj.carteiras_vinculadas.clear()
         if hasattr(obj, '_selected_carteira_ids_snapshot'):
             delattr(obj, '_selected_carteira_ids_snapshot')
+        self._sync_supervision_slack_after_admin_save(request, obj)
+
+    def _sync_supervision_slack_after_admin_save(self, request, processo):
+        analise = getattr(processo, 'analise_processo', None)
+        if not analise or not getattr(analise, 'pk', None):
+            return
+
+        if not getattr(analise, 'para_supervisionar', False):
+            return
+
+        try:
+            from contratos.services.slack_supervisao import (
+                slack_supervisao_enabled,
+                sync_supervision_slack_for_analysis,
+            )
+        except Exception:
+            return
+
+        if not slack_supervisao_enabled():
+            messages.warning(
+                request,
+                "Processo salvo. Supervisão pendente, mas o envio ao Slack não está configurado.",
+            )
+            return
+
+        try:
+            sync_result = sync_supervision_slack_for_analysis(analise.pk, request=request) or {}
+        except Exception as exc:
+            messages.warning(
+                request,
+                f"Processo salvo. Supervisão pendente, mas houve falha ao enviar ao Slack: {exc}",
+            )
+            return
+
+        recipients = [
+            str(name).strip()
+            for name in (sync_result.get('recipients') or [])
+            if str(name).strip()
+        ]
+        eligible_recipients = [
+            str(name).strip()
+            for name in (sync_result.get('eligible_recipients') or [])
+            if str(name).strip()
+        ]
+        errors = sync_result.get('errors') or []
+        has_pending_entries = bool(sync_result.get('has_pending_entries'))
+
+        if recipients:
+            messages.success(
+                request,
+                f"Supervisão enviada ao Slack para: {', '.join(recipients)}.",
+            )
+            if errors:
+                first_error = errors[0]
+                messages.warning(
+                    request,
+                    "Nem todos os supervisores receberam no Slack. "
+                    f"{first_error.get('supervisor') or 'Supervisor'}: {first_error.get('error') or 'falha não informada'}.",
+                )
+            return
+
+        if not has_pending_entries:
+            return
+
+        if eligible_recipients and errors:
+            first_error = errors[0]
+            messages.warning(
+                request,
+                "Processo salvo. Supervisão pendente, mas o Slack não concluiu o envio. "
+                f"{first_error.get('supervisor') or 'Supervisor'}: {first_error.get('error') or 'falha não informada'}.",
+            )
+            return
+
+        messages.warning(
+            request,
+            "Processo salvo. Supervisão pendente, mas nenhum supervisor Slack está configurado "
+            "para esta carteira e tipo de análise.",
+        )
 
 
     def changelist_view(self, request, extra_context=None):
