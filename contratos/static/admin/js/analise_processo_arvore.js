@@ -2956,7 +2956,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const hint = document.createElement('p');
             hint.className = 'analise-slack-deliveries-modal__hint';
-            hint.textContent = 'Lista global das mensagens do seu Slack de supervisão. Atualizar ressincroniza as mensagens já enviadas e libera novos envios da fila quando um tipo zerar.';
+            hint.textContent = 'Lista global das mensagens Slack de supervisão de todos os supervisores. Atualizar ressincroniza as mensagens já enviadas e libera novos envios da fila quando um tipo zerar.';
 
             const summary = document.createElement('div');
             summary.className = 'analise-slack-deliveries-summary';
@@ -3095,7 +3095,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if (!deliveries.length) {
                     const empty = document.createElement('div');
                     empty.className = 'analise-slack-deliveries-empty';
-                    empty.textContent = 'Nenhuma entrega Slack de supervisão foi encontrada para o seu usuário.';
+                    empty.textContent = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
                     list.appendChild(empty);
                     refreshActionState();
                     return;
@@ -3124,6 +3124,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         ? 'Status Slack: em fila'
                         : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
                     meta.textContent = [
+                        delivery.supervisor_name ? `Supervisor: ${delivery.supervisor_name}` : '',
                         delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
                         delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : 'Ainda não enviada',
                         statusText,
@@ -3218,10 +3219,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 let confirmMessage = '';
                 if (mode === 'last') {
                     actionButton = deleteLastBtn;
-                    confirmMessage = 'Apagar a última mensagem Slack enviada da sua fila global?';
+                    confirmMessage = 'Apagar a última mensagem Slack enviada da fila global dos supervisores?';
                 } else if (mode === 'all') {
                     actionButton = deleteAllBtn;
-                    confirmMessage = 'Apagar todas as mensagens Slack listadas do seu usuário?';
+                    confirmMessage = 'Apagar todas as mensagens Slack listadas de todos os supervisores?';
                 } else {
                     actionButton = deleteSelectedBtn;
                     selectedIds = getSelectedIds();
@@ -3230,7 +3231,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         refreshActionState();
                         return;
                     }
-                    confirmMessage = `Apagar ${selectedIds.length} mensagem(ns) Slack selecionada(s)?`;
+                    confirmMessage = `Apagar ${selectedIds.length} mensagem(ns) Slack selecionada(s) dos supervisores listados?`;
                 }
 
                 const confirmed = await showCffConfirmDialog(

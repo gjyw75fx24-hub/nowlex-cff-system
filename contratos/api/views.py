@@ -452,12 +452,22 @@ def _get_supervisor_by_slack_user_id(slack_user_id):
 
 
 def _build_slack_delivery_entry_payload(delivery, request_user):
-    entry = get_supervision_entry_for_card(
-        supervisor=request_user,
-        analise_id=delivery.analise_id,
-        source=delivery.card_source,
-        index=delivery.card_index,
-    )
+    supervisor = getattr(delivery, 'supervisor', None) or request_user
+    try:
+        entry = get_supervision_entry_for_card(
+            supervisor=supervisor,
+            analise_id=delivery.analise_id,
+            source=delivery.card_source,
+            index=delivery.card_index,
+        )
+    except Exception as exc:
+        logger.exception(
+            'Falha ao montar payload de entrega Slack id=%s supervisor=%s',
+            delivery.pk,
+            getattr(supervisor, 'pk', None),
+            exc_info=exc,
+        )
+        entry = {}
     entry = entry if isinstance(entry, dict) else {}
     cnj_label = str(entry.get('cnj_label') or '').strip()
     if not cnj_label:
@@ -475,11 +485,16 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
     is_pending = status_key in {'pendente', 'pre_aprovado'}
     is_responded = status_key in {'aprovado', 'reprovado'}
     dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
+    supervisor_name = ''
+    if supervisor:
+        supervisor_name = str(supervisor.get_full_name() or '').strip() or str(supervisor.username or '').strip()
     return {
         'id': delivery.pk,
         'analise_id': delivery.analise_id,
         'processo_id': delivery.processo_id,
         'processo_label': str(delivery.processo or '').strip(),
+        'supervisor_id': getattr(supervisor, 'pk', None),
+        'supervisor_name': supervisor_name,
         'card_id': str(delivery.card_id or '').strip(),
         'card_source': str(delivery.card_source or '').strip(),
         'card_index': int(delivery.card_index or 0),
@@ -508,7 +523,10 @@ def _annotate_slack_delivery_queue(results):
     for item in results:
         if not item.get('is_pending') or item.get('has_message'):
             continue
-        group_key = str(item.get('analysis_type_slug') or '__sem_tipo__').strip().lower() or '__sem_tipo__'
+        group_key = (
+            int(item.get('supervisor_id') or 0),
+            str(item.get('analysis_type_slug') or '__sem_tipo__').strip().lower() or '__sem_tipo__',
+        )
         groups.setdefault(group_key, []).append(item)
 
     for items in groups.values():
@@ -1612,8 +1630,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
 
         deliveries = (
             SupervisaoSlackEntrega.objects
-            .select_related('processo')
-            .filter(supervisor=request.user)
+            .select_related('processo', 'supervisor')
             .order_by('-updated_at', '-created_at', '-id')
         )
         results = [
@@ -1639,11 +1656,7 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
         if mode not in {'last', 'selected', 'all'}:
             return Response({'detail': 'mode inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        deliveries_qs = (
-            SupervisaoSlackEntrega.objects
-            .filter(supervisor=request.user)
-            .order_by('-updated_at', '-created_at', '-id')
-        )
+        deliveries_qs = SupervisaoSlackEntrega.objects.order_by('-updated_at', '-created_at', '-id')
 
         if mode == 'last':
             deliveries = list(deliveries_qs[:1])
@@ -1671,8 +1684,31 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode atualizar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
 
-        result = sync_supervision_slack_for_supervisor(request.user.id, request=request) or {}
-        return Response(result)
+        configs = (
+            UserSlackConfig.objects
+            .select_related('user')
+            .filter(user__is_active=True)
+            .exclude(slack_user_id='')
+            .order_by('user_id')
+        )
+        recipients = set()
+        eligible_recipients = set()
+        errors = []
+        queued_count = 0
+
+        for config in configs:
+            result = sync_supervision_slack_for_supervisor(config.user_id, request=request) or {}
+            recipients.update(str(name).strip() for name in (result.get('recipients') or []) if str(name).strip())
+            eligible_recipients.update(str(name).strip() for name in (result.get('eligible_recipients') or []) if str(name).strip())
+            queued_count += int(result.get('queued_count') or 0)
+            errors.extend(result.get('errors') or [])
+
+        return Response({
+            'recipients': sorted(recipients),
+            'eligible_recipients': sorted(eligible_recipients),
+            'errors': errors,
+            'queued_count': queued_count,
+        })
 
 
 @method_decorator(csrf_exempt, name='dispatch')
