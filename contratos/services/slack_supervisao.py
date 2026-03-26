@@ -24,6 +24,7 @@ SUPERVISION_STATUS_LABELS = {
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
+SUPERVISION_BATCH_SIZE_PER_TYPE = 5
 SLACK_API_TIMEOUT = 30
 
 
@@ -155,6 +156,41 @@ def _supervisor_accepts_entry(config, entry):
     return bool(entry_slug and entry_slug in allowed_slugs)
 
 
+def _entry_status_key(entry):
+    return str(entry.get('supervisor_status') or '').strip().lower()
+
+
+def _entry_is_pending(entry):
+    return _entry_status_key(entry) in SUPERVISION_PENDING_STATUSES
+
+
+def _entry_is_final(entry):
+    return _entry_status_key(entry) in SUPERVISION_FINAL_STATUSES
+
+
+def _has_slack_message(delivery):
+    if not delivery:
+        return False
+    return bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
+
+
+def _entry_queue_sort_key(entry):
+    try:
+        analise_id = int(entry.get('analise_id') or 0)
+    except (TypeError, ValueError):
+        analise_id = 0
+    try:
+        card_index = int(entry.get('card_index') or 0)
+    except (TypeError, ValueError):
+        card_index = 0
+    return (
+        str(entry.get('date') or entry.get('original_date') or ''),
+        analise_id,
+        str(entry.get('card_source') or '').strip(),
+        card_index,
+    )
+
+
 def _format_analysis_lines(entry):
     lines = []
     for raw_line in entry.get('analysis_lines') or []:
@@ -224,7 +260,19 @@ def _format_checagem_sistemas_lines(entry):
 
 
 def _format_contract_detail_lines(entry):
-    lines = [str(line or '').strip() for line in (entry.get('contract_detail_lines') or []) if str(line or '').strip()]
+    lines = []
+    saldo_original_total = str(entry.get('saldo_original_total_text') or '').strip()
+    saldo_atualizado_total = str(entry.get('saldo_atualizado_total_text') or '').strip()
+    if saldo_original_total and saldo_original_total != '—':
+        lines.append(f'Saldo Original (somado): {saldo_original_total}')
+    if saldo_atualizado_total and saldo_atualizado_total != '—':
+        lines.append(f'Saldo Atualizado (somado): {saldo_atualizado_total}')
+
+    detail_lines = [str(line or '').strip() for line in (entry.get('contract_detail_lines') or []) if str(line or '').strip()]
+    if detail_lines and lines:
+        lines.append('Detalhamento por contrato:')
+    lines.extend(detail_lines)
+
     custas = str(entry.get('custas_estimativa_text') or '').strip()
     if custas:
         lines.append(f'Estimativa de Custas (2%): {custas}')
@@ -612,18 +660,24 @@ def _thread_update_text(entry, actor_name, status_key):
     return '\n'.join(lines)
 
 
-def _sync_single_delivery(entry, supervisor, delivery, *, request=None):
+def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_post=True):
     message = _build_supervision_message(entry, request=request)
     status_key = message['status_key']
     status_changed = status_key != str(delivery.last_status or '').strip().lower()
+    has_message = _has_slack_message(delivery)
+    queued = False
 
-    if not delivery.slack_channel_id or not delivery.slack_message_ts:
-        channel_id = open_slack_dm(delivery.slack_user_id)
-        posted = post_slack_message(channel_id, text=message['text'], blocks=message['blocks'])
-        delivery.slack_channel_id = channel_id
-        delivery.slack_message_ts = str(posted.get('ts') or '').strip()
-        delivery.slack_thread_ts = delivery.slack_message_ts
-        delivery.notified_at = timezone.now()
+    if not has_message:
+        if allow_post and status_key in SUPERVISION_PENDING_STATUSES:
+            channel_id = open_slack_dm(delivery.slack_user_id)
+            posted = post_slack_message(channel_id, text=message['text'], blocks=message['blocks'])
+            delivery.slack_channel_id = channel_id
+            delivery.slack_message_ts = str(posted.get('ts') or '').strip()
+            delivery.slack_thread_ts = delivery.slack_message_ts
+            delivery.notified_at = timezone.now()
+            has_message = _has_slack_message(delivery)
+        else:
+            queued = status_key in SUPERVISION_PENDING_STATUSES
     elif message['hash'] != str(delivery.message_hash or ''):
         update_slack_message(
             delivery.slack_channel_id,
@@ -668,6 +722,156 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None):
             'updated_at',
         ],
     )
+    return {
+        'sent': _has_slack_message(delivery),
+        'queued': queued and not _has_slack_message(delivery),
+    }
+
+
+def _build_supervisor_delivery_context(supervisor, config):
+    accepted_entries = []
+    for entry in _collect_supervision_entries_for_supervisor(supervisor):
+        key = _build_entry_key(entry)
+        if not key or not _supervisor_accepts_entry(config, entry):
+            continue
+        accepted_entries.append(entry)
+
+    if not accepted_entries:
+        return [], {}, {}
+
+    analysis_ids = sorted({
+        int(entry.get('analise_id') or 0)
+        for entry in accepted_entries
+        if int(entry.get('analise_id') or 0)
+    })
+    deliveries = {}
+    if analysis_ids:
+        deliveries = {
+            (delivery.analise_id, delivery.card_source, delivery.card_index): delivery
+            for delivery in SupervisaoSlackEntrega.objects.filter(
+                supervisor=supervisor,
+                analise_id__in=analysis_ids,
+            )
+        }
+
+    analyses = {
+        analise.pk: analise
+        for analise in AnaliseProcesso.objects.select_related('processo_judicial').filter(pk__in=analysis_ids)
+    }
+
+    for entry in accepted_entries:
+        key = _build_entry_key(entry)
+        if not key:
+            continue
+        delivery = deliveries.get(key)
+        analise = analyses.get(int(entry.get('analise_id') or 0))
+        if delivery is None:
+            if not analise:
+                continue
+            delivery = SupervisaoSlackEntrega.objects.create(
+                analise=analise,
+                processo=analise.processo_judicial,
+                supervisor=supervisor,
+                card_id=str(entry.get('cardId') or ''),
+                card_source=str(entry.get('card_source') or ''),
+                card_index=int(entry.get('card_index') or 0),
+                slack_user_id=config.slack_user_id,
+            )
+            deliveries[key] = delivery
+            continue
+
+        update_fields = []
+        new_card_id = str(entry.get('cardId') or delivery.card_id or '')
+        if delivery.card_id != new_card_id:
+            delivery.card_id = new_card_id
+            update_fields.append('card_id')
+        if delivery.slack_user_id != config.slack_user_id:
+            delivery.slack_user_id = config.slack_user_id
+            update_fields.append('slack_user_id')
+        if analise and delivery.processo_id != getattr(analise, 'processo_judicial_id', None):
+            delivery.processo = analise.processo_judicial
+            update_fields.append('processo')
+        if update_fields:
+            update_fields.append('updated_at')
+            delivery.save(update_fields=update_fields)
+
+    entries_by_key = {
+        _build_entry_key(entry): entry
+        for entry in accepted_entries
+        if _build_entry_key(entry)
+    }
+    return accepted_entries, deliveries, entries_by_key
+
+
+def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_entries, deliveries, request=None):
+    pending_entries = [
+        entry for entry in accepted_entries
+        if _entry_is_pending(entry) and _entry_analysis_type_slug(entry) == analysis_type_slug
+    ]
+    if not pending_entries:
+        return {'sent': False, 'queued_count': 0, 'errors': []}
+
+    pending_entries.sort(key=_entry_queue_sort_key)
+    sent_pending = []
+    unsent_pending = []
+    for entry in pending_entries:
+        delivery = deliveries.get(_build_entry_key(entry))
+        if not delivery:
+            continue
+        if _has_slack_message(delivery):
+            sent_pending.append((entry, delivery))
+        else:
+            unsent_pending.append((entry, delivery))
+
+    if sent_pending:
+        to_send = sent_pending
+        to_queue = unsent_pending
+    else:
+        to_send = unsent_pending[:SUPERVISION_BATCH_SIZE_PER_TYPE]
+        to_queue = unsent_pending[SUPERVISION_BATCH_SIZE_PER_TYPE:]
+
+    sent_any = False
+    queued_count = 0
+    errors = []
+
+    for entry, delivery in to_send:
+        try:
+            result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=True)
+            sent_any = sent_any or bool(result.get('sent'))
+        except Exception as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.exception(
+                'Falha ao sincronizar lote pendente Slack supervisor=%s tipo=%s',
+                supervisor.pk,
+                analysis_type_slug,
+                exc_info=exc,
+            )
+
+    for entry, delivery in to_queue:
+        try:
+            result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=False)
+            if result.get('queued'):
+                queued_count += 1
+        except Exception as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.exception(
+                'Falha ao enfileirar entrega Slack supervisor=%s tipo=%s',
+                supervisor.pk,
+                analysis_type_slug,
+                exc_info=exc,
+            )
+
+    return {
+        'sent': sent_any,
+        'queued_count': queued_count,
+        'errors': errors,
+    }
 
 
 def sync_supervision_slack_for_analysis(analise_id, *, request=None):
@@ -677,6 +881,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
             'eligible_recipients': [],
             'errors': [],
             'has_pending_entries': False,
+            'queued_count': 0,
         }
     try:
         analise = AnaliseProcesso.objects.select_related('processo_judicial').get(pk=analise_id)
@@ -686,6 +891,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
             'eligible_recipients': [],
             'errors': [],
             'has_pending_entries': False,
+            'queued_count': 0,
         }
 
     supervisor_configs = list(
@@ -703,76 +909,83 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
             'eligible_recipients': [],
             'errors': [],
             'has_pending_entries': False,
+            'queued_count': 0,
         }
 
     recipient_names = set()
     eligible_names = set()
     errors = []
     has_pending_entries = False
+    queued_count = 0
 
     for config in supervisor_configs:
         supervisor = config.user
-        entries = _collect_supervision_entries_for_supervisor(supervisor, analise_id=analise.pk)
-        entry_map = {
-            _build_entry_key(entry): entry
-            for entry in entries
-            if _build_entry_key(entry) and _supervisor_accepts_entry(config, entry)
-        }
-        if entry_map:
+        accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+        current_entries = [
+            entry for entry in accepted_entries
+            if int(entry.get('analise_id') or 0) == int(analise.pk)
+        ]
+        if current_entries:
             has_pending_entries = True
             eligible_names.add(
                 str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
             )
-        deliveries = {
-            (delivery.analise_id, delivery.card_source, delivery.card_index): delivery
-            for delivery in SupervisaoSlackEntrega.objects.filter(analise=analise, supervisor=supervisor)
+        relevant_slugs = {
+            _entry_analysis_type_slug(entry)
+            for entry in current_entries
+            if _entry_analysis_type_slug(entry)
         }
 
-        for key, entry in entry_map.items():
-            if not key:
+        for entry in current_entries:
+            if not _entry_is_final(entry):
                 continue
-            delivery = deliveries.get(key)
-            if delivery is None:
-                delivery = SupervisaoSlackEntrega.objects.create(
-                    analise=analise,
-                    processo=analise.processo_judicial,
-                    supervisor=supervisor,
-                    card_id=str(entry.get('cardId') or ''),
-                    card_source=str(entry.get('card_source') or ''),
-                    card_index=int(entry.get('card_index') or 0),
-                    slack_user_id=config.slack_user_id,
-                )
-            elif delivery.slack_user_id != config.slack_user_id:
-                delivery.slack_user_id = config.slack_user_id
-                delivery.save(update_fields=['slack_user_id', 'updated_at'])
-
+            delivery = deliveries.get(_build_entry_key(entry))
+            if not delivery:
+                continue
             try:
-                _sync_single_delivery(entry, supervisor, delivery, request=request)
-                recipient_names.add(
-                    str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
-                )
+                result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=False)
+                if result.get('sent'):
+                    recipient_names.add(
+                        str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
+                    )
             except Exception as exc:
                 errors.append({
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                     'error': str(exc),
                 })
                 logger.exception(
-                    'Falha ao sincronizar entrega Slack da supervisao analise=%s supervisor=%s',
+                    'Falha ao sincronizar status final no Slack analise=%s supervisor=%s',
                     analise.pk,
                     supervisor.pk,
                     exc_info=exc,
                 )
+
+        for analysis_type_slug in sorted(relevant_slugs):
+            result = _sync_pending_batch_for_type(
+                supervisor=supervisor,
+                analysis_type_slug=analysis_type_slug,
+                accepted_entries=accepted_entries,
+                deliveries=deliveries,
+                request=request,
+            )
+            if result.get('sent'):
+                recipient_names.add(
+                    str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
+                )
+            queued_count += int(result.get('queued_count') or 0)
+            errors.extend(result.get('errors') or [])
     return {
         'recipients': sorted(name for name in recipient_names if name),
         'eligible_recipients': sorted(name for name in eligible_names if name),
         'errors': errors,
         'has_pending_entries': has_pending_entries,
+        'queued_count': queued_count,
     }
 
 
 def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     if not slack_supervisao_enabled():
-        return {'recipients': []}
+        return {'recipients': [], 'errors': [], 'queued_count': 0}
     config = (
         UserSlackConfig.objects.select_related('user')
         .filter(user_id=user_id, user__is_active=True)
@@ -780,19 +993,59 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
         .first()
     )
     if not config:
-        return {'recipients': []}
+        return {'recipients': [], 'errors': [], 'queued_count': 0}
     supervisor = config.user
-    entries = _collect_supervision_entries_for_supervisor(supervisor)
-    for entry in entries:
-        if not _supervisor_accepts_entry(config, entry):
+    accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+    recipient_names = set()
+    errors = []
+    queued_count = 0
+
+    for entry in accepted_entries:
+        if not _entry_is_final(entry):
             continue
-        if str(entry.get('supervisor_status') or '').strip().lower() not in SUPERVISION_PENDING_STATUSES:
+        delivery = deliveries.get(_build_entry_key(entry))
+        if not delivery:
             continue
-        analise_id = entry.get('analise_id')
-        if analise_id:
-            sync_supervision_slack_for_analysis(analise_id, request=request)
+        try:
+            result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=False)
+            if result.get('sent'):
+                recipient_names.add(
+                    str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
+                )
+        except Exception as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.exception(
+                'Falha ao sincronizar status final Slack supervisor=%s',
+                supervisor.pk,
+                exc_info=exc,
+            )
+
+    type_slugs = {
+        _entry_analysis_type_slug(entry)
+        for entry in accepted_entries
+        if _entry_analysis_type_slug(entry) and _entry_is_pending(entry)
+    }
+    for analysis_type_slug in sorted(type_slugs):
+        result = _sync_pending_batch_for_type(
+            supervisor=supervisor,
+            analysis_type_slug=analysis_type_slug,
+            accepted_entries=accepted_entries,
+            deliveries=deliveries,
+            request=request,
+        )
+        if result.get('sent'):
+            recipient_names.add(
+                str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
+            )
+        queued_count += int(result.get('queued_count') or 0)
+        errors.extend(result.get('errors') or [])
     return {
-        'recipients': [str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()],
+        'recipients': sorted(name for name in recipient_names if name),
+        'errors': errors,
+        'queued_count': queued_count,
     }
 
 

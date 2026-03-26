@@ -1,8 +1,10 @@
 import json
+import logging
 import os
 import re
 import hmac
 import hashlib
+import threading
 from datetime import datetime, date as date_cls, time as time_cls
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs
@@ -20,7 +22,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -84,6 +86,7 @@ from ..services.slack_supervisao import (
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
+    sync_supervision_slack_for_supervisor,
 )
 from ..integracoes_escavador.partes import collect_partes_from_escavador_payload
 
@@ -94,6 +97,8 @@ SUPERVISION_STATUS_LABELS = {
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_demandas_alias(carteira_id):
@@ -126,6 +131,36 @@ def _normalize_decimal_string(value):
     elif has_comma:
         normalized = normalized.replace(',', '.')
     return normalized
+
+
+def _open_supervision_decision_modal_async(*, trigger_id, metadata_json, desired_status, analise_id, source, index, slack_user_id):
+    def _run():
+        close_old_connections()
+        try:
+            supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+            if not supervisor:
+                return
+            entry = get_supervision_entry_for_card(
+                supervisor=supervisor,
+                analise_id=analise_id,
+                source=source,
+                index=index,
+            )
+            if not entry:
+                return
+            open_supervision_decision_modal(
+                trigger_id,
+                metadata_json=metadata_json,
+                desired_status=desired_status,
+                entry=entry,
+                slack_user_id=slack_user_id,
+            )
+        except Exception:
+            logger.exception('Falha ao abrir modal de decisao do Slack')
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 def _parse_decimal_value(value):
     normalized = _normalize_decimal_string(value)
@@ -432,24 +467,73 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         or entry.get('analysis_type_short')
         or ''
     ).strip() or 'Análise'
+    analysis_type_slug = str(entry.get('analysis_type_slug') or '').strip().lower()
     notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
     updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
+    has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
+    status_key = str(delivery.last_status or entry.get('supervisor_status') or '').strip().lower()
+    is_pending = status_key in {'pendente', 'pre_aprovado'}
+    is_responded = status_key in {'aprovado', 'reprovado'}
+    dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
     return {
         'id': delivery.pk,
         'analise_id': delivery.analise_id,
+        'processo_id': delivery.processo_id,
+        'processo_label': str(delivery.processo or '').strip(),
         'card_id': str(delivery.card_id or '').strip(),
         'card_source': str(delivery.card_source or '').strip(),
         'card_index': int(delivery.card_index or 0),
         'cnj_label': cnj_label,
         'analysis_type_name': analysis_type_name,
+        'analysis_type_slug': analysis_type_slug,
         'last_status': str(delivery.last_status or '').strip(),
+        'status_key': status_key,
+        'is_pending': is_pending,
+        'is_responded': is_responded,
+        'dispatch_state': dispatch_state,
+        'agenda_date': str(entry.get('date') or '').strip(),
         'notified_at': notified_at.isoformat() if notified_at else '',
         'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
         'updated_at': updated_at.isoformat() if updated_at else '',
         'updated_at_display': updated_at.strftime('%d/%m/%Y %H:%M') if updated_at else '',
         'slack_channel_id': str(delivery.slack_channel_id or '').strip(),
         'slack_message_ts': str(delivery.slack_message_ts or '').strip(),
-        'has_message': bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip()),
+        'has_message': has_message,
+        'queue_position': 0,
+    }
+
+
+def _annotate_slack_delivery_queue(results):
+    groups = {}
+    for item in results:
+        if not item.get('is_pending') or item.get('has_message'):
+            continue
+        group_key = str(item.get('analysis_type_slug') or '__sem_tipo__').strip().lower() or '__sem_tipo__'
+        groups.setdefault(group_key, []).append(item)
+
+    for items in groups.values():
+        items.sort(
+            key=lambda item: (
+                str(item.get('agenda_date') or ''),
+                int(item.get('analise_id') or 0),
+                str(item.get('card_source') or ''),
+                int(item.get('card_index') or 0),
+            )
+        )
+        for index, item in enumerate(items, start=1):
+            item['queue_position'] = index
+
+
+def _build_slack_delivery_summary(results):
+    sent_count = sum(1 for item in results if item.get('has_message'))
+    responded_count = sum(1 for item in results if item.get('has_message') and item.get('is_responded'))
+    pending_count = sum(1 for item in results if item.get('has_message') and item.get('is_pending'))
+    queued_count = sum(1 for item in results if item.get('dispatch_state') == 'queued')
+    return {
+        'sent_count': sent_count,
+        'responded_count': responded_count,
+        'pending_count': pending_count,
+        'queued_count': queued_count,
     }
 
 
@@ -1312,7 +1396,9 @@ class AgendaGeralAPIView(APIView):
                 )
             )
             detail_text = f"{cnj_label} — {', '.join(contrato_labels)}"
+            valor_total_devido = sum((c.valor_total_devido or Decimal('0.00')) for c in valid_contracts)
             valor_total_causa = sum((c.valor_causa or Decimal('0.00')) for c in valid_contracts)
+            valor_total_devido = float(valor_total_devido)
             valor_total_causa = float(valor_total_causa)
             # Supervisão é fila do supervisor (não do analista que atualizou o card).
             responsavel_user = agenda_supervisor_user
@@ -1348,6 +1434,10 @@ class AgendaGeralAPIView(APIView):
                 'contract_ids': contract_pk_ids,
                 'monitoria_files_summary': monitoria_files_summary,
                 'monitoria_files_detail': monitoria_files_detail,
+                'saldo_original_total': valor_total_devido,
+                'saldo_original_total_text': format_currency_brl(valor_total_devido),
+                'saldo_atualizado_total': valor_total_causa,
+                'saldo_atualizado_total_text': format_currency_brl(valor_total_causa),
                 'valor_causa': valor_total_causa,
                 'custas_total': float(custas_total_decimal) if custas_total_decimal is not None else None,
                 'custas_estimativa_text': format_currency_brl(custas_estimativa),
@@ -1520,25 +1610,20 @@ class SlackSupervisionDeliveryListAPIView(APIView):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
 
-        processo_id = request.query_params.get('processo_id')
-        if not processo_id:
-            return Response({'detail': 'processo_id é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        processo = get_object_or_404(
-            filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
-            pk=processo_id,
-        )
         deliveries = (
             SupervisaoSlackEntrega.objects
-            .filter(processo=processo, supervisor=request.user)
-            .exclude(slack_message_ts='')
-            .order_by('-notified_at', '-created_at', '-id')
+            .select_related('processo')
+            .filter(supervisor=request.user)
+            .order_by('-updated_at', '-created_at', '-id')
         )
+        results = [
+            _build_slack_delivery_entry_payload(delivery, request.user)
+            for delivery in deliveries
+        ]
+        _annotate_slack_delivery_queue(results)
         return Response({
-            'results': [
-                _build_slack_delivery_entry_payload(delivery, request.user)
-                for delivery in deliveries
-            ],
+            'summary': _build_slack_delivery_summary(results),
+            'results': results,
         })
 
 
@@ -1550,22 +1635,14 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode apagar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
 
         data = request.data or {}
-        processo_id = data.get('processo_id')
         mode = str(data.get('mode') or '').strip().lower()
-        if not processo_id:
-            return Response({'detail': 'processo_id é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
         if mode not in {'last', 'selected', 'all'}:
             return Response({'detail': 'mode inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        processo = get_object_or_404(
-            filter_processos_queryset_for_user(ProcessoJudicial.objects.all(), request.user),
-            pk=processo_id,
-        )
         deliveries_qs = (
             SupervisaoSlackEntrega.objects
-            .filter(processo=processo, supervisor=request.user)
-            .exclude(slack_message_ts='')
-            .order_by('-notified_at', '-created_at', '-id')
+            .filter(supervisor=request.user)
+            .order_by('-updated_at', '-created_at', '-id')
         )
 
         if mode == 'last':
@@ -1581,9 +1658,20 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
             deliveries = list(deliveries_qs.filter(pk__in=delivery_ids))
 
         if not deliveries:
-            return Response({'detail': 'Nenhuma mensagem Slack encontrada para apagar.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Nenhuma entrega Slack encontrada para apagar.'}, status=status.HTTP_400_BAD_REQUEST)
 
         result = delete_supervision_slack_deliveries(deliveries)
+        return Response(result)
+
+
+class SlackSupervisionDeliveryRefreshAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_supervisor_developer_user(request.user):
+            return Response({'detail': 'Apenas Supervisor Desenvolvedor pode atualizar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
+
+        result = sync_supervision_slack_for_supervisor(request.user.id, request=request) or {}
         return Response(result)
 
 
@@ -1615,8 +1703,7 @@ class SlackSupervisionInteractionAPIView(View):
     def _handle_block_actions(self, payload):
         trigger_id = str(payload.get('trigger_id') or '').strip()
         slack_user_id = str(((payload.get('user') or {}).get('id')) or '').strip()
-        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
-        if not trigger_id or not supervisor:
+        if not trigger_id or not slack_user_id:
             return HttpResponse('')
 
         actions = payload.get('actions') or []
@@ -1637,28 +1724,24 @@ class SlackSupervisionInteractionAPIView(View):
         analise_id = metadata.get('analise_id')
         source = metadata.get('source')
         index = metadata.get('index')
-        if not analise_id or not source or index is None:
+        if desired_status not in {'aprovado', 'reprovado', 'barrado'} or not analise_id or not source or index is None:
             return HttpResponse('')
 
-        entry = get_supervision_entry_for_card(
-            supervisor=supervisor,
+        _open_supervision_decision_modal_async(
+            trigger_id=trigger_id,
+            metadata_json=json.dumps(
+                {
+                    'analise_id': analise_id,
+                    'source': source,
+                    'index': index,
+                    'card_id': metadata.get('card_id') or '',
+                },
+                ensure_ascii=True,
+            ),
+            desired_status=desired_status,
             analise_id=analise_id,
             source=source,
             index=index,
-        )
-        if not entry:
-            return HttpResponse('')
-
-        open_supervision_decision_modal(
-            trigger_id,
-            metadata_json=json.dumps({
-                'analise_id': analise_id,
-                'source': source,
-                'index': index,
-                'card_id': metadata.get('card_id') or '',
-            }, ensure_ascii=True),
-            desired_status=desired_status,
-            entry=entry,
             slack_user_id=slack_user_id,
         )
         return HttpResponse('')

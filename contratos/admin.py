@@ -13681,12 +13681,13 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         ]
         errors = sync_result.get('errors') or []
         has_pending_entries = bool(sync_result.get('has_pending_entries'))
+        queued_count = int(sync_result.get('queued_count') or 0)
 
         if recipients:
-            messages.success(
-                request,
-                f"Supervisão enviada ao Slack para: {', '.join(recipients)}.",
-            )
+            success_message = f"Supervisão enviada ao Slack para: {', '.join(recipients)}."
+            if queued_count:
+                success_message += f" {queued_count} item(ns) ficaram em fila."
+            messages.success(request, success_message)
             if errors:
                 first_error = errors[0]
                 messages.warning(
@@ -13697,6 +13698,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return
 
         if not has_pending_entries:
+            return
+
+        if queued_count and eligible_recipients:
+            messages.warning(
+                request,
+                "Processo salvo. A supervisão ficou em fila no Slack "
+                f"para: {', '.join(eligible_recipients)}. "
+                f"{queued_count} item(ns) aguardam liberação por tipo de análise.",
+            )
             return
 
         if eligible_recipients and errors:

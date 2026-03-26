@@ -7139,6 +7139,32 @@ body.admin-navigation-loading-active * {
     line-height: 1.45;
 }
 
+.analise-slack-deliveries-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.analise-slack-deliveries-summary__card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(40, 52, 72, 0.12);
+    background: linear-gradient(180deg, #f9fbfd 0%, #f3f7fb 100%);
+}
+
+.analise-slack-deliveries-summary__card strong {
+    font-size: 1.1rem;
+    color: #203247;
+}
+
+.analise-slack-deliveries-summary__card span {
+    font-size: 0.8rem;
+    color: #617286;
+}
+
 .analise-slack-deliveries-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -7236,4 +7262,10 @@ body.admin-navigation-loading-active * {
     border-radius: 12px;
     color: #617286;
     background: #fbfcfe;
+}
+
+@media (max-width: 720px) {
+    .analise-slack-deliveries-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }

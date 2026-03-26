@@ -270,6 +270,7 @@
         const isSupervisorDeveloperUser = Boolean(window.__analise_is_supervisor_developer);
         const TAB_STORAGE_KEY = 'analise_active_tab';
         const SLACK_SUPERVISION_DELIVERIES_URL = '/api/slack/supervisao/entregas/';
+        const SLACK_SUPERVISION_DELIVERIES_REFRESH_URL = '/api/slack/supervisao/entregas/refresh/';
         const SLACK_SUPERVISION_DELIVERIES_DELETE_URL = '/api/slack/supervisao/entregas/delete/';
         const desiredTab = sessionStorage.getItem(TAB_STORAGE_KEY);
         const $analysisTabButton = $(
@@ -2892,10 +2893,19 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             return $.ajax({
                 url: SLACK_SUPERVISION_DELIVERIES_URL,
                 method: 'GET',
+                dataType: 'json'
+            });
+        }
+
+        function refreshSlackSupervisionDeliveries() {
+            const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            return $.ajax({
+                url: SLACK_SUPERVISION_DELIVERIES_REFRESH_URL,
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrftoken },
+                contentType: 'application/json; charset=utf-8',
                 dataType: 'json',
-                data: {
-                    processo_id: currentProcessoId
-                }
+                data: JSON.stringify({})
             });
         }
 
@@ -2908,7 +2918,6 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 contentType: 'application/json; charset=utf-8',
                 dataType: 'json',
                 data: JSON.stringify({
-                    processo_id: currentProcessoId,
                     mode,
                     delivery_ids: deliveryIds
                 })
@@ -2947,7 +2956,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const hint = document.createElement('p');
             hint.className = 'analise-slack-deliveries-modal__hint';
-            hint.textContent = 'Apaga as mensagens Slack deste processo para o seu usuário. Um novo envio pode ser recriado ao sincronizar novamente.';
+            hint.textContent = 'Lista global das mensagens do seu Slack de supervisão. Atualizar ressincroniza as mensagens já enviadas e libera novos envios da fila quando um tipo zerar.';
+
+            const summary = document.createElement('div');
+            summary.className = 'analise-slack-deliveries-summary';
 
             const toolbar = document.createElement('div');
             toolbar.className = 'analise-slack-deliveries-toolbar';
@@ -2988,6 +3000,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             footer.appendChild(footerClose);
 
             body.appendChild(hint);
+            body.appendChild(summary);
             body.appendChild(toolbar);
             body.appendChild(feedback);
             body.appendChild(list);
@@ -2998,6 +3011,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             document.body.appendChild(overlay);
 
             let deliveries = [];
+            let summaryData = {
+                sent_count: 0,
+                responded_count: 0,
+                pending_count: 0,
+                queued_count: 0
+            };
             let isBusy = false;
 
             const setBusy = (busy) => {
@@ -3050,12 +3069,33 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 deleteAllBtn.disabled = isBusy || deliveries.length === 0;
             };
 
+            const renderSummary = () => {
+                const cards = [
+                    { label: 'Enviadas', value: summaryData.sent_count || 0 },
+                    { label: 'Respondidas', value: summaryData.responded_count || 0 },
+                    { label: 'Pendentes', value: summaryData.pending_count || 0 },
+                    { label: 'Em fila', value: summaryData.queued_count || 0 }
+                ];
+                summary.innerHTML = '';
+                cards.forEach((card) => {
+                    const cardEl = document.createElement('div');
+                    cardEl.className = 'analise-slack-deliveries-summary__card';
+                    const valueEl = document.createElement('strong');
+                    valueEl.textContent = String(card.value);
+                    const labelEl = document.createElement('span');
+                    labelEl.textContent = card.label;
+                    cardEl.appendChild(valueEl);
+                    cardEl.appendChild(labelEl);
+                    summary.appendChild(cardEl);
+                });
+            };
+
             const renderList = () => {
                 list.innerHTML = '';
                 if (!deliveries.length) {
                     const empty = document.createElement('div');
                     empty.className = 'analise-slack-deliveries-empty';
-                    empty.textContent = 'Nenhuma mensagem Slack enviada foi encontrada para este processo.';
+                    empty.textContent = 'Nenhuma entrega Slack de supervisão foi encontrada para o seu usuário.';
                     list.appendChild(empty);
                     refreshActionState();
                     return;
@@ -3073,13 +3113,19 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                     const titleEl = document.createElement('div');
                     titleEl.className = 'analise-slack-deliveries-item__title';
-                    titleEl.textContent = `${delivery.analysis_type_name || 'Análise'} · ${delivery.cnj_label || 'Card'}`;
+                    const queueLabel = Number.isFinite(Number(delivery.queue_position)) && Number(delivery.queue_position) > 0
+                        ? ` · Em fila #${delivery.queue_position}`
+                        : '';
+                    titleEl.textContent = `${delivery.analysis_type_name || 'Análise'} · ${delivery.cnj_label || 'Card'}${queueLabel}`;
 
                     const meta = document.createElement('div');
                     meta.className = 'analise-slack-deliveries-item__meta';
-                    const statusText = delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado';
+                    const statusText = delivery.dispatch_state === 'queued'
+                        ? 'Status Slack: em fila'
+                        : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
                     meta.textContent = [
-                        delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : '',
+                        delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
+                        delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : 'Ainda não enviada',
                         statusText,
                         delivery.card_source ? `Origem: ${delivery.card_source}:${delivery.card_index}` : ''
                     ].filter(Boolean).join(' · ');
@@ -3103,20 +3149,63 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const loadDeliveries = () => {
                 setBusy(true);
-                setActionLoadingState(refreshBtn, true, 'Atualizando...');
                 setFeedback('');
-                fetchSlackSupervisionDeliveries()
+                return fetchSlackSupervisionDeliveries()
                     .done((response) => {
                         deliveries = Array.isArray(response?.results) ? response.results : [];
+                        summaryData = response?.summary && typeof response.summary === 'object'
+                            ? response.summary
+                            : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                        renderSummary();
                         renderList();
                     })
                     .fail((xhr) => {
                         const message = xhr?.responseJSON?.detail || 'Falha ao carregar mensagens Slack.';
                         deliveries = [];
+                        summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                        renderSummary();
                         renderList();
                         setFeedback(message, 'error');
                     })
                     .always(() => {
+                        setBusy(false);
+                        refreshActionState();
+                    });
+            };
+
+            const runRefresh = () => {
+                setBusy(true);
+                setActionLoadingState(refreshBtn, true, 'Atualizando...');
+                setFeedback('');
+                refreshSlackSupervisionDeliveries()
+                    .done((response) => {
+                        const recipients = Array.isArray(response?.recipients) ? response.recipients.filter(Boolean) : [];
+                        const queuedCount = parseInt(response?.queued_count || 0, 10) || 0;
+                        const errors = Array.isArray(response?.errors) ? response.errors : [];
+                        if (errors.length) {
+                            setFeedback(
+                                `Atualização concluída com falhas. ${errors.map(item => item.error || 'erro').join(' | ')}`,
+                                'warning'
+                            );
+                        } else if (recipients.length || queuedCount) {
+                            const parts = [];
+                            if (recipients.length) {
+                                parts.push(`Mensagens sincronizadas para: ${recipients.join(', ')}`);
+                            }
+                            if (queuedCount) {
+                                parts.push(`${queuedCount} item(ns) permanecem em fila`);
+                            }
+                            setFeedback(parts.join('. ') + '.', 'success');
+                        } else {
+                            setFeedback('Atualização concluída. Nenhuma mensagem pendente precisou ser reenviada.', 'success');
+                        }
+                        loadDeliveries().always(() => {
+                            setActionLoadingState(refreshBtn, false);
+                        });
+                    })
+                    .fail((xhr) => {
+                        const message = xhr?.responseJSON?.detail || 'Falha ao atualizar mensagens Slack.';
+                        setFeedback(message, 'error');
                         setActionLoadingState(refreshBtn, false);
                         setBusy(false);
                         refreshActionState();
@@ -3129,10 +3218,10 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 let confirmMessage = '';
                 if (mode === 'last') {
                     actionButton = deleteLastBtn;
-                    confirmMessage = 'Apagar a última mensagem Slack enviada deste processo?';
+                    confirmMessage = 'Apagar a última mensagem Slack enviada da sua fila global?';
                 } else if (mode === 'all') {
                     actionButton = deleteAllBtn;
-                    confirmMessage = 'Apagar todas as mensagens Slack listadas deste processo?';
+                    confirmMessage = 'Apagar todas as mensagens Slack listadas do seu usuário?';
                 } else {
                     actionButton = deleteSelectedBtn;
                     selectedIds = getSelectedIds();
@@ -3186,7 +3275,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 }
             };
 
-            refreshBtn.addEventListener('click', loadDeliveries);
+            refreshBtn.addEventListener('click', runRefresh);
             deleteLastBtn.addEventListener('click', () => { void runDelete('last'); });
             deleteSelectedBtn.addEventListener('click', () => { void runDelete('selected'); });
             deleteAllBtn.addEventListener('click', () => { void runDelete('all'); });

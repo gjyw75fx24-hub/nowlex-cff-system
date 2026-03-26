@@ -19,6 +19,7 @@ urlpatterns = [
     path('agenda/supervision/status/', views.AgendaSupervisionStatusAPIView.as_view(), name='agenda_supervision_status'),
     path('agenda/supervision/note/', views.AgendaSupervisionNoteAPIView.as_view(), name='agenda_supervision_note'),
     path('slack/supervisao/entregas/', views.SlackSupervisionDeliveryListAPIView.as_view(), name='slack_supervisao_entregas'),
+    path('slack/supervisao/entregas/refresh/', views.SlackSupervisionDeliveryRefreshAPIView.as_view(), name='slack_supervisao_entregas_refresh'),
     path('slack/supervisao/entregas/delete/', views.SlackSupervisionDeliveryDeleteAPIView.as_view(), name='slack_supervisao_entregas_delete'),
     path('slack/supervisao/interactions/', views.SlackSupervisionInteractionAPIView.as_view(), name='slack_supervisao_interactions'),
     path('agenda/supervision/barrado/', views.AgendaSupervisionBarradoAPIView.as_view(), name='agenda_supervision_barrado'),
