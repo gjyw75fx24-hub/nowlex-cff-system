@@ -1708,7 +1708,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 'results': results,
             })
         except BaseException as exc:
-            logger.exception('Falha ao listar entregas Slack globais', exc_info=exc)
+            logger.warning('Falha ao listar entregas Slack globais: %s', exc)
             return Response({
                 'summary': _build_slack_delivery_summary([]),
                 'results': [],
