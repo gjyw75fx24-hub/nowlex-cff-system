@@ -2973,6 +2973,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             refreshBtn.type = 'button';
             refreshBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
             refreshBtn.textContent = 'Atualizar';
+            const findOldThreadsBtn = document.createElement('button');
+            findOldThreadsBtn.type = 'button';
+            findOldThreadsBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
+            findOldThreadsBtn.textContent = 'Buscar threads antigas';
+            const deleteOldThreadsBtn = document.createElement('button');
+            deleteOldThreadsBtn.type = 'button';
+            deleteOldThreadsBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger';
+            deleteOldThreadsBtn.textContent = 'Apagar threads antigas';
             const deleteLastBtn = document.createElement('button');
             deleteLastBtn.type = 'button';
             deleteLastBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
@@ -2986,6 +2994,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             deleteAllBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger';
             deleteAllBtn.textContent = 'Apagar todas';
             toolbar.appendChild(refreshBtn);
+            toolbar.appendChild(findOldThreadsBtn);
+            toolbar.appendChild(deleteOldThreadsBtn);
             toolbar.appendChild(deleteLastBtn);
             toolbar.appendChild(deleteSelectedBtn);
             toolbar.appendChild(deleteAllBtn);
@@ -3026,10 +3036,23 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             let isBusy = false;
             let emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
             let hasRemoteLoadWarnings = false;
+            let orphanReplyKeys = [];
+            let highlightOrphanReplies = false;
+
+            const isOrphanThreadReply = (delivery) => (
+                Boolean(delivery?.is_remote_orphan) && String(delivery?.message_kind || '').trim() === 'thread_reply_orphan'
+            );
+
+            const syncOrphanReplyKeys = () => {
+                orphanReplyKeys = (Array.isArray(deliveries) ? deliveries : [])
+                    .filter((delivery) => isOrphanThreadReply(delivery))
+                    .map((delivery) => String(delivery?.delivery_key || '').trim())
+                    .filter(Boolean);
+            };
 
             const setBusy = (busy) => {
                 isBusy = busy;
-                [refreshBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn, closeBtn, footerClose].forEach((button) => {
+                [refreshBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn, closeBtn, footerClose].forEach((button) => {
                     button.disabled = busy;
                 });
                 list.classList.toggle('is-loading', busy);
@@ -3052,7 +3075,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             const resetToolbarLoadingState = () => {
-                [refreshBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn].forEach((button) => {
+                [refreshBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn].forEach((button) => {
                     setActionLoadingState(button, false);
                 });
             };
@@ -3081,6 +3104,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 deleteSelectedBtn.disabled = isBusy || selectedCount === 0;
                 deleteLastBtn.disabled = isBusy || deliveries.length === 0;
                 deleteAllBtn.disabled = isBusy || (deliveries.length === 0 && !hasRemoteLoadWarnings);
+                deleteOldThreadsBtn.disabled = isBusy || orphanReplyKeys.length === 0;
             };
 
             const collectDeliveryErrorMessages = (items) => (
@@ -3125,10 +3149,16 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 deliveries.forEach((delivery) => {
                     const item = document.createElement('label');
                     item.className = 'analise-slack-deliveries-item';
+                    if (highlightOrphanReplies && isOrphanThreadReply(delivery)) {
+                        item.classList.add('analise-slack-deliveries-item--orphan-thread');
+                    }
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.setAttribute('data-delivery-key', String(delivery.delivery_key || delivery.id || '').trim());
+                    if (highlightOrphanReplies && isOrphanThreadReply(delivery)) {
+                        checkbox.checked = true;
+                    }
 
                     const content = document.createElement('div');
                     content.className = 'analise-slack-deliveries-item__content';
@@ -3174,6 +3204,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const applyDeliveriesResponse = (response) => {
                 const responseErrors = collectDeliveryErrorMessages(response?.errors);
                 deliveries = Array.isArray(response?.results) ? response.results : [];
+                syncOrphanReplyKeys();
                 summaryData = response?.summary && typeof response.summary === 'object'
                     ? response.summary
                     : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
@@ -3198,6 +3229,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     || (responseText && !responseText.startsWith('<!DOCTYPE') ? responseText : '')
                     || 'Falha ao carregar mensagens Slack.';
                 deliveries = [];
+                orphanReplyKeys = [];
                 summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
                 hasRemoteLoadWarnings = false;
                 emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
@@ -3230,6 +3262,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 );
                 return fetchSlackSupervisionDeliveries({ reconcile: shouldReconcile })
                     .done((response) => {
+                        highlightOrphanReplies = false;
                         applyDeliveriesResponse(response);
                     })
                     .fail((xhr) => {
@@ -3242,6 +3275,31 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     })
                     .done(() => {
                         finalizeLoad();
+                    });
+            };
+
+            const runFindOldThreads = () => {
+                setBusy(true);
+                setActionLoadingState(findOldThreadsBtn, true, 'Buscando...');
+                setFeedback('');
+                fetchSlackSupervisionDeliveries({ reconcile: false })
+                    .done((response) => {
+                        highlightOrphanReplies = true;
+                        applyDeliveriesResponse(response);
+                        if (orphanReplyKeys.length) {
+                            setFeedback(`${orphanReplyKeys.length} thread(s) antiga(s) órfã(s) encontrada(s) e destacada(s) na lista.`, 'warning');
+                        } else {
+                            setFeedback('Nenhuma thread antiga órfã foi encontrada nesta carga.', 'success');
+                        }
+                    })
+                    .fail((xhr) => {
+                        highlightOrphanReplies = false;
+                        applyDeliveriesLoadError(xhr);
+                    })
+                    .always(() => {
+                        resetToolbarLoadingState();
+                        setBusy(false);
+                        refreshActionState();
                     });
             };
 
@@ -3313,6 +3371,47 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     });
             };
 
+            const runDeleteOldThreads = async () => {
+                if (!orphanReplyKeys.length) {
+                    setFeedback('Nenhuma thread antiga órfã foi localizada para apagar.', 'warning');
+                    refreshActionState();
+                    return;
+                }
+                const confirmed = await showCffConfirmDialog(
+                    `Apagar ${orphanReplyKeys.length} thread(s) antiga(s) órfã(s) do Slack?`,
+                    'Apagar threads antigas',
+                    { okLabel: 'Apagar', cancelLabel: 'Cancelar', variant: 'danger' }
+                );
+                if (!confirmed) {
+                    return;
+                }
+                setBusy(true);
+                setActionLoadingState(deleteOldThreadsBtn, true, 'Apagando...');
+                setFeedback('');
+                deleteSlackSupervisionDeliveries('selected', orphanReplyKeys)
+                    .done((response) => {
+                        const deletedCount = parseInt(response?.deleted_count || 0, 10) || 0;
+                        const errors = Array.isArray(response?.errors) ? response.errors : [];
+                        if (errors.length) {
+                            setFeedback(
+                                `Foram apagadas ${deletedCount} thread(s) antiga(s), mas houve falhas: ${errors.map(item => item.error || 'erro').join(' | ')}`,
+                                'warning'
+                            );
+                        } else {
+                            setFeedback(`Foram apagadas ${deletedCount} thread(s) antiga(s) do Slack.`, 'success');
+                        }
+                        highlightOrphanReplies = true;
+                        runFindOldThreads();
+                    })
+                    .fail((xhr) => {
+                        const message = xhr?.responseJSON?.detail || 'Falha ao apagar threads antigas do Slack.';
+                        setActionLoadingState(deleteOldThreadsBtn, false);
+                        setBusy(false);
+                        setFeedback(message, 'error');
+                        refreshActionState();
+                    });
+            };
+
             const runDelete = async (mode) => {
                 let actionButton = null;
                 let selectedIds = [];
@@ -3377,6 +3476,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             refreshBtn.addEventListener('click', runRefresh);
+            findOldThreadsBtn.addEventListener('click', runFindOldThreads);
+            deleteOldThreadsBtn.addEventListener('click', () => { void runDeleteOldThreads(); });
             deleteLastBtn.addEventListener('click', () => { void runDelete('last'); });
             deleteSelectedBtn.addEventListener('click', () => { void runDelete('selected'); });
             deleteAllBtn.addEventListener('click', () => { void runDelete('all'); });
