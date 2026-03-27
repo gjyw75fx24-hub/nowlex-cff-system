@@ -268,14 +268,14 @@ def _format_contract_detail_lines(entry):
     if saldo_atualizado_total and saldo_atualizado_total != '—':
         lines.append(f'Saldo Atualizado (somado): {saldo_atualizado_total}')
 
+    custas = str(entry.get('custas_estimativa_text') or '').strip()
+    if custas:
+        lines.append(f'Estimativa de Custas (2%): {custas}')
+
     detail_lines = [str(line or '').strip() for line in (entry.get('contract_detail_lines') or []) if str(line or '').strip()]
     if detail_lines and lines:
         lines.append('Detalhamento por contrato:')
     lines.extend(detail_lines)
-
-    custas = str(entry.get('custas_estimativa_text') or '').strip()
-    if custas:
-        lines.append(f'Estimativa de Custas (2%): {custas}')
     return lines
 
 

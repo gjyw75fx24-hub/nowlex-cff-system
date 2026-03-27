@@ -200,70 +200,90 @@ def _agenda_extract_contract_refs(raw_contract):
     return ids, numbers
 
 
-def _resolve_supervision_card_prescricao_date(analise, card, respostas=None):
+def _resolve_supervision_card_contracts(analise, card, respostas=None):
     if not analise or not analise.processo_judicial_id:
-        return None
+        return []
     if not isinstance(card, dict):
         card = {}
     if not isinstance(respostas, dict):
         respostas = {}
 
-    contract_values = card.get('contratos')
-    if not isinstance(contract_values, (list, tuple)):
-        contract_values = []
-    if not contract_values:
-        tipo_respostas = card.get('tipo_de_acao_respostas') or {}
-        if isinstance(tipo_respostas, dict):
-            contract_values = tipo_respostas.get('contratos_para_monitoria') or []
-    if not contract_values:
-        root_contract_values = respostas.get('contratos_para_monitoria')
-        if isinstance(root_contract_values, (list, tuple)):
-            contract_values = root_contract_values
-
     process_contracts = list(
-        analise.processo_judicial.contratos.all().only('id', 'numero_contrato', 'data_prescricao')
+        analise.processo_judicial.contratos.all().only(
+            'id',
+            'numero_contrato',
+            'data_prescricao',
+            'valor_total_devido',
+            'valor_causa',
+        )
     )
     if not process_contracts:
-        return None
+        return []
+
+    contract_map = {contract.id: contract for contract in process_contracts}
+    contract_map_by_number = {}
+    for contract in process_contracts:
+        for lookup_key in _agenda_build_contract_lookup_keys(contract.numero_contrato):
+            contract_map_by_number.setdefault(lookup_key, contract)
+
+    raw_contract_values = []
+
+    def append_raw_values(raw_value):
+        if raw_value in (None, ''):
+            return
+        if isinstance(raw_value, (list, tuple)):
+            raw_contract_values.extend(list(raw_value))
+            return
+        raw_contract_values.append(raw_value)
+
+    for key in ('contratos', 'contracts'):
+        append_raw_values(card.get(key))
+
+    for raw_contract in _extract_monitoria_contract_values(card):
+        append_raw_values(raw_contract)
+
+    if not raw_contract_values and _card_requests_monitoria(card):
+        for raw_contract in _extract_monitoria_contract_values(respostas):
+            append_raw_values(raw_contract)
 
     parsed_ids = set()
     parsed_numbers = set()
-    for raw_contract in contract_values or []:
+    for raw_contract in raw_contract_values:
         extracted_ids, extracted_numbers = _agenda_extract_contract_refs(raw_contract)
         parsed_ids.update(extracted_ids)
         parsed_numbers.update(extracted_numbers)
 
-    if not parsed_ids and not parsed_numbers:
-        valid_contracts = process_contracts
-    else:
-        contract_map = {contract.id: contract for contract in process_contracts}
-        contract_map_by_number = {}
-        for contract in process_contracts:
-            for lookup_key in _agenda_build_contract_lookup_keys(contract.numero_contrato):
-                contract_map_by_number.setdefault(lookup_key, contract)
+    valid_contracts = []
+    seen_contract_ids = set()
 
-        valid_contracts = []
-        seen_contract_ids = set()
+    def append_contract(contract):
+        if not contract or contract.pk in seen_contract_ids:
+            return
+        seen_contract_ids.add(contract.pk)
+        valid_contracts.append(contract)
 
-        def _append_contract(contract):
-            if not contract or contract.pk in seen_contract_ids:
-                return
-            seen_contract_ids.add(contract.pk)
-            valid_contracts.append(contract)
+    for contract_id in parsed_ids:
+        append_contract(contract_map.get(contract_id))
 
-        for contract_id in parsed_ids:
-            _append_contract(contract_map.get(contract_id))
+    for raw_number in parsed_numbers:
+        matched_contract = None
+        for lookup_key in _agenda_build_contract_lookup_keys(raw_number):
+            matched_contract = contract_map_by_number.get(lookup_key)
+            if matched_contract:
+                break
+        append_contract(matched_contract)
 
-        for raw_number in parsed_numbers:
-            matched_contract = None
-            for lookup_key in _agenda_build_contract_lookup_keys(raw_number):
-                matched_contract = contract_map_by_number.get(lookup_key)
-                if matched_contract:
-                    break
-            _append_contract(matched_contract)
+    if valid_contracts:
+        return valid_contracts
 
-        if not valid_contracts:
-            valid_contracts = process_contracts
+    if raw_contract_values:
+        return []
+
+    return process_contracts
+
+
+def _resolve_supervision_card_prescricao_date(analise, card, respostas=None):
+    valid_contracts = _resolve_supervision_card_contracts(analise, card, respostas=respostas)
 
     contracts_with_prescricao = [contract for contract in valid_contracts if contract.data_prescricao]
     if not contracts_with_prescricao:
@@ -1263,39 +1283,20 @@ class AgendaGeralAPIView(APIView):
                     status = (card.get('supervisor_status') or 'pendente').lower()
                     if status not in target_statuses:
                         continue
-                    contract_values = card.get('contratos')
-                    if not isinstance(contract_values, (list, tuple)):
-                        contract_values = []
-                    if not contract_values:
-                        tipo_respostas = card.get('tipo_de_acao_respostas') or {}
-                        if isinstance(tipo_respostas, dict):
-                            contract_values = tipo_respostas.get('contratos_para_monitoria') or []
-                    if not contract_values:
-                        root_contract_values = respostas.get('contratos_para_monitoria')
-                        if isinstance(root_contract_values, (list, tuple)):
-                            contract_values = root_contract_values
-                    parsed_ids = set()
-                    parsed_numbers = set()
-                    for raw_contract in contract_values or []:
-                        extracted_ids, extracted_numbers = _extract_contract_refs(raw_contract)
-                        parsed_ids.update(extracted_ids)
-                        parsed_numbers.update(extracted_numbers)
-                    if not parsed_ids and not parsed_numbers and analise.processo_judicial_id:
-                        fallback_contracts = list(
-                            analise.processo_judicial.contratos.all().only('id', 'numero_contrato')
-                        )
-                        for contract in fallback_contracts:
-                            parsed_ids.add(contract.id)
-                            parsed_numbers.update(_build_contract_lookup_keys(contract.numero_contrato))
-                    if not parsed_ids and not parsed_numbers:
+                    valid_contracts = _resolve_supervision_card_contracts(analise, card, respostas=respostas)
+                    if not valid_contracts:
                         continue
                     card_key_id = f"{analise.pk}-{source}-{idx}"
                     identity_key = (analise.pk, idx)
                     candidate = {
                         'analise': analise,
                         'card': card,
-                        'contract_ids': parsed_ids,
-                        'contract_numbers': parsed_numbers,
+                        'contract_ids': {contract.pk for contract in valid_contracts},
+                        'contract_numbers': {
+                            lookup_key
+                            for contract in valid_contracts
+                            for lookup_key in _build_contract_lookup_keys(contract.numero_contrato)
+                        },
                         'source': source,
                         'index': idx,
                         'status': status,
