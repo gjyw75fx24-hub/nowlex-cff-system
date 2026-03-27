@@ -29,6 +29,7 @@ SUPERVISION_BATCH_SIZE_PER_TYPE = 5
 SLACK_API_TIMEOUT = 30
 SLACK_API_RETRY_ATTEMPTS = 3
 SLACK_HISTORY_FETCH_LIMIT = 200
+LEGACY_PENDING_STATUS_KEYS = {'enviado', 'sent'}
 
 
 def _describe_slack_api_error(method, error_code):
@@ -175,6 +176,18 @@ def _supervisor_accepts_entry(config, entry):
 
 def _entry_status_key(entry):
     return str(entry.get('supervisor_status') or '').strip().lower()
+
+
+def _normalize_delivery_status_key(raw_status, *, fallback=''):
+    normalized_status = str(raw_status or '').strip().lower()
+    if normalized_status in SUPERVISION_PENDING_STATUSES or normalized_status in SUPERVISION_FINAL_STATUSES:
+        return normalized_status
+    if normalized_status in LEGACY_PENDING_STATUS_KEYS:
+        return 'pendente'
+    fallback_status = str(fallback or '').strip().lower()
+    if fallback_status in SUPERVISION_PENDING_STATUSES or fallback_status in SUPERVISION_FINAL_STATUSES:
+        return fallback_status
+    return normalized_status
 
 
 def _entry_is_pending(entry):
@@ -779,16 +792,11 @@ def _save_delivery(delivery, update_fields):
         if str(field_name or '').strip()
     }
     if not getattr(delivery, 'pk', None):
-        try:
-            delivery.save()
-            return
-        except BaseException as exc:
-            logger.exception(
-                'Falha ao salvar nova entrega Slack delivery_id=%s.',
-                getattr(delivery, 'pk', None),
-                exc_info=exc,
-            )
-            raise RuntimeError('Falha ao salvar entrega Slack.') from exc
+        persisted_delivery = _insert_delivery(delivery)
+        for attr_name in ('pk', 'created_at', 'updated_at'):
+            if hasattr(persisted_delivery, attr_name):
+                setattr(delivery, attr_name, getattr(persisted_delivery, attr_name, None))
+        return
 
     current_timestamp = timezone.now()
     update_map = {
@@ -826,6 +834,46 @@ def _save_delivery(delivery, update_fields):
             exc_info=exc,
         )
         raise RuntimeError('Falha ao salvar entrega Slack.') from exc
+
+
+def _insert_delivery(delivery):
+    current_timestamp = timezone.now()
+    if not getattr(delivery, 'created_at', None):
+        delivery.created_at = current_timestamp
+    if not getattr(delivery, 'updated_at', None):
+        delivery.updated_at = current_timestamp
+    filters = {
+        'analise_id': getattr(delivery, 'analise_id', None),
+        'supervisor_id': getattr(delivery, 'supervisor_id', None),
+        'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
+        'card_index': int(getattr(delivery, 'card_index', 0) or 0),
+    }
+    try:
+        created_items = SupervisaoSlackEntrega.objects.bulk_create([delivery])
+        persisted_delivery = created_items[0] if created_items else delivery
+        if getattr(persisted_delivery, 'pk', None):
+            return persisted_delivery
+        existing_delivery = SupervisaoSlackEntrega.objects.filter(**filters).order_by('-pk').first()
+        if existing_delivery:
+            return existing_delivery
+        raise RuntimeError('Entrega Slack criada sem retorno de identificador.')
+    except BaseException as exc:
+        existing_delivery = None
+        try:
+            existing_delivery = SupervisaoSlackEntrega.objects.filter(**filters).order_by('-pk').first()
+        except Exception:
+            existing_delivery = None
+        if existing_delivery:
+            return existing_delivery
+        logger.exception(
+            'Falha ao criar entrega Slack supervisor=%s analise=%s source=%s index=%s.',
+            filters['supervisor_id'],
+            filters['analise_id'],
+            filters['card_source'],
+            filters['card_index'],
+            exc_info=exc,
+        )
+        raise RuntimeError('Falha ao criar entrega Slack.') from exc
 
 
 def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_post=True):
@@ -934,10 +982,11 @@ def _build_supervisor_delivery_context(supervisor, config):
             continue
         delivery = deliveries.get(key)
         analise = analyses.get(int(entry.get('analise_id') or 0))
+        entry_status_key = _normalize_delivery_status_key(_entry_status_key(entry), fallback='pendente')
         if delivery is None:
             if not analise:
                 continue
-            delivery = SupervisaoSlackEntrega.objects.create(
+            delivery = _insert_delivery(SupervisaoSlackEntrega(
                 analise=analise,
                 processo=analise.processo_judicial,
                 supervisor=supervisor,
@@ -945,11 +994,13 @@ def _build_supervisor_delivery_context(supervisor, config):
                 card_source=str(entry.get('card_source') or ''),
                 card_index=int(entry.get('card_index') or 0),
                 slack_user_id=config.slack_user_id,
-            )
+                last_status=entry_status_key,
+            ))
             deliveries[key] = delivery
             continue
 
         update_fields = []
+        has_message = _has_slack_message(delivery)
         new_card_id = str(entry.get('cardId') or delivery.card_id or '')
         if delivery.card_id != new_card_id:
             delivery.card_id = new_card_id
@@ -960,6 +1011,9 @@ def _build_supervisor_delivery_context(supervisor, config):
         if analise and delivery.processo_id != getattr(analise, 'processo_judicial_id', None):
             delivery.processo = analise.processo_judicial
             update_fields.append('processo')
+        if not has_message and delivery.last_status != entry_status_key:
+            delivery.last_status = entry_status_key
+            update_fields.append('last_status')
         if update_fields:
             update_fields.append('updated_at')
             _save_delivery(delivery, update_fields=update_fields)

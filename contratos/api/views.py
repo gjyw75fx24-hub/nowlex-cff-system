@@ -97,6 +97,7 @@ SUPERVISION_STATUS_LABELS = {
     'aprovado': 'Aprovado',
     'reprovado': 'Reprovado',
 }
+LEGACY_PENDING_STATUS_KEYS = {'enviado', 'sent'}
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,17 @@ def _safe_delivery_int(value, default=0):
         return default
 
 
+def _normalize_delivery_status_key(raw_status, *, has_message=False):
+    normalized_status = str(raw_status or '').strip().lower()
+    if normalized_status in SUPERVISION_STATUS_SEQUENCE:
+        return normalized_status
+    if normalized_status in LEGACY_PENDING_STATUS_KEYS:
+        return 'pendente'
+    if not normalized_status and not has_message:
+        return 'pendente'
+    return normalized_status
+
+
 def _build_slack_delivery_analysis_type(delivery):
     source = str(getattr(delivery, 'card_source', '') or '').strip()
     if source == 'saved_processos_vinculados':
@@ -509,7 +521,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
         updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
         has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
-        status_key = str(delivery.last_status or '').strip().lower()
+        status_key = _normalize_delivery_status_key(getattr(delivery, 'last_status', ''), has_message=has_message)
         is_pending = status_key in {'pendente', 'pre_aprovado'}
         is_responded = status_key in {'aprovado', 'reprovado'}
         dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
@@ -532,7 +544,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'cnj_label': _build_slack_delivery_card_label(delivery),
             'analysis_type_name': analysis_type_name,
             'analysis_type_slug': analysis_type_slug,
-            'last_status': str(delivery.last_status or '').strip(),
+            'last_status': status_key,
             'status_key': status_key,
             'is_pending': is_pending,
             'is_responded': is_responded,
@@ -549,8 +561,8 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         }
     except BaseException as exc:
         logger.warning('Falha fatal ao serializar entrega Slack id=%s: %s', getattr(delivery, 'pk', None), exc)
-        status_key = str(getattr(delivery, 'last_status', '') or '').strip().lower()
         has_message = bool(str(getattr(delivery, 'slack_channel_id', '') or '').strip() and str(getattr(delivery, 'slack_message_ts', '') or '').strip())
+        status_key = _normalize_delivery_status_key(getattr(delivery, 'last_status', ''), has_message=has_message)
         is_pending = status_key in {'pendente', 'pre_aprovado'}
         is_responded = status_key in {'aprovado', 'reprovado'}
         return {
@@ -568,7 +580,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'cnj_label': str(getattr(delivery, 'card_id', '') or '').strip() or 'Card',
             'analysis_type_name': 'Análise',
             'analysis_type_slug': '',
-            'last_status': str(getattr(delivery, 'last_status', '') or '').strip(),
+            'last_status': status_key,
             'status_key': status_key,
             'is_pending': is_pending,
             'is_responded': is_responded,
@@ -719,8 +731,8 @@ def _extract_remote_supervision_message_payload(remote_item):
 
 def _build_slack_delivery_summary(results):
     sent_count = sum(1 for item in results if item.get('has_message'))
-    responded_count = sum(1 for item in results if item.get('has_message') and item.get('is_responded'))
-    pending_count = sum(1 for item in results if item.get('has_message') and item.get('is_pending'))
+    responded_count = sum(1 for item in results if item.get('is_responded'))
+    pending_count = sum(1 for item in results if item.get('is_pending'))
     queued_count = sum(1 for item in results if item.get('dispatch_state') == 'queued')
     return {
         'sent_count': sent_count,

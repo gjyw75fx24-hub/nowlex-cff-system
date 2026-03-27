@@ -9,6 +9,8 @@ from contratos.api.views import (
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
     SlackSupervisionDeliveryRefreshAPIView,
+    _build_slack_delivery_entry_payload,
+    _build_slack_delivery_summary,
     _build_remote_slack_delivery_key,
     _parse_remote_slack_delivery_key,
     _resolve_supervision_card_contracts,
@@ -67,6 +69,32 @@ class ResolveSupervisionCardContractsTests(SimpleTestCase):
 
 
 class SaveDeliveryTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
+    def test_inserts_new_delivery_without_calling_model_save(self, mocked_bulk_create):
+        mocked_bulk_create.return_value = [SimpleNamespace(pk=321, created_at=None, updated_at=None)]
+        delivery = SimpleNamespace(
+            pk=None,
+            analise_id=7,
+            supervisor_id=5,
+            card_source='saved_processos_vinculados',
+            card_index=1,
+            slack_channel_id='',
+            slack_message_ts='',
+            slack_thread_ts='',
+            notified_at=None,
+            resolved_at=None,
+            message_hash='',
+            last_status='pendente',
+            card_id='card-1',
+            slack_user_id='U1',
+            processo_id=9,
+        )
+
+        _save_delivery(delivery, update_fields=['last_status'])
+
+        mocked_bulk_create.assert_called_once()
+        self.assertEqual(delivery.pk, 321)
+
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
     def test_updates_existing_delivery_without_calling_model_save(self, mocked_filter):
         mocked_filter.return_value.update.return_value = 1
@@ -148,6 +176,41 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(SlackSupervisionDeliveryListAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
+
+
+class SlackDeliveryPayloadTests(SimpleTestCase):
+    def test_normalizes_legacy_sent_status_without_message_into_pending_queue(self):
+        supervisor = SimpleNamespace(
+            pk=5,
+            username='maicon',
+            get_full_name=lambda: 'Maicon Bispo',
+        )
+        delivery = SimpleNamespace(
+            pk=1,
+            analise_id=77,
+            processo_id=44,
+            processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
+            supervisor=supervisor,
+            card_id='card-1',
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            last_status='enviado',
+            notified_at=None,
+            updated_at=None,
+            slack_channel_id='',
+            slack_message_ts='',
+            parte_nome_display='LAFAYETE',
+        )
+
+        payload = _build_slack_delivery_entry_payload(delivery, supervisor)
+        summary = _build_slack_delivery_summary([payload])
+
+        self.assertEqual(payload['status_key'], 'pendente')
+        self.assertEqual(payload['last_status'], 'pendente')
+        self.assertEqual(payload['dispatch_state'], 'queued')
+        self.assertEqual(summary['sent_count'], 0)
+        self.assertEqual(summary['pending_count'], 1)
+        self.assertEqual(summary['queued_count'], 1)
 
 
 class SlackRemoteDeliveryKeyTests(SimpleTestCase):
