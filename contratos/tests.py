@@ -33,6 +33,7 @@ from contratos.services.slack_supervisao import (
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
+    sync_supervision_slack_for_supervisor,
 )
 
 
@@ -572,6 +573,32 @@ class SlackDeliveryReconcileTests(SimpleTestCase):
         self.assertEqual(mocked_builder.call_count, 2)
         mocked_builder.assert_any_call(config_a.user, config_a, include_completed=False)
         mocked_builder.assert_any_call(config_b.user, config_b, include_completed=False)
+
+
+class SlackSupervisorRefreshTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
+    @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
+    def test_refresh_builds_pending_only_context_before_sending(
+        self,
+        mocked_config_objects,
+        mocked_builder,
+        mocked_delivery_objects,
+    ):
+        supervisor = SimpleNamespace(
+            pk=2,
+            username='Maicon.Bispo',
+            get_full_name=lambda: 'Maicon Bispo',
+        )
+        config = SimpleNamespace(user=supervisor, user_id=2)
+        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value.first.return_value = config
+        mocked_builder.return_value = ([], {}, {})
+        mocked_delivery_objects.filter.return_value.exclude.return_value.exclude.return_value.exclude.return_value.select_related.return_value = []
+
+        result = sync_supervision_slack_for_supervisor(2)
+
+        self.assertEqual(result['errors'], [])
+        mocked_builder.assert_called_once_with(supervisor, config, include_completed=False)
 
 
 class SlackAnalysisGroupingTests(SimpleTestCase):

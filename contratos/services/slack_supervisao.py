@@ -1488,7 +1488,11 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     queued_count = 0
     type_summaries = []
     try:
-        accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+        accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(
+            supervisor,
+            config,
+            include_completed=False,
+        )
     except BaseException as exc:
         errors.append({
             'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
@@ -1511,11 +1515,22 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
             str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
         )
 
-    for entry in accepted_entries:
-        if not _entry_is_final(entry):
-            continue
-        delivery = deliveries.get(_build_entry_key(entry))
-        if not delivery:
+    active_final_deliveries = (
+        SupervisaoSlackEntrega.objects
+        .filter(supervisor=supervisor)
+        .exclude(slack_channel_id='')
+        .exclude(slack_message_ts='')
+        .exclude(last_status__in=sorted(SUPERVISION_PENDING_STATUSES))
+        .select_related('analise', 'processo')
+    )
+    for delivery in active_final_deliveries:
+        entry = get_supervision_entry_for_card(
+            supervisor=supervisor,
+            analise_id=delivery.analise_id,
+            source=delivery.card_source,
+            index=delivery.card_index,
+        )
+        if not entry or not _entry_is_final(entry):
             continue
         try:
             result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=False)
