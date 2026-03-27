@@ -3038,6 +3038,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             let hasRemoteLoadWarnings = false;
             let orphanReplyKeys = [];
             let highlightOrphanReplies = false;
+            let reconcileRetryTimer = null;
+            let reconcileRetryAttempts = 0;
+            const maxReconcileRetryAttempts = 4;
 
             const isOrphanThreadReply = (delivery) => (
                 Boolean(delivery?.is_remote_orphan) && String(delivery?.message_kind || '').trim() === 'thread_reply_orphan'
@@ -3197,8 +3200,44 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             const closeDialog = () => {
+                if (reconcileRetryTimer) {
+                    window.clearTimeout(reconcileRetryTimer);
+                    reconcileRetryTimer = null;
+                }
                 document.removeEventListener('keydown', handleKeydown);
                 overlay.remove();
+            };
+
+            const clearReconcileRetryState = () => {
+                if (reconcileRetryTimer) {
+                    window.clearTimeout(reconcileRetryTimer);
+                    reconcileRetryTimer = null;
+                }
+                reconcileRetryAttempts = 0;
+            };
+
+            const scheduleReconcileRetry = (contextLabel = 'fila') => {
+                if (reconcileRetryTimer || reconcileRetryAttempts >= maxReconcileRetryAttempts) {
+                    return;
+                }
+                reconcileRetryAttempts += 1;
+                reconcileRetryTimer = window.setTimeout(() => {
+                    reconcileRetryTimer = null;
+                    fetchSlackSupervisionDeliveries({ reconcile: true })
+                        .done((response) => {
+                            highlightOrphanReplies = false;
+                            applyDeliveriesResponse(response);
+                            if (hasRemoteLoadWarnings) {
+                                scheduleReconcileRetry(contextLabel);
+                                return;
+                            }
+                            setFeedback(`${contextLabel} reconciliada automaticamente.`, 'success');
+                            clearReconcileRetryState();
+                        })
+                        .fail(() => {
+                            scheduleReconcileRetry(contextLabel);
+                        });
+                }, 3000);
             };
 
             const applyDeliveriesResponse = (response) => {
@@ -3240,8 +3279,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const loadDeliveries = (options = {}) => {
                 const shouldReconcile = !(options && options.reconcile === false);
+                const retryContextLabel = String(options?.retryContextLabel || 'Fila').trim() || 'Fila';
                 setBusy(true);
                 setFeedback('');
+                if (shouldReconcile) {
+                    clearReconcileRetryState();
+                }
                 const finalizeLoad = () => {
                     resetToolbarLoadingState();
                     setBusy(false);
@@ -3252,8 +3295,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         .done((response) => {
                             applyDeliveriesResponse(response);
                             if (!hasRemoteLoadWarnings) {
-                                setFeedback('Mensagens carregadas sem reconciliar toda a fila.', 'warning');
+                                setFeedback('Mensagens carregadas sem reconciliar toda a fila. Tentando concluir em segundo plano.', 'warning');
                             }
+                            scheduleReconcileRetry(retryContextLabel);
                         })
                         .fail((xhr) => {
                             applyDeliveriesLoadError(xhr);
@@ -3264,6 +3308,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     .done((response) => {
                         highlightOrphanReplies = false;
                         applyDeliveriesResponse(response);
+                        if (shouldReconcile && hasRemoteLoadWarnings) {
+                            scheduleReconcileRetry(retryContextLabel);
+                        } else if (shouldReconcile) {
+                            clearReconcileRetryState();
+                        }
                     })
                     .fail((xhr) => {
                         if (shouldReconcile) {
@@ -3457,7 +3506,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         } else {
                             setFeedback(`Foram apagadas ${deletedCount} mensagem(ns) Slack.`, 'success');
                         }
-                        loadDeliveries();
+                        loadDeliveries({ retryContextLabel: 'Fila de mensagens' });
                     })
                     .fail((xhr) => {
                         const message = xhr?.responseJSON?.detail || 'Falha ao apagar mensagens Slack.';
