@@ -3246,6 +3246,36 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             const runRefresh = () => {
+                const previousSummary = {
+                    sent_count: Number(summaryData?.sent_count || 0),
+                    responded_count: Number(summaryData?.responded_count || 0),
+                    pending_count: Number(summaryData?.pending_count || 0),
+                    queued_count: Number(summaryData?.queued_count || 0)
+                };
+                const previousDeliveryCount = Array.isArray(deliveries) ? deliveries.length : 0;
+                const summaryHasChanged = () => (
+                    Number(summaryData?.sent_count || 0) !== previousSummary.sent_count
+                    || Number(summaryData?.responded_count || 0) !== previousSummary.responded_count
+                    || Number(summaryData?.pending_count || 0) !== previousSummary.pending_count
+                    || Number(summaryData?.queued_count || 0) !== previousSummary.queued_count
+                    || (Array.isArray(deliveries) ? deliveries.length : 0) !== previousDeliveryCount
+                );
+                const scheduleReloadAfterFailure = (attempt = 1) => {
+                    window.setTimeout(() => {
+                        loadDeliveries({ reconcile: false })
+                            .always(() => {
+                                if (summaryHasChanged()) {
+                                    setFeedback('Atualização concluída com atraso. Os contadores foram atualizados.', 'warning');
+                                    return;
+                                }
+                                if (attempt >= 6) {
+                                    setFeedback('A atualização pode ainda estar em processamento. Reabra o modal em alguns instantes.', 'warning');
+                                    return;
+                                }
+                                scheduleReloadAfterFailure(attempt + 1);
+                            });
+                    }, 4000);
+                };
                 setBusy(true);
                 setActionLoadingState(refreshBtn, true, 'Atualizando...');
                 setFeedback('');
@@ -3274,11 +3304,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         loadDeliveries();
                     })
                     .fail((xhr) => {
-                        const message = xhr?.responseJSON?.detail || 'Falha ao atualizar mensagens Slack.';
-                        setFeedback(message, 'error');
+                        const message = xhr?.responseJSON?.detail || 'A atualização pode ainda estar em processamento. Vamos recarregar a lista automaticamente.';
+                        setFeedback(message, 'warning');
                         setActionLoadingState(refreshBtn, false);
                         setBusy(false);
                         refreshActionState();
+                        scheduleReloadAfterFailure();
                     });
             };
 
