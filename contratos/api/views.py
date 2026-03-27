@@ -1885,6 +1885,7 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
 
         deliveries_qs = SupervisaoSlackEntrega.objects.order_by('-updated_at', '-created_at', '-id')
         remote_refs = []
+        remote_errors = []
 
         if mode == 'last':
             deliveries = list(deliveries_qs[:1])
@@ -1906,7 +1907,7 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
                 if str(getattr(delivery, 'slack_channel_id', '') or '').strip()
                 and str(getattr(delivery, 'slack_message_ts', '') or '').strip()
             }
-            remote_messages, _remote_errors = fetch_remote_supervision_slack_messages(configs, existing_refs=existing_refs)
+            remote_messages, remote_errors = fetch_remote_supervision_slack_messages(configs, existing_refs=existing_refs)
             remote_refs = [
                 {
                     'slack_channel_id': str(item.get('slack_channel_id') or '').strip(),
@@ -1929,9 +1930,26 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
             deliveries = list(deliveries_qs.filter(pk__in=delivery_ids))
 
         if not deliveries and not remote_refs:
+            if remote_errors:
+                remote_detail = ' | '.join(
+                    str(item.get('error') or '').strip()
+                    for item in remote_errors
+                    if str(item.get('error') or '').strip()
+                )
+                return Response({
+                    'detail': (
+                        'Nao foi possivel listar as mensagens remotas ja enviadas no Slack para apaga-las. '
+                        f'{remote_detail}'
+                    ).strip(),
+                }, status=status.HTTP_409_CONFLICT)
             return Response({'detail': 'Nenhuma entrega Slack encontrada para apagar.'}, status=status.HTTP_400_BAD_REQUEST)
 
         result = delete_supervision_slack_deliveries(deliveries, remote_refs=remote_refs)
+        if remote_errors:
+            result.setdefault('errors', []).extend({
+                'delivery_id': None,
+                'error': str(item.get('error') or '').strip() or 'Falha ao listar mensagens remotas do Slack.',
+            } for item in remote_errors)
         return Response(result)
 
 

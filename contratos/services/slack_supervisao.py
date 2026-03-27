@@ -31,6 +31,20 @@ SLACK_API_RETRY_ATTEMPTS = 3
 SLACK_HISTORY_FETCH_LIMIT = 200
 
 
+def _describe_slack_api_error(method, error_code):
+    normalized_method = str(method or '').strip()
+    normalized_error = str(error_code or '').strip()
+    if normalized_error != 'missing_scope':
+        return normalized_error or 'erro_desconhecido'
+    if normalized_method == 'conversations.history':
+        return 'missing_scope: o app do Slack precisa do escopo im:history para ler DMs ja enviadas; reinstale o app apos adicionar o escopo'
+    if normalized_method == 'conversations.open':
+        return 'missing_scope: o app do Slack precisa do escopo im:write para abrir DMs; reinstale o app apos adicionar o escopo'
+    if normalized_method == 'chat.delete':
+        return 'missing_scope: o app do Slack precisa do escopo chat:write para apagar mensagens'
+    return 'missing_scope: o app do Slack precisa de permissao adicional; reinstale o app apos ajustar os escopos'
+
+
 def _slack_bot_token():
     return str(getattr(settings, 'SLACK_BOT_TOKEN', '') or '').strip()
 
@@ -568,7 +582,7 @@ def _slack_api_post(method, *, token=None, json_payload=None, data_payload=None)
     if payload is None:
         raise RuntimeError(f'Falha ao comunicar com o Slack ({method}).') from last_exc
     if not payload.get('ok'):
-        raise ValueError(str(payload.get('error') or 'erro_desconhecido'))
+        raise ValueError(_describe_slack_api_error(method, payload.get('error')))
     return payload
 
 

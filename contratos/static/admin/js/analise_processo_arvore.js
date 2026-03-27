@@ -3019,6 +3019,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 queued_count: 0
             };
             let isBusy = false;
+            let emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+            let hasRemoteLoadWarnings = false;
 
             const setBusy = (busy) => {
                 isBusy = busy;
@@ -3073,8 +3075,16 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const selectedCount = getSelectedIds().length;
                 deleteSelectedBtn.disabled = isBusy || selectedCount === 0;
                 deleteLastBtn.disabled = isBusy || deliveries.length === 0;
-                deleteAllBtn.disabled = isBusy || deliveries.length === 0;
+                deleteAllBtn.disabled = isBusy || (deliveries.length === 0 && !hasRemoteLoadWarnings);
             };
+
+            const collectDeliveryErrorMessages = (items) => (
+                Array.from(new Set(
+                    (Array.isArray(items) ? items : [])
+                        .map((item) => String(item?.error || '').trim())
+                        .filter(Boolean)
+                ))
+            );
 
             const renderSummary = () => {
                 const cards = [
@@ -3102,7 +3112,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if (!deliveries.length) {
                     const empty = document.createElement('div');
                     empty.className = 'analise-slack-deliveries-empty';
-                    empty.textContent = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+                    empty.textContent = emptyListMessage;
                     list.appendChild(empty);
                     refreshActionState();
                     return;
@@ -3161,16 +3171,20 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 setFeedback('');
                 return fetchSlackSupervisionDeliveries()
                     .done((response) => {
-                        const responseErrors = Array.isArray(response?.errors) ? response.errors : [];
+                        const responseErrors = collectDeliveryErrorMessages(response?.errors);
                         deliveries = Array.isArray(response?.results) ? response.results : [];
                         summaryData = response?.summary && typeof response.summary === 'object'
                             ? response.summary
                             : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                        hasRemoteLoadWarnings = responseErrors.length > 0;
+                        emptyListMessage = hasRemoteLoadWarnings && !deliveries.length
+                            ? `Nao foi possivel listar as mensagens ja enviadas no Slack. ${responseErrors.join(' | ')}`
+                            : 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
                         renderSummary();
                         renderList();
-                        if (responseErrors.length) {
+                        if (hasRemoteLoadWarnings) {
                             setFeedback(
-                                `Mensagens carregadas com avisos: ${responseErrors.map(item => item.error || 'erro').join(' | ')}`,
+                                `Mensagens carregadas com avisos: ${responseErrors.join(' | ')}`,
                                 'warning'
                             );
                         }
@@ -3183,6 +3197,8 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                             || 'Falha ao carregar mensagens Slack.';
                         deliveries = [];
                         summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                        hasRemoteLoadWarnings = false;
+                        emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
                         renderSummary();
                         renderList();
                         setFeedback(message, 'error');

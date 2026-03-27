@@ -131,6 +131,17 @@ class SlackApiPostTests(SimpleTestCase):
         self.assertEqual(mocked_post.call_count, 2)
         mocked_sleep.assert_called_once()
 
+    @patch('contratos.services.slack_supervisao.requests.post')
+    def test_formats_missing_scope_for_history_calls(self, mocked_post):
+        response = Mock()
+        response.json.return_value = {'ok': False, 'error': 'missing_scope'}
+        mocked_post.return_value = response
+
+        with self.assertRaises(ValueError) as ctx:
+            _slack_api_post('conversations.history', token='xoxb-test', data_payload={'channel': 'D1'})
+
+        self.assertIn('im:history', str(ctx.exception))
+
 
 class SlackDeliveryViewRendererTests(SimpleTestCase):
     def test_slack_delivery_views_render_only_json(self):
