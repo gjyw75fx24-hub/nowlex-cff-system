@@ -82,7 +82,6 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 from ..services.slack_supervisao import (
-    _collect_supervision_entries_for_supervisor,
     delete_supervision_slack_deliveries,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
@@ -479,104 +478,50 @@ def _safe_delivery_int(value, default=0):
         return default
 
 
-def _build_slack_delivery_entry_lookup(deliveries, request_user):
-    lookup = {}
-    deliveries_by_supervisor = {}
-
-    for delivery in deliveries or []:
-        supervisor = getattr(delivery, 'supervisor', None) or request_user
-        if not supervisor:
-            continue
-        supervisor_key = getattr(supervisor, 'pk', None) or getattr(supervisor, 'username', None)
-        if not supervisor_key:
-            continue
-        deliveries_by_supervisor.setdefault(supervisor_key, supervisor)
-
-    for supervisor_key, supervisor in deliveries_by_supervisor.items():
-        try:
-            entries = _collect_supervision_entries_for_supervisor(supervisor) or []
-        except BaseException as exc:
-            logger.warning(
-                'Falha ao pré-carregar entradas de supervisao para entregas Slack supervisor=%s: %s',
-                getattr(supervisor, 'pk', None),
-                exc,
-            )
-            continue
-
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            entry_key = (
-                supervisor_key,
-                _safe_delivery_int(entry.get('analise_id'), default=None),
-                str(entry.get('card_source') or '').strip(),
-                _safe_delivery_int(entry.get('card_index')),
-            )
-            lookup[entry_key] = entry
-
-    return lookup
+def _build_slack_delivery_analysis_type(delivery):
+    source = str(getattr(delivery, 'card_source', '') or '').strip()
+    if source == 'saved_processos_vinculados':
+        return 'Análise salva', 'saved'
+    if source == 'processos_vinculados':
+        return 'Análise vinculada', 'linked'
+    return 'Análise', source.lower()
 
 
-def _build_slack_delivery_entry_payload(delivery, request_user, entry_lookup=None):
+def _build_slack_delivery_card_label(delivery):
+    processo_label = _safe_processo_label(delivery)
+    if processo_label:
+        return processo_label
+    source = str(getattr(delivery, 'card_source', '') or '').strip()
+    index = _safe_delivery_int(getattr(delivery, 'card_index', 0))
+    return f'Card {source}:{index}'
+
+
+def _build_slack_delivery_entry_payload(delivery, request_user):
     try:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
-        supervisor_key = getattr(supervisor, 'pk', None) or getattr(supervisor, 'username', None)
-        delivery_lookup_key = (
-            supervisor_key,
-            _safe_delivery_int(getattr(delivery, 'analise_id', None), default=None),
-            str(getattr(delivery, 'card_source', '') or '').strip(),
-            _safe_delivery_int(getattr(delivery, 'card_index', 0)),
-        )
-        entry = {}
-        if entry_lookup is not None:
-            entry = entry_lookup.get(delivery_lookup_key) or {}
-        if not entry:
-            try:
-                entry = get_supervision_entry_for_card(
-                    supervisor=supervisor,
-                    analise_id=delivery.analise_id,
-                    source=delivery.card_source,
-                    index=delivery.card_index,
-                )
-            except BaseException as exc:
-                logger.warning(
-                    'Falha ao montar payload de entrega Slack id=%s supervisor=%s: %s',
-                    delivery.pk,
-                    getattr(supervisor, 'pk', None),
-                    exc,
-                )
-                entry = {}
-        entry = entry if isinstance(entry, dict) else {}
-        cnj_label = str(entry.get('cnj_label') or '').strip()
-        if not cnj_label:
-            cnj_label = str(delivery.card_id or '').strip() or f'Card {delivery.card_source}:{delivery.card_index}'
-        analysis_type_name = str(
-            entry.get('analysis_type_nome')
-            or entry.get('analysis_type_short')
-            or ''
-        ).strip() or 'Análise'
-        analysis_type_slug = str(entry.get('analysis_type_slug') or '').strip().lower()
+        analysis_type_name, analysis_type_slug = _build_slack_delivery_analysis_type(delivery)
         notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
         updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
         has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
-        status_key = str(delivery.last_status or entry.get('supervisor_status') or '').strip().lower()
+        status_key = str(delivery.last_status or '').strip().lower()
         is_pending = status_key in {'pendente', 'pre_aprovado'}
         is_responded = status_key in {'aprovado', 'reprovado'}
         dispatch_state = 'sent' if has_message else ('queued' if is_pending else 'unsent')
         supervisor_name = ''
         if supervisor:
             supervisor_name = str(supervisor.get_full_name() or '').strip() or str(supervisor.username or '').strip()
+        processo_label = _safe_processo_label(delivery)
         return {
             'id': delivery.pk,
             'analise_id': delivery.analise_id,
             'processo_id': delivery.processo_id,
-            'processo_label': _safe_processo_label(delivery),
+            'processo_label': processo_label,
             'supervisor_id': getattr(supervisor, 'pk', None),
             'supervisor_name': supervisor_name,
             'card_id': str(delivery.card_id or '').strip(),
             'card_source': str(delivery.card_source or '').strip(),
             'card_index': _safe_delivery_int(delivery.card_index),
-            'cnj_label': cnj_label,
+            'cnj_label': _build_slack_delivery_card_label(delivery),
             'analysis_type_name': analysis_type_name,
             'analysis_type_slug': analysis_type_slug,
             'last_status': str(delivery.last_status or '').strip(),
@@ -584,7 +529,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user, entry_lookup=Non
             'is_pending': is_pending,
             'is_responded': is_responded,
             'dispatch_state': dispatch_state,
-            'agenda_date': str(entry.get('date') or '').strip(),
+            'agenda_date': '',
             'notified_at': notified_at.isoformat() if notified_at else '',
             'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
             'updated_at': updated_at.isoformat() if updated_at else '',
@@ -1759,11 +1704,28 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             deliveries = list(
                 SupervisaoSlackEntrega.objects
                 .select_related('processo', 'supervisor')
+                .only(
+                    'id',
+                    'analise_id',
+                    'processo_id',
+                    'processo__cnj',
+                    'supervisor_id',
+                    'supervisor__first_name',
+                    'supervisor__last_name',
+                    'supervisor__username',
+                    'card_id',
+                    'card_source',
+                    'card_index',
+                    'slack_channel_id',
+                    'slack_message_ts',
+                    'last_status',
+                    'notified_at',
+                    'updated_at',
+                )
                 .order_by('-updated_at', '-created_at', '-id')
             )
-            entry_lookup = _build_slack_delivery_entry_lookup(deliveries, request.user)
             results = [
-                _build_slack_delivery_entry_payload(delivery, request.user, entry_lookup=entry_lookup)
+                _build_slack_delivery_entry_payload(delivery, request.user)
                 for delivery in deliveries
             ]
             _annotate_slack_delivery_queue(results)
