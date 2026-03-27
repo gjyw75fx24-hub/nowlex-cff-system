@@ -82,6 +82,7 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 from ..services.slack_supervisao import (
+    _collect_supervision_entries_for_supervisor,
     delete_supervision_slack_deliveries,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
@@ -478,24 +479,73 @@ def _safe_delivery_int(value, default=0):
         return default
 
 
-def _build_slack_delivery_entry_payload(delivery, request_user):
-    try:
+def _build_slack_delivery_entry_lookup(deliveries, request_user):
+    lookup = {}
+    deliveries_by_supervisor = {}
+
+    for delivery in deliveries or []:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
+        if not supervisor:
+            continue
+        supervisor_key = getattr(supervisor, 'pk', None) or getattr(supervisor, 'username', None)
+        if not supervisor_key:
+            continue
+        deliveries_by_supervisor.setdefault(supervisor_key, supervisor)
+
+    for supervisor_key, supervisor in deliveries_by_supervisor.items():
         try:
-            entry = get_supervision_entry_for_card(
-                supervisor=supervisor,
-                analise_id=delivery.analise_id,
-                source=delivery.card_source,
-                index=delivery.card_index,
-            )
+            entries = _collect_supervision_entries_for_supervisor(supervisor) or []
         except BaseException as exc:
             logger.warning(
-                'Falha ao montar payload de entrega Slack id=%s supervisor=%s: %s',
-                delivery.pk,
+                'Falha ao pré-carregar entradas de supervisao para entregas Slack supervisor=%s: %s',
                 getattr(supervisor, 'pk', None),
                 exc,
             )
-            entry = {}
+            continue
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_key = (
+                supervisor_key,
+                _safe_delivery_int(entry.get('analise_id'), default=None),
+                str(entry.get('card_source') or '').strip(),
+                _safe_delivery_int(entry.get('card_index')),
+            )
+            lookup[entry_key] = entry
+
+    return lookup
+
+
+def _build_slack_delivery_entry_payload(delivery, request_user, entry_lookup=None):
+    try:
+        supervisor = getattr(delivery, 'supervisor', None) or request_user
+        supervisor_key = getattr(supervisor, 'pk', None) or getattr(supervisor, 'username', None)
+        delivery_lookup_key = (
+            supervisor_key,
+            _safe_delivery_int(getattr(delivery, 'analise_id', None), default=None),
+            str(getattr(delivery, 'card_source', '') or '').strip(),
+            _safe_delivery_int(getattr(delivery, 'card_index', 0)),
+        )
+        entry = {}
+        if entry_lookup is not None:
+            entry = entry_lookup.get(delivery_lookup_key) or {}
+        if not entry:
+            try:
+                entry = get_supervision_entry_for_card(
+                    supervisor=supervisor,
+                    analise_id=delivery.analise_id,
+                    source=delivery.card_source,
+                    index=delivery.card_index,
+                )
+            except BaseException as exc:
+                logger.warning(
+                    'Falha ao montar payload de entrega Slack id=%s supervisor=%s: %s',
+                    delivery.pk,
+                    getattr(supervisor, 'pk', None),
+                    exc,
+                )
+                entry = {}
         entry = entry if isinstance(entry, dict) else {}
         cnj_label = str(entry.get('cnj_label') or '').strip()
         if not cnj_label:
@@ -1706,13 +1756,14 @@ class SlackSupervisionDeliveryListAPIView(APIView):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
         try:
-            deliveries = (
+            deliveries = list(
                 SupervisaoSlackEntrega.objects
                 .select_related('processo', 'supervisor')
                 .order_by('-updated_at', '-created_at', '-id')
             )
+            entry_lookup = _build_slack_delivery_entry_lookup(deliveries, request.user)
             results = [
-                _build_slack_delivery_entry_payload(delivery, request.user)
+                _build_slack_delivery_entry_payload(delivery, request.user, entry_lookup=entry_lookup)
                 for delivery in deliveries
             ]
             _annotate_slack_delivery_queue(results)
