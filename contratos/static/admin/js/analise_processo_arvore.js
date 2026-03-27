@@ -2890,10 +2890,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             });
         }
 
-        function fetchSlackSupervisionDeliveries() {
+        function fetchSlackSupervisionDeliveries(options = {}) {
+            const requestData = {};
+            if (options && options.reconcile) {
+                requestData.reconcile = '1';
+            }
             return $.ajax({
                 url: SLACK_SUPERVISION_DELIVERIES_URL,
                 method: 'GET',
+                data: requestData,
                 dataType: 'json'
             });
         }
@@ -3166,47 +3171,77 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 overlay.remove();
             };
 
-            const loadDeliveries = () => {
+            const applyDeliveriesResponse = (response) => {
+                const responseErrors = collectDeliveryErrorMessages(response?.errors);
+                deliveries = Array.isArray(response?.results) ? response.results : [];
+                summaryData = response?.summary && typeof response.summary === 'object'
+                    ? response.summary
+                    : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                hasRemoteLoadWarnings = responseErrors.length > 0;
+                emptyListMessage = hasRemoteLoadWarnings && !deliveries.length
+                    ? `Nao foi possivel listar as mensagens ja enviadas no Slack. ${responseErrors.join(' | ')}`
+                    : 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+                renderSummary();
+                renderList();
+                if (hasRemoteLoadWarnings) {
+                    setFeedback(
+                        `Mensagens carregadas com avisos: ${responseErrors.join(' | ')}`,
+                        'warning'
+                    );
+                }
+            };
+
+            const applyDeliveriesLoadError = (xhr) => {
+                const responseText = String(xhr?.responseText || '').trim();
+                const message = xhr?.responseJSON?.detail
+                    || (xhr?.status ? `Erro ${xhr.status} ao carregar mensagens Slack.` : '')
+                    || (responseText && !responseText.startsWith('<!DOCTYPE') ? responseText : '')
+                    || 'Falha ao carregar mensagens Slack.';
+                deliveries = [];
+                summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
+                hasRemoteLoadWarnings = false;
+                emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+                renderSummary();
+                renderList();
+                setFeedback(message, 'error');
+            };
+
+            const loadDeliveries = (options = {}) => {
+                const shouldReconcile = !(options && options.reconcile === false);
                 setBusy(true);
                 setFeedback('');
-                return fetchSlackSupervisionDeliveries()
+                const finalizeLoad = () => {
+                    resetToolbarLoadingState();
+                    setBusy(false);
+                    refreshActionState();
+                };
+                const fallbackToSimpleLoad = () => (
+                    fetchSlackSupervisionDeliveries({ reconcile: false })
+                        .done((response) => {
+                            applyDeliveriesResponse(response);
+                            if (!hasRemoteLoadWarnings) {
+                                setFeedback('Mensagens carregadas sem reconciliar toda a fila.', 'warning');
+                            }
+                        })
+                        .fail((xhr) => {
+                            applyDeliveriesLoadError(xhr);
+                        })
+                        .always(finalizeLoad)
+                );
+                return fetchSlackSupervisionDeliveries({ reconcile: shouldReconcile })
                     .done((response) => {
-                        const responseErrors = collectDeliveryErrorMessages(response?.errors);
-                        deliveries = Array.isArray(response?.results) ? response.results : [];
-                        summaryData = response?.summary && typeof response.summary === 'object'
-                            ? response.summary
-                            : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
-                        hasRemoteLoadWarnings = responseErrors.length > 0;
-                        emptyListMessage = hasRemoteLoadWarnings && !deliveries.length
-                            ? `Nao foi possivel listar as mensagens ja enviadas no Slack. ${responseErrors.join(' | ')}`
-                            : 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
-                        renderSummary();
-                        renderList();
-                        if (hasRemoteLoadWarnings) {
-                            setFeedback(
-                                `Mensagens carregadas com avisos: ${responseErrors.join(' | ')}`,
-                                'warning'
-                            );
-                        }
+                        applyDeliveriesResponse(response);
                     })
                     .fail((xhr) => {
-                        const responseText = String(xhr?.responseText || '').trim();
-                        const message = xhr?.responseJSON?.detail
-                            || (xhr?.status ? `Erro ${xhr.status} ao carregar mensagens Slack.` : '')
-                            || (responseText && !responseText.startsWith('<!DOCTYPE') ? responseText : '')
-                            || 'Falha ao carregar mensagens Slack.';
-                        deliveries = [];
-                        summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
-                        hasRemoteLoadWarnings = false;
-                        emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
-                        renderSummary();
-                        renderList();
-                        setFeedback(message, 'error');
+                        if (shouldReconcile) {
+                            fallbackToSimpleLoad();
+                            return;
+                        }
+                        applyDeliveriesLoadError(xhr);
+                        finalizeLoad();
                     })
-                    .always(() => {
-                        resetToolbarLoadingState();
-                        setBusy(false);
-                        refreshActionState();
+                    .done(() => {
+                        finalizeLoad();
                     });
             };
 
