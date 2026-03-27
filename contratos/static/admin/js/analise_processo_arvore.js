@@ -3930,9 +3930,18 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 contratos: contractIds,
                 tipo_de_acao_respostas: responses,
                 observacoes: mergedObservationText,
+                supervisor_observacoes: typeof processo.supervisor_observacoes === 'string'
+                    ? processo.supervisor_observacoes.trim()
+                    : '',
+                supervisor_observacoes_autor: typeof processo.supervisor_observacoes_autor === 'string'
+                    ? processo.supervisor_observacoes_autor.trim()
+                    : '',
                 analysis_type: processo.analysis_type ? deepClone(processo.analysis_type) : null,
                 supervisionado: Boolean(processo.supervisionado),
                 supervisor_status: processo.supervisor_status || 'pendente',
+                supervisor_status_autor: typeof processo.supervisor_status_autor === 'string'
+                    ? processo.supervisor_status_autor.trim()
+                    : '',
                 awaiting_supervision_confirm: Boolean(processo.awaiting_supervision_confirm),
                 supervision_date: supervisionDate,
                 barrado,
