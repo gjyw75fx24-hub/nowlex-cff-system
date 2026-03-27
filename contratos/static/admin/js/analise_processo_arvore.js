@@ -3044,6 +3044,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 }
             };
 
+            const resetToolbarLoadingState = () => {
+                [refreshBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn].forEach((button) => {
+                    setActionLoadingState(button, false);
+                });
+            };
+
             const setFeedback = (message, variant = 'info') => {
                 const text = String(message || '').trim();
                 if (!text) {
@@ -3175,6 +3181,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         setFeedback(message, 'error');
                     })
                     .always(() => {
+                        resetToolbarLoadingState();
                         setBusy(false);
                         refreshActionState();
                     });
@@ -3206,9 +3213,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         } else {
                             setFeedback('Atualização concluída. Nenhuma mensagem pendente precisou ser reenviada.', 'success');
                         }
-                        loadDeliveries().always(() => {
-                            setActionLoadingState(refreshBtn, false);
-                        });
+                        loadDeliveries();
                     })
                     .fail((xhr) => {
                         const message = xhr?.responseJSON?.detail || 'Falha ao atualizar mensagens Slack.';
@@ -3264,9 +3269,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         } else {
                             setFeedback(`Foram apagadas ${deletedCount} mensagem(ns) Slack.`, 'success');
                         }
-                        loadDeliveries().always(() => {
-                            setActionLoadingState(actionButton, false);
-                        });
+                        loadDeliveries();
                     })
                     .fail((xhr) => {
                         const message = xhr?.responseJSON?.detail || 'Falha ao apagar mensagens Slack.';
