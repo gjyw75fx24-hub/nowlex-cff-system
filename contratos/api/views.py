@@ -276,10 +276,7 @@ def _resolve_supervision_card_contracts(analise, card, respostas=None):
     if valid_contracts:
         return valid_contracts
 
-    if raw_contract_values:
-        return []
-
-    return process_contracts
+    return []
 
 
 def _resolve_supervision_card_prescricao_date(analise, card, respostas=None):
@@ -289,6 +286,13 @@ def _resolve_supervision_card_prescricao_date(analise, card, respostas=None):
     if not contracts_with_prescricao:
         return None
     return min(contract.data_prescricao for contract in contracts_with_prescricao)
+
+
+def _resolve_supervision_entry_date(custom_supervision_date, prescricao_date):
+    custom_date = _parse_optional_date(custom_supervision_date)
+    if custom_date:
+        return custom_date
+    return _parse_optional_date(prescricao_date)
 
 
 def _build_analysis_type_short(analysis_type):
@@ -1398,20 +1402,10 @@ class AgendaGeralAPIView(APIView):
                 if contracts_with_prescricao
                 else None
             )
-            if prescricao_date and custom_supervision_date and custom_supervision_date > prescricao_date:
-                # Segurança: supervisão nunca pode ultrapassar a menor prescrição
-                # dos contratos vinculados ao card.
-                custom_supervision_date = prescricao_date
-
             # Regra da agenda:
-            # 1) Se houver data customizada de S, ela prevalece sempre.
-            #    Isso garante que o arrastar/soltar na Agenda Geral persista
-            #    exatamente na data escolhida pelo usuário, inclusive no passado.
-            # 2) Sem data customizada, usa a menor data de prescrição disponível.
-            if custom_supervision_date:
-                agenda_date = custom_supervision_date
-            else:
-                agenda_date = prescricao_date
+            # 1) Se houver data informada no botão Supervisionar, ela prevalece.
+            # 2) Sem data informada, usa a menor data de prescrição disponível.
+            agenda_date = _resolve_supervision_entry_date(custom_supervision_date, prescricao_date)
             if not agenda_date:
                 continue
             analise = card_info['analise']
@@ -2130,16 +2124,6 @@ class AgendaSupervisionDateAPIView(APIView):
         if supervision_date < timezone.localdate():
             return Response(
                 {'detail': 'A supervisão não pode ser movida para datas passadas.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        prescricao_date = _resolve_supervision_card_prescricao_date(analise, card, respostas)
-        if prescricao_date and supervision_date > prescricao_date:
-            return Response(
-                {
-                    'detail': 'A supervisão não pode ser movida para depois da data de prescrição.',
-                    'prescricao_date': prescricao_date.isoformat(),
-                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

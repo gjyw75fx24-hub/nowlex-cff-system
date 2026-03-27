@@ -4122,11 +4122,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 if ($supervisionDateInput.length) {
                     const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
                     $supervisionDateInput.val(normalizedDate);
-                    const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
-                    cardData.supervision_date = clampedDate;
+                    const resolvedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                    cardData.supervision_date = resolvedDate;
                 } else {
-                    cardData.supervision_date = clampIsoDateToMax(
-                        normalizeIsoDateValue(cardData.supervision_date),
+                    cardData.supervision_date = resolveInitialSupervisionDate(
+                        cardData.supervision_date,
                         getMaxSupervisionDateForCard(cardData)
                     );
                 }
@@ -5724,18 +5724,6 @@ function formatCnjDigits(raw) {
             if (normalizedA === normalizedB) return 0;
             return normalizedA > normalizedB ? 1 : -1;
         }
-
-        function clampIsoDateToMax(value, maxDate) {
-            const normalizedValue = normalizeIsoDateValue(value);
-            const normalizedMax = normalizeIsoDateValue(maxDate);
-            if (!normalizedValue || !normalizedMax) {
-                return normalizedValue;
-            }
-            return compareIsoDates(normalizedValue, normalizedMax) > 0
-                ? normalizedMax
-                : normalizedValue;
-        }
-
 
         function extractCnjDigits(text) {
             if (!text) return null;
@@ -7364,7 +7352,7 @@ function formatCnjDigits(raw) {
                     });
                     const $statusMeta = $('<div class="analise-summary-supervision-meta"></div>');
                     const supervisionDateDisplay = formatDateDisplay(
-                        clampIsoDateToMax(
+                        resolveInitialSupervisionDate(
                             processo && processo.supervision_date,
                             getMaxSupervisionDateFromContractInfos(snapshot.contratoInfos)
                         )
@@ -7947,7 +7935,7 @@ function formatCnjDigits(raw) {
             $headerTitleColumn.append($headerTitle);
             const $statusMeta = $('<div class="analise-summary-supervision-meta"></div>');
             const supervisionDateDisplay = formatDateDisplay(
-                clampIsoDateToMax(
+                resolveInitialSupervisionDate(
                     processo && processo.supervision_date,
                     getMaxSupervisionDateFromContractInfos(snapshot.contratoInfos)
                 )
@@ -9143,8 +9131,8 @@ function formatCnjDigits(raw) {
             const syncSupervisionDateFromInput = () => {
                 const normalizedDate = normalizeIsoDateValue($supervisionDateInput.val());
                 $supervisionDateInput.val(normalizedDate);
-                const clampedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
-                cardData.supervision_date = clampedDate;
+                const resolvedDate = applySupervisionDateLimit($supervisionDateInput, cardData);
+                cardData.supervision_date = resolvedDate;
                 syncEditingCardWithSaved(cardData);
                 userResponses.processos_vinculados = [cardData];
                 saveResponses();
@@ -10123,8 +10111,8 @@ function formatCnjDigits(raw) {
             }
             cardData.supervisionado = Boolean(cardData.supervisionado);
             cardData.supervisor_status = cardData.supervisor_status || 'pendente';
-            cardData.supervision_date = clampIsoDateToMax(
-                normalizeIsoDateValue(cardData.supervision_date),
+            cardData.supervision_date = resolveInitialSupervisionDate(
+                cardData.supervision_date,
                 getMaxSupervisionDateForCard(cardData)
             );
             cardData.barrado = cardData.barrado || {};
@@ -10530,29 +10518,25 @@ function formatCnjDigits(raw) {
 
         function resolveInitialSupervisionDate(currentDate, maxDate) {
             const normalizedCurrentDate = normalizeIsoDateValue(currentDate);
-            if (!maxDate) {
-                return normalizedCurrentDate;
-            }
-            return clampIsoDateToMax(normalizedCurrentDate || maxDate, maxDate);
+            const normalizedMaxDate = normalizeIsoDateValue(maxDate);
+            return normalizedCurrentDate || normalizedMaxDate;
         }
 
         function applySupervisionDateLimit($dateInput, cardData) {
-            const maxDate = getMaxSupervisionDateForCard(cardData);
             if ($dateInput && $dateInput.length) {
-                if (maxDate) {
-                    $dateInput.attr('max', maxDate);
-                } else {
-                    $dateInput.removeAttr('max');
-                }
+                $dateInput.removeAttr('max');
             }
             const normalizedValue = normalizeIsoDateValue(
                 $dateInput && $dateInput.length ? $dateInput.val() : ''
             );
-            const clampedValue = clampIsoDateToMax(normalizedValue, maxDate);
-            if ($dateInput && $dateInput.length && clampedValue !== normalizedValue) {
-                $dateInput.val(clampedValue);
+            const resolvedValue = resolveInitialSupervisionDate(
+                normalizedValue,
+                getMaxSupervisionDateForCard(cardData)
+            );
+            if ($dateInput && $dateInput.length && resolvedValue !== normalizedValue) {
+                $dateInput.val(resolvedValue);
             }
-            return clampedValue;
+            return resolvedValue;
         }
 
         function resolveContratoCandidate(rawId) {
@@ -10929,10 +10913,10 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 }
                 return getMaxSupervisionDateForCard(existingNaoJudCard || {});
             };
-            const initialSupervisionDate = clampIsoDateToMax(
+            const initialSupervisionDate = resolveInitialSupervisionDate(
                 normalizeIsoDateValue(
-                userResponses.supervision_date_nao_judicializado ||
-                (existingNaoJudCard && existingNaoJudCard.supervision_date)
+                    userResponses.supervision_date_nao_judicializado ||
+                    (existingNaoJudCard && existingNaoJudCard.supervision_date)
                 ),
                 resolveNaoJudSupervisionMaxDate()
             );
@@ -10955,12 +10939,7 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 `<input type="date" id="${naoJudDateInputId}" class="supervision-date-input supervision-date-input--compact">`
             );
             $dateInput.val(initialSupervisionDate);
-            const initialMaxDate = resolveNaoJudSupervisionMaxDate();
-            if (initialMaxDate) {
-                $dateInput.attr('max', initialMaxDate);
-            } else {
-                $dateInput.removeAttr('max');
-            }
+            $dateInput.removeAttr('max');
             $dateWrap.append($dateLabel).append($dateInput);
             const $input = $toggle.find('.supervision-toggle-input');
             $input.prop(
@@ -10969,21 +10948,19 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
             );
             $dateInput.on('change', function () {
                 const normalizedDate = normalizeIsoDateValue($(this).val());
-                const maxDate = resolveNaoJudSupervisionMaxDate();
-                if (maxDate) {
-                    $(this).attr('max', maxDate);
-                } else {
-                    $(this).removeAttr('max');
-                }
-                const clampedDate = clampIsoDateToMax(normalizedDate, maxDate);
-                $(this).val(clampedDate);
-                userResponses.supervision_date_nao_judicializado = clampedDate;
+                $(this).removeAttr('max');
+                const resolvedDate = resolveInitialSupervisionDate(
+                    normalizedDate,
+                    resolveNaoJudSupervisionMaxDate()
+                );
+                $(this).val(resolvedDate);
+                userResponses.supervision_date_nao_judicializado = resolvedDate;
                 if (Array.isArray(userResponses.processos_vinculados)) {
                     userResponses.processos_vinculados.forEach(card => {
                         if (card && typeof card === 'object' && String(card.cnj || '').trim().toLowerCase() === 'não judicializado') {
                             syncNaoJudicializadoCardFromRootResponses(card, {
                                 checked: Boolean(userResponses.supervisionado_nao_judicializado),
-                                normalizedDate: clampedDate
+                                normalizedDate: resolvedDate
                             });
                         }
                     });
@@ -10995,9 +10972,8 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                 if (!Array.isArray(userResponses.processos_vinculados)) {
                     userResponses.processos_vinculados = [];
                 }
-                    const defaultSupervisionDate = clampIsoDateToMax(
-                        normalizeIsoDateValue(userResponses.supervision_date_nao_judicializado) ||
-                            resolveNaoJudSupervisionMaxDate(),
+                    const defaultSupervisionDate = resolveInitialSupervisionDate(
+                        userResponses.supervision_date_nao_judicializado,
                         resolveNaoJudSupervisionMaxDate()
                     );
                     if (checked && defaultSupervisionDate) {
@@ -11016,8 +10992,8 @@ function renderMonitoriaContractSelector(question, $container, currentResponses,
                             },
                             supervisionado: true,
                             supervisor_status: 'pendente',
-                            supervision_date: clampIsoDateToMax(
-                                normalizeIsoDateValue(userResponses.supervision_date_nao_judicializado),
+                            supervision_date: resolveInitialSupervisionDate(
+                                userResponses.supervision_date_nao_judicializado,
                                 resolveNaoJudSupervisionMaxDate()
                             ),
                             analysis_author: getCurrentAnalysisAuthorName(),

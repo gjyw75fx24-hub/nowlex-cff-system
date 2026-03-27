@@ -662,6 +662,36 @@ def _thread_update_text(entry, actor_name, status_key):
     return '\n'.join(lines)
 
 
+def _save_delivery(delivery, update_fields):
+    valid_fields = {field.name for field in delivery._meta.concrete_fields}
+    prepared_fields = []
+    seen_fields = set()
+    for field_name in update_fields or []:
+        normalized = str(field_name or '').strip()
+        if not normalized or normalized in seen_fields or normalized not in valid_fields:
+            continue
+        prepared_fields.append(normalized)
+        seen_fields.add(normalized)
+
+    if not prepared_fields:
+        delivery.save()
+        return
+
+    try:
+        delivery.save(update_fields=prepared_fields)
+    except BaseException as exc:
+        logger.exception(
+            'Falha ao salvar entrega Slack via update_fields=%s delivery_id=%s; tentando save completo.',
+            prepared_fields,
+            getattr(delivery, 'pk', None),
+            exc_info=exc,
+        )
+        try:
+            delivery.save()
+        except BaseException as retry_exc:
+            raise RuntimeError('Falha ao salvar entrega Slack.') from retry_exc
+
+
 def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_post=True):
     message = _build_supervision_message(entry, request=request)
     status_key = message['status_key']
@@ -711,7 +741,8 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
     delivery.message_hash = message['hash']
     delivery.last_status = status_key
     delivery.card_id = str(entry.get('cardId') or delivery.card_id or '')
-    delivery.save(
+    _save_delivery(
+        delivery,
         update_fields=[
             'slack_channel_id',
             'slack_message_ts',
@@ -795,7 +826,7 @@ def _build_supervisor_delivery_context(supervisor, config):
             update_fields.append('processo')
         if update_fields:
             update_fields.append('updated_at')
-            delivery.save(update_fields=update_fields)
+            _save_delivery(delivery, update_fields=update_fields)
 
     entries_by_key = {
         _build_entry_key(entry): entry
