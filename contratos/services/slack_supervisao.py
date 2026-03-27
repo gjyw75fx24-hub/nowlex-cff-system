@@ -665,7 +665,15 @@ def _thread_update_text(entry, actor_name, status_key):
 def _save_delivery(delivery, update_fields):
     # O backend atual tem apresentado SystemExit ao usar save(update_fields=...)
     # nessa model; save() completo evita esse caminho instável.
-    delivery.save()
+    try:
+        delivery.save()
+    except BaseException as exc:
+        logger.exception(
+            'Falha ao salvar entrega Slack delivery_id=%s.',
+            getattr(delivery, 'pk', None),
+            exc_info=exc,
+        )
+        raise RuntimeError('Falha ao salvar entrega Slack.') from exc
 
 
 def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_post=True):
@@ -847,7 +855,7 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
         try:
             result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=True)
             sent_any = sent_any or bool(result.get('sent'))
-        except Exception as exc:
+        except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
@@ -864,7 +872,7 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
             result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=False)
             if result.get('queued'):
                 queued_count += 1
-        except Exception as exc:
+        except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
@@ -929,7 +937,20 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
 
     for config in supervisor_configs:
         supervisor = config.user
-        accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+        try:
+            accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+        except BaseException as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.exception(
+                'Falha ao montar contexto Slack analise=%s supervisor=%s',
+                analise.pk,
+                supervisor.pk,
+                exc_info=exc,
+            )
+            continue
         current_entries = [
             entry for entry in accepted_entries
             if int(entry.get('analise_id') or 0) == int(analise.pk)
@@ -957,7 +978,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
                     recipient_names.add(
                         str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
                     )
-            except Exception as exc:
+            except BaseException as exc:
                 errors.append({
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                     'error': str(exc),
@@ -994,7 +1015,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
 
 def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     if not slack_supervisao_enabled():
-        return {'recipients': [], 'errors': [], 'queued_count': 0}
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0}
     config = (
         UserSlackConfig.objects.select_related('user')
         .filter(user_id=user_id, user__is_active=True)
@@ -1002,12 +1023,35 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
         .first()
     )
     if not config:
-        return {'recipients': [], 'errors': [], 'queued_count': 0}
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0}
     supervisor = config.user
-    accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
     recipient_names = set()
+    eligible_names = set()
     errors = []
     queued_count = 0
+    try:
+        accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
+    except BaseException as exc:
+        errors.append({
+            'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+            'error': str(exc),
+        })
+        logger.exception(
+            'Falha ao montar contexto Slack supervisor=%s',
+            supervisor.pk,
+            exc_info=exc,
+        )
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': errors,
+            'queued_count': 0,
+        }
+
+    if accepted_entries:
+        eligible_names.add(
+            str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
+        )
 
     for entry in accepted_entries:
         if not _entry_is_final(entry):
@@ -1021,7 +1065,7 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
                 recipient_names.add(
                     str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
                 )
-        except Exception as exc:
+        except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
@@ -1053,6 +1097,7 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
         errors.extend(result.get('errors') or [])
     return {
         'recipients': sorted(name for name in recipient_names if name),
+        'eligible_recipients': sorted(name for name in eligible_names if name),
         'errors': errors,
         'queued_count': queued_count,
     }

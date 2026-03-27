@@ -1791,7 +1791,19 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
         queued_count = 0
 
         for config in configs:
-            result = sync_supervision_slack_for_supervisor(config.user_id, request=request) or {}
+            try:
+                result = sync_supervision_slack_for_supervisor(config.user_id, request=request) or {}
+            except BaseException as exc:
+                errors.append({
+                    'supervisor': str(config.user.get_full_name()).strip() or str(config.user.username).strip(),
+                    'error': str(exc),
+                })
+                logger.exception(
+                    'Falha ao atualizar entregas Slack supervisor=%s',
+                    config.user_id,
+                    exc_info=exc,
+                )
+                continue
             recipients.update(str(name).strip() for name in (result.get('recipients') or []) if str(name).strip())
             eligible_recipients.update(str(name).strip() for name in (result.get('eligible_recipients') or []) if str(name).strip())
             queued_count += int(result.get('queued_count') or 0)

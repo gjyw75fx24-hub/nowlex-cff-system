@@ -67,3 +67,11 @@ class SaveDeliveryTests(SimpleTestCase):
         _save_delivery(delivery, update_fields=['message_hash', 'updated_at', 'invalid_field'])
 
         delivery.save.assert_called_once_with()
+
+    def test_converts_base_exception_from_save_into_runtime_error(self):
+        delivery = Mock()
+        delivery.pk = 99
+        delivery.save.side_effect = SystemExit(1)
+
+        with self.assertRaises(RuntimeError):
+            _save_delivery(delivery, update_fields=['message_hash'])
