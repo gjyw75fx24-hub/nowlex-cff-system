@@ -3264,7 +3264,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         } else {
                             setFeedback(`Foram apagadas ${deletedCount} mensagem(ns) Slack.`, 'success');
                         }
-                        loadDeliveries();
+                        loadDeliveries().always(() => {
+                            setActionLoadingState(actionButton, false);
+                        });
                     })
                     .fail((xhr) => {
                         const message = xhr?.responseJSON?.detail || 'Falha ao apagar mensagens Slack.';
