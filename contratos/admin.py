@@ -7659,6 +7659,15 @@ class AnaliseProcessoInline(NoRelatedLinksMixin, admin.StackedInline): # Usando 
         css = {'all': ()}
         js = ()
 
+    def get_extra(self, request, obj=None, **kwargs):
+        if obj and getattr(obj, 'pk', None):
+            try:
+                if obj.analise_processo:
+                    return 0
+            except AnaliseProcesso.DoesNotExist:
+                pass
+        return 1
+
 
 class ProcessoJudicialChangeList(ChangeList):
     """
@@ -13575,11 +13584,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
 
                 instance = inline_form.save(commit=False)
                 if isinstance(instance, AnaliseProcesso):
-                    # Assegura que o FK seja preenchido ao criar novo processo
-                    if not instance.processo_judicial_id:
-                        instance.processo_judicial = form.instance
-                    instance.updated_by = request.user
-                    instance._skip_auto_slack_sync = True
+                    instance = self._prepare_analise_inline_instance(request, form.instance, instance)
 
                 is_new = instance.pk is None
                 instance.save()
@@ -13605,6 +13610,31 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             return self._save_prazo_formset_with_audit(request, formset)
         else:
             super().save_formset(request, form, formset, change)
+
+    def _prepare_analise_inline_instance(self, request, processo, instance):
+        # O inline é OneToOne. Se o form vier como "novo" por causa do loader/JS,
+        # reutilizamos a análise já existente do processo em vez de tentar inseri-la
+        # novamente e bater na unique constraint.
+        if not instance.processo_judicial_id:
+            instance.processo_judicial = processo
+        instance.updated_by = request.user
+        instance._skip_auto_slack_sync = True
+
+        if instance.pk:
+            return instance
+
+        processo_id = getattr(instance, 'processo_judicial_id', None) or getattr(processo, 'pk', None)
+        if not processo_id:
+            return instance
+
+        existing = AnaliseProcesso.objects.filter(processo_judicial_id=processo_id).first()
+        if not existing:
+            return instance
+
+        existing.respostas = instance.respostas
+        existing.updated_by = request.user
+        existing._skip_auto_slack_sync = True
+        return existing
 
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)

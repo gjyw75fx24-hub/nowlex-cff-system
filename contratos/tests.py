@@ -2,10 +2,12 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+from django.contrib.admin.sites import AdminSite
 from django.test import SimpleTestCase
 from rest_framework.renderers import JSONRenderer
 from rest_framework.test import APIRequestFactory
 
+from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin
 from contratos.api.views import (
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
@@ -18,6 +20,7 @@ from contratos.api.views import (
     _resolve_supervision_entry_date,
     _save_supervision_card,
 )
+from contratos.models import AnaliseProcesso, ProcessoJudicial
 from contratos.services.slack_supervisao import (
     _insert_delivery,
     _save_delivery,
@@ -98,6 +101,44 @@ class SaveSupervisionCardTests(SimpleTestCase):
         mocked_filter.return_value.update.assert_called_once()
         mocked_trigger_sync.assert_called_once_with(55)
         self.assertTrue(analise.para_supervisionar)
+
+
+class AnaliseProcessoAdminTests(SimpleTestCase):
+    def test_inline_hides_extra_form_when_analysis_already_exists(self):
+        inline = AnaliseProcessoInline(ProcessoJudicial, AdminSite())
+        processo = SimpleNamespace(pk=2241, analise_processo=object())
+
+        result = inline.get_extra(SimpleNamespace(), obj=processo)
+
+        self.assertEqual(result, 0)
+
+    @patch('contratos.admin.AnaliseProcesso.objects.filter')
+    def test_save_formset_reuses_existing_analysis_instead_of_inserting_duplicate(self, mocked_filter):
+        admin_instance = ProcessoJudicialAdmin(ProcessoJudicial, AdminSite())
+        processo = ProcessoJudicial(id=2241)
+        request = SimpleNamespace(user=SimpleNamespace(pk=7))
+        form = SimpleNamespace(instance=processo)
+
+        existing = AnaliseProcesso(pk=55, processo_judicial=processo, respostas={'saved_processos_vinculados': []})
+        existing.save = Mock()
+        mocked_filter.return_value.first.return_value = existing
+
+        new_instance = AnaliseProcesso(respostas={'saved_processos_vinculados': [{'slug': 'card-1'}]})
+        inline_form = Mock()
+        inline_form.has_changed.return_value = True
+        inline_form.cleaned_data = {'DELETE': False}
+        inline_form.changed_data = ['respostas']
+        inline_form.save.return_value = new_instance
+        inline_form.save_m2m = Mock()
+
+        formset = SimpleNamespace(model=AnaliseProcesso, forms=[inline_form])
+
+        admin_instance.save_formset(request, form, formset, change=True)
+
+        mocked_filter.assert_called_once_with(processo_judicial_id=2241)
+        existing.save.assert_called_once()
+        self.assertEqual(formset.new_objects, [])
+        self.assertEqual(formset.changed_objects, [(existing, ['respostas'])])
 
 
 class SaveDeliveryTests(SimpleTestCase):
