@@ -4,7 +4,6 @@ import os
 import re
 import hmac
 import hashlib
-import threading
 from datetime import datetime, date as date_cls, time as time_cls
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs
@@ -22,7 +21,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.db import close_old_connections, transaction
+from django.db import transaction
 from django.db.models import Q, Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -132,35 +131,6 @@ def _normalize_decimal_string(value):
         normalized = normalized.replace(',', '.')
     return normalized
 
-
-def _open_supervision_decision_modal_async(*, trigger_id, metadata_json, desired_status, analise_id, source, index, slack_user_id):
-    def _run():
-        close_old_connections()
-        try:
-            supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
-            if not supervisor:
-                return
-            entry = get_supervision_entry_for_card(
-                supervisor=supervisor,
-                analise_id=analise_id,
-                source=source,
-                index=index,
-            )
-            if not entry:
-                return
-            open_supervision_decision_modal(
-                trigger_id,
-                metadata_json=metadata_json,
-                desired_status=desired_status,
-                entry=entry,
-                slack_user_id=slack_user_id,
-            )
-        except Exception:
-            logger.exception('Falha ao abrir modal de decisao do Slack')
-        finally:
-            close_old_connections()
-
-    threading.Thread(target=_run, daemon=True).start()
 
 def _parse_decimal_value(value):
     normalized = _normalize_decimal_string(value)
@@ -1892,23 +1862,36 @@ class SlackSupervisionInteractionAPIView(View):
         if desired_status not in {'aprovado', 'reprovado', 'barrado'} or not analise_id or not source or index is None:
             return HttpResponse('')
 
-        _open_supervision_decision_modal_async(
-            trigger_id=trigger_id,
-            metadata_json=json.dumps(
-                {
-                    'analise_id': analise_id,
-                    'source': source,
-                    'index': index,
-                    'card_id': metadata.get('card_id') or '',
-                },
-                ensure_ascii=True,
-            ),
-            desired_status=desired_status,
-            analise_id=analise_id,
-            source=source,
-            index=index,
-            slack_user_id=slack_user_id,
+        metadata_json = json.dumps(
+            {
+                'analise_id': analise_id,
+                'source': source,
+                'index': index,
+                'card_id': metadata.get('card_id') or '',
+            },
+            ensure_ascii=True,
         )
+        try:
+            supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+            if not supervisor:
+                return HttpResponse('')
+            entry = get_supervision_entry_for_card(
+                supervisor=supervisor,
+                analise_id=analise_id,
+                source=source,
+                index=index,
+            )
+            if not entry:
+                return HttpResponse('')
+            open_supervision_decision_modal(
+                trigger_id,
+                metadata_json=metadata_json,
+                desired_status=desired_status,
+                entry=entry,
+                slack_user_id=slack_user_id,
+            )
+        except Exception:
+            logger.exception('Falha ao abrir modal de decisao do Slack')
         return HttpResponse('')
 
     def _handle_view_submission(self, payload):
