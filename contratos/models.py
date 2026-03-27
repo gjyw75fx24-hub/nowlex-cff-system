@@ -1974,13 +1974,32 @@ def analiseprocesso_sync_supervision_slack(sender, instance, raw=False, **kwargs
     if not _has_supervisao_slack_tables():
         return
 
-    def _sync():
+    def _sync_async(analise_id):
+        close_old_connections()
         try:
             from contratos.services.slack_supervisao import sync_supervision_slack_for_analysis
-            sync_supervision_slack_for_analysis(instance.pk)
+            sync_supervision_slack_for_analysis(analise_id)
         except BaseException as exc:
             logger.exception(
                 'Falha no sync assíncrono da supervisão Slack para analise_id=%s',
+                analise_id,
+                exc_info=exc,
+            )
+        finally:
+            close_old_connections()
+
+    def _sync():
+        try:
+            thread = threading.Thread(
+                target=_sync_async,
+                args=(instance.pk,),
+                name=f'slack-supervision-analise-sync-{instance.pk}',
+                daemon=True,
+            )
+            thread.start()
+        except BaseException as exc:
+            logger.exception(
+                'Falha ao disparar sync assíncrono da supervisão Slack para analise_id=%s',
                 instance.pk,
                 exc_info=exc,
             )

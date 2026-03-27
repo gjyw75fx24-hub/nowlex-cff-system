@@ -4,6 +4,7 @@ import os
 import re
 import hmac
 import hashlib
+import threading
 from datetime import datetime, date as date_cls, time as time_cls
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs
@@ -21,7 +22,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.db.models import Q, Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -421,18 +422,58 @@ def _save_supervision_card(analise, respostas, *, request_user=None):
             raise RuntimeError('Análise não encontrada para salvar supervisão.')
         analise.updated_at = current_timestamp
     except BaseException as exc:
-        logger.exception(
-            'Falha ao persistir card de supervisao analise=%s.',
-            getattr(analise, 'pk', None),
-            exc_info=exc,
-        )
-        raise RuntimeError('Falha ao salvar supervisão.') from exc
+        try:
+            shadow = AnaliseProcesso(
+                pk=analise.pk,
+                processo_judicial_id=getattr(analise, 'processo_judicial_id', None),
+                respostas=respostas,
+                para_supervisionar=analise.para_supervisionar,
+                updated_by_id=getattr(request_user, 'pk', None) if request_user is not None else getattr(analise, 'updated_by_id', None),
+                created_at=getattr(analise, 'created_at', None) or current_timestamp,
+                updated_at=current_timestamp,
+            )
+            AnaliseProcesso.objects.bulk_create(
+                [shadow],
+                update_conflicts=True,
+                update_fields=['respostas', 'para_supervisionar', 'updated_by', 'updated_at'],
+                unique_fields=['id'],
+            )
+            analise.updated_at = current_timestamp
+        except BaseException as bulk_exc:
+            logger.exception(
+                'Falha ao persistir card de supervisao analise=%s.',
+                getattr(analise, 'pk', None),
+                exc_info=bulk_exc,
+            )
+            raise RuntimeError('Falha ao salvar supervisão.') from bulk_exc
+    _trigger_supervision_analysis_sync_async(analise.pk)
+
+
+def _trigger_supervision_analysis_sync_async(analise_id):
+    def _sync():
+        close_old_connections()
+        try:
+            sync_supervision_slack_for_analysis(analise_id)
+        except BaseException as exc:
+            logger.warning(
+                'Falha ao sincronizar Slack apos salvar supervisao analise=%s erro=%s',
+                analise_id,
+                exc,
+            )
+        finally:
+            close_old_connections()
+
     try:
-        sync_supervision_slack_for_analysis(analise.pk)
+        thread = threading.Thread(
+            target=_sync,
+            name=f'slack-supervision-analysis-sync-{analise_id}',
+            daemon=True,
+        )
+        thread.start()
     except BaseException as exc:
         logger.warning(
-            'Falha ao sincronizar Slack apos salvar supervisao analise=%s erro=%s',
-            getattr(analise, 'pk', None),
+            'Falha ao iniciar sync assíncrono do Slack analise=%s erro=%s',
+            analise_id,
             exc,
         )
 
@@ -2202,7 +2243,13 @@ class SlackSupervisionInteractionAPIView(View):
             card['supervisor_status_autor'] = actor_name
             card['supervisor_observacoes'] = note_value
             card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
-        _save_supervision_card(analise, respostas, request_user=supervisor)
+        try:
+            _save_supervision_card(analise, respostas, request_user=supervisor)
+        except RuntimeError as exc:
+            return JsonResponse({
+                'response_action': 'errors',
+                'errors': {'devolutiva_block': str(exc)},
+            })
         return JsonResponse({'response_action': 'clear'})
 
 

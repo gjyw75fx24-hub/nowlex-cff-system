@@ -70,11 +70,10 @@ class ResolveSupervisionCardContractsTests(SimpleTestCase):
 
 
 class SaveSupervisionCardTests(SimpleTestCase):
-    @patch('contratos.api.views.sync_supervision_slack_for_analysis')
+    @patch('contratos.api.views._trigger_supervision_analysis_sync_async')
     @patch('contratos.api.views.AnaliseProcesso.objects.filter')
-    def test_persists_card_with_update_and_ignores_sync_failure(self, mocked_filter, mocked_sync):
+    def test_persists_card_with_update_and_triggers_async_sync(self, mocked_filter, mocked_trigger_sync):
         mocked_filter.return_value.update.return_value = 1
-        mocked_sync.side_effect = SystemExit(1)
         request_user = SimpleNamespace(pk=7)
         analise = SimpleNamespace(
             pk=55,
@@ -89,7 +88,7 @@ class SaveSupervisionCardTests(SimpleTestCase):
 
         mocked_filter.assert_called_once_with(pk=55)
         mocked_filter.return_value.update.assert_called_once()
-        mocked_sync.assert_called_once_with(55)
+        mocked_trigger_sync.assert_called_once_with(55)
         self.assertTrue(analise.para_supervisionar)
 
 
