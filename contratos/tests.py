@@ -419,6 +419,8 @@ class SlackDeliveryReconcileTests(SimpleTestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(mocked_builder.call_count, 2)
+        mocked_builder.assert_any_call(config_a.user, config_a, include_completed=False)
+        mocked_builder.assert_any_call(config_b.user, config_b, include_completed=False)
 
 
 class SlackAnalysisGroupingTests(SimpleTestCase):

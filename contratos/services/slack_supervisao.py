@@ -116,13 +116,14 @@ def _build_entry_focus_url(entry, request=None):
     return f'{base_url}{path}?{query}' if query else f'{base_url}{path}'
 
 
-def _collect_supervision_entries_for_supervisor(supervisor, analise_id=None):
+def _collect_supervision_entries_for_supervisor(supervisor, analise_id=None, *, include_completed=True):
     from contratos.api.views import AgendaGeralAPIView
 
     dummy_request = SimpleNamespace(user=supervisor)
     view = AgendaGeralAPIView()
     collected = []
-    for show_completed in (False, True):
+    show_completed_options = (False, True) if include_completed else (False,)
+    for show_completed in show_completed_options:
         try:
             entries = view._get_supervision_entries(show_completed, dummy_request, target_user=supervisor)
         except BaseException as exc:
@@ -1137,9 +1138,9 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
     }
 
 
-def _build_supervisor_delivery_context(supervisor, config):
+def _build_supervisor_delivery_context(supervisor, config, *, include_completed=True):
     accepted_entries = []
-    for entry in _collect_supervision_entries_for_supervisor(supervisor):
+    for entry in _collect_supervision_entries_for_supervisor(supervisor, include_completed=include_completed):
         key = _build_entry_key(entry)
         if not key or not _supervisor_accepts_entry(config, entry):
             continue
@@ -1561,7 +1562,7 @@ def ensure_supervision_delivery_records(configs):
         if not supervisor:
             continue
         try:
-            _build_supervisor_delivery_context(supervisor, config)
+            _build_supervisor_delivery_context(supervisor, config, include_completed=False)
         except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
