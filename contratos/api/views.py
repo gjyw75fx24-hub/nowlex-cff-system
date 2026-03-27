@@ -2288,10 +2288,10 @@ class SlackSupervisionInteractionAPIView(View):
             for block_values in values.values():
                 if not isinstance(block_values, dict):
                     continue
-                for action_data in block_values.values():
+                for action_key, action_data in block_values.items():
                     if not isinstance(action_data, dict):
                         continue
-                    action_id = str(action_data.get('action_id') or '')
+                    action_id = str(action_data.get('action_id') or action_key or '')
                     if action_id == 'devolutiva_input':
                         devolutiva_value = str(action_data.get('value') or '')
                     elif action_id == 'retorno_picker':

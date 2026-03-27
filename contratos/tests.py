@@ -27,6 +27,7 @@ from contratos.services.slack_supervisao import (
     _entry_analysis_group_key,
     _insert_delivery,
     _save_delivery,
+    _sync_single_delivery,
     _slack_api_post,
     delete_slack_thread,
     delete_supervision_slack_deliveries,
@@ -414,6 +415,114 @@ class SlackSupervisionInteractionTests(SimpleTestCase):
             entry=entry_snapshot,
             slack_user_id='U123',
         )
+
+    @patch('contratos.api.views._save_supervision_card')
+    @patch('contratos.api.views._load_supervision_card')
+    @patch('contratos.api.views._get_supervisor_by_slack_user_id')
+    def test_view_submission_reads_devolutiva_from_action_key_when_action_id_is_missing(
+        self,
+        mocked_get_supervisor,
+        mocked_load_card,
+        mocked_save_card,
+    ):
+        supervisor = SimpleNamespace(
+            username='maicon',
+            get_full_name=lambda: 'Maicon Bispo',
+        )
+        analise = SimpleNamespace(pk=55)
+        respostas = {'saved_processos_vinculados': []}
+        card = {}
+        mocked_get_supervisor.return_value = supervisor
+        mocked_load_card.return_value = (analise, respostas, respostas['saved_processos_vinculados'], card, 0)
+        payload = {
+            'view': {
+                'callback_id': 'supervision_decision_modal',
+                'private_metadata': json.dumps({
+                    'slack_user_id': 'U123',
+                    'status': 'aprovado',
+                    'metadata': json.dumps({
+                        'analise_id': 55,
+                        'source': 'saved_processos_vinculados',
+                        'index': 0,
+                    }),
+                }),
+                'state': {
+                    'values': {
+                        'devolutiva_block': {
+                            'devolutiva_input': {
+                                'type': 'plain_text_input',
+                                'value': 'Testando supervisão via Slack',
+                            },
+                        },
+                    },
+                },
+            },
+        }
+
+        response = SlackSupervisionInteractionAPIView()._handle_view_submission(payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {'response_action': 'clear'})
+        self.assertEqual(card['supervisor_status'], 'aprovado')
+        self.assertEqual(card['supervisor_status_autor'], 'Maicon Bispo')
+        self.assertEqual(card['supervisor_observacoes'], 'Testando supervisão via Slack')
+        self.assertEqual(card['supervisor_observacoes_autor'], 'Maicon Bispo')
+        mocked_save_card.assert_called_once_with(analise, respostas, request_user=supervisor)
+
+
+class SlackSingleDeliverySyncTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao._save_delivery')
+    @patch('contratos.services.slack_supervisao.add_slack_reaction')
+    @patch('contratos.services.slack_supervisao.post_slack_thread_reply')
+    @patch('contratos.services.slack_supervisao.update_slack_message')
+    @patch('contratos.services.slack_supervisao._build_supervision_message')
+    def test_posts_thread_reply_when_final_message_changes_to_include_note(
+        self,
+        mocked_build_message,
+        mocked_update_message,
+        mocked_post_thread_reply,
+        mocked_add_reaction,
+        mocked_save_delivery,
+    ):
+        mocked_build_message.return_value = {
+            'status_key': 'aprovado',
+            'hash': 'new-hash',
+            'text': 'Supervisão aprovada',
+            'blocks': [],
+        }
+        delivery = SimpleNamespace(
+            slack_user_id='U123',
+            slack_channel_id='D123',
+            slack_message_ts='100.000',
+            slack_thread_ts='100.000',
+            message_hash='old-hash',
+            last_status='aprovado',
+            card_id='card-1',
+            notified_at=None,
+            resolved_at=None,
+        )
+        entry = {
+            'cardId': 'card-1',
+            'supervisor_status': 'aprovado',
+            'supervisor_status_autor': 'Maicon Bispo',
+            'supervisor_observacoes': 'Testando supervisão via Slack',
+            'supervisor_observacoes_autor': 'Maicon Bispo',
+        }
+
+        result = _sync_single_delivery(entry, SimpleNamespace(), delivery, allow_post=False)
+
+        self.assertEqual(result, {'sent': True, 'queued': False})
+        mocked_update_message.assert_called_once_with(
+            'D123',
+            '100.000',
+            text='Supervisão aprovada',
+            blocks=[],
+        )
+        mocked_post_thread_reply.assert_called_once()
+        self.assertIn('Status: Aprovado', mocked_post_thread_reply.call_args.args[2])
+        self.assertIn('Testando supervisão via Slack', mocked_post_thread_reply.call_args.args[2])
+        mocked_add_reaction.assert_not_called()
+        mocked_save_delivery.assert_called_once()
 
 
 class SlackDeliveryPayloadTests(SimpleTestCase):

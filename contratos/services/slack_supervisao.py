@@ -1090,6 +1090,7 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
     message = _build_supervision_message(entry, request=request)
     status_key = message['status_key']
     status_changed = status_key != str(delivery.last_status or '').strip().lower()
+    message_changed = message['hash'] != str(delivery.message_hash or '')
     has_message = _has_slack_message(delivery)
     queued = False
 
@@ -1104,7 +1105,7 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
             has_message = _has_slack_message(delivery)
         else:
             queued = status_key in SUPERVISION_PENDING_STATUSES
-    elif message['hash'] != str(delivery.message_hash or ''):
+    elif message_changed:
         update_slack_message(
             delivery.slack_channel_id,
             delivery.slack_message_ts,
@@ -1112,7 +1113,14 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
             blocks=message['blocks'],
         )
 
-    if status_key in SUPERVISION_FINAL_STATUSES and status_changed and delivery.slack_channel_id and delivery.slack_thread_ts:
+    note_present = bool(str(entry.get('supervisor_observacoes') or '').strip())
+    should_post_thread_reply = (
+        status_key in SUPERVISION_FINAL_STATUSES
+        and delivery.slack_channel_id
+        and delivery.slack_thread_ts
+        and (status_changed or (message_changed and note_present))
+    )
+    if should_post_thread_reply:
         actor_name = (
             str(entry.get('supervisor_status_autor') or '').strip()
             or str(entry.get('supervisor_observacoes_autor') or '').strip()
@@ -1123,6 +1131,7 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
             delivery.slack_thread_ts,
             _thread_update_text(entry, actor_name, status_key),
         )
+    if status_key in SUPERVISION_FINAL_STATUSES and status_changed and delivery.slack_channel_id and delivery.slack_message_ts:
         add_slack_reaction(
             delivery.slack_channel_id,
             delivery.slack_message_ts,
