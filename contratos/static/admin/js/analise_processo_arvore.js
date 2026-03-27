@@ -2818,6 +2818,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const overlay = document.createElement('div');
                 overlay.id = 'cff-system-confirm-dialog';
                 overlay.className = 'cff-dialog-overlay';
+                overlay.style.zIndex = '3200';
                 const dialog = document.createElement('div');
                 dialog.className = 'cff-dialog-box warning';
                 dialog.style.padding = '24px';
