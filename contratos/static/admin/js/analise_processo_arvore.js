@@ -5442,6 +5442,89 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             }));
         }
 
+        function buildServerSupervisionCardStateMap(sourceResponses) {
+            const stateMap = new Map();
+            if (!sourceResponses || typeof sourceResponses !== 'object') {
+                return stateMap;
+            }
+            const appendFrom = (list, sourceLabel) => {
+                if (!Array.isArray(list)) {
+                    return;
+                }
+                list.forEach((card, idx) => {
+                    const normalizedCard = normalizeProcessCardForSummary(card) || card;
+                    if (!normalizedCard || typeof normalizedCard !== 'object') {
+                        return;
+                    }
+                    const identity = getSummaryCardIdentity(normalizedCard, idx, sourceLabel);
+                    if (!identity) {
+                        return;
+                    }
+                    stateMap.set(identity, {
+                        supervisor_observacoes: typeof normalizedCard.supervisor_observacoes === 'string'
+                            ? normalizedCard.supervisor_observacoes.trim()
+                            : '',
+                        supervisor_observacoes_autor: typeof normalizedCard.supervisor_observacoes_autor === 'string'
+                            ? normalizedCard.supervisor_observacoes_autor.trim()
+                            : '',
+                        supervisor_status: typeof normalizedCard.supervisor_status === 'string'
+                            ? normalizedCard.supervisor_status.trim()
+                            : '',
+                        supervisor_status_autor: typeof normalizedCard.supervisor_status_autor === 'string'
+                            ? normalizedCard.supervisor_status_autor.trim()
+                            : '',
+                        awaiting_supervision_confirm: Boolean(normalizedCard.awaiting_supervision_confirm),
+                        supervision_date: normalizeIsoDateValue(normalizedCard.supervision_date),
+                        barrado: deepClone(
+                            normalizedCard.barrado && typeof normalizedCard.barrado === 'object'
+                                ? normalizedCard.barrado
+                                : { ativo: false, inicio: null, retorno_em: null }
+                        ),
+                    });
+                });
+            };
+            appendFrom(sourceResponses[SAVED_PROCESSOS_KEY], 'saved');
+            appendFrom(sourceResponses.processos_vinculados, 'active');
+            return stateMap;
+        }
+
+        function applyServerSupervisionStateToLocalResponses(targetResponses, stateMap) {
+            if (!targetResponses || typeof targetResponses !== 'object' || !(stateMap instanceof Map) || stateMap.size === 0) {
+                return;
+            }
+            const applyToList = (list, sourceLabel) => {
+                if (!Array.isArray(list)) {
+                    return;
+                }
+                list.forEach((card, idx) => {
+                    const normalizedCard = normalizeProcessCardForSummary(card) || card;
+                    if (!normalizedCard || typeof normalizedCard !== 'object') {
+                        return;
+                    }
+                    const identity = getSummaryCardIdentity(normalizedCard, idx, sourceLabel);
+                    if (!identity || !stateMap.has(identity)) {
+                        return;
+                    }
+                    const serverState = stateMap.get(identity) || {};
+                    card.supervisor_observacoes = serverState.supervisor_observacoes || '';
+                    card.supervisor_observacoes_autor = serverState.supervisor_observacoes_autor || '';
+                    card.supervisor_status = serverState.supervisor_status || card.supervisor_status || '';
+                    card.supervisor_status_autor = serverState.supervisor_status_autor || '';
+                    card.awaiting_supervision_confirm = Boolean(serverState.awaiting_supervision_confirm);
+                    card.supervision_date = serverState.supervision_date || card.supervision_date || '';
+                    card.barrado = deepClone(
+                        serverState.barrado && typeof serverState.barrado === 'object'
+                            ? serverState.barrado
+                            : (card.barrado && typeof card.barrado === 'object'
+                                ? card.barrado
+                                : { ativo: false, inicio: null, retorno_em: null })
+                    );
+                });
+            };
+            applyToList(targetResponses[SAVED_PROCESSOS_KEY], 'saved');
+            applyToList(targetResponses.processos_vinculados, 'active');
+        }
+
         function restoreLocalResponsesIfNewer() {
             if (!localResponsesKey || typeof localStorage === 'undefined') {
                 return;
@@ -5457,9 +5540,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 const storedTs = Number(parsed.ts) || 0;
                 if (!storedData) return;
                 const serverTs = getServerUpdatedTimestamp();
+                const serverSupervisionStateMap = buildServerSupervisionCardStateMap(userResponses);
                 if (storedTs > serverTs) {
                     userResponses = storedData;
                     ensureUserResponsesShape();
+                    applyServerSupervisionStateToLocalResponses(userResponses, serverSupervisionStateMap);
                     console.info('Restaurando resposta da análise salva localmente.');
                 }
             } catch (error) {
