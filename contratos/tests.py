@@ -341,6 +341,19 @@ class SlackRemoteDeliveryKeyTests(SimpleTestCase):
             {
                 'slack_channel_id': 'D123',
                 'slack_message_ts': '1743072809.123456',
+                'message_kind': 'root',
+            },
+        )
+
+    def test_builds_and_parses_remote_reply_delivery_key(self):
+        key = _build_remote_slack_delivery_key('D123', '1743072809.123456', message_kind='thread_reply_orphan')
+        self.assertEqual(key, 'remote_reply:D123:1743072809.123456')
+        self.assertEqual(
+            _parse_remote_slack_delivery_key(key),
+            {
+                'slack_channel_id': 'D123',
+                'slack_message_ts': '1743072809.123456',
+                'message_kind': 'thread_reply_orphan',
             },
         )
 
@@ -369,12 +382,26 @@ class SlackRemoteMessageFetchTests(SimpleTestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['slack_channel_id'], 'D123')
-        self.assertEqual(results[0]['slack_message_ts'], '200.000')
-        self.assertEqual(results[0]['slack_reply_ts'], '200.002')
+        self.assertEqual(results[0]['slack_message_ts'], '200.002')
+        self.assertEqual(results[0]['slack_root_ts'], '200.000')
         self.assertEqual(results[0]['message_kind'], 'thread_reply_orphan')
 
 
 class DeleteSlackDeliveriesTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.delete_slack_message')
+    def test_delete_remote_orphan_reply_uses_reply_ts_directly(self, mocked_delete_message):
+        result = delete_supervision_slack_deliveries(
+            [],
+            remote_refs=[{
+                'slack_channel_id': 'D123',
+                'slack_message_ts': '200.002',
+                'message_kind': 'thread_reply_orphan',
+            }],
+        )
+
+        mocked_delete_message.assert_called_once_with('D123', '200.002')
+        self.assertEqual(result['deleted_remote_count'], 1)
+
     @patch('contratos.services.slack_supervisao.fetch_slack_thread_replies')
     def test_delete_slack_thread_reports_when_root_was_already_deleted(self, mocked_fetch_replies):
         mocked_fetch_replies.side_effect = ValueError('thread_not_found')

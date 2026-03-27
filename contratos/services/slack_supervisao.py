@@ -774,9 +774,11 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                 message_kind = ''
                 if _is_supervision_root_message(message):
                     remote_message_ts = current_ts
+                    remote_root_ts = current_ts
                     message_kind = 'root'
                 elif _is_supervision_thread_reply_message(message) and root_ts:
-                    remote_message_ts = root_ts
+                    remote_message_ts = current_ts
+                    remote_root_ts = root_ts
                     message_kind = 'thread_reply_orphan'
                 else:
                     continue
@@ -792,7 +794,7 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                     'slack_user_id': str(getattr(config, 'slack_user_id', '') or '').strip(),
                     'slack_channel_id': channel_id,
                     'slack_message_ts': remote_message_ts,
-                    'slack_reply_ts': current_ts if message_kind == 'thread_reply_orphan' else '',
+                    'slack_root_ts': remote_root_ts,
                     'message_kind': message_kind,
                     'message': message,
                 })
@@ -1551,19 +1553,28 @@ def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
             continue
         channel_id = str(ref.get('slack_channel_id') or '').strip()
         message_ts = str(ref.get('slack_message_ts') or '').strip()
+        message_kind = str(ref.get('message_kind') or '').strip().lower()
         if not channel_id or not message_ts:
             continue
-        dedupe_key = (channel_id, message_ts)
+        dedupe_key = (channel_id, message_ts, message_kind)
         if dedupe_key in seen_remote:
             continue
         seen_remote.add(dedupe_key)
         try:
-            try:
-                delete_slack_thread(channel_id, message_ts)
-            except ValueError as exc:
-                error_text = str(exc or '').strip()
-                if error_text not in {'message_not_found', 'channel_not_found'}:
-                    raise
+            if message_kind == 'thread_reply_orphan':
+                try:
+                    delete_slack_message(channel_id, message_ts)
+                except ValueError as exc:
+                    error_text = str(exc or '').strip()
+                    if error_text not in {'message_not_found', 'channel_not_found'}:
+                        raise
+            else:
+                try:
+                    delete_slack_thread(channel_id, message_ts)
+                except ValueError as exc:
+                    error_text = str(exc or '').strip()
+                    if error_text not in {'message_not_found', 'channel_not_found'}:
+                        raise
             deleted_remote_count += 1
         except Exception as exc:
             errors.append({

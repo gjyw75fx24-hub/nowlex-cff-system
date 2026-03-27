@@ -690,21 +690,25 @@ def _annotate_slack_delivery_queue(results):
             item['queue_position'] = index
 
 
-def _build_remote_slack_delivery_key(channel_id, message_ts):
+def _build_remote_slack_delivery_key(channel_id, message_ts, *, message_kind='root'):
     normalized_channel = str(channel_id or '').strip()
     normalized_ts = str(message_ts or '').strip()
     if not normalized_channel or not normalized_ts:
         return ''
+    normalized_kind = str(message_kind or 'root').strip().lower()
+    if normalized_kind == 'thread_reply_orphan':
+        return f'remote_reply:{normalized_channel}:{normalized_ts}'
     return f'remote:{normalized_channel}:{normalized_ts}'
 
 
 def _parse_remote_slack_delivery_key(value):
     raw = str(value or '').strip()
-    if not raw.startswith('remote:'):
+    if not (raw.startswith('remote:') or raw.startswith('remote_reply:')):
         return None
     parts = raw.split(':', 2)
     if len(parts) != 3:
         return None
+    key_prefix = str(parts[0] or '').strip()
     channel_id = str(parts[1] or '').strip()
     message_ts = str(parts[2] or '').strip()
     if not channel_id or not message_ts:
@@ -712,6 +716,7 @@ def _parse_remote_slack_delivery_key(value):
     return {
         'slack_channel_id': channel_id,
         'slack_message_ts': message_ts,
+        'message_kind': 'thread_reply_orphan' if key_prefix == 'remote_reply' else 'root',
     }
 
 
@@ -777,6 +782,7 @@ def _extract_remote_supervision_message_payload(remote_item):
         status_key = 'pendente'
     notified_at = None
     message_ts = str(remote_item.get('slack_message_ts') or '').strip()
+    root_ts = str(remote_item.get('slack_root_ts') or '').strip()
     try:
         notified_at = timezone.localtime(
             datetime.fromtimestamp(float(message_ts.split('.', 1)[0]), tz=timezone.get_current_timezone())
@@ -786,7 +792,11 @@ def _extract_remote_supervision_message_payload(remote_item):
     has_message = bool(str(remote_item.get('slack_channel_id') or '').strip() and message_ts)
     return {
         'id': None,
-        'delivery_key': _build_remote_slack_delivery_key(remote_item.get('slack_channel_id'), message_ts),
+        'delivery_key': _build_remote_slack_delivery_key(
+            remote_item.get('slack_channel_id'),
+            message_ts,
+            message_kind=message_kind,
+        ),
         'analise_id': None,
         'processo_id': None,
         'processo_label': '',
@@ -811,9 +821,11 @@ def _extract_remote_supervision_message_payload(remote_item):
         'updated_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
         'slack_channel_id': str(remote_item.get('slack_channel_id') or '').strip(),
         'slack_message_ts': message_ts,
+        'slack_root_ts': root_ts,
         'has_message': has_message,
         'queue_position': 0,
         'is_remote_orphan': True,
+        'message_kind': message_kind,
     }
 
 
@@ -2014,6 +2026,7 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
                 {
                     'slack_channel_id': str(item.get('slack_channel_id') or '').strip(),
                     'slack_message_ts': str(item.get('slack_message_ts') or '').strip(),
+                    'message_kind': str(item.get('message_kind') or '').strip(),
                 }
                 for item in remote_messages
             ]
