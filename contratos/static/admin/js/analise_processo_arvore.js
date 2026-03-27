@@ -3391,9 +3391,20 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         const recipients = Array.isArray(response?.recipients) ? response.recipients.filter(Boolean) : [];
                         const queuedCount = parseInt(response?.queued_count || 0, 10) || 0;
                         const errors = Array.isArray(response?.errors) ? response.errors : [];
+                        const typeSummaries = Array.isArray(response?.type_summaries) ? response.type_summaries : [];
+                        const typeSummaryText = typeSummaries
+                            .map((item) => {
+                                const slug = String(item?.analysis_type_slug || 'sem_tipo').trim() || 'sem_tipo';
+                                const pendingTotal = parseInt(item?.pending_total || 0, 10) || 0;
+                                const postedNowCount = parseInt(item?.posted_now_count || 0, 10) || 0;
+                                const alreadySentCount = parseInt(item?.already_sent_count || 0, 10) || 0;
+                                return `${slug}: ${postedNowCount} nova(s), ${alreadySentCount} ativa(s), ${pendingTotal} pendente(s)`;
+                            })
+                            .filter(Boolean)
+                            .join(' | ');
                         if (errors.length) {
                             setFeedback(
-                                `Atualização concluída com falhas. ${errors.map(item => item.error || 'erro').join(' | ')}`,
+                                `Atualização concluída com falhas. ${errors.map(item => item.error || 'erro').join(' | ')}${typeSummaryText ? ` | ${typeSummaryText}` : ''}`,
                                 'warning'
                             );
                         } else if (recipients.length || queuedCount) {
@@ -3404,9 +3415,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                             if (queuedCount) {
                                 parts.push(`${queuedCount} item(ns) permanecem em fila`);
                             }
+                            if (typeSummaryText) {
+                                parts.push(`Tipos: ${typeSummaryText}`);
+                            }
                             setFeedback(parts.join('. ') + '.', 'success');
                         } else {
-                            setFeedback('Atualização concluída. Nenhuma mensagem pendente precisou ser reenviada.', 'success');
+                            setFeedback(
+                                `Atualização concluída. Nenhuma mensagem pendente precisou ser reenviada.${typeSummaryText ? ` Tipos: ${typeSummaryText}.` : ''}`,
+                                'success'
+                            );
                         }
                         loadDeliveries();
                     })

@@ -1224,7 +1224,19 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
         if _entry_is_pending(entry) and _entry_analysis_group_key(entry) == analysis_type_slug
     ]
     if not pending_entries:
-        return {'sent': False, 'queued_count': 0, 'errors': []}
+        return {
+            'sent': False,
+            'queued_count': 0,
+            'errors': [],
+            'type_summary': {
+                'analysis_type_slug': analysis_type_slug,
+                'pending_total': 0,
+                'already_sent_count': 0,
+                'posted_now_count': 0,
+                'to_send_count': 0,
+                'to_queue_count': 0,
+            },
+        }
 
     pending_entries.sort(key=_entry_queue_sort_key)
     sent_pending = []
@@ -1248,11 +1260,15 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
     sent_any = False
     queued_count = 0
     errors = []
+    posted_now_count = 0
 
     for entry, delivery in to_send:
         try:
+            had_message_before = _has_slack_message(delivery)
             result = _sync_single_delivery(entry, supervisor, delivery, request=request, allow_post=True)
             sent_any = sent_any or bool(result.get('sent'))
+            if not had_message_before and result.get('sent'):
+                posted_now_count += 1
         except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
@@ -1286,6 +1302,14 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
         'sent': sent_any,
         'queued_count': queued_count,
         'errors': errors,
+        'type_summary': {
+            'analysis_type_slug': analysis_type_slug,
+            'pending_total': len(pending_entries),
+            'already_sent_count': len(sent_pending),
+            'posted_now_count': posted_now_count,
+            'to_send_count': len(to_send),
+            'to_queue_count': len(to_queue),
+        },
     }
 
 
@@ -1332,6 +1356,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
     errors = []
     has_pending_entries = False
     queued_count = 0
+    type_summaries = []
 
     for config in supervisor_configs:
         supervisor = config.user
@@ -1396,6 +1421,12 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
                 deliveries=deliveries,
                 request=request,
             )
+            type_summary = result.get('type_summary')
+            if isinstance(type_summary, dict):
+                type_summaries.append({
+                    **type_summary,
+                    'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                })
             if result.get('sent'):
                 recipient_names.add(
                     str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
@@ -1408,6 +1439,7 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
         'errors': errors,
         'has_pending_entries': has_pending_entries,
         'queued_count': queued_count,
+        'type_summaries': type_summaries,
     }
 
 
@@ -1427,6 +1459,7 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     eligible_names = set()
     errors = []
     queued_count = 0
+    type_summaries = []
     try:
         accepted_entries, deliveries, _entries_by_key = _build_supervisor_delivery_context(supervisor, config)
     except BaseException as exc:
@@ -1500,6 +1533,12 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
                 exc,
             )
             continue
+        type_summary = result.get('type_summary')
+        if isinstance(type_summary, dict):
+            type_summaries.append({
+                **type_summary,
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+            })
         if result.get('sent'):
             recipient_names.add(
                 str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
@@ -1511,6 +1550,7 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
         'eligible_recipients': sorted(name for name in eligible_names if name),
         'errors': errors,
         'queued_count': queued_count,
+        'type_summaries': type_summaries,
     }
 
 

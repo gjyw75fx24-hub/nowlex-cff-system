@@ -2150,6 +2150,7 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
         eligible_recipients = set()
         errors = []
         queued_count = 0
+        type_summaries = []
 
         for config in configs:
             try:
@@ -2169,12 +2170,14 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
             eligible_recipients.update(str(name).strip() for name in (result.get('eligible_recipients') or []) if str(name).strip())
             queued_count += int(result.get('queued_count') or 0)
             errors.extend(result.get('errors') or [])
+            type_summaries.extend(item for item in (result.get('type_summaries') or []) if isinstance(item, dict))
 
         return Response({
             'recipients': sorted(recipients),
             'eligible_recipients': sorted(eligible_recipients),
             'errors': errors,
             'queued_count': queued_count,
+            'type_summaries': type_summaries,
         })
 
 
