@@ -85,6 +85,7 @@ from ..services.slack_supervisao import (
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
+    fetch_remote_supervision_slack_snapshot,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
@@ -1899,6 +1900,65 @@ class SlackSupervisionDeliveryListAPIView(APIView):
     renderer_classes = [JSONRenderer]
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _clear_stale_local_message_refs(local_results, remote_snapshot):
+        if not local_results or not isinstance(remote_snapshot, dict):
+            return []
+
+        remote_errors = remote_snapshot.get('errors') or []
+        if remote_errors:
+            return []
+
+        seen_refs = {
+            (
+                str(channel_id or '').strip(),
+                str(message_ts or '').strip(),
+            )
+            for channel_id, message_ts in (remote_snapshot.get('seen_refs') or set())
+            if str(channel_id or '').strip() and str(message_ts or '').strip()
+        }
+        complete_channels = {
+            str(channel_id or '').strip()
+            for channel_id in (remote_snapshot.get('complete_channels') or set())
+            if str(channel_id or '').strip()
+        }
+        if not complete_channels:
+            return []
+
+        stale_delivery_ids = []
+        stale_refs = []
+        for payload in local_results:
+            channel_id = str(payload.get('slack_channel_id') or '').strip()
+            message_ts = str(payload.get('slack_message_ts') or '').strip()
+            if not channel_id or not message_ts:
+                continue
+            if channel_id not in complete_channels:
+                continue
+            if (channel_id, message_ts) in seen_refs:
+                continue
+
+            delivery_id = payload.get('id')
+            if delivery_id:
+                stale_delivery_ids.append(int(delivery_id))
+            stale_refs.append((channel_id, message_ts))
+            payload['slack_channel_id'] = ''
+            payload['slack_message_ts'] = ''
+            payload['has_message'] = False
+            payload['dispatch_state'] = 'queued' if payload.get('is_pending') else 'unsent'
+            payload['notified_at'] = ''
+            payload['notified_at_display'] = ''
+
+        if stale_delivery_ids:
+            SupervisaoSlackEntrega.objects.filter(pk__in=stale_delivery_ids).update(
+                slack_channel_id='',
+                slack_message_ts='',
+                slack_thread_ts='',
+                notified_at=None,
+                message_hash='',
+                updated_at=timezone.now(),
+            )
+        return stale_refs
+
     def get(self, request):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1965,7 +2025,10 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 for item in results
                 if str(item.get('slack_channel_id') or '').strip() and str(item.get('slack_message_ts') or '').strip()
             }
-            remote_messages, remote_errors = fetch_remote_supervision_slack_messages(configs, existing_refs=existing_refs)
+            remote_snapshot = fetch_remote_supervision_slack_snapshot(configs, existing_refs=existing_refs)
+            remote_messages = remote_snapshot.get('results') or []
+            remote_errors = remote_snapshot.get('errors') or []
+            self._clear_stale_local_message_refs(results, remote_snapshot)
             results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
             results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             _annotate_slack_delivery_queue(results)

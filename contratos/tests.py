@@ -309,14 +309,14 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
 
     @patch('contratos.api.views.is_supervisor_developer_user', return_value=True)
-    @patch('contratos.api.views.fetch_remote_supervision_slack_messages')
+    @patch('contratos.api.views.fetch_remote_supervision_slack_snapshot')
     @patch('contratos.api.views.ensure_supervision_delivery_records')
     @patch('contratos.api.views.SupervisaoSlackEntrega.objects')
     @patch('contratos.api.views.UserSlackConfig.objects')
     def test_list_view_skips_reconcile_by_default(self, mocked_config_objects, mocked_delivery_objects, mocked_reconcile, mocked_fetch_remote, _mocked_is_supervisor_dev):
         mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value = []
         mocked_delivery_objects.annotate.return_value.select_related.return_value.only.return_value.order_by.return_value = []
-        mocked_fetch_remote.return_value = ([], [])
+        mocked_fetch_remote.return_value = {'results': [], 'errors': [], 'seen_refs': set(), 'complete_channels': set()}
         request = APIRequestFactory().get('/api/slack/supervisao/entregas/')
         request.user = SimpleNamespace(is_authenticated=True, is_superuser=False)
 
@@ -324,6 +324,53 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         mocked_reconcile.assert_not_called()
+
+    @patch('contratos.api.views.is_supervisor_developer_user', return_value=True)
+    @patch('contratos.api.views.fetch_remote_supervision_slack_snapshot')
+    @patch('contratos.api.views.ensure_supervision_delivery_records')
+    @patch('contratos.api.views.SupervisaoSlackEntrega.objects')
+    @patch('contratos.api.views.UserSlackConfig.objects')
+    def test_list_view_clears_stale_local_message_refs_when_remote_dm_is_empty(
+        self,
+        mocked_config_objects,
+        mocked_delivery_objects,
+        mocked_reconcile,
+        mocked_remote_snapshot,
+        _mocked_is_supervisor_dev,
+    ):
+        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value = []
+        delivery = SimpleNamespace(
+            pk=91,
+            analise_id=77,
+            processo_id=44,
+            processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
+            supervisor=SimpleNamespace(pk=5, username='maicon', get_full_name=lambda: 'Maicon Bispo'),
+            card_id='card-1',
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            last_status='pendente',
+            notified_at=None,
+            updated_at=None,
+            slack_channel_id='D123',
+            slack_message_ts='123.456',
+            parte_nome_display='LAFAYETE',
+        )
+        mocked_delivery_objects.annotate.return_value.select_related.return_value.only.return_value.order_by.return_value = [delivery]
+        mocked_remote_snapshot.return_value = {
+            'results': [],
+            'errors': [],
+            'seen_refs': set(),
+            'complete_channels': {'D123'},
+        }
+        request = APIRequestFactory().get('/api/slack/supervisao/entregas/')
+        request.user = SimpleNamespace(is_authenticated=True, is_superuser=False)
+
+        response = SlackSupervisionDeliveryListAPIView().get(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['sent_count'], 0)
+        self.assertEqual(response.data['summary']['queued_count'], 1)
+        mocked_delivery_objects.filter.return_value.update.assert_called_once()
 
 
 class SlackDeliveryPayloadTests(SimpleTestCase):

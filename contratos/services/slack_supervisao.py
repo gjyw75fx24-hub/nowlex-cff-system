@@ -748,7 +748,7 @@ def _is_supervision_thread_reply_message(message):
     return False
 
 
-def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
+def fetch_remote_supervision_slack_snapshot(configs, *, existing_refs=None):
     existing = {
         (str(channel_id or '').strip(), str(message_ts or '').strip())
         for channel_id, message_ts in (existing_refs or set())
@@ -756,6 +756,8 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
     }
     results = []
     errors = []
+    seen_refs = set()
+    complete_channels = set()
     for config in configs or []:
         supervisor = getattr(config, 'user', None)
         supervisor_name = (
@@ -768,6 +770,8 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
             if not channel_id:
                 continue
             payload = fetch_slack_conversation_history(channel_id)
+            if not bool(payload.get('has_more')):
+                complete_channels.add(channel_id)
             for message in payload.get('messages') or []:
                 current_ts = str(message.get('ts') or '').strip()
                 root_ts = str(message.get('thread_ts') or '').strip()
@@ -785,6 +789,7 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                 if not remote_message_ts:
                     continue
                 ref_key = (channel_id, remote_message_ts)
+                seen_refs.add(ref_key)
                 if ref_key in existing:
                     continue
                 existing.add(ref_key)
@@ -808,7 +813,17 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                 getattr(supervisor, 'pk', None),
                 exc,
             )
-    return results, errors
+    return {
+        'results': results,
+        'errors': errors,
+        'seen_refs': seen_refs,
+        'complete_channels': complete_channels,
+    }
+
+
+def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
+    snapshot = fetch_remote_supervision_slack_snapshot(configs, existing_refs=existing_refs)
+    return snapshot['results'], snapshot['errors']
 
 
 def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status, entry=None, slack_user_id):
