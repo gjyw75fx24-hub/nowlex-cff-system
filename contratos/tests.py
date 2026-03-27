@@ -22,6 +22,7 @@ from contratos.api.views import (
 )
 from contratos.models import AnaliseProcesso, ProcessoJudicial
 from contratos.services.slack_supervisao import (
+    _entry_analysis_group_key,
     _insert_delivery,
     _save_delivery,
     _slack_api_post,
@@ -418,6 +419,23 @@ class SlackDeliveryReconcileTests(SimpleTestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(mocked_builder.call_count, 2)
+
+
+class SlackAnalysisGroupingTests(SimpleTestCase):
+    def test_group_key_falls_back_to_name_when_slug_is_missing(self):
+        key = _entry_analysis_group_key({
+            'analysis_type_nome': 'Novas Monitorias',
+            'analysis_type_slug': '',
+        })
+
+        self.assertEqual(key, 'novas monitorias')
+
+    def test_group_key_falls_back_to_card_source_when_type_metadata_is_missing(self):
+        key = _entry_analysis_group_key({
+            'card_source': 'saved_processos_vinculados',
+        })
+
+        self.assertEqual(key, 'saved_processos_vinculados')
 
 
 class SlackRemoteDeliveryKeyTests(SimpleTestCase):

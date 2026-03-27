@@ -164,8 +164,27 @@ def _entry_analysis_type_slug(entry):
     return _normalize_analysis_slug(
         entry.get('analysis_type_slug')
         or entry.get('analysisTypeSlug')
+        or entry.get('analysis_hashtag')
+        or entry.get('analysisTypeHashtag')
         or ''
     )
+
+
+def _entry_analysis_group_key(entry):
+    explicit_slug = _entry_analysis_type_slug(entry)
+    if explicit_slug:
+        return explicit_slug
+    for candidate in (
+        entry.get('analysis_type_nome'),
+        entry.get('analysisTypeName'),
+        entry.get('analysis_type_short'),
+        entry.get('analysisTypeShort'),
+        entry.get('card_source'),
+    ):
+        normalized = _normalize_analysis_slug(candidate)
+        if normalized:
+            return normalized
+    return '__sem_tipo__'
 
 
 def _supervisor_accepts_entry(config, entry):
@@ -1202,7 +1221,7 @@ def _build_supervisor_delivery_context(supervisor, config):
 def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_entries, deliveries, request=None):
     pending_entries = [
         entry for entry in accepted_entries
-        if _entry_is_pending(entry) and _entry_analysis_type_slug(entry) == analysis_type_slug
+        if _entry_is_pending(entry) and _entry_analysis_group_key(entry) == analysis_type_slug
     ]
     if not pending_entries:
         return {'sent': False, 'queued_count': 0, 'errors': []}
@@ -1340,9 +1359,9 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
                 str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()
             )
         relevant_slugs = {
-            _entry_analysis_type_slug(entry)
+            _entry_analysis_group_key(entry)
             for entry in current_entries
-            if _entry_analysis_type_slug(entry)
+            if _entry_is_pending(entry)
         }
 
         for entry in current_entries:
@@ -1456,9 +1475,9 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
             )
 
     type_slugs = {
-        _entry_analysis_type_slug(entry)
+        _entry_analysis_group_key(entry)
         for entry in accepted_entries
-        if _entry_analysis_type_slug(entry) and _entry_is_pending(entry)
+        if _entry_is_pending(entry)
     }
     for analysis_type_slug in sorted(type_slugs):
         try:
