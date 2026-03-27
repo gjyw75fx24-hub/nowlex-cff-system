@@ -4,6 +4,7 @@ from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
 from rest_framework.renderers import JSONRenderer
+from rest_framework.test import APIRequestFactory
 
 from contratos.api.views import (
     SlackSupervisionDeliveryDeleteAPIView,
@@ -266,6 +267,23 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
 
+    @patch('contratos.api.views.is_supervisor_developer_user', return_value=True)
+    @patch('contratos.api.views.fetch_remote_supervision_slack_messages')
+    @patch('contratos.api.views.ensure_supervision_delivery_records')
+    @patch('contratos.api.views.SupervisaoSlackEntrega.objects')
+    @patch('contratos.api.views.UserSlackConfig.objects')
+    def test_list_view_skips_reconcile_by_default(self, mocked_config_objects, mocked_delivery_objects, mocked_reconcile, mocked_fetch_remote, _mocked_is_supervisor_dev):
+        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value = []
+        mocked_delivery_objects.annotate.return_value.select_related.return_value.only.return_value.order_by.return_value = []
+        mocked_fetch_remote.return_value = ([], [])
+        request = APIRequestFactory().get('/api/slack/supervisao/entregas/')
+        request.user = SimpleNamespace(is_authenticated=True, is_superuser=False)
+
+        response = SlackSupervisionDeliveryListAPIView().get(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_reconcile.assert_not_called()
+
 
 class SlackDeliveryPayloadTests(SimpleTestCase):
     def test_normalizes_legacy_sent_status_without_message_into_pending_queue(self):
@@ -357,6 +375,13 @@ class SlackRemoteMessageFetchTests(SimpleTestCase):
 
 
 class DeleteSlackDeliveriesTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.fetch_slack_thread_replies')
+    def test_delete_slack_thread_reports_when_root_was_already_deleted(self, mocked_fetch_replies):
+        mocked_fetch_replies.side_effect = ValueError('thread_not_found')
+
+        with self.assertRaises(RuntimeError):
+            delete_slack_thread('D123', '100.000')
+
     @patch('contratos.services.slack_supervisao.delete_slack_message')
     @patch('contratos.services.slack_supervisao.fetch_slack_thread_replies')
     def test_delete_slack_thread_deletes_child_replies_before_root(self, mocked_fetch_replies, mocked_delete_message):

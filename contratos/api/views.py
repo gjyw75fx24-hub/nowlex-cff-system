@@ -1898,7 +1898,8 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 .exclude(slack_user_id='')
                 .order_by('user_id')
             )
-            reconcile_errors = ensure_supervision_delivery_records(configs)
+            reconcile_requested = (request.query_params.get('reconcile') or '').strip().lower() in {'1', 'true', 'sim', 'yes'}
+            reconcile_errors = ensure_supervision_delivery_records(configs) if reconcile_requested else []
             passive_part_name_subquery = (
                 Parte.objects
                 .filter(processo_id=OuterRef('processo_id'), tipo_polo='PASSIVO')

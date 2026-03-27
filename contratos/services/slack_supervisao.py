@@ -660,8 +660,11 @@ def delete_slack_thread(channel_id, message_ts):
             child_messages.append(reply_ts)
     except ValueError as exc:
         error_text = str(exc or '').strip()
-        if error_text not in {'thread_not_found', 'message_not_found', 'channel_not_found'}:
-            raise
+        if error_text in {'thread_not_found', 'message_not_found'}:
+            raise RuntimeError(
+                'A mensagem raiz da thread ja foi excluida no Slack; as respostas remanescentes nao podem ser localizadas automaticamente.'
+            ) from exc
+        raise
     for reply_ts in reversed(child_messages):
         try:
             delete_slack_message(channel_id, reply_ts)
@@ -670,7 +673,15 @@ def delete_slack_thread(channel_id, message_ts):
             error_text = str(exc or '').strip()
             if error_text not in {'message_not_found', 'channel_not_found'}:
                 raise
-    delete_slack_message(channel_id, message_ts)
+    try:
+        delete_slack_message(channel_id, message_ts)
+    except ValueError as exc:
+        error_text = str(exc or '').strip()
+        if error_text == 'message_not_found':
+            raise RuntimeError(
+                'A mensagem raiz da thread ja foi excluida no Slack; as respostas remanescentes nao podem ser localizadas automaticamente.'
+            ) from exc
+        raise
     return deleted_count + 1
 
 
@@ -1517,7 +1528,7 @@ def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
                     delete_slack_thread(channel_id, message_ts)
                 except ValueError as exc:
                     error_text = str(exc or '').strip()
-                    if error_text not in {'message_not_found', 'channel_not_found', 'thread_not_found'}:
+                    if error_text not in {'message_not_found', 'channel_not_found'}:
                         raise
             elif delivery.notified_at:
                 raise RuntimeError('Entrega enviada sem identificadores Slack persistidos.')
@@ -1551,7 +1562,7 @@ def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
                 delete_slack_thread(channel_id, message_ts)
             except ValueError as exc:
                 error_text = str(exc or '').strip()
-                if error_text not in {'message_not_found', 'channel_not_found', 'thread_not_found'}:
+                if error_text not in {'message_not_found', 'channel_not_found'}:
                     raise
             deleted_remote_count += 1
         except Exception as exc:
