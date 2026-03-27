@@ -86,7 +86,6 @@ from ..services.slack_supervisao import (
     ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
     fetch_remote_supervision_slack_snapshot,
-    get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
     sync_supervision_slack_for_analysis,
@@ -2242,18 +2241,9 @@ class SlackSupervisionInteractionAPIView(View):
             },
             ensure_ascii=True,
         )
-        entry = None
-        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
-        if supervisor:
-            try:
-                entry = get_supervision_entry_for_card(
-                    supervisor=supervisor,
-                    analise_id=analise_id,
-                    source=source,
-                    index=index,
-                )
-            except BaseException:
-                entry = None
+        entry = action_payload.get('entry')
+        if not isinstance(entry, dict):
+            entry = None
         try:
             open_supervision_decision_modal(
                 trigger_id,

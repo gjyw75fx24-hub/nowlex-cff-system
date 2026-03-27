@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
@@ -9,6 +10,7 @@ from rest_framework.test import APIRequestFactory
 
 from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin
 from contratos.api.views import (
+    SlackSupervisionInteractionAPIView,
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
     SlackSupervisionDeliveryRefreshAPIView,
@@ -372,6 +374,46 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(response.data['summary']['sent_count'], 0)
         self.assertEqual(response.data['summary']['queued_count'], 1)
         mocked_delivery_objects.filter.return_value.update.assert_called_once()
+
+
+class SlackSupervisionInteractionTests(SimpleTestCase):
+    @patch('contratos.api.views.open_supervision_decision_modal')
+    def test_block_action_opens_modal_from_embedded_entry_snapshot(self, mocked_open_modal):
+        entry_snapshot = {
+            'nome': 'Parte Teste',
+            'cpf': '12345678900',
+            'supervisor_observacoes': 'Texto anterior',
+            'barrado_text': '',
+            'barrado': {'ativo': False, 'inicio': None, 'retorno_em': None},
+        }
+        payload = {
+            'trigger_id': '1337.42',
+            'user': {'id': 'U123'},
+            'actions': [{
+                'action_id': 'supervision_approve',
+                'value': json.dumps({
+                    'metadata': json.dumps({
+                        'analise_id': 55,
+                        'source': 'saved_processos_vinculados',
+                        'index': 0,
+                        'card_id': 'card-1',
+                    }),
+                    'status': 'aprovado',
+                    'entry': entry_snapshot,
+                }),
+            }],
+        }
+
+        response = SlackSupervisionInteractionAPIView()._handle_block_actions(payload)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_open_modal.assert_called_once_with(
+            '1337.42',
+            metadata_json='{"analise_id": 55, "source": "saved_processos_vinculados", "index": 0, "card_id": "card-1"}',
+            desired_status='aprovado',
+            entry=entry_snapshot,
+            slack_user_id='U123',
+        )
 
 
 class SlackDeliveryPayloadTests(SimpleTestCase):

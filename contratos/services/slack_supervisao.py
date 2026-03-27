@@ -370,6 +370,29 @@ def _split_lines(value):
     return [line for line in str(value or '').replace('\r\n', '\n').split('\n') if line.strip()]
 
 
+def _build_decision_action_value(entry, status):
+    metadata = json.dumps({
+        'analise_id': entry.get('analise_id'),
+        'source': entry.get('card_source'),
+        'index': entry.get('card_index'),
+        'card_id': entry.get('cardId'),
+    }, ensure_ascii=True)
+    entry_snapshot = {
+        'nome': str(entry.get('nome') or entry.get('parte_nome') or '').strip(),
+        'cpf': str(entry.get('cpf') or '').strip(),
+        'supervisor_observacoes': str(entry.get('supervisor_observacoes') or '').strip(),
+        'barrado_text': str(entry.get('barrado_text') or '').strip(),
+    }
+    barrado = entry.get('barrado')
+    if isinstance(barrado, dict):
+        entry_snapshot['barrado'] = {
+            'ativo': bool(barrado.get('ativo')),
+            'inicio': str(barrado.get('inicio') or '').strip() or None,
+            'retorno_em': str(barrado.get('retorno_em') or '').strip() or None,
+        }
+    return json.dumps({'metadata': metadata, 'status': status, 'entry': entry_snapshot}, ensure_ascii=True)
+
+
 def _build_decision_modal_blocks(desired_status, entry=None):
     entry = entry if isinstance(entry, dict) else {}
     existing_note = str(entry.get('supervisor_observacoes') or '').strip()
@@ -535,12 +558,6 @@ def _build_supervision_message(entry, *, request=None):
             'action_id': 'open_supervision_agenda',
         })
     if status_key in SUPERVISION_PENDING_STATUSES and slack_supervisao_interactive_enabled():
-        metadata = json.dumps({
-            'analise_id': entry.get('analise_id'),
-            'source': entry.get('card_source'),
-            'index': entry.get('card_index'),
-            'card_id': entry.get('cardId'),
-        }, ensure_ascii=True)
         barrado = entry.get('barrado') if isinstance(entry.get('barrado'), dict) else {}
         barrado_active = bool(barrado.get('ativo'))
         action_elements.extend([
@@ -549,14 +566,14 @@ def _build_supervision_message(entry, *, request=None):
                 'text': {'type': 'plain_text', 'text': 'Aprovar', 'emoji': True},
                 'style': 'primary',
                 'action_id': 'supervision_approve',
-                'value': json.dumps({'metadata': metadata, 'status': 'aprovado'}),
+                'value': _build_decision_action_value(entry, 'aprovado'),
             },
             {
                 'type': 'button',
                 'text': {'type': 'plain_text', 'text': 'Reprovar', 'emoji': True},
                 'style': 'danger',
                 'action_id': 'supervision_reprove',
-                'value': json.dumps({'metadata': metadata, 'status': 'reprovado'}),
+                'value': _build_decision_action_value(entry, 'reprovado'),
             },
             {
                 'type': 'button',
@@ -566,7 +583,7 @@ def _build_supervision_message(entry, *, request=None):
                     'emoji': True,
                 },
                 'action_id': 'supervision_barrar',
-                'value': json.dumps({'metadata': metadata, 'status': 'barrado'}),
+                'value': _build_decision_action_value(entry, 'barrado'),
             },
         ])
         _append_markdown_section(blocks, 'Devolutiva', _build_pending_decision_hint_lines())
