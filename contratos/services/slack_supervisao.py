@@ -39,6 +39,8 @@ def _describe_slack_api_error(method, error_code):
         return normalized_error or 'erro_desconhecido'
     if normalized_method == 'conversations.history':
         return 'missing_scope: o app do Slack precisa do escopo im:history para ler DMs ja enviadas; reinstale o app apos adicionar o escopo'
+    if normalized_method == 'conversations.replies':
+        return 'missing_scope: o app do Slack precisa do escopo im:history para ler respostas de threads em DMs; reinstale o app apos adicionar o escopo'
     if normalized_method == 'conversations.open':
         return 'missing_scope: o app do Slack precisa do escopo im:write para abrir DMs; reinstale o app apos adicionar o escopo'
     if normalized_method == 'chat.delete':
@@ -612,6 +614,17 @@ def fetch_slack_conversation_history(channel_id, *, limit=SLACK_HISTORY_FETCH_LI
     )
 
 
+def fetch_slack_thread_replies(channel_id, message_ts, *, limit=SLACK_HISTORY_FETCH_LIMIT):
+    return _slack_api_post(
+        'conversations.replies',
+        data_payload={
+            'channel': channel_id,
+            'ts': str(message_ts or '').strip(),
+            'limit': int(limit or SLACK_HISTORY_FETCH_LIMIT),
+        },
+    )
+
+
 def post_slack_message(channel_id, *, text, blocks):
     return _slack_api_post(
         'chat.postMessage',
@@ -631,6 +644,34 @@ def delete_slack_message(channel_id, message_ts):
         'chat.delete',
         json_payload={'channel': channel_id, 'ts': message_ts},
     )
+
+
+def delete_slack_thread(channel_id, message_ts):
+    deleted_count = 0
+    child_messages = []
+    try:
+        replies_payload = fetch_slack_thread_replies(channel_id, message_ts)
+        for message in replies_payload.get('messages') or []:
+            if not isinstance(message, dict):
+                continue
+            reply_ts = str(message.get('ts') or '').strip()
+            if not reply_ts or reply_ts == str(message_ts or '').strip():
+                continue
+            child_messages.append(reply_ts)
+    except ValueError as exc:
+        error_text = str(exc or '').strip()
+        if error_text not in {'thread_not_found', 'message_not_found', 'channel_not_found'}:
+            raise
+    for reply_ts in reversed(child_messages):
+        try:
+            delete_slack_message(channel_id, reply_ts)
+            deleted_count += 1
+        except ValueError as exc:
+            error_text = str(exc or '').strip()
+            if error_text not in {'message_not_found', 'channel_not_found'}:
+                raise
+    delete_slack_message(channel_id, message_ts)
+    return deleted_count + 1
 
 
 def post_slack_thread_reply(channel_id, thread_ts, text):
@@ -866,6 +907,10 @@ def _insert_delivery(delivery):
             return existing_delivery
         raise RuntimeError('Entrega Slack criada sem retorno de identificador.')
     except BaseException as exc:
+        try:
+            return _upsert_delivery(delivery, current_timestamp=current_timestamp)
+        except BaseException:
+            pass
         existing_delivery = None
         try:
             existing_delivery = SupervisaoSlackEntrega.objects.filter(**filters).order_by('-pk').first()
@@ -1438,10 +1483,10 @@ def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
             message_ts = str(delivery.slack_message_ts or '').strip()
             if channel_id and message_ts:
                 try:
-                    delete_slack_message(channel_id, message_ts)
+                    delete_slack_thread(channel_id, message_ts)
                 except ValueError as exc:
                     error_text = str(exc or '').strip()
-                    if error_text not in {'message_not_found', 'channel_not_found'}:
+                    if error_text not in {'message_not_found', 'channel_not_found', 'thread_not_found'}:
                         raise
             elif delivery.notified_at:
                 raise RuntimeError('Entrega enviada sem identificadores Slack persistidos.')
@@ -1472,10 +1517,10 @@ def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
         seen_remote.add(dedupe_key)
         try:
             try:
-                delete_slack_message(channel_id, message_ts)
+                delete_slack_thread(channel_id, message_ts)
             except ValueError as exc:
                 error_text = str(exc or '').strip()
-                if error_text not in {'message_not_found', 'channel_not_found'}:
+                if error_text not in {'message_not_found', 'channel_not_found', 'thread_not_found'}:
                     raise
             deleted_remote_count += 1
         except Exception as exc:

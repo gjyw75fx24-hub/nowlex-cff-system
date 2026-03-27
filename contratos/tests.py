@@ -1,6 +1,6 @@
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
 from rest_framework.renderers import JSONRenderer
@@ -17,8 +17,14 @@ from contratos.api.views import (
     _resolve_supervision_entry_date,
     _save_supervision_card,
 )
-from contratos.services.slack_supervisao import _save_delivery, _slack_api_post
-from contratos.services.slack_supervisao import delete_supervision_slack_deliveries, ensure_supervision_delivery_records
+from contratos.services.slack_supervisao import (
+    _insert_delivery,
+    _save_delivery,
+    _slack_api_post,
+    delete_slack_thread,
+    delete_supervision_slack_deliveries,
+    ensure_supervision_delivery_records,
+)
 
 
 class ResolveSupervisionEntryDateTests(SimpleTestCase):
@@ -141,11 +147,17 @@ class SaveDeliveryTests(SimpleTestCase):
         mocked_filter.assert_called_once_with(pk=99)
         mocked_filter.return_value.update.assert_called_once()
 
+    @patch('contratos.services.slack_supervisao._upsert_delivery')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
-    def test_converts_base_exception_from_update_into_runtime_error(self, mocked_filter):
+    def test_raises_runtime_error_when_update_and_upsert_fail(self, mocked_filter, mocked_upsert):
         mocked_filter.return_value.update.side_effect = SystemExit(1)
+        mocked_upsert.side_effect = SystemExit(1)
         delivery = SimpleNamespace(
             pk=99,
+            analise_id=7,
+            supervisor_id=5,
+            card_source='saved_processos_vinculados',
+            card_index=1,
             slack_channel_id='C1',
             slack_message_ts='123.456',
             slack_thread_ts='123.456',
@@ -160,6 +172,27 @@ class SaveDeliveryTests(SimpleTestCase):
 
         with self.assertRaises(RuntimeError):
             _save_delivery(delivery, update_fields=['message_hash'])
+
+    @patch('contratos.services.slack_supervisao._upsert_delivery')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
+    def test_insert_delivery_falls_back_to_upsert_when_bulk_create_raises_base_exception(self, mocked_bulk_create, mocked_upsert):
+        mocked_bulk_create.side_effect = SystemExit(1)
+        mocked_upsert.return_value = SimpleNamespace(pk=777, created_at=None, updated_at=None)
+        delivery = SimpleNamespace(
+            pk=None,
+            analise_id=38,
+            supervisor_id=2,
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            created_at=None,
+            updated_at=None,
+        )
+
+        persisted_delivery = _insert_delivery(delivery)
+
+        mocked_bulk_create.assert_called_once()
+        mocked_upsert.assert_called_once()
+        self.assertEqual(getattr(persisted_delivery, 'pk', None), 777)
 
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
@@ -294,6 +327,29 @@ class SlackRemoteDeliveryKeyTests(SimpleTestCase):
 
 
 class DeleteSlackDeliveriesTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.delete_slack_message')
+    @patch('contratos.services.slack_supervisao.fetch_slack_thread_replies')
+    def test_delete_slack_thread_deletes_child_replies_before_root(self, mocked_fetch_replies, mocked_delete_message):
+        mocked_fetch_replies.return_value = {
+            'messages': [
+                {'ts': '100.000', 'thread_ts': '100.000'},
+                {'ts': '100.002', 'thread_ts': '100.000'},
+                {'ts': '100.003', 'thread_ts': '100.000'},
+            ],
+        }
+
+        deleted_count = delete_slack_thread('D123', '100.000')
+
+        self.assertEqual(deleted_count, 3)
+        self.assertEqual(
+            mocked_delete_message.call_args_list,
+            [
+                call('D123', '100.003'),
+                call('D123', '100.002'),
+                call('D123', '100.000'),
+            ],
+        )
+
     def test_does_not_delete_local_record_when_sent_message_has_no_identifiers(self):
         delivery = SimpleNamespace(
             pk=1,
