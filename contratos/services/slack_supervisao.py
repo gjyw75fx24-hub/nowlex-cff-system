@@ -677,13 +677,55 @@ def _thread_update_text(entry, actor_name, status_key):
 
 
 def _save_delivery(delivery, update_fields):
-    # O backend atual tem apresentado SystemExit ao usar save(update_fields=...)
-    # nessa model; save() completo evita esse caminho instável.
+    normalized_fields = {
+        str(field_name or '').strip()
+        for field_name in (update_fields or [])
+        if str(field_name or '').strip()
+    }
+    if not getattr(delivery, 'pk', None):
+        try:
+            delivery.save()
+            return
+        except BaseException as exc:
+            logger.exception(
+                'Falha ao salvar nova entrega Slack delivery_id=%s.',
+                getattr(delivery, 'pk', None),
+                exc_info=exc,
+            )
+            raise RuntimeError('Falha ao salvar entrega Slack.') from exc
+
+    current_timestamp = timezone.now()
+    update_map = {
+        'slack_channel_id': str(delivery.slack_channel_id or '').strip(),
+        'slack_message_ts': str(delivery.slack_message_ts or '').strip(),
+        'slack_thread_ts': str(delivery.slack_thread_ts or '').strip(),
+        'notified_at': delivery.notified_at,
+        'resolved_at': delivery.resolved_at,
+        'message_hash': str(delivery.message_hash or '').strip(),
+        'last_status': str(delivery.last_status or '').strip(),
+        'card_id': str(delivery.card_id or '').strip(),
+        'slack_user_id': str(delivery.slack_user_id or '').strip(),
+        'processo_id': delivery.processo_id,
+        'updated_at': current_timestamp,
+    }
+    if not normalized_fields:
+        normalized_fields = set(update_map.keys())
+    normalized_fields.add('updated_at')
+    update_values = {}
+    for field_name in normalized_fields:
+        if field_name == 'processo':
+            update_values['processo_id'] = delivery.processo_id
+            continue
+        if field_name in update_map:
+            update_values[field_name] = update_map[field_name]
     try:
-        delivery.save()
+        updated_rows = SupervisaoSlackEntrega.objects.filter(pk=delivery.pk).update(**update_values)
+        if not updated_rows:
+            raise RuntimeError('Entrega Slack não encontrada para atualização.')
+        delivery.updated_at = current_timestamp
     except BaseException as exc:
         logger.exception(
-            'Falha ao salvar entrega Slack delivery_id=%s.',
+            'Falha ao persistir entrega Slack delivery_id=%s.',
             getattr(delivery, 'pk', None),
             exc_info=exc,
         )
@@ -1147,16 +1189,18 @@ def delete_supervision_slack_deliveries(deliveries):
                     error_text = str(exc or '').strip()
                     if error_text not in {'message_not_found', 'channel_not_found'}:
                         raise
+            elif delivery.notified_at:
+                raise RuntimeError('Entrega enviada sem identificadores Slack persistidos.')
             deleted_ids.append(int(delivery.pk))
         except Exception as exc:
             errors.append({
                 'delivery_id': int(delivery.pk),
                 'error': str(exc),
             })
-            logger.exception(
-                'Falha ao apagar entrega Slack da supervisao delivery=%s',
+            logger.warning(
+                'Falha ao apagar entrega Slack da supervisao delivery=%s erro=%s',
                 delivery.pk,
-                exc_info=exc,
+                exc,
             )
     if deleted_ids:
         SupervisaoSlackEntrega.objects.filter(pk__in=deleted_ids).delete()

@@ -13,6 +13,7 @@ from contratos.api.views import (
     _resolve_supervision_entry_date,
 )
 from contratos.services.slack_supervisao import _save_delivery, _slack_api_post
+from contratos.services.slack_supervisao import delete_supervision_slack_deliveries
 
 
 class ResolveSupervisionEntryDateTests(SimpleTestCase):
@@ -64,18 +65,44 @@ class ResolveSupervisionCardContractsTests(SimpleTestCase):
 
 
 class SaveDeliveryTests(SimpleTestCase):
-    def test_uses_full_save_directly(self):
-        delivery = Mock()
-        delivery.pk = 99
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
+    def test_updates_existing_delivery_without_calling_model_save(self, mocked_filter):
+        mocked_filter.return_value.update.return_value = 1
+        delivery = SimpleNamespace(
+            pk=99,
+            slack_channel_id='C1',
+            slack_message_ts='123.456',
+            slack_thread_ts='123.456',
+            notified_at=None,
+            resolved_at=None,
+            message_hash='abc',
+            last_status='pendente',
+            card_id='card-1',
+            slack_user_id='U1',
+            processo_id=7,
+        )
 
-        _save_delivery(delivery, update_fields=['message_hash', 'updated_at', 'invalid_field'])
+        _save_delivery(delivery, update_fields=['message_hash', 'slack_message_ts'])
 
-        delivery.save.assert_called_once_with()
+        mocked_filter.assert_called_once_with(pk=99)
+        mocked_filter.return_value.update.assert_called_once()
 
-    def test_converts_base_exception_from_save_into_runtime_error(self):
-        delivery = Mock()
-        delivery.pk = 99
-        delivery.save.side_effect = SystemExit(1)
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
+    def test_converts_base_exception_from_update_into_runtime_error(self, mocked_filter):
+        mocked_filter.return_value.update.side_effect = SystemExit(1)
+        delivery = SimpleNamespace(
+            pk=99,
+            slack_channel_id='C1',
+            slack_message_ts='123.456',
+            slack_thread_ts='123.456',
+            notified_at=None,
+            resolved_at=None,
+            message_hash='abc',
+            last_status='pendente',
+            card_id='card-1',
+            slack_user_id='U1',
+            processo_id=7,
+        )
 
         with self.assertRaises(RuntimeError):
             _save_delivery(delivery, update_fields=['message_hash'])
@@ -108,3 +135,18 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(SlackSupervisionDeliveryListAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
+
+
+class DeleteSlackDeliveriesTests(SimpleTestCase):
+    def test_does_not_delete_local_record_when_sent_message_has_no_identifiers(self):
+        delivery = SimpleNamespace(
+            pk=1,
+            slack_channel_id='',
+            slack_message_ts='',
+            notified_at=date(2026, 3, 27),
+        )
+
+        result = delete_supervision_slack_deliveries([delivery])
+
+        self.assertEqual(result['deleted_count'], 0)
+        self.assertEqual(len(result['errors']), 1)
