@@ -60,28 +60,10 @@ class ResolveSupervisionCardContractsTests(SimpleTestCase):
 
 
 class SaveDeliveryTests(SimpleTestCase):
-    def test_falls_back_to_full_save_when_partial_save_raises_base_exception(self):
+    def test_uses_full_save_directly(self):
         delivery = Mock()
         delivery.pk = 99
-        delivery._meta = SimpleNamespace(
-            concrete_fields=[
-                SimpleNamespace(name='message_hash'),
-                SimpleNamespace(name='updated_at'),
-            ]
-        )
-
-        def save_side_effect(*args, **kwargs):
-            if 'update_fields' in kwargs:
-                raise SystemExit(1)
-            return None
-
-        delivery.save.side_effect = save_side_effect
 
         _save_delivery(delivery, update_fields=['message_hash', 'updated_at', 'invalid_field'])
 
-        self.assertEqual(delivery.save.call_count, 2)
-        self.assertEqual(
-            delivery.save.call_args_list[0].kwargs,
-            {'update_fields': ['message_hash', 'updated_at']},
-        )
-        self.assertEqual(delivery.save.call_args_list[1].kwargs, {})
+        delivery.save.assert_called_once_with()
