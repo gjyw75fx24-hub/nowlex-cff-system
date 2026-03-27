@@ -1673,6 +1673,7 @@ class AgendaSupervisionNoteAPIView(APIView):
 
 
 class SlackSupervisionDeliveryListAPIView(APIView):
+    renderer_classes = [JSONRenderer]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1739,6 +1740,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
 
 
 class SlackSupervisionDeliveryDeleteAPIView(APIView):
+    renderer_classes = [JSONRenderer]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -1772,6 +1774,7 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
 
 
 class SlackSupervisionDeliveryRefreshAPIView(APIView):
+    renderer_classes = [JSONRenderer]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):

@@ -3,8 +3,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
+from rest_framework.renderers import JSONRenderer
 
 from contratos.api.views import (
+    SlackSupervisionDeliveryDeleteAPIView,
+    SlackSupervisionDeliveryListAPIView,
+    SlackSupervisionDeliveryRefreshAPIView,
     _resolve_supervision_card_contracts,
     _resolve_supervision_entry_date,
 )
@@ -84,3 +88,10 @@ class SlackApiPostTests(SimpleTestCase):
 
         with self.assertRaises(RuntimeError):
             _slack_api_post('chat.postMessage', token='xoxb-test', json_payload={'channel': 'C1'})
+
+
+class SlackDeliveryViewRendererTests(SimpleTestCase):
+    def test_slack_delivery_views_render_only_json(self):
+        self.assertEqual(SlackSupervisionDeliveryListAPIView.renderer_classes, [JSONRenderer])
+        self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
+        self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
