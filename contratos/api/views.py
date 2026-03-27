@@ -82,6 +82,7 @@ from ..services.nowlex_calc import (
 )
 from ..services.slack_supervisao import (
     delete_supervision_slack_deliveries,
+    ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
@@ -1810,6 +1811,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 .exclude(slack_user_id='')
                 .order_by('user_id')
             )
+            reconcile_errors = ensure_supervision_delivery_records(configs)
             passive_part_name_subquery = (
                 Parte.objects
                 .filter(processo_id=OuterRef('processo_id'), tipo_polo='PASSIVO')
@@ -1870,7 +1872,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             return Response({
                 'summary': _build_slack_delivery_summary(results),
                 'results': results,
-                'errors': remote_errors,
+                'errors': [*(reconcile_errors or []), *(remote_errors or [])],
             })
         except BaseException as exc:
             logger.warning('Falha ao listar entregas Slack globais: %s', exc)

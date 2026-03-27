@@ -1391,6 +1391,27 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     }
 
 
+def ensure_supervision_delivery_records(configs):
+    errors = []
+    for config in configs or []:
+        supervisor = getattr(config, 'user', None)
+        if not supervisor:
+            continue
+        try:
+            _build_supervisor_delivery_context(supervisor, config)
+        except BaseException as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.warning(
+                'Falha ao reconciliar entregas Slack supervisor=%s erro=%s',
+                getattr(supervisor, 'pk', None),
+                exc,
+            )
+    return errors
+
+
 def get_supervision_entry_for_card(*, supervisor, analise_id, source, index):
     entries = _collect_supervision_entries_for_supervisor(supervisor, analise_id=analise_id)
     for entry in entries:

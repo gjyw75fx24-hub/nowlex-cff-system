@@ -17,7 +17,7 @@ from contratos.api.views import (
     _resolve_supervision_entry_date,
 )
 from contratos.services.slack_supervisao import _save_delivery, _slack_api_post
-from contratos.services.slack_supervisao import delete_supervision_slack_deliveries
+from contratos.services.slack_supervisao import delete_supervision_slack_deliveries, ensure_supervision_delivery_records
 
 
 class ResolveSupervisionEntryDateTests(SimpleTestCase):
@@ -242,6 +242,18 @@ class SlackDeliveryPayloadTests(SimpleTestCase):
         self.assertEqual(summary['sent_count'], 0)
         self.assertEqual(summary['pending_count'], 1)
         self.assertEqual(summary['queued_count'], 1)
+
+
+class SlackDeliveryReconcileTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
+    def test_reconciles_delivery_records_for_each_supervisor_config(self, mocked_builder):
+        config_a = SimpleNamespace(user=SimpleNamespace(pk=1, username='u1', get_full_name=lambda: 'U1'))
+        config_b = SimpleNamespace(user=SimpleNamespace(pk=2, username='u2', get_full_name=lambda: 'U2'))
+
+        errors = ensure_supervision_delivery_records([config_a, config_b])
+
+        self.assertEqual(errors, [])
+        self.assertEqual(mocked_builder.call_count, 2)
 
 
 class SlackRemoteDeliveryKeyTests(SimpleTestCase):
