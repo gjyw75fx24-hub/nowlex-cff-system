@@ -82,6 +82,7 @@ from ..services.nowlex_calc import (
 )
 from ..services.slack_supervisao import (
     delete_supervision_slack_deliveries,
+    fetch_remote_supervision_slack_messages,
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
@@ -518,6 +519,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         processo_label = _safe_processo_label(delivery)
         return {
             'id': delivery.pk,
+            'delivery_key': str(delivery.pk),
             'analise_id': delivery.analise_id,
             'processo_id': delivery.processo_id,
             'processo_label': processo_label,
@@ -553,6 +555,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         is_responded = status_key in {'aprovado', 'reprovado'}
         return {
             'id': getattr(delivery, 'pk', None),
+            'delivery_key': str(getattr(delivery, 'pk', '') or '').strip(),
             'analise_id': getattr(delivery, 'analise_id', None),
             'processo_id': getattr(delivery, 'processo_id', None),
             'processo_label': _safe_processo_label(delivery),
@@ -604,6 +607,114 @@ def _annotate_slack_delivery_queue(results):
         )
         for index, item in enumerate(items, start=1):
             item['queue_position'] = index
+
+
+def _build_remote_slack_delivery_key(channel_id, message_ts):
+    normalized_channel = str(channel_id or '').strip()
+    normalized_ts = str(message_ts or '').strip()
+    if not normalized_channel or not normalized_ts:
+        return ''
+    return f'remote:{normalized_channel}:{normalized_ts}'
+
+
+def _parse_remote_slack_delivery_key(value):
+    raw = str(value or '').strip()
+    if not raw.startswith('remote:'):
+        return None
+    parts = raw.split(':', 2)
+    if len(parts) != 3:
+        return None
+    channel_id = str(parts[1] or '').strip()
+    message_ts = str(parts[2] or '').strip()
+    if not channel_id or not message_ts:
+        return None
+    return {
+        'slack_channel_id': channel_id,
+        'slack_message_ts': message_ts,
+    }
+
+
+def _extract_remote_supervision_message_payload(remote_item):
+    message = remote_item.get('message') if isinstance(remote_item, dict) else {}
+    if not isinstance(message, dict):
+        message = {}
+    blocks = message.get('blocks') or []
+    header_text = ''
+    top_section_text = ''
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get('type') or '').strip()
+        text_obj = block.get('text') or {}
+        block_text = str(text_obj.get('text') or '').strip()
+        if block_type == 'header' and block_text and not header_text:
+            header_text = block_text
+        elif block_type == 'section' and block_text and not top_section_text:
+            top_section_text = block_text
+    fallback_text = str(message.get('text') or '').strip()
+    source_text = top_section_text or fallback_text
+    lines = [str(line or '').strip() for line in source_text.split('\n') if str(line or '').strip()]
+    parte_nome = ''
+    cnj_label = 'Mensagem órfã no Slack'
+    analysis_type_name = 'Mensagem órfã'
+    for line in lines:
+        cleaned_line = line.replace('*', '').strip()
+        if not parte_nome:
+            parte_nome = cleaned_line
+        if cleaned_line.startswith('Tipo:'):
+            analysis_type_name = cleaned_line.split('|', 1)[0].split(':', 1)[-1].strip() or analysis_type_name
+        elif cleaned_line.startswith('CNJ:'):
+            cnj_label = cleaned_line.split(':', 1)[-1].strip() or cnj_label
+    title_text = header_text or fallback_text.split('\n', 1)[0]
+    normalized_title = title_text.casefold()
+    if normalized_title.startswith('supervisão aprovado'):
+        status_key = 'aprovado'
+    elif normalized_title.startswith('supervisão reprovado'):
+        status_key = 'reprovado'
+    elif normalized_title.startswith('supervisão pre-aprovado'):
+        status_key = 'pre_aprovado'
+    else:
+        status_key = 'pendente'
+    notified_at = None
+    message_ts = str(remote_item.get('slack_message_ts') or '').strip()
+    try:
+        notified_at = timezone.localtime(
+            datetime.fromtimestamp(float(message_ts.split('.', 1)[0]), tz=timezone.get_current_timezone())
+        )
+    except Exception:
+        notified_at = None
+    has_message = bool(str(remote_item.get('slack_channel_id') or '').strip() and message_ts)
+    return {
+        'id': None,
+        'delivery_key': _build_remote_slack_delivery_key(remote_item.get('slack_channel_id'), message_ts),
+        'analise_id': None,
+        'processo_id': None,
+        'processo_label': '',
+        'parte_nome': parte_nome,
+        'supervisor_id': getattr(remote_item.get('supervisor'), 'pk', None),
+        'supervisor_name': str(remote_item.get('supervisor_name') or '').strip(),
+        'card_id': '',
+        'card_source': 'remote_slack',
+        'card_index': 0,
+        'cnj_label': cnj_label,
+        'analysis_type_name': analysis_type_name,
+        'analysis_type_slug': 'remote_slack',
+        'last_status': status_key,
+        'status_key': status_key,
+        'is_pending': status_key in {'pendente', 'pre_aprovado'},
+        'is_responded': status_key in {'aprovado', 'reprovado'},
+        'dispatch_state': 'sent' if has_message else 'unsent',
+        'agenda_date': '',
+        'notified_at': notified_at.isoformat() if notified_at else '',
+        'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
+        'updated_at': notified_at.isoformat() if notified_at else '',
+        'updated_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
+        'slack_channel_id': str(remote_item.get('slack_channel_id') or '').strip(),
+        'slack_message_ts': message_ts,
+        'has_message': has_message,
+        'queue_position': 0,
+        'is_remote_orphan': True,
+    }
 
 
 def _build_slack_delivery_summary(results):
@@ -1680,6 +1791,13 @@ class SlackSupervisionDeliveryListAPIView(APIView):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
         try:
+            configs = list(
+                UserSlackConfig.objects
+                .select_related('user')
+                .filter(user__is_active=True)
+                .exclude(slack_user_id='')
+                .order_by('user_id')
+            )
             passive_part_name_subquery = (
                 Parte.objects
                 .filter(processo_id=OuterRef('processo_id'), tipo_polo='PASSIVO')
@@ -1725,16 +1843,29 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 _build_slack_delivery_entry_payload(delivery, request.user)
                 for delivery in deliveries
             ]
+            existing_refs = {
+                (
+                    str(item.get('slack_channel_id') or '').strip(),
+                    str(item.get('slack_message_ts') or '').strip(),
+                )
+                for item in results
+                if str(item.get('slack_channel_id') or '').strip() and str(item.get('slack_message_ts') or '').strip()
+            }
+            remote_messages, remote_errors = fetch_remote_supervision_slack_messages(configs, existing_refs=existing_refs)
+            results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
+            results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             _annotate_slack_delivery_queue(results)
             return Response({
                 'summary': _build_slack_delivery_summary(results),
                 'results': results,
+                'errors': remote_errors,
             })
         except BaseException as exc:
             logger.warning('Falha ao listar entregas Slack globais: %s', exc)
             return Response({
                 'summary': _build_slack_delivery_summary([]),
                 'results': [],
+                'errors': [],
                 'detail': 'Falha ao carregar mensagens Slack.',
             })
 
@@ -1753,23 +1884,54 @@ class SlackSupervisionDeliveryDeleteAPIView(APIView):
             return Response({'detail': 'mode inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
         deliveries_qs = SupervisaoSlackEntrega.objects.order_by('-updated_at', '-created_at', '-id')
+        remote_refs = []
 
         if mode == 'last':
             deliveries = list(deliveries_qs[:1])
         elif mode == 'all':
             deliveries = list(deliveries_qs)
+            configs = list(
+                UserSlackConfig.objects
+                .select_related('user')
+                .filter(user__is_active=True)
+                .exclude(slack_user_id='')
+                .order_by('user_id')
+            )
+            existing_refs = {
+                (
+                    str(getattr(delivery, 'slack_channel_id', '') or '').strip(),
+                    str(getattr(delivery, 'slack_message_ts', '') or '').strip(),
+                )
+                for delivery in deliveries
+                if str(getattr(delivery, 'slack_channel_id', '') or '').strip()
+                and str(getattr(delivery, 'slack_message_ts', '') or '').strip()
+            }
+            remote_messages, _remote_errors = fetch_remote_supervision_slack_messages(configs, existing_refs=existing_refs)
+            remote_refs = [
+                {
+                    'slack_channel_id': str(item.get('slack_channel_id') or '').strip(),
+                    'slack_message_ts': str(item.get('slack_message_ts') or '').strip(),
+                }
+                for item in remote_messages
+            ]
         else:
             raw_ids = data.get('delivery_ids') or []
-            try:
-                delivery_ids = [int(value) for value in raw_ids]
-            except (TypeError, ValueError):
-                return Response({'detail': 'delivery_ids inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+            delivery_ids = []
+            for raw_value in raw_ids:
+                remote_ref = _parse_remote_slack_delivery_key(raw_value)
+                if remote_ref:
+                    remote_refs.append(remote_ref)
+                    continue
+                try:
+                    delivery_ids.append(int(str(raw_value or '').strip()))
+                except (TypeError, ValueError):
+                    return Response({'detail': 'delivery_ids inválido.'}, status=status.HTTP_400_BAD_REQUEST)
             deliveries = list(deliveries_qs.filter(pk__in=delivery_ids))
 
-        if not deliveries:
+        if not deliveries and not remote_refs:
             return Response({'detail': 'Nenhuma entrega Slack encontrada para apagar.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        result = delete_supervision_slack_deliveries(deliveries)
+        result = delete_supervision_slack_deliveries(deliveries, remote_refs=remote_refs)
         return Response(result)
 
 

@@ -28,6 +28,7 @@ SUPERVISION_STATUS_LABELS = {
 SUPERVISION_BATCH_SIZE_PER_TYPE = 5
 SLACK_API_TIMEOUT = 30
 SLACK_API_RETRY_ATTEMPTS = 3
+SLACK_HISTORY_FETCH_LIMIT = 200
 
 
 def _slack_bot_token():
@@ -577,6 +578,13 @@ def open_slack_dm(slack_user_id):
     return str(channel.get('id') or '').strip()
 
 
+def fetch_slack_conversation_history(channel_id, *, limit=SLACK_HISTORY_FETCH_LIMIT):
+    return _slack_api_post(
+        'conversations.history',
+        data_payload={'channel': channel_id, 'limit': int(limit or SLACK_HISTORY_FETCH_LIMIT)},
+    )
+
+
 def post_slack_message(channel_id, *, text, blocks):
     return _slack_api_post(
         'chat.postMessage',
@@ -615,6 +623,80 @@ def add_slack_reaction(channel_id, message_ts, reaction_name):
         error_text = str(exc)
         if error_text not in {'already_reacted', 'invalid_name'}:
             raise
+
+
+def _is_supervision_root_message(message):
+    if not isinstance(message, dict):
+        return False
+    ts = str(message.get('ts') or '').strip()
+    thread_ts = str(message.get('thread_ts') or '').strip()
+    if thread_ts and ts and thread_ts != ts:
+        return False
+    text = str(message.get('text') or '').strip()
+    normalized_text = text.casefold()
+    if normalized_text.startswith('nova supervisão pendente - ') or normalized_text.startswith('supervisão '):
+        return True
+    blocks = message.get('blocks') or []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text_obj = block.get('text') or {}
+        block_text = str(text_obj.get('text') or '').strip()
+        normalized_block_text = block_text.casefold()
+        if normalized_block_text.startswith('nova supervisão pendente') or normalized_block_text.startswith('supervisão '):
+            return True
+    return False
+
+
+def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
+    existing = {
+        (str(channel_id or '').strip(), str(message_ts or '').strip())
+        for channel_id, message_ts in (existing_refs or set())
+        if str(channel_id or '').strip() and str(message_ts or '').strip()
+    }
+    results = []
+    errors = []
+    for config in configs or []:
+        supervisor = getattr(config, 'user', None)
+        supervisor_name = (
+            str(getattr(supervisor, 'get_full_name', lambda: '')() or '').strip()
+            or str(getattr(supervisor, 'username', '') or '').strip()
+            or 'Supervisor'
+        )
+        try:
+            channel_id = open_slack_dm(getattr(config, 'slack_user_id', ''))
+            if not channel_id:
+                continue
+            payload = fetch_slack_conversation_history(channel_id)
+            for message in payload.get('messages') or []:
+                if not _is_supervision_root_message(message):
+                    continue
+                message_ts = str(message.get('ts') or '').strip()
+                if not message_ts:
+                    continue
+                ref_key = (channel_id, message_ts)
+                if ref_key in existing:
+                    continue
+                existing.add(ref_key)
+                results.append({
+                    'supervisor': supervisor,
+                    'supervisor_name': supervisor_name,
+                    'slack_user_id': str(getattr(config, 'slack_user_id', '') or '').strip(),
+                    'slack_channel_id': channel_id,
+                    'slack_message_ts': message_ts,
+                    'message': message,
+                })
+        except BaseException as exc:
+            errors.append({
+                'supervisor': supervisor_name,
+                'error': str(exc),
+            })
+            logger.warning(
+                'Falha ao listar mensagens remotas Slack supervisor=%s erro=%s',
+                getattr(supervisor, 'pk', None),
+                exc,
+            )
+    return results, errors
 
 
 def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status, entry=None, slack_user_id):
@@ -1173,8 +1255,9 @@ def get_supervision_entry_for_card(*, supervisor, analise_id, source, index):
     return None
 
 
-def delete_supervision_slack_deliveries(deliveries):
+def delete_supervision_slack_deliveries(deliveries, *, remote_refs=None):
     deleted_ids = []
+    deleted_remote_count = 0
     errors = []
     for delivery in deliveries or []:
         if not delivery:
@@ -1204,8 +1287,39 @@ def delete_supervision_slack_deliveries(deliveries):
             )
     if deleted_ids:
         SupervisaoSlackEntrega.objects.filter(pk__in=deleted_ids).delete()
+    seen_remote = set()
+    for ref in remote_refs or []:
+        if not isinstance(ref, dict):
+            continue
+        channel_id = str(ref.get('slack_channel_id') or '').strip()
+        message_ts = str(ref.get('slack_message_ts') or '').strip()
+        if not channel_id or not message_ts:
+            continue
+        dedupe_key = (channel_id, message_ts)
+        if dedupe_key in seen_remote:
+            continue
+        seen_remote.add(dedupe_key)
+        try:
+            try:
+                delete_slack_message(channel_id, message_ts)
+            except ValueError as exc:
+                error_text = str(exc or '').strip()
+                if error_text not in {'message_not_found', 'channel_not_found'}:
+                    raise
+            deleted_remote_count += 1
+        except Exception as exc:
+            errors.append({
+                'delivery_id': None,
+                'error': str(exc),
+            })
+            logger.warning(
+                'Falha ao apagar mensagem remota Slack channel=%s ts=%s erro=%s',
+                channel_id,
+                message_ts,
+                exc,
+            )
     return {
         'deleted_ids': deleted_ids,
-        'deleted_count': len(deleted_ids),
+        'deleted_count': len(deleted_ids) + deleted_remote_count,
         'errors': errors,
     }

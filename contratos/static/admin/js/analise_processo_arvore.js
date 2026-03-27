@@ -3064,9 +3064,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             const getSelectedIds = () => (
-                Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-id]:checked'))
-                    .map((input) => parseInt(input.getAttribute('data-delivery-id') || '', 10))
-                    .filter((value) => Number.isFinite(value))
+                Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-key]:checked'))
+                    .map((input) => String(input.getAttribute('data-delivery-key') || '').trim())
+                    .filter(Boolean)
             );
 
             const refreshActionState = () => {
@@ -3113,7 +3113,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
-                    checkbox.setAttribute('data-delivery-id', delivery.id);
+                    checkbox.setAttribute('data-delivery-key', String(delivery.delivery_key || delivery.id || '').trim());
 
                     const content = document.createElement('div');
                     content.className = 'analise-slack-deliveries-item__content';
@@ -3145,7 +3145,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     item.appendChild(content);
                     list.appendChild(item);
                 });
-                list.querySelectorAll('input[type="checkbox"][data-delivery-id]').forEach((input) => {
+                list.querySelectorAll('input[type="checkbox"][data-delivery-key]').forEach((input) => {
                     input.addEventListener('change', refreshActionState);
                 });
                 refreshActionState();
@@ -3161,12 +3161,19 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 setFeedback('');
                 return fetchSlackSupervisionDeliveries()
                     .done((response) => {
+                        const responseErrors = Array.isArray(response?.errors) ? response.errors : [];
                         deliveries = Array.isArray(response?.results) ? response.results : [];
                         summaryData = response?.summary && typeof response.summary === 'object'
                             ? response.summary
                             : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
                         renderSummary();
                         renderList();
+                        if (responseErrors.length) {
+                            setFeedback(
+                                `Mensagens carregadas com avisos: ${responseErrors.map(item => item.error || 'erro').join(' | ')}`,
+                                'warning'
+                            );
+                        }
                     })
                     .fail((xhr) => {
                         const responseText = String(xhr?.responseText || '').trim();

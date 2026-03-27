@@ -9,6 +9,8 @@ from contratos.api.views import (
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
     SlackSupervisionDeliveryRefreshAPIView,
+    _build_remote_slack_delivery_key,
+    _parse_remote_slack_delivery_key,
     _resolve_supervision_card_contracts,
     _resolve_supervision_entry_date,
 )
@@ -135,6 +137,19 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(SlackSupervisionDeliveryListAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryRefreshAPIView.renderer_classes, [JSONRenderer])
+
+
+class SlackRemoteDeliveryKeyTests(SimpleTestCase):
+    def test_builds_and_parses_remote_delivery_key(self):
+        key = _build_remote_slack_delivery_key('D123', '1743072809.123456')
+        self.assertEqual(key, 'remote:D123:1743072809.123456')
+        self.assertEqual(
+            _parse_remote_slack_delivery_key(key),
+            {
+                'slack_channel_id': 'D123',
+                'slack_message_ts': '1743072809.123456',
+            },
+        )
 
 
 class DeleteSlackDeliveriesTests(SimpleTestCase):
