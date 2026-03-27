@@ -719,6 +719,7 @@ def _extract_remote_supervision_message_payload(remote_item):
     message = remote_item.get('message') if isinstance(remote_item, dict) else {}
     if not isinstance(message, dict):
         message = {}
+    message_kind = str(remote_item.get('message_kind') or '').strip()
     blocks = message.get('blocks') or []
     header_text = ''
     top_section_text = ''
@@ -735,12 +736,16 @@ def _extract_remote_supervision_message_payload(remote_item):
     fallback_text = str(message.get('text') or '').strip()
     source_text = top_section_text or fallback_text
     lines = [str(line or '').strip() for line in source_text.split('\n') if str(line or '').strip()]
-    parte_nome = ''
+    parte_nome = 'Mensagem órfã no Slack'
     cnj_label = 'Mensagem órfã no Slack'
     analysis_type_name = 'Mensagem órfã'
+    if message_kind == 'thread_reply_orphan':
+        parte_nome = 'Resposta órfã no Slack'
+        cnj_label = 'Thread órfã no Slack'
+        analysis_type_name = 'Resposta órfã'
     for line in lines:
         cleaned_line = line.replace('*', '').strip()
-        if not parte_nome:
+        if message_kind != 'thread_reply_orphan' and parte_nome == 'Mensagem órfã no Slack':
             parte_nome = cleaned_line
         if cleaned_line.startswith('Tipo:'):
             analysis_type_name = cleaned_line.split('|', 1)[0].split(':', 1)[-1].strip() or analysis_type_name
@@ -754,6 +759,20 @@ def _extract_remote_supervision_message_payload(remote_item):
         status_key = 'reprovado'
     elif normalized_title.startswith('supervisão pre-aprovado'):
         status_key = 'pre_aprovado'
+    elif message_kind == 'thread_reply_orphan':
+        status_key = 'respondido'
+        for line in lines:
+            cleaned_line = line.replace('*', '').strip()
+            if not cleaned_line.startswith('Status:'):
+                continue
+            status_text = cleaned_line.split(':', 1)[-1].strip().casefold()
+            if 'aprov' in status_text:
+                status_key = 'aprovado'
+            elif 'reprov' in status_text:
+                status_key = 'reprovado'
+            elif 'pré' in status_text or 'pre' in status_text:
+                status_key = 'pre_aprovado'
+            break
     else:
         status_key = 'pendente'
     notified_at = None

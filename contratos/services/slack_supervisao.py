@@ -716,6 +716,27 @@ def _is_supervision_root_message(message):
     return False
 
 
+def _is_supervision_thread_reply_message(message):
+    if not isinstance(message, dict):
+        return False
+    ts = str(message.get('ts') or '').strip()
+    thread_ts = str(message.get('thread_ts') or '').strip()
+    if not ts or not thread_ts or thread_ts == ts:
+        return False
+    text = str(message.get('text') or '').replace('*', '').strip().casefold()
+    if text.startswith('status atualizado no sistema'):
+        return True
+    blocks = message.get('blocks') or []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        text_obj = block.get('text') or {}
+        block_text = str(text_obj.get('text') or '').replace('*', '').strip().casefold()
+        if block_text.startswith('status atualizado no sistema'):
+            return True
+    return False
+
+
 def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
     existing = {
         (str(channel_id or '').strip(), str(message_ts or '').strip())
@@ -737,12 +758,20 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                 continue
             payload = fetch_slack_conversation_history(channel_id)
             for message in payload.get('messages') or []:
-                if not _is_supervision_root_message(message):
+                current_ts = str(message.get('ts') or '').strip()
+                root_ts = str(message.get('thread_ts') or '').strip()
+                message_kind = ''
+                if _is_supervision_root_message(message):
+                    remote_message_ts = current_ts
+                    message_kind = 'root'
+                elif _is_supervision_thread_reply_message(message) and root_ts:
+                    remote_message_ts = root_ts
+                    message_kind = 'thread_reply_orphan'
+                else:
                     continue
-                message_ts = str(message.get('ts') or '').strip()
-                if not message_ts:
+                if not remote_message_ts:
                     continue
-                ref_key = (channel_id, message_ts)
+                ref_key = (channel_id, remote_message_ts)
                 if ref_key in existing:
                     continue
                 existing.add(ref_key)
@@ -751,7 +780,9 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
                     'supervisor_name': supervisor_name,
                     'slack_user_id': str(getattr(config, 'slack_user_id', '') or '').strip(),
                     'slack_channel_id': channel_id,
-                    'slack_message_ts': message_ts,
+                    'slack_message_ts': remote_message_ts,
+                    'slack_reply_ts': current_ts if message_kind == 'thread_reply_orphan' else '',
+                    'message_kind': message_kind,
                     'message': message,
                 })
         except BaseException as exc:

@@ -24,6 +24,7 @@ from contratos.services.slack_supervisao import (
     delete_slack_thread,
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
+    fetch_remote_supervision_slack_messages,
 )
 
 
@@ -324,6 +325,35 @@ class SlackRemoteDeliveryKeyTests(SimpleTestCase):
                 'slack_message_ts': '1743072809.123456',
             },
         )
+
+
+class SlackRemoteMessageFetchTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.fetch_slack_conversation_history')
+    @patch('contratos.services.slack_supervisao.open_slack_dm')
+    def test_collects_orphan_thread_reply_using_root_thread_ts(self, mocked_open_dm, mocked_fetch_history):
+        mocked_open_dm.return_value = 'D123'
+        mocked_fetch_history.return_value = {
+            'messages': [
+                {
+                    'ts': '200.002',
+                    'thread_ts': '200.000',
+                    'text': '*Status atualizado no sistema*\nSupervisor: Maicon\nStatus: Aprovado',
+                },
+            ],
+        }
+        config = SimpleNamespace(
+            slack_user_id='U123',
+            user=SimpleNamespace(pk=7, username='maicon', get_full_name=lambda: 'Maicon Bispo'),
+        )
+
+        results, errors = fetch_remote_supervision_slack_messages([config])
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['slack_channel_id'], 'D123')
+        self.assertEqual(results[0]['slack_message_ts'], '200.000')
+        self.assertEqual(results[0]['slack_reply_ts'], '200.002')
+        self.assertEqual(results[0]['message_kind'], 'thread_reply_orphan')
 
 
 class DeleteSlackDeliveriesTests(SimpleTestCase):
