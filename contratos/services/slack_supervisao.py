@@ -828,6 +828,14 @@ def _save_delivery(delivery, update_fields):
             raise RuntimeError('Entrega Slack não encontrada para atualização.')
         delivery.updated_at = current_timestamp
     except BaseException as exc:
+        try:
+            persisted_delivery = _upsert_delivery(delivery, normalized_fields=normalized_fields, current_timestamp=current_timestamp)
+            for attr_name in ('pk', 'created_at', 'updated_at'):
+                if hasattr(persisted_delivery, attr_name):
+                    setattr(delivery, attr_name, getattr(persisted_delivery, attr_name, None))
+            return
+        except BaseException:
+            pass
         logger.exception(
             'Falha ao persistir entrega Slack delivery_id=%s.',
             getattr(delivery, 'pk', None),
@@ -874,6 +882,67 @@ def _insert_delivery(delivery):
             exc_info=exc,
         )
         raise RuntimeError('Falha ao criar entrega Slack.') from exc
+
+
+def _upsert_delivery(delivery, *, normalized_fields=None, current_timestamp=None):
+    timestamp = current_timestamp or timezone.now()
+    unique_filters = {
+        'analise_id': getattr(delivery, 'analise_id', None),
+        'supervisor_id': getattr(delivery, 'supervisor_id', None),
+        'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
+        'card_index': int(getattr(delivery, 'card_index', 0) or 0),
+    }
+    if not getattr(delivery, 'created_at', None):
+        delivery.created_at = timestamp
+    delivery.updated_at = timestamp
+    upsert_delivery = SupervisaoSlackEntrega(
+        analise_id=unique_filters['analise_id'],
+        processo_id=getattr(delivery, 'processo_id', None),
+        supervisor_id=unique_filters['supervisor_id'],
+        card_id=str(getattr(delivery, 'card_id', '') or '').strip(),
+        card_source=unique_filters['card_source'],
+        card_index=unique_filters['card_index'],
+        slack_user_id=str(getattr(delivery, 'slack_user_id', '') or '').strip(),
+        slack_channel_id=str(getattr(delivery, 'slack_channel_id', '') or '').strip(),
+        slack_message_ts=str(getattr(delivery, 'slack_message_ts', '') or '').strip(),
+        slack_thread_ts=str(getattr(delivery, 'slack_thread_ts', '') or '').strip(),
+        last_status=str(getattr(delivery, 'last_status', '') or '').strip(),
+        message_hash=str(getattr(delivery, 'message_hash', '') or '').strip(),
+        notified_at=getattr(delivery, 'notified_at', None),
+        resolved_at=getattr(delivery, 'resolved_at', None),
+        created_at=getattr(delivery, 'created_at', timestamp),
+        updated_at=timestamp,
+    )
+    update_fields = [
+        field_name for field_name in (
+            'processo',
+            'card_id',
+            'slack_user_id',
+            'slack_channel_id',
+            'slack_message_ts',
+            'slack_thread_ts',
+            'last_status',
+            'message_hash',
+            'notified_at',
+            'resolved_at',
+            'updated_at',
+        )
+        if not normalized_fields or field_name in normalized_fields or (field_name == 'updated_at')
+    ]
+    bulk_update_fields = [
+        'processo' if field_name == 'processo' else field_name
+        for field_name in update_fields
+    ]
+    SupervisaoSlackEntrega.objects.bulk_create(
+        [upsert_delivery],
+        update_conflicts=True,
+        update_fields=bulk_update_fields,
+        unique_fields=['analise', 'supervisor', 'card_source', 'card_index'],
+    )
+    persisted_delivery = SupervisaoSlackEntrega.objects.filter(**unique_filters).order_by('-pk').first()
+    if persisted_delivery:
+        return persisted_delivery
+    raise RuntimeError('Falha ao localizar entrega Slack apos upsert.')
 
 
 def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_post=True):
@@ -1288,13 +1357,26 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
         if _entry_analysis_type_slug(entry) and _entry_is_pending(entry)
     }
     for analysis_type_slug in sorted(type_slugs):
-        result = _sync_pending_batch_for_type(
-            supervisor=supervisor,
-            analysis_type_slug=analysis_type_slug,
-            accepted_entries=accepted_entries,
-            deliveries=deliveries,
-            request=request,
-        )
+        try:
+            result = _sync_pending_batch_for_type(
+                supervisor=supervisor,
+                analysis_type_slug=analysis_type_slug,
+                accepted_entries=accepted_entries,
+                deliveries=deliveries,
+                request=request,
+            )
+        except BaseException as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.warning(
+                'Falha ao sincronizar lote pendente por tipo Slack supervisor=%s tipo=%s erro=%s',
+                supervisor.pk,
+                analysis_type_slug,
+                exc,
+            )
+            continue
         if result.get('sent'):
             recipient_names.add(
                 str(supervisor.get_full_name()).strip() or str(supervisor.username).strip()

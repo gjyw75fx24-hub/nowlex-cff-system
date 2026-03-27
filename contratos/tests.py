@@ -137,6 +137,37 @@ class SaveDeliveryTests(SimpleTestCase):
         with self.assertRaises(RuntimeError):
             _save_delivery(delivery, update_fields=['message_hash'])
 
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
+    def test_falls_back_to_upsert_when_update_raises_base_exception(self, mocked_filter, mocked_bulk_create):
+        mocked_filter.return_value.update.side_effect = SystemExit(1)
+        mocked_filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(pk=99, created_at=None, updated_at=None)
+        mocked_bulk_create.return_value = [SimpleNamespace(pk=99, created_at=None, updated_at=None)]
+        delivery = SimpleNamespace(
+            pk=99,
+            analise_id=7,
+            supervisor_id=5,
+            card_source='saved_processos_vinculados',
+            card_index=1,
+            slack_channel_id='C1',
+            slack_message_ts='123.456',
+            slack_thread_ts='123.456',
+            notified_at=None,
+            resolved_at=None,
+            message_hash='abc',
+            last_status='pendente',
+            card_id='card-1',
+            slack_user_id='U1',
+            processo_id=9,
+            created_at=None,
+            updated_at=None,
+        )
+
+        _save_delivery(delivery, update_fields=['message_hash', 'slack_message_ts'])
+
+        mocked_bulk_create.assert_called_once()
+        self.assertEqual(delivery.pk, 99)
+
 
 class SlackApiPostTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao.requests.post')
