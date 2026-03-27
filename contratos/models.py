@@ -1978,7 +1978,11 @@ def analiseprocesso_sync_supervision_slack(sender, instance, raw=False, **kwargs
         try:
             from contratos.services.slack_supervisao import sync_supervision_slack_for_analysis
             sync_supervision_slack_for_analysis(instance.pk)
-        except Exception:
-            pass
+        except BaseException as exc:
+            logger.exception(
+                'Falha no sync assíncrono da supervisão Slack para analise_id=%s',
+                instance.pk,
+                exc_info=exc,
+            )
 
     transaction.on_commit(_sync)

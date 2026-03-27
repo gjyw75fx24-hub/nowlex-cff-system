@@ -87,6 +87,7 @@ from ..services.slack_supervisao import (
     get_supervision_entry_for_card,
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
+    sync_supervision_slack_for_analysis,
     sync_supervision_slack_for_supervisor,
 )
 from ..integracoes_escavador.partes import collect_partes_from_escavador_payload
@@ -405,9 +406,35 @@ def _save_supervision_card(analise, respostas, *, request_user=None):
     analise.respostas = respostas
     if request_user is not None:
         analise.updated_by = request_user
-        analise.save(update_fields=['respostas', 'updated_by'])
-    else:
-        analise.save(update_fields=['respostas'])
+    analise.para_supervisionar = analise._respostas_requerem_supervisao()
+    current_timestamp = timezone.now()
+    update_values = {
+        'respostas': respostas,
+        'para_supervisionar': analise.para_supervisionar,
+        'updated_at': current_timestamp,
+    }
+    if request_user is not None:
+        update_values['updated_by_id'] = request_user.pk
+    try:
+        updated_rows = AnaliseProcesso.objects.filter(pk=analise.pk).update(**update_values)
+        if not updated_rows:
+            raise RuntimeError('Análise não encontrada para salvar supervisão.')
+        analise.updated_at = current_timestamp
+    except BaseException as exc:
+        logger.exception(
+            'Falha ao persistir card de supervisao analise=%s.',
+            getattr(analise, 'pk', None),
+            exc_info=exc,
+        )
+        raise RuntimeError('Falha ao salvar supervisão.') from exc
+    try:
+        sync_supervision_slack_for_analysis(analise.pk)
+    except BaseException as exc:
+        logger.warning(
+            'Falha ao sincronizar Slack apos salvar supervisao analise=%s erro=%s',
+            getattr(analise, 'pk', None),
+            exc,
+        )
 
 
 def _slack_verify_signature(request):

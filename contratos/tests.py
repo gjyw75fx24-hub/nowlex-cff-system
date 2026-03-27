@@ -15,6 +15,7 @@ from contratos.api.views import (
     _parse_remote_slack_delivery_key,
     _resolve_supervision_card_contracts,
     _resolve_supervision_entry_date,
+    _save_supervision_card,
 )
 from contratos.services.slack_supervisao import _save_delivery, _slack_api_post
 from contratos.services.slack_supervisao import delete_supervision_slack_deliveries, ensure_supervision_delivery_records
@@ -66,6 +67,30 @@ class ResolveSupervisionCardContractsTests(SimpleTestCase):
         )
 
         self.assertEqual([contract.pk for contract in result], [2])
+
+
+class SaveSupervisionCardTests(SimpleTestCase):
+    @patch('contratos.api.views.sync_supervision_slack_for_analysis')
+    @patch('contratos.api.views.AnaliseProcesso.objects.filter')
+    def test_persists_card_with_update_and_ignores_sync_failure(self, mocked_filter, mocked_sync):
+        mocked_filter.return_value.update.return_value = 1
+        mocked_sync.side_effect = SystemExit(1)
+        request_user = SimpleNamespace(pk=7)
+        analise = SimpleNamespace(
+            pk=55,
+            respostas={},
+            updated_by=None,
+            para_supervisionar=False,
+            updated_at=None,
+            _respostas_requerem_supervisao=lambda: True,
+        )
+
+        _save_supervision_card(analise, {'saved_processos_vinculados': []}, request_user=request_user)
+
+        mocked_filter.assert_called_once_with(pk=55)
+        mocked_filter.return_value.update.assert_called_once()
+        mocked_sync.assert_called_once_with(55)
+        self.assertTrue(analise.para_supervisionar)
 
 
 class SaveDeliveryTests(SimpleTestCase):
