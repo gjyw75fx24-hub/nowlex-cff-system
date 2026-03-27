@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 from datetime import timedelta
+import time
 from types import SimpleNamespace
 
 import requests
@@ -26,6 +27,7 @@ SUPERVISION_STATUS_LABELS = {
 }
 SUPERVISION_BATCH_SIZE_PER_TYPE = 5
 SLACK_API_TIMEOUT = 30
+SLACK_API_RETRY_ATTEMPTS = 3
 
 
 def _slack_bot_token():
@@ -544,17 +546,26 @@ def _slack_api_post(method, *, token=None, json_payload=None, data_payload=None)
     headers = {'Authorization': f'Bearer {api_token}'}
     if json_payload is not None:
         headers['Content-Type'] = 'application/json; charset=utf-8'
-    try:
-        response = requests.post(
-            f'https://slack.com/api/{method}',
-            headers=headers,
-            json=json_payload,
-            data=data_payload,
-            timeout=SLACK_API_TIMEOUT,
-        )
-        payload = response.json()
-    except BaseException as exc:
-        raise RuntimeError(f'Falha ao comunicar com o Slack ({method}).') from exc
+    last_exc = None
+    payload = None
+    for attempt in range(1, SLACK_API_RETRY_ATTEMPTS + 1):
+        try:
+            response = requests.post(
+                f'https://slack.com/api/{method}',
+                headers=headers,
+                json=json_payload,
+                data=data_payload,
+                timeout=SLACK_API_TIMEOUT,
+            )
+            payload = response.json()
+            break
+        except BaseException as exc:
+            last_exc = exc
+            if attempt >= SLACK_API_RETRY_ATTEMPTS:
+                raise RuntimeError(f'Falha ao comunicar com o Slack ({method}).') from exc
+            time.sleep(0.5 * attempt)
+    if payload is None:
+        raise RuntimeError(f'Falha ao comunicar com o Slack ({method}).') from last_exc
     if not payload.get('ok'):
         raise ValueError(str(payload.get('error') or 'erro_desconhecido'))
     return payload

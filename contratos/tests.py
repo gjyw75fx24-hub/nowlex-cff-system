@@ -89,6 +89,19 @@ class SlackApiPostTests(SimpleTestCase):
         with self.assertRaises(RuntimeError):
             _slack_api_post('chat.postMessage', token='xoxb-test', json_payload={'channel': 'C1'})
 
+    @patch('contratos.services.slack_supervisao.time.sleep')
+    @patch('contratos.services.slack_supervisao.requests.post')
+    def test_retries_before_succeeding(self, mocked_post, mocked_sleep):
+        success_response = Mock()
+        success_response.json.return_value = {'ok': True, 'ts': '123.456'}
+        mocked_post.side_effect = [SystemExit(1), success_response]
+
+        payload = _slack_api_post('chat.delete', token='xoxb-test', json_payload={'channel': 'C1', 'ts': '123.456'})
+
+        self.assertEqual(payload, {'ok': True, 'ts': '123.456'})
+        self.assertEqual(mocked_post.call_count, 2)
+        mocked_sleep.assert_called_once()
+
 
 class SlackDeliveryViewRendererTests(SimpleTestCase):
     def test_slack_delivery_views_render_only_json(self):
