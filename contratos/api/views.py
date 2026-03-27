@@ -23,7 +23,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.db import close_old_connections, transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
@@ -496,6 +496,17 @@ def _build_slack_delivery_card_label(delivery):
     return f'Card {source}:{index}'
 
 
+def _safe_delivery_parte_label(delivery):
+    for attr_name in ('parte_nome_display', 'parte_nome_fallback'):
+        try:
+            value = str(getattr(delivery, attr_name, '') or '').strip()
+        except Exception:
+            value = ''
+        if value:
+            return value
+    return ''
+
+
 def _build_slack_delivery_entry_payload(delivery, request_user):
     try:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
@@ -516,6 +527,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'analise_id': delivery.analise_id,
             'processo_id': delivery.processo_id,
             'processo_label': processo_label,
+            'parte_nome': _safe_delivery_parte_label(delivery),
             'supervisor_id': getattr(supervisor, 'pk', None),
             'supervisor_name': supervisor_name,
             'card_id': str(delivery.card_id or '').strip(),
@@ -550,6 +562,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'analise_id': getattr(delivery, 'analise_id', None),
             'processo_id': getattr(delivery, 'processo_id', None),
             'processo_label': _safe_processo_label(delivery),
+            'parte_nome': _safe_delivery_parte_label(delivery),
             'supervisor_id': getattr(delivery, 'supervisor_id', None),
             'supervisor_name': '',
             'card_id': str(getattr(delivery, 'card_id', '') or '').strip(),
@@ -1701,8 +1714,26 @@ class SlackSupervisionDeliveryListAPIView(APIView):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode consultar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
         try:
+            passive_part_name_subquery = (
+                Parte.objects
+                .filter(processo_id=OuterRef('processo_id'), tipo_polo='PASSIVO')
+                .exclude(nome='')
+                .order_by('id')
+                .values('nome')[:1]
+            )
+            any_part_name_subquery = (
+                Parte.objects
+                .filter(processo_id=OuterRef('processo_id'))
+                .exclude(nome='')
+                .order_by('id')
+                .values('nome')[:1]
+            )
             deliveries = list(
                 SupervisaoSlackEntrega.objects
+                .annotate(
+                    parte_nome_display=Subquery(passive_part_name_subquery),
+                    parte_nome_fallback=Subquery(any_part_name_subquery),
+                )
                 .select_related('processo', 'supervisor')
                 .only(
                     'id',

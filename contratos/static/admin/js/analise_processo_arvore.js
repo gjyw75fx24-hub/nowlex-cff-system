@@ -3125,6 +3125,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
                     meta.textContent = [
                         delivery.supervisor_name ? `Supervisor: ${delivery.supervisor_name}` : '',
+                        delivery.parte_nome ? `Parte: ${delivery.parte_nome}` : '',
                         delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
                         delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : 'Ainda não enviada',
                         statusText,
