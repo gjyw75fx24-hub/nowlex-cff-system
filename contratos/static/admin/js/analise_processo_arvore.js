@@ -3161,7 +3161,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         renderList();
                     })
                     .fail((xhr) => {
-                        const message = xhr?.responseJSON?.detail || 'Falha ao carregar mensagens Slack.';
+                        const responseText = String(xhr?.responseText || '').trim();
+                        const message = xhr?.responseJSON?.detail
+                            || (xhr?.status ? `Erro ${xhr.status} ao carregar mensagens Slack.` : '')
+                            || (responseText && !responseText.startsWith('<!DOCTYPE') ? responseText : '')
+                            || 'Falha ao carregar mensagens Slack.';
                         deliveries = [];
                         summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
                         renderSummary();

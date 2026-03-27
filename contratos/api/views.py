@@ -452,17 +452,30 @@ def _get_supervisor_by_slack_user_id(slack_user_id):
 
 
 def _safe_processo_label(delivery):
-    processo = getattr(delivery, 'processo', None)
+    try:
+        processo = getattr(delivery, 'processo', None)
+    except Exception:
+        processo = None
     try:
         cnj = str(getattr(processo, 'cnj', '') or '').strip()
     except Exception:
         cnj = ''
     if cnj:
         return cnj
-    processo_id = getattr(delivery, 'processo_id', None)
+    try:
+        processo_id = getattr(delivery, 'processo_id', None)
+    except Exception:
+        processo_id = None
     if processo_id:
         return f'Processo #{processo_id}'
     return ''
+
+
+def _safe_delivery_int(value, default=0):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
 
 
 def _build_slack_delivery_entry_payload(delivery, request_user):
@@ -512,7 +525,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'supervisor_name': supervisor_name,
             'card_id': str(delivery.card_id or '').strip(),
             'card_source': str(delivery.card_source or '').strip(),
-            'card_index': int(delivery.card_index or 0),
+            'card_index': _safe_delivery_int(delivery.card_index),
             'cnj_label': cnj_label,
             'analysis_type_name': analysis_type_name,
             'analysis_type_slug': analysis_type_slug,
@@ -546,7 +559,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'supervisor_name': '',
             'card_id': str(getattr(delivery, 'card_id', '') or '').strip(),
             'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
-            'card_index': int(getattr(delivery, 'card_index', 0) or 0),
+            'card_index': _safe_delivery_int(getattr(delivery, 'card_index', 0)),
             'cnj_label': str(getattr(delivery, 'card_id', '') or '').strip() or 'Card',
             'analysis_type_name': 'Análise',
             'analysis_type_slug': '',
