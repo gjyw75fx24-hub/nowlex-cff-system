@@ -1,6 +1,6 @@
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
@@ -8,7 +8,7 @@ from contratos.api.views import (
     _resolve_supervision_card_contracts,
     _resolve_supervision_entry_date,
 )
-from contratos.services.slack_supervisao import _save_delivery
+from contratos.services.slack_supervisao import _save_delivery, _slack_api_post
 
 
 class ResolveSupervisionEntryDateTests(SimpleTestCase):
@@ -75,3 +75,12 @@ class SaveDeliveryTests(SimpleTestCase):
 
         with self.assertRaises(RuntimeError):
             _save_delivery(delivery, update_fields=['message_hash'])
+
+
+class SlackApiPostTests(SimpleTestCase):
+    @patch('contratos.services.slack_supervisao.requests.post')
+    def test_converts_base_exception_from_requests_into_runtime_error(self, mocked_post):
+        mocked_post.side_effect = SystemExit(1)
+
+        with self.assertRaises(RuntimeError):
+            _slack_api_post('chat.postMessage', token='xoxb-test', json_payload={'channel': 'C1'})

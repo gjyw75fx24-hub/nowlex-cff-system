@@ -544,14 +544,17 @@ def _slack_api_post(method, *, token=None, json_payload=None, data_payload=None)
     headers = {'Authorization': f'Bearer {api_token}'}
     if json_payload is not None:
         headers['Content-Type'] = 'application/json; charset=utf-8'
-    response = requests.post(
-        f'https://slack.com/api/{method}',
-        headers=headers,
-        json=json_payload,
-        data=data_payload,
-        timeout=SLACK_API_TIMEOUT,
-    )
-    payload = response.json()
+    try:
+        response = requests.post(
+            f'https://slack.com/api/{method}',
+            headers=headers,
+            json=json_payload,
+            data=data_payload,
+            timeout=SLACK_API_TIMEOUT,
+        )
+        payload = response.json()
+    except BaseException as exc:
+        raise RuntimeError(f'Falha ao comunicar com o Slack ({method}).') from exc
     if not payload.get('ok'):
         raise ValueError(str(payload.get('error') or 'erro_desconhecido'))
     return payload
@@ -860,11 +863,11 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
             })
-            logger.exception(
-                'Falha ao sincronizar lote pendente Slack supervisor=%s tipo=%s',
+            logger.warning(
+                'Falha ao sincronizar lote pendente Slack supervisor=%s tipo=%s erro=%s',
                 supervisor.pk,
                 analysis_type_slug,
-                exc_info=exc,
+                exc,
             )
 
     for entry, delivery in to_queue:
@@ -877,11 +880,11 @@ def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_ent
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
             })
-            logger.exception(
-                'Falha ao enfileirar entrega Slack supervisor=%s tipo=%s',
+            logger.warning(
+                'Falha ao enfileirar entrega Slack supervisor=%s tipo=%s erro=%s',
                 supervisor.pk,
                 analysis_type_slug,
-                exc_info=exc,
+                exc,
             )
 
     return {
@@ -983,11 +986,11 @@ def sync_supervision_slack_for_analysis(analise_id, *, request=None):
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                     'error': str(exc),
                 })
-                logger.exception(
-                    'Falha ao sincronizar status final no Slack analise=%s supervisor=%s',
+                logger.warning(
+                    'Falha ao sincronizar status final no Slack analise=%s supervisor=%s erro=%s',
                     analise.pk,
                     supervisor.pk,
-                    exc_info=exc,
+                    exc,
                 )
 
         for analysis_type_slug in sorted(relevant_slugs):
@@ -1070,10 +1073,10 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
             })
-            logger.exception(
-                'Falha ao sincronizar status final Slack supervisor=%s',
+            logger.warning(
+                'Falha ao sincronizar status final Slack supervisor=%s erro=%s',
                 supervisor.pk,
-                exc_info=exc,
+                exc,
             )
 
     type_slugs = {
