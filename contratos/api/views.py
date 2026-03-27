@@ -2143,11 +2143,24 @@ class SlackSupervisionInteractionAPIView(View):
             },
             ensure_ascii=True,
         )
+        entry = None
+        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+        if supervisor:
+            try:
+                entry = get_supervision_entry_for_card(
+                    supervisor=supervisor,
+                    analise_id=analise_id,
+                    source=source,
+                    index=index,
+                )
+            except BaseException:
+                entry = None
         try:
             open_supervision_decision_modal(
                 trigger_id,
                 metadata_json=metadata_json,
                 desired_status=desired_status,
+                entry=entry,
                 slack_user_id=slack_user_id,
             )
         except Exception:
@@ -2155,102 +2168,88 @@ class SlackSupervisionInteractionAPIView(View):
         return HttpResponse('')
 
     def _handle_view_submission(self, payload):
-        view_payload = payload.get('view') or {}
-        if str(view_payload.get('callback_id') or '').strip() != 'supervision_decision_modal':
-            return JsonResponse({'response_action': 'clear'})
-        private_metadata_raw = str(view_payload.get('private_metadata') or '').strip()
         try:
+            view_payload = payload.get('view') or {}
+            if str(view_payload.get('callback_id') or '').strip() != 'supervision_decision_modal':
+                return JsonResponse({'response_action': 'clear'})
+            private_metadata_raw = str(view_payload.get('private_metadata') or '').strip()
             private_metadata = json.loads(private_metadata_raw or '{}')
-        except json.JSONDecodeError:
-            return JsonResponse({'response_action': 'clear'})
 
-        slack_user_id = str(private_metadata.get('slack_user_id') or '').strip()
-        supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
-        if not supervisor:
-            return JsonResponse({
-                'response_action': 'errors',
-                'errors': {'devolutiva_block': 'Supervisor não configurado para Slack.'},
-            })
-
-        metadata_raw = private_metadata.get('metadata')
-        try:
-            metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else (metadata_raw or {})
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return JsonResponse({'response_action': 'clear'})
-
-        desired_status = str(private_metadata.get('status') or '').strip().lower()
-        analise_id = metadata.get('analise_id')
-        source = metadata.get('source')
-        index = metadata.get('index')
-        if desired_status not in {'aprovado', 'reprovado', 'barrado'} or not analise_id or not source or index is None:
-            return JsonResponse({'response_action': 'clear'})
-
-        values = (((view_payload.get('state') or {}).get('values')) or {})
-        devolutiva_value = ''
-        retorno_em_value = ''
-        for block_values in values.values():
-            if not isinstance(block_values, dict):
-                continue
-            for action_data in block_values.values():
-                if not isinstance(action_data, dict):
-                    continue
-                action_type = str(action_data.get('type') or '')
-                action_id = str(action_data.get('action_id') or '')
-                if action_type == 'plain_text_input' and action_id == 'devolutiva_input':
-                    devolutiva_value = str(action_data.get('value') or '')
-                elif action_type == 'datepicker' and action_id == 'retorno_picker':
-                    retorno_em_value = str(action_data.get('selected_date') or '').strip()
-
-        try:
-            entry = get_supervision_entry_for_card(
-                supervisor=supervisor,
-                analise_id=analise_id,
-                source=source,
-                index=index,
-            )
-            if not entry:
+            slack_user_id = str(private_metadata.get('slack_user_id') or '').strip()
+            supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
+            if not supervisor:
                 return JsonResponse({
                     'response_action': 'errors',
-                    'errors': {'devolutiva_block': 'Este card de supervisão não está disponível para você.'},
+                    'errors': {'devolutiva_block': 'Supervisor não configurado para Slack.'},
                 })
+
+            metadata_raw = private_metadata.get('metadata')
+            metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else (metadata_raw or {})
+
+            desired_status = str(private_metadata.get('status') or '').strip().lower()
+            analise_id = metadata.get('analise_id')
+            source = metadata.get('source')
+            index = metadata.get('index')
+            if desired_status not in {'aprovado', 'reprovado', 'barrado'} or not analise_id or not source or index is None:
+                return JsonResponse({'response_action': 'clear'})
+
+            values = (((view_payload.get('state') or {}).get('values')) or {})
+            devolutiva_value = ''
+            retorno_em_value = ''
+            for block_values in values.values():
+                if not isinstance(block_values, dict):
+                    continue
+                for action_data in block_values.values():
+                    if not isinstance(action_data, dict):
+                        continue
+                    action_id = str(action_data.get('action_id') or '')
+                    if action_id == 'devolutiva_input':
+                        devolutiva_value = str(action_data.get('value') or '')
+                    elif action_id == 'retorno_picker':
+                        retorno_em_value = str(action_data.get('selected_date') or '').strip()
+
             analise, respostas, cards, card, _entry_index = _load_supervision_card(analise_id, source, index)
+            actor_name = supervisor.get_full_name().strip() or supervisor.username
+            note_value = str(devolutiva_value or '').replace('\r\n', '\n')
+            if desired_status == 'barrado':
+                barrado = card.get('barrado')
+                if not isinstance(barrado, dict):
+                    barrado = {}
+                barrado.setdefault('ativo', False)
+                barrado.setdefault('inicio', None)
+                barrado.setdefault('retorno_em', None)
+                barrado['ativo'] = True
+                if not barrado.get('inicio'):
+                    barrado['inicio'] = timezone.localdate().isoformat()
+                retorno_em_date = _parse_optional_date(retorno_em_value)
+                barrado['retorno_em'] = retorno_em_date.isoformat() if retorno_em_date else None
+                card['barrado'] = barrado
+                if note_value.strip():
+                    card['supervisor_observacoes'] = note_value
+                    card['supervisor_observacoes_autor'] = actor_name
+            else:
+                card['supervisor_status'] = desired_status
+                card['supervisor_status_autor'] = actor_name
+                card['supervisor_observacoes'] = note_value
+                card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
+            _save_supervision_card(analise, respostas, request_user=supervisor)
+            return JsonResponse({'response_action': 'clear'})
         except DRFValidationError as exc:
             return JsonResponse({
                 'response_action': 'errors',
                 'errors': {'devolutiva_block': str(exc.detail)},
             })
-
-        actor_name = supervisor.get_full_name().strip() or supervisor.username
-        note_value = str(devolutiva_value or '').replace('\r\n', '\n')
-        if desired_status == 'barrado':
-            barrado = card.get('barrado')
-            if not isinstance(barrado, dict):
-                barrado = {}
-            barrado.setdefault('ativo', False)
-            barrado.setdefault('inicio', None)
-            barrado.setdefault('retorno_em', None)
-            barrado['ativo'] = True
-            if not barrado.get('inicio'):
-                barrado['inicio'] = timezone.localdate().isoformat()
-            retorno_em_date = _parse_optional_date(retorno_em_value)
-            barrado['retorno_em'] = retorno_em_date.isoformat() if retorno_em_date else None
-            card['barrado'] = barrado
-            if note_value.strip():
-                card['supervisor_observacoes'] = note_value
-                card['supervisor_observacoes_autor'] = actor_name
-        else:
-            card['supervisor_status'] = desired_status
-            card['supervisor_status_autor'] = actor_name
-            card['supervisor_observacoes'] = note_value
-            card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
-        try:
-            _save_supervision_card(analise, respostas, request_user=supervisor)
         except RuntimeError as exc:
             return JsonResponse({
                 'response_action': 'errors',
                 'errors': {'devolutiva_block': str(exc)},
             })
-        return JsonResponse({'response_action': 'clear'})
+        except BaseException as exc:
+            logger.exception('Falha inesperada no submit de supervisao do Slack', exc_info=exc)
+            return JsonResponse({
+                'response_action': 'errors',
+                'errors': {'devolutiva_block': 'Recebemos sua resposta. Aguarde ate 5 minutos para o CFF System refletir a atualizacao.'},
+            })
 
 
 class AgendaSupervisionBarradoAPIView(APIView):
