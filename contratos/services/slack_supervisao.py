@@ -318,7 +318,8 @@ def _split_lines(value):
     return [line for line in str(value or '').replace('\r\n', '\n').split('\n') if line.strip()]
 
 
-def _build_decision_modal_blocks(desired_status, entry):
+def _build_decision_modal_blocks(desired_status, entry=None):
+    entry = entry if isinstance(entry, dict) else {}
     existing_note = str(entry.get('supervisor_observacoes') or '').strip()
     if desired_status == 'barrado':
         barrado = entry.get('barrado') if isinstance(entry.get('barrado'), dict) else {}
@@ -602,12 +603,13 @@ def add_slack_reaction(channel_id, message_ts, reaction_name):
             raise
 
 
-def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status, entry, slack_user_id):
+def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status, entry=None, slack_user_id):
     api_token = _slack_bot_token()
     if not api_token:
         raise ValueError('SLACK_BOT_TOKEN não configurado.')
+    entry = entry if isinstance(entry, dict) else {}
     status_label = 'Barrar' if desired_status == 'barrado' else SUPERVISION_STATUS_LABELS.get(desired_status, desired_status.capitalize())
-    nome = str(entry.get('nome') or 'Parte').strip()
+    nome = str(entry.get('nome') or entry.get('parte_nome') or 'Parte').strip()
     cpf = str(entry.get('cpf') or '').strip()
     blocks = [{
         'type': 'section',

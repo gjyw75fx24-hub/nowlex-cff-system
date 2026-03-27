@@ -1872,22 +1872,10 @@ class SlackSupervisionInteractionAPIView(View):
             ensure_ascii=True,
         )
         try:
-            supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
-            if not supervisor:
-                return HttpResponse('')
-            entry = get_supervision_entry_for_card(
-                supervisor=supervisor,
-                analise_id=analise_id,
-                source=source,
-                index=index,
-            )
-            if not entry:
-                return HttpResponse('')
             open_supervision_decision_modal(
                 trigger_id,
                 metadata_json=metadata_json,
                 desired_status=desired_status,
-                entry=entry,
                 slack_user_id=slack_user_id,
             )
         except Exception:
