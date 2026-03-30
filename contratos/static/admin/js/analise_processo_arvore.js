@@ -3067,16 +3067,32 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             let selectedDeliveryKeys = new Set();
 
             const getAllDeliveries = () => (Array.isArray(deliveries) ? deliveries : []);
-            const getSelectedIds = () => Array.from(selectedDeliveryKeys).filter(Boolean);
-            const getSelectedLocalIds = () => (
-                getAllDeliveries()
-                    .filter((delivery) => selectedDeliveryKeys.has(String(delivery?.delivery_key || '').trim()))
+            const syncSelectedDeliveryKeysFromDom = () => {
+                const visibleKeys = new Set(
+                    Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-key]'))
+                        .map((input) => String(input.getAttribute('data-delivery-key') || '').trim())
+                        .filter(Boolean)
+                );
+                visibleKeys.forEach((key) => selectedDeliveryKeys.delete(key));
+                Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-key]:checked'))
+                    .map((input) => String(input.getAttribute('data-delivery-key') || '').trim())
+                    .filter(Boolean)
+                    .forEach((key) => selectedDeliveryKeys.add(key));
+            };
+            const getSelectedIds = () => {
+                syncSelectedDeliveryKeysFromDom();
+                return Array.from(selectedDeliveryKeys).filter(Boolean);
+            };
+            const getSelectedLocalIds = () => {
+                const selectedIds = new Set(getSelectedIds());
+                return getAllDeliveries()
+                    .filter((delivery) => selectedIds.has(String(delivery?.delivery_key || '').trim()))
                     .map((delivery) => {
                         const rawId = String(delivery?.id ?? '').trim();
                         return /^\d+$/.test(rawId) ? rawId : '';
                     })
-                    .filter(Boolean)
-            );
+                    .filter(Boolean);
+            };
             const matchesSummaryFilter = (delivery) => {
                 if (!delivery || activeSummaryFilter === 'all') {
                     return true;
