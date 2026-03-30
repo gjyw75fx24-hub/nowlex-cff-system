@@ -7311,6 +7311,25 @@ body.admin-navigation-loading-active * {
     appearance: auto;
 }
 
+.analise-slack-deliveries-toolbar__filter--search {
+    margin-left: 2px;
+}
+
+.analise-slack-deliveries-toolbar__search {
+    min-width: 220px;
+    padding: 5px 12px;
+    border: 1px solid rgba(40, 52, 72, 0.12);
+    border-radius: 999px;
+    background: #f9fbfd;
+    color: #203247;
+    font-size: 0.82rem;
+    outline: none;
+}
+
+.analise-slack-deliveries-toolbar__search::placeholder {
+    color: #7a8898;
+}
+
 .slack-supervision-manager-root .analise-slack-deliveries-toolbar__filter.is-enhanced .analise-slack-deliveries-toolbar__select--native {
     position: absolute;
     opacity: 0;

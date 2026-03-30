@@ -25,6 +25,7 @@
         const feedback = document.getElementById('slack-supervision-manager-feedback');
         const list = document.getElementById('slack-supervision-manager-list');
         const typeFilterSelect = document.getElementById('slack-supervision-manager-type-filter');
+        const searchInput = document.getElementById('slack-supervision-manager-search');
         const refreshBtn = document.getElementById('slack-supervision-manager-refresh');
         const sendSelectedBtn = document.getElementById('slack-supervision-manager-send-selected');
         const deleteLastBtn = document.getElementById('slack-supervision-manager-delete-last');
@@ -51,6 +52,7 @@
         const maxReconcileRetryAttempts = 4;
         let activeSummaryFilter = 'all';
         let activeAnalysisTypeFilter = '';
+        let activeSearchTerm = '';
         let availableAnalysisTypes = [];
         let selectedDeliveryKeys = new Set();
         let typePickerRoot = null;
@@ -159,8 +161,27 @@
             return String(delivery?.analysis_type_filter_key || delivery?.analysis_type_slug || '').trim() === activeAnalysisTypeFilter;
         };
 
+        const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
+
+        const matchesSearchFilter = (delivery) => {
+            if (!activeSearchTerm) {
+                return true;
+            }
+            const queryText = activeSearchTerm.toLocaleLowerCase('pt-BR');
+            const queryDigits = normalizeDigits(activeSearchTerm);
+            const parteNome = String(delivery?.parte_nome || '').toLocaleLowerCase('pt-BR');
+            const parteCpf = normalizeDigits(delivery?.parte_cpf || '');
+            const matchesName = parteNome.includes(queryText);
+            const matchesCpf = !!queryDigits && parteCpf.includes(queryDigits);
+            return matchesName || matchesCpf;
+        };
+
         const getVisibleDeliveries = () => (
-            getAllDeliveries().filter((delivery) => matchesSummaryFilter(delivery) && matchesTypeFilter(delivery))
+            getAllDeliveries().filter((delivery) => (
+                matchesSummaryFilter(delivery)
+                && matchesTypeFilter(delivery)
+                && matchesSearchFilter(delivery)
+            ))
         );
 
         const refreshTypeFilterOptions = () => {
@@ -289,6 +310,7 @@
                 findOldThreadsBtn,
                 deleteOldThreadsBtn,
                 typeFilterSelect,
+                searchInput,
             ].forEach((button) => {
                 button.disabled = busy;
             });
@@ -451,31 +473,24 @@
                 const supervisorNames = Array.isArray(delivery.supervisor_names)
                     ? delivery.supervisor_names.map((value) => String(value || '').trim()).filter(Boolean)
                     : (delivery.supervisor_name ? [String(delivery.supervisor_name).trim()] : []);
+                const supervisorLabel = supervisorNames.length > 1
+                    ? `Supervisores: ${supervisorNames.join(', ')}`
+                    : (supervisorNames.length === 1 ? `Supervisor: ${supervisorNames[0]}` : '');
+                const titleLabel = String(delivery.cnj_label || 'Card').trim();
+                const processAlreadyInTitle = !!(delivery.processo_label && titleLabel && delivery.processo_label === titleLabel);
                 const statusText = delivery.dispatch_state === 'queued'
                     ? 'Status Slack: em fila'
                     : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
                 meta.textContent = [
                     delivery.analysis_type_name ? `Tipo: ${delivery.analysis_type_name}` : '',
-                    delivery.supervisor_name ? `Supervisor: ${delivery.supervisor_name}` : '',
-                    delivery.parte_nome ? `Parte: ${delivery.parte_nome}` : '',
-                    delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
+                    supervisorLabel,
+                    delivery.parte_cpf ? `CPF: ${delivery.parte_cpf}` : '',
+                    !processAlreadyInTitle && delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
                     delivery.notified_at_display ? `Enviada em ${delivery.notified_at_display}` : 'Ainda não enviada',
                     statusText,
-                    delivery.card_source ? `Origem: ${delivery.card_source}:${delivery.card_index}` : '',
                 ].filter(Boolean).join(' · ');
 
                 content.appendChild(titleEl);
-                if (supervisorNames.length) {
-                    const supervisorBadges = document.createElement('div');
-                    supervisorBadges.className = 'analise-slack-deliveries-item__supervisors';
-                    supervisorNames.forEach((name) => {
-                        const badge = document.createElement('span');
-                        badge.className = 'analise-slack-deliveries-item__supervisor-badge';
-                        badge.textContent = name;
-                        supervisorBadges.appendChild(badge);
-                    });
-                    content.appendChild(supervisorBadges);
-                }
                 content.appendChild(meta);
                 item.appendChild(checkbox);
                 item.appendChild(content);
@@ -838,6 +853,12 @@
             renderTypePickerOptions();
             renderList();
         });
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                activeSearchTerm = String(searchInput.value || '').trim();
+                renderList();
+            });
+        }
         refreshBtn.addEventListener('click', () => runRefresh({ selectedOnly: getSelectedLocalIds().length > 0 }));
         sendSelectedBtn.addEventListener('click', () => runRefresh({ selectedOnly: true }));
         deleteLastBtn.addEventListener('click', () => runDelete('last'));

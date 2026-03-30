@@ -588,7 +588,7 @@ def _safe_processo_label(delivery):
     except Exception:
         processo_id = None
     if processo_id:
-        return f'Processo #{processo_id}'
+        return 'Não judicializado'
     return ''
 
 
@@ -644,7 +644,28 @@ def _build_slack_delivery_analysis_type(delivery):
     return 'Análise', source.lower(), ''
 
 
+def _build_slack_delivery_card(delivery):
+    source = str(getattr(delivery, 'card_source', '') or '').strip()
+    analise = getattr(delivery, 'analise', None)
+    respostas = getattr(analise, 'respostas', None) if analise is not None else None
+    if not isinstance(respostas, dict):
+        return {}
+    raw_cards = respostas.get(source) or []
+    try:
+        card_index = int(getattr(delivery, 'card_index', 0) or 0)
+    except (TypeError, ValueError):
+        card_index = 0
+    if isinstance(raw_cards, list) and 0 <= card_index < len(raw_cards):
+        candidate = raw_cards[card_index]
+        if isinstance(candidate, dict):
+            return candidate
+    return {}
+
+
 def _build_slack_delivery_card_label(delivery):
+    parte_nome = _safe_delivery_parte_label(delivery)
+    if parte_nome:
+        return parte_nome
     processo_label = _safe_processo_label(delivery)
     if processo_label:
         return processo_label
@@ -664,9 +685,21 @@ def _safe_delivery_parte_label(delivery):
     return ''
 
 
+def _safe_delivery_parte_documento(delivery):
+    for attr_name in ('parte_documento_display', 'parte_documento_fallback'):
+        try:
+            value = str(getattr(delivery, attr_name, '') or '').strip()
+        except Exception:
+            value = ''
+        if value:
+            return value
+    return ''
+
+
 def _build_slack_delivery_entry_payload(delivery, request_user):
     try:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
+        card = _build_slack_delivery_card(delivery)
         analysis_type_name, analysis_type_slug, analysis_type_short = _build_slack_delivery_analysis_type(delivery)
         notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
         updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
@@ -687,6 +720,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'processo_id': delivery.processo_id,
             'processo_label': processo_label,
             'parte_nome': _safe_delivery_parte_label(delivery),
+            'parte_cpf': str(card.get('parte_cpf') or card.get('cpf') or _safe_delivery_parte_documento(delivery) or '').strip(),
             'supervisor_id': getattr(supervisor, 'pk', None),
             'supervisor_name': supervisor_name,
             'supervisor_names': supervisor_names,
@@ -725,6 +759,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'processo_id': getattr(delivery, 'processo_id', None),
             'processo_label': _safe_processo_label(delivery),
             'parte_nome': _safe_delivery_parte_label(delivery),
+            'parte_cpf': _safe_delivery_parte_documento(delivery),
             'supervisor_id': getattr(delivery, 'supervisor_id', None),
             'supervisor_name': '',
             'supervisor_names': [],
@@ -750,6 +785,45 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'has_message': has_message,
             'queue_position': 0,
         }
+
+
+def _build_slack_delivery_group_key(payload):
+    if not isinstance(payload, dict):
+        return None
+    if payload.get('is_remote_orphan'):
+        return None
+    analise_id = int(payload.get('analise_id') or 0)
+    processo_id = int(payload.get('processo_id') or 0)
+    card_source = str(payload.get('card_source') or '').strip()
+    card_index = int(payload.get('card_index') or 0)
+    if not analise_id or not card_source:
+        return None
+    return (analise_id, processo_id, card_source, card_index)
+
+
+def _annotate_slack_delivery_supervisors(results):
+    grouped_supervisors = {}
+    for item in results:
+        group_key = _build_slack_delivery_group_key(item)
+        if not group_key:
+            continue
+        names = grouped_supervisors.setdefault(group_key, set())
+        supervisor_name = str(item.get('supervisor_name') or '').strip()
+        if supervisor_name:
+            names.add(supervisor_name)
+        for raw_name in (item.get('supervisor_names') or []):
+            normalized_name = str(raw_name or '').strip()
+            if normalized_name:
+                names.add(normalized_name)
+
+    for item in results:
+        group_key = _build_slack_delivery_group_key(item)
+        if not group_key:
+            continue
+        supervisor_names = sorted(grouped_supervisors.get(group_key) or [], key=lambda value: value.casefold())
+        item['supervisor_names'] = supervisor_names
+        if len(supervisor_names) == 1:
+            item['supervisor_name'] = supervisor_names[0]
 
 
 def _annotate_slack_delivery_queue(results):
@@ -2066,6 +2140,13 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 .order_by('id')
                 .values('nome')[:1]
             )
+            passive_part_document_subquery = (
+                Parte.objects
+                .filter(processo_id=OuterRef('processo_id'), tipo_polo='PASSIVO')
+                .exclude(documento='')
+                .order_by('id')
+                .values('documento')[:1]
+            )
             any_part_name_subquery = (
                 Parte.objects
                 .filter(processo_id=OuterRef('processo_id'))
@@ -2073,11 +2154,20 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 .order_by('id')
                 .values('nome')[:1]
             )
+            any_part_document_subquery = (
+                Parte.objects
+                .filter(processo_id=OuterRef('processo_id'))
+                .exclude(documento='')
+                .order_by('id')
+                .values('documento')[:1]
+            )
             deliveries = list(
                 SupervisaoSlackEntrega.objects
                 .annotate(
                     parte_nome_display=Subquery(passive_part_name_subquery),
                     parte_nome_fallback=Subquery(any_part_name_subquery),
+                    parte_documento_display=Subquery(passive_part_document_subquery),
+                    parte_documento_fallback=Subquery(any_part_document_subquery),
                 )
                 .select_related('processo', 'supervisor', 'analise')
                 .only(
@@ -2118,6 +2208,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             remote_errors = remote_snapshot.get('errors') or []
             self._clear_stale_local_message_refs(results, remote_snapshot)
             results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
+            _annotate_slack_delivery_supervisors(results)
             available_analysis_types = _normalize_slack_delivery_analysis_type_filters(results)
             results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             _annotate_slack_delivery_queue(results)
