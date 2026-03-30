@@ -8584,15 +8584,6 @@ function formatCnjDigits(raw) {
             }
             const { active: processos, archived: archivedProcessos } = getProcessCardsForSupervisionPanel();
             $supervisionPanelContent.empty();
-            if (isSupervisorDeveloperUser && currentProcessoId) {
-                const $toolbar = $('<div class="analise-supervision-toolbar"></div>');
-                const $slackButton = $(
-                    '<button type="button" class="button button-secondary analise-supervision-slack-trigger" title="Listar mensagens enviadas ao Slack">Msgs Slack</button>'
-                );
-                $slackButton.on('click', openSlackDeliveryManagerDialog);
-                $toolbar.append($slackButton);
-                $supervisionPanelContent.append($toolbar);
-            }
             if (processos.length === 0 && archivedProcessos.length === 0) {
                 $supervisionPanelContent.append('<p>Nenhum processo está aguardando supervisão.</p>');
                 return;

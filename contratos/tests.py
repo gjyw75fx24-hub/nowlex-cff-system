@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from django.contrib.admin.sites import AdminSite
-from django.test import SimpleTestCase
+from django.core.exceptions import PermissionDenied
+from django.test import RequestFactory, SimpleTestCase
 from rest_framework.renderers import JSONRenderer
 from rest_framework.test import APIRequestFactory
 
-from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin
+from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin, slack_supervision_manager_view
 from contratos.api.views import (
     SlackSupervisionInteractionAPIView,
     SlackSupervisionDeliveryDeleteAPIView,
@@ -46,6 +47,29 @@ class ResolveSupervisionEntryDateTests(SimpleTestCase):
     def test_prescricao_date_is_used_when_custom_date_is_missing(self):
         result = _resolve_supervision_entry_date('', '2026-03-31')
         self.assertEqual(result, date(2026, 3, 31))
+
+
+class SlackSupervisionManagerAdminViewTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    @patch('contratos.admin.admin.site.each_context', return_value={})
+    def test_renders_for_supervisor_developer(self, mocked_each_context):
+        request = self.factory.get('/admin/contratos/slack-supervisao/')
+        request.user = SimpleNamespace(is_superuser=True)
+
+        response = slack_supervision_manager_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Mensagens enviadas ao Slack', response.content)
+        mocked_each_context.assert_called_once_with(request)
+
+    def test_blocks_non_supervisor_developer(self):
+        request = self.factory.get('/admin/contratos/slack-supervisao/')
+        request.user = SimpleNamespace(is_superuser=False, pk=None)
+
+        with self.assertRaises(PermissionDenied):
+            slack_supervision_manager_view(request)
 
 
 class ResolveSupervisionCardContractsTests(SimpleTestCase):

@@ -2312,6 +2312,26 @@ admin.site.site_header = "CFF SYSTEM"
 admin.site.site_title = "Home"
 admin.site.index_title = "Bem-vindo à Administração"
 
+_original_each_context = admin.site.each_context
+
+
+def _admin_each_context(request):
+    context = _original_each_context(request)
+    show_slack_supervision_manager = bool(
+        getattr(request.user, 'is_superuser', False) or is_user_supervisor_developer(request.user)
+    )
+    context.update({
+        "show_slack_supervision_manager": show_slack_supervision_manager,
+        "slack_supervision_manager_url": (
+            reverse("admin:contratos_slack_supervisao_manager")
+            if show_slack_supervision_manager else ""
+        ),
+    })
+    return context
+
+
+admin.site.each_context = _admin_each_context
+
 _original_app_index = admin.site.app_index
 
 def _app_index_redirect(request, app_label, extra_context=None):
@@ -2352,6 +2372,18 @@ def configuracao_analise_tipos_view(request):
         "is_supervisor": is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False)),
     })
     return render(request, "admin/contratos/configuracao_analise_tipos.html", context)
+
+
+def slack_supervision_manager_view(request):
+    if not (getattr(request.user, "is_superuser", False) or is_user_supervisor_developer(request.user)):
+        raise PermissionDenied("Acesso restrito ao Supervisor Desenvolvedor.")
+
+    context = admin.site.each_context(request)
+    context.update({
+        "title": "Mensagens enviadas ao Slack",
+        "subtitle": "Gerenciamento global das mensagens Slack de supervisão.",
+    })
+    return render(request, "admin/contratos/slack_supervisao_manager.html", context)
 
 def configuracao_analise_tipo_objetiva_view(request, tipo_id: int):
     if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
@@ -5646,6 +5678,11 @@ def _get_admin_urls():
             "contratos/guardados/",
             admin.site.admin_view(guardados_view),
             name="contratos_guardados",
+        ),
+        path(
+            "contratos/slack-supervisao/",
+            admin.site.admin_view(slack_supervision_manager_view),
+            name="contratos_slack_supervisao_manager",
         ),
     ]
     return custom_urls + urls

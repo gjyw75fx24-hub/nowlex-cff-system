@@ -3590,6 +3590,91 @@ a.historylink {
 #nav-sidebar .minhas-acoes-row + tr .section {
     padding-top: 0;
 }
+
+#nav-sidebar .slack-msgs-shortcut-prev {
+    margin-bottom: 0;
+}
+
+#nav-sidebar .slack-msgs-shortcut {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--hairline-color);
+    background: var(--body-bg);
+}
+
+#nav-sidebar .slack-msgs-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 14px;
+    color: #2f6f96;
+    font-weight: 700;
+    font-size: 0.72rem;
+    line-height: 1.1;
+    text-decoration: none;
+}
+
+#nav-sidebar .slack-msgs-link::before {
+    content: '#';
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: rgba(35, 93, 166, 0.10);
+    color: #235da6;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+#nav-sidebar .slack-msgs-link:hover,
+#nav-sidebar .slack-msgs-link--active {
+    color: #1f5f88;
+}
+
+.slack-supervision-manager-page {
+    padding: 24px 18px 32px;
+}
+
+.slack-supervision-manager-shell {
+    width: min(1320px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.slack-supervision-manager-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.slack-supervision-manager-header h1 {
+    margin: 0 0 6px;
+}
+
+.slack-supervision-manager-header p {
+    margin: 0;
+    max-width: 780px;
+    color: #5c6b7d;
+}
+
+.slack-supervision-manager-root {
+    background: #fff;
+    border-radius: 20px;
+    border: 1px solid rgba(40, 52, 72, 0.10);
+    box-shadow: 0 16px 40px rgba(15, 58, 118, 0.10);
+    padding: 24px;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-list {
+    min-height: 240px;
+}
 .agenda-panel__weekday {
     font-size: 12px;
     font-weight: 700;
@@ -7145,6 +7230,10 @@ body.admin-navigation-loading-active * {
     gap: 10px;
 }
 
+.slack-supervision-manager-root .analise-slack-deliveries-summary {
+    margin-top: 14px;
+}
+
 .analise-slack-deliveries-summary__card {
     appearance: none;
     display: flex;
@@ -7186,31 +7275,135 @@ body.admin-navigation-loading-active * {
     align-items: center;
 }
 
+.slack-supervision-manager-root .analise-slack-deliveries-toolbar {
+    margin-top: 16px;
+    column-gap: 6px;
+    row-gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
 .analise-slack-deliveries-toolbar__filter {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
-    border: 1px solid rgba(40, 52, 72, 0.12);
-    border-radius: 999px;
-    background: #f9fbfd;
     color: #617286;
     font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-toolbar__filter {
+    flex: 0 0 auto;
+    padding: 0;
+    position: relative;
 }
 
 .analise-slack-deliveries-toolbar__select {
     min-width: 180px;
-    border: none;
-    background: transparent;
+    padding: 5px 12px;
+    border: 1px solid rgba(40, 52, 72, 0.12);
+    border-radius: 999px;
+    background: #f9fbfd;
     color: #203247;
     font-size: 0.82rem;
     outline: none;
+    -webkit-appearance: menulist;
+    appearance: auto;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-toolbar__filter.is-enhanced .analise-slack-deliveries-toolbar__select--native {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    min-width: 0;
+    height: 0;
+    padding: 0;
+    border: 0;
+}
+
+.analise-slack-deliveries-type-picker {
+    position: relative;
+}
+
+.analise-slack-deliveries-type-picker__trigger {
+    min-width: 190px;
+    padding: 5px 34px 5px 12px;
+    border: 1px solid rgba(40, 52, 72, 0.12);
+    border-radius: 999px;
+    background: #f9fbfd;
+    color: #203247;
+    font-size: 0.82rem;
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+}
+
+.analise-slack-deliveries-type-picker__trigger::after {
+    content: '▾';
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #5f6b7a;
+    font-size: 0.8rem;
+    pointer-events: none;
+}
+
+.analise-slack-deliveries-type-picker__trigger:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.analise-slack-deliveries-type-picker__menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 100%;
+    padding: 6px;
+    border: 1px solid rgba(40, 52, 72, 0.14);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 12px 24px rgba(22, 39, 63, 0.14);
+    z-index: 12;
+}
+
+.analise-slack-deliveries-type-picker.is-open .analise-slack-deliveries-type-picker__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.analise-slack-deliveries-type-picker__option {
+    appearance: none;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #203247;
+    font-size: 0.82rem;
+    line-height: 1.2;
+    text-align: left;
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+.analise-slack-deliveries-type-picker__option:hover,
+.analise-slack-deliveries-type-picker__option--active {
+    background: rgba(35, 93, 166, 0.10);
+    color: #1f5f88;
 }
 
 .analise-slack-deliveries-toolbar__btn {
     border-radius: 999px;
     padding: 6px 14px;
     font-size: 0.82rem;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-toolbar__btn {
+    padding: 5px 12px;
+    font-size: 0.78rem;
 }
 
 .analise-slack-deliveries-toolbar__btn--danger {
@@ -7229,6 +7422,10 @@ body.admin-navigation-loading-active * {
     padding: 10px 12px;
     font-size: 0.84rem;
     line-height: 1.45;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-modal__feedback {
+    margin-top: 14px;
 }
 
 .analise-slack-deliveries-modal__feedback--success {
@@ -7251,6 +7448,10 @@ body.admin-navigation-loading-active * {
     flex-direction: column;
     gap: 10px;
     min-height: 120px;
+}
+
+.slack-supervision-manager-root .analise-slack-deliveries-list {
+    margin-top: 0;
 }
 
 .analise-slack-deliveries-list.is-loading {

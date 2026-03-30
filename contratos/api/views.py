@@ -46,6 +46,7 @@ from ..models import (
     PrazoMensagem,
     QuestaoAnalise,
     SupervisaoSlackEntrega,
+    TipoAnaliseObjetiva,
     Tarefa,
     TarefaLote,
     TarefaMensagem,
@@ -354,6 +355,57 @@ def _build_analysis_type_short(analysis_type):
         if not fallback:
             fallback = short
     return fallback
+
+
+def _normalize_analysis_type_token(value):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return ''
+    normalized = normalized.lstrip('#').replace('_', ' ').replace('-', ' ')
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    return normalized
+
+
+def _build_available_analysis_type_options():
+    options = []
+    aliases = {}
+    for tipo in TipoAnaliseObjetiva.objects.filter(ativo=True).order_by('nome'):
+        slug = str(tipo.slug or '').strip().lower()
+        name = str(tipo.nome or '').strip()
+        hashtag = str(tipo.hashtag or '').strip()
+        if not slug or not name:
+            continue
+        option = {
+            'slug': slug,
+            'name': name,
+        }
+        options.append(option)
+        for candidate in (slug, name, hashtag):
+            normalized = _normalize_analysis_type_token(candidate)
+            if normalized and normalized not in aliases:
+                aliases[normalized] = option
+    return options, aliases
+
+
+def _normalize_slack_delivery_analysis_type_filters(results):
+    available_types, aliases = _build_available_analysis_type_options()
+    for item in results:
+        raw_slug = str(item.get('analysis_type_slug') or '').strip().lower()
+        raw_name = str(item.get('analysis_type_name') or '').strip()
+        canonical = None
+        for candidate in (raw_slug, raw_name):
+            normalized = _normalize_analysis_type_token(candidate)
+            if normalized and normalized in aliases:
+                canonical = aliases[normalized]
+                break
+        if canonical:
+            item['analysis_type_filter_key'] = canonical['slug']
+            item['analysis_type_slug'] = canonical['slug']
+            if not raw_name or _normalize_analysis_type_token(raw_name) != _normalize_analysis_type_token(canonical['name']):
+                item['analysis_type_name'] = canonical['name']
+        else:
+            item['analysis_type_filter_key'] = raw_slug or _normalize_analysis_type_token(raw_name)
+    return available_types
 
 def get_next_supervision_status(current_status):
     normalized = (current_status or 'pendente').lower()
@@ -2062,10 +2114,12 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             remote_errors = remote_snapshot.get('errors') or []
             self._clear_stale_local_message_refs(results, remote_snapshot)
             results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
+            available_analysis_types = _normalize_slack_delivery_analysis_type_filters(results)
             results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             _annotate_slack_delivery_queue(results)
             return Response({
                 'summary': _build_slack_delivery_summary(results),
+                'available_analysis_types': available_analysis_types,
                 'results': results,
                 'errors': [*(reconcile_errors or []), *(remote_errors or [])],
             })
@@ -2073,6 +2127,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             logger.warning('Falha ao listar entregas Slack globais: %s', exc)
             return Response({
                 'summary': _build_slack_delivery_summary([]),
+                'available_analysis_types': [],
                 'results': [],
                 'errors': [],
                 'detail': 'Falha ao carregar mensagens Slack.',

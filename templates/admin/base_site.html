@@ -1,13 +1,19 @@
-{% load static %}
 {% extends "admin/base.html" %}
+{% load static %}
 
 {% block extrahead %}
-    {{ block.super }}
-    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'favicon/apple-touch-icon.png' %}">
-    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'favicon/favicon-32x32.png' %}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'favicon/favicon-16x16.png' %}">
-    <link rel="manifest" href="{% static 'favicon/site.webmanifest' %}">
-    <link rel="icon" href="{% static 'favicon/favicon.ico' %}">
-    <script defer src="{% static 'admin/js/changelist_row_open_prompt.js' %}?v=20260220b"></script>
-    <script defer src="{% static 'admin/js/navigation_loading_overlay.js' %}?v=20260220b"></script>
+{{ block.super }}
+<link rel="apple-touch-icon" sizes="180x180" href="{% static 'favicon/apple-touch-icon.png' %}">
+<link rel="icon" type="image/png" sizes="32x32" href="{% static 'favicon/favicon-32x32.png' %}">
+<link rel="icon" type="image/png" sizes="16x16" href="{% static 'favicon/favicon-16x16.png' %}">
+<link rel="manifest" href="{% static 'favicon/site.webmanifest' %}">
+<link rel="icon" href="{% static 'favicon/favicon.ico' %}">
+<script defer src="{% static 'admin/js/changelist_row_open_prompt.js' %}?v=20260220b"></script>
+<script defer src="{% static 'admin/js/navigation_loading_overlay.js' %}?v=20260220b"></script>
+<link rel="stylesheet" href="{% static 'admin/css/custom_admin_styles.css' %}">
+<script>
+window.__admin_is_supervisor_developer = {{ show_slack_supervision_manager|default_if_none:False|yesno:"true,false" }};
+window.__admin_slack_supervision_manager_url = "{{ slack_supervision_manager_url|default:''|escapejs }}";
+</script>
+<script defer src="{% static 'admin/js/admin_sidebar_shortcuts.js' %}?v=20260330b"></script>
 {% endblock %}

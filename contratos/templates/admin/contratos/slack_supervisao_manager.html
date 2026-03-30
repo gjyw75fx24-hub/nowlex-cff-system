@@ -1,0 +1,63 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'admin/js/jquery.init.js' %}"></script>
+<script defer src="{% static 'admin/js/slack_supervision_manager_page.js' %}?v=20260330a"></script>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='contratos' %}">Menu ADM</a>
+  &rsaquo; Mensagens enviadas ao Slack
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="slack-supervision-manager-page">
+  <div class="slack-supervision-manager-shell">
+    <div class="slack-supervision-manager-header">
+      <div>
+        <h1>Mensagens enviadas ao Slack</h1>
+        <p>Gerencie a fila global de supervisão, envie seleções específicas e apague mensagens antigas sem depender do modal.</p>
+      </div>
+      <a href="{% url 'admin:index' %}" class="button button-secondary">Voltar ao admin</a>
+    </div>
+
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+
+    <div
+      id="slack-supervision-manager-root"
+      class="slack-supervision-manager-root"
+      data-list-url="{% url 'api_root:slack_supervisao_entregas' %}"
+      data-refresh-url="{% url 'api_root:slack_supervisao_entregas_refresh' %}"
+      data-delete-url="{% url 'api_root:slack_supervisao_entregas_delete' %}">
+      <p class="analise-slack-deliveries-modal__hint">
+        Lista global das mensagens Slack de supervisão de todos os supervisores. Atualizar ressincroniza as mensagens já enviadas e libera novos envios da fila quando um tipo zerar.
+      </p>
+
+      <div id="slack-supervision-manager-summary" class="analise-slack-deliveries-summary"></div>
+
+      <div class="analise-slack-deliveries-toolbar">
+        <button id="slack-supervision-manager-refresh" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn">Atualizar</button>
+        <button id="slack-supervision-manager-send-selected" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn">Enviar selecionadas</button>
+        <button id="slack-supervision-manager-delete-last" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn">Apagar última</button>
+        <button id="slack-supervision-manager-delete-selected" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn">Apagar selecionadas</button>
+        <button id="slack-supervision-manager-delete-all" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger">Apagar todas</button>
+        <button id="slack-supervision-manager-find-old-threads" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn">Buscar threads antigas</button>
+        <button id="slack-supervision-manager-delete-old-threads" type="button" class="button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger">Apagar threads antigas</button>
+        <label class="analise-slack-deliveries-toolbar__filter">
+          <span>Tipo de Análise</span>
+          <select id="slack-supervision-manager-type-filter" class="analise-slack-deliveries-toolbar__select"></select>
+        </label>
+      </div>
+
+      <div id="slack-supervision-manager-feedback" class="analise-slack-deliveries-modal__feedback" style="display:none;"></div>
+      <div id="slack-supervision-manager-list" class="analise-slack-deliveries-list"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
