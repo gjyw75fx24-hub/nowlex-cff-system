@@ -83,6 +83,7 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 from ..services.slack_supervisao import (
+    _supervisor_accepts_entry,
     build_supervision_processing_message,
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
@@ -917,6 +918,42 @@ def _annotate_slack_delivery_supervisors(results):
         item['supervisor_names'] = supervisor_names
         if len(supervisor_names) == 1:
             item['supervisor_name'] = supervisor_names[0]
+
+
+def _annotate_slack_delivery_designated_supervisors(results, configs):
+    normalized_configs = []
+    for config in configs or []:
+        user = getattr(config, 'user', None)
+        if not user:
+            continue
+        display_name = str(user.get_full_name() or '').strip() or str(user.username or '').strip()
+        if not display_name:
+            continue
+        normalized_configs.append((config, display_name))
+
+    if not normalized_configs:
+        return
+
+    for item in results or []:
+        if not isinstance(item, dict):
+            continue
+        group_key = _build_slack_delivery_group_key(item)
+        if not group_key:
+            continue
+        designated_names = [
+            display_name
+            for config, display_name in normalized_configs
+            if _supervisor_accepts_entry(config, {
+                'analysis_type_slug': item.get('analysis_type_slug'),
+                'analysis_type_nome': item.get('analysis_type_name'),
+                'analysis_type_short': item.get('analysis_type_short'),
+            })
+        ]
+        if not designated_names:
+            continue
+        designated_names = sorted(set(designated_names), key=lambda value: value.casefold())
+        item['supervisor_names'] = designated_names
+        item['supervisor_name'] = designated_names[0] if len(designated_names) == 1 else ''
 
 
 def _annotate_slack_delivery_queue(results):
@@ -2302,9 +2339,10 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             self._clear_stale_local_message_refs(results, remote_snapshot)
             results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
             _annotate_slack_delivery_supervisors(results)
+            results = _aggregate_slack_delivery_results(results)
+            _annotate_slack_delivery_designated_supervisors(results, configs)
             available_analysis_types = _normalize_slack_delivery_analysis_type_filters(results)
             _annotate_slack_delivery_queue(results)
-            results = _aggregate_slack_delivery_results(results)
             results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             return Response({
                 'summary': _build_slack_delivery_summary(results),

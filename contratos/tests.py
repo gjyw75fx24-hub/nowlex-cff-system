@@ -17,6 +17,7 @@ from contratos.api.views import (
     SlackSupervisionDeliveryListAPIView,
     SlackSupervisionDeliveryRefreshAPIView,
     _aggregate_slack_delivery_results,
+    _annotate_slack_delivery_designated_supervisors,
     _build_slack_delivery_entry_payload,
     _build_slack_delivery_summary,
     _build_remote_slack_delivery_key,
@@ -806,6 +807,39 @@ class SlackDeliveryPayloadTests(SimpleTestCase):
         self.assertEqual(results[0]['supervisor_name'], '')
         self.assertEqual(results[0]['supervisor_names'], ['Daniella.Lisboa', 'Maicon.Bispo'])
         self.assertEqual(results[0]['queue_position'], 0)
+
+    def test_annotates_designated_supervisors_even_with_single_local_delivery(self):
+        results = [{
+            'id': 1,
+            'delivery_key': '1',
+            'analise_id': 1413,
+            'processo_id': 4860,
+            'card_source': 'saved_processos_vinculados',
+            'card_index': 0,
+            'status_key': 'pendente',
+            'dispatch_state': 'queued',
+            'has_message': False,
+            'analysis_type_slug': 'novas-monitorias',
+            'analysis_type_name': 'Novas Monitórias',
+            'analysis_type_short': 'NM',
+            'supervisor_name': 'Maicon.Bispo',
+            'supervisor_names': ['Maicon.Bispo'],
+        }]
+        configs = [
+            SimpleNamespace(
+                user=SimpleNamespace(username='Maicon.Bispo', get_full_name=lambda: 'Maicon.Bispo'),
+                allowed_analysis_type_slugs=lambda: ['esteira_3', 'novas-monitorias', 'passivas'],
+            ),
+            SimpleNamespace(
+                user=SimpleNamespace(username='Daniella.Lisboa', get_full_name=lambda: 'Daniella.Lisboa'),
+                allowed_analysis_type_slugs=lambda: ['novas-monitorias'],
+            ),
+        ]
+
+        _annotate_slack_delivery_designated_supervisors(results, configs)
+
+        self.assertEqual(results[0]['supervisor_name'], '')
+        self.assertEqual(results[0]['supervisor_names'], ['Daniella.Lisboa', 'Maicon.Bispo'])
 
 
 class SlackDeliveryReconcileTests(SimpleTestCase):
