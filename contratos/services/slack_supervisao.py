@@ -1663,11 +1663,24 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     if not selected_deliveries:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 
+    selected_card_keys = {
+        (
+            int(getattr(delivery, 'analise_id', 0) or 0),
+            str(getattr(delivery, 'card_source', '') or '').strip(),
+            int(getattr(delivery, 'card_index', 0) or 0),
+        )
+        for delivery in selected_deliveries
+        if int(getattr(delivery, 'analise_id', 0) or 0) > 0
+        and str(getattr(delivery, 'card_source', '') or '').strip()
+    }
+    if not selected_card_keys:
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
+
     configs = {
         config.user_id: config
         for config in (
             UserSlackConfig.objects.select_related('user')
-            .filter(user__is_active=True, user_id__in={delivery.supervisor_id for delivery in selected_deliveries})
+            .filter(user__is_active=True)
             .exclude(slack_user_id='')
         )
     }
@@ -1678,20 +1691,14 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     queued_count = 0
     type_totals = {}
 
-    deliveries_by_supervisor = {}
-    for delivery in selected_deliveries:
-        deliveries_by_supervisor.setdefault(delivery.supervisor_id, []).append(delivery)
-
-    for supervisor_id, supervisor_deliveries in deliveries_by_supervisor.items():
-        config = configs.get(supervisor_id)
+    for supervisor_id, config in configs.items():
         supervisor = getattr(config, 'user', None)
-        if not config or not supervisor:
+        if not supervisor:
             errors.append({
                 'supervisor': str(supervisor_id),
                 'error': 'Supervisor sem configuração Slack ativa para envio selecionado.',
             })
             continue
-        eligible_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
         try:
             accepted_entries, deliveries_map, entries_by_key = _build_supervisor_delivery_context(
                 supervisor,
@@ -1712,20 +1719,19 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
         if not accepted_entries:
             continue
 
-        for selected_delivery in supervisor_deliveries:
-            key = (
-                int(selected_delivery.analise_id or 0),
-                str(selected_delivery.card_source or '').strip(),
-                int(selected_delivery.card_index or 0),
-            )
+        supervisor_has_selected_entries = False
+        for key in sorted(selected_card_keys):
             entry = entries_by_key.get(key)
             if not entry:
+                continue
+            supervisor_has_selected_entries = True
+            delivery = deliveries_map.get(key)
+            if delivery is None:
                 errors.append({
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
-                    'error': f'Entrega {selected_delivery.pk} não encontrada na agenda atual.',
+                    'error': f'Entrega {key[0]}:{key[1]}:{key[2]} não encontrada no contexto do supervisor.',
                 })
                 continue
-            delivery = deliveries_map.get(key) or selected_delivery
             group_key = _entry_analysis_group_key(entry)
             group_summary = type_totals.setdefault(group_key, {
                 'analysis_type_slug': group_key,
@@ -1765,9 +1771,11 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
                 logger.warning(
                     'Falha ao sincronizar entrega Slack selecionada supervisor=%s delivery=%s erro=%s',
                     supervisor_id,
-                    selected_delivery.pk,
+                    f'{key[0]}:{key[1]}:{key[2]}',
                     exc,
                 )
+        if supervisor_has_selected_entries:
+            eligible_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
 
     return {
         'recipients': sorted(name for name in recipient_names if name),
