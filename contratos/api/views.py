@@ -678,6 +678,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         supervisor_name = ''
         if supervisor:
             supervisor_name = str(supervisor.get_full_name() or '').strip() or str(supervisor.username or '').strip()
+        supervisor_names = [supervisor_name] if supervisor_name else []
         processo_label = _safe_processo_label(delivery)
         return {
             'id': delivery.pk,
@@ -688,6 +689,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'parte_nome': _safe_delivery_parte_label(delivery),
             'supervisor_id': getattr(supervisor, 'pk', None),
             'supervisor_name': supervisor_name,
+            'supervisor_names': supervisor_names,
             'card_id': str(delivery.card_id or '').strip(),
             'card_source': str(delivery.card_source or '').strip(),
             'card_index': _safe_delivery_int(delivery.card_index),
@@ -725,6 +727,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'parte_nome': _safe_delivery_parte_label(delivery),
             'supervisor_id': getattr(delivery, 'supervisor_id', None),
             'supervisor_name': '',
+            'supervisor_names': [],
             'card_id': str(getattr(delivery, 'card_id', '') or '').strip(),
             'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
             'card_index': _safe_delivery_int(getattr(delivery, 'card_index', 0)),
@@ -886,6 +889,7 @@ def _extract_remote_supervision_message_payload(remote_item):
         'parte_nome': parte_nome,
         'supervisor_id': getattr(remote_item.get('supervisor'), 'pk', None),
         'supervisor_name': str(remote_item.get('supervisor_name') or '').strip(),
+        'supervisor_names': [str(remote_item.get('supervisor_name') or '').strip()] if str(remote_item.get('supervisor_name') or '').strip() else [],
         'card_id': '',
         'card_source': 'remote_slack',
         'card_index': 0,

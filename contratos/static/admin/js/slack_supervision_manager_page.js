@@ -448,6 +448,9 @@
 
                 const meta = document.createElement('div');
                 meta.className = 'analise-slack-deliveries-item__meta';
+                const supervisorNames = Array.isArray(delivery.supervisor_names)
+                    ? delivery.supervisor_names.map((value) => String(value || '').trim()).filter(Boolean)
+                    : (delivery.supervisor_name ? [String(delivery.supervisor_name).trim()] : []);
                 const statusText = delivery.dispatch_state === 'queued'
                     ? 'Status Slack: em fila'
                     : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
@@ -462,6 +465,17 @@
                 ].filter(Boolean).join(' · ');
 
                 content.appendChild(titleEl);
+                if (supervisorNames.length) {
+                    const supervisorBadges = document.createElement('div');
+                    supervisorBadges.className = 'analise-slack-deliveries-item__supervisors';
+                    supervisorNames.forEach((name) => {
+                        const badge = document.createElement('span');
+                        badge.className = 'analise-slack-deliveries-item__supervisor-badge';
+                        badge.textContent = name;
+                        supervisorBadges.appendChild(badge);
+                    });
+                    content.appendChild(supervisorBadges);
+                }
                 content.appendChild(meta);
                 item.appendChild(checkbox);
                 item.appendChild(content);

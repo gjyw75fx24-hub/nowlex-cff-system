@@ -170,6 +170,43 @@ class AnaliseProcessoAdminTests(SimpleTestCase):
         self.assertEqual(formset.new_objects, [])
         self.assertEqual(formset.changed_objects, [(existing, ['respostas'])])
 
+    @patch('contratos.admin.transaction.on_commit')
+    @patch('django.contrib.admin.options.ModelAdmin.save_related')
+    def test_save_related_defers_slack_sync_until_after_commit(self, mocked_super_save_related, mocked_on_commit):
+        admin_instance = ProcessoJudicialAdmin(ProcessoJudicial, AdminSite())
+        admin_instance._extract_selected_carteira_ids = Mock(return_value=set())
+        admin_instance._sync_supervision_slack_after_admin_save = Mock()
+
+        carteiras_manager = Mock()
+        carteiras_manager.values_list.return_value = []
+        carteiras_manager.clear = Mock()
+        carteiras_manager.set = Mock()
+
+        numeros_cnj_qs = Mock()
+        numeros_cnj_qs.values_list.return_value = []
+        numeros_cnj_manager = Mock()
+        numeros_cnj_manager.exclude.return_value = numeros_cnj_qs
+
+        processo = SimpleNamespace(
+            pk=2241,
+            carteiras_vinculadas=carteiras_manager,
+            numeros_cnj=numeros_cnj_manager,
+            carteira_id=None,
+        )
+        request = SimpleNamespace(user=SimpleNamespace(pk=7))
+        form = SimpleNamespace(instance=processo)
+
+        admin_instance.save_related(request, form, formsets=[], change=True)
+
+        mocked_super_save_related.assert_called_once_with(request, form, [], True)
+        mocked_on_commit.assert_called_once()
+        admin_instance._sync_supervision_slack_after_admin_save.assert_not_called()
+
+        callback = mocked_on_commit.call_args.args[0]
+        callback()
+
+        admin_instance._sync_supervision_slack_after_admin_save.assert_called_once_with(request, processo)
+
 
 class SaveDeliveryTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
@@ -266,6 +303,33 @@ class SaveDeliveryTests(SimpleTestCase):
         mocked_bulk_create.assert_called_once()
         mocked_upsert.assert_called_once()
         self.assertEqual(getattr(persisted_delivery, 'pk', None), 777)
+
+    @patch('contratos.services.slack_supervisao._upsert_delivery')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
+    def test_insert_delivery_returns_in_memory_delivery_when_all_persistence_fallbacks_fail(
+        self,
+        mocked_bulk_create,
+        mocked_filter,
+        mocked_upsert,
+    ):
+        mocked_bulk_create.side_effect = SystemExit(1)
+        mocked_upsert.side_effect = SystemExit(1)
+        mocked_filter.side_effect = SystemExit(1)
+        delivery = SimpleNamespace(
+            pk=None,
+            analise_id=38,
+            supervisor_id=2,
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            created_at=None,
+            updated_at=None,
+        )
+
+        persisted_delivery = _insert_delivery(delivery)
+
+        self.assertIs(persisted_delivery, delivery)
+        self.assertIsNone(getattr(persisted_delivery, 'pk', None))
 
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.filter')

@@ -11,6 +11,7 @@ import unicodedata
 import zipfile
 import requests
 from dataclasses import asdict, is_dataclass
+from functools import partial
 from types import SimpleNamespace
 from urllib.parse import quote, unquote, urlparse, urlencode
 from typing import Optional
@@ -13702,7 +13703,9 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             obj.carteiras_vinculadas.clear()
         if hasattr(obj, '_selected_carteira_ids_snapshot'):
             delattr(obj, '_selected_carteira_ids_snapshot')
-        self._sync_supervision_slack_after_admin_save(request, obj)
+        transaction.on_commit(
+            partial(self._sync_supervision_slack_after_admin_save, request, obj)
+        )
 
     def _sync_supervision_slack_after_admin_save(self, request, processo):
         analise = getattr(processo, 'analise_processo', None)

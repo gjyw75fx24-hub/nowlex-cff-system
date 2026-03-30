@@ -1066,7 +1066,7 @@ def _insert_delivery(delivery):
             filters['card_index'],
             exc_info=exc,
         )
-        raise RuntimeError('Falha ao criar entrega Slack.') from exc
+        return delivery
 
 
 def _upsert_delivery(delivery, *, normalized_fields=None, current_timestamp=None):
