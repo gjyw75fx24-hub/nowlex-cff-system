@@ -16,6 +16,7 @@ from contratos.api.views import (
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
     SlackSupervisionDeliveryRefreshAPIView,
+    _aggregate_slack_delivery_results,
     _build_slack_delivery_entry_payload,
     _build_slack_delivery_summary,
     _build_remote_slack_delivery_key,
@@ -755,6 +756,44 @@ class SlackDeliveryPayloadTests(SimpleTestCase):
         self.assertEqual(summary['sent_count'], 0)
         self.assertEqual(summary['pending_count'], 1)
         self.assertEqual(summary['queued_count'], 1)
+
+    def test_aggregates_duplicate_card_rows_across_supervisors(self):
+        results = _aggregate_slack_delivery_results([
+            {
+                'id': 1,
+                'delivery_key': '1',
+                'analise_id': 55,
+                'processo_id': 88,
+                'card_source': 'saved_processos_vinculados',
+                'card_index': 0,
+                'status_key': 'pendente',
+                'dispatch_state': 'queued',
+                'has_message': False,
+                'queue_position': 3,
+                'supervisor_name': 'Daniella.Lisboa',
+                'supervisor_names': ['Daniella.Lisboa'],
+            },
+            {
+                'id': 2,
+                'delivery_key': '2',
+                'analise_id': 55,
+                'processo_id': 88,
+                'card_source': 'saved_processos_vinculados',
+                'card_index': 0,
+                'status_key': 'pendente',
+                'dispatch_state': 'queued',
+                'has_message': False,
+                'queue_position': 21,
+                'supervisor_name': 'Maicon.Bispo',
+                'supervisor_names': ['Maicon.Bispo'],
+            },
+        ])
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['delivery_ids'], [1, 2])
+        self.assertEqual(results[0]['supervisor_name'], '')
+        self.assertEqual(results[0]['supervisor_names'], ['Daniella.Lisboa', 'Maicon.Bispo'])
+        self.assertEqual(results[0]['queue_position'], 0)
 
 
 class SlackDeliveryReconcileTests(SimpleTestCase):

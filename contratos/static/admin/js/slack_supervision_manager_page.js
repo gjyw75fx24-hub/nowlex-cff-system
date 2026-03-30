@@ -160,9 +160,34 @@
             const selectedIds = new Set(getSelectedIds());
             return getAllDeliveries()
                 .filter((delivery) => selectedIds.has(String(delivery?.delivery_key || '').trim()))
-                .map((delivery) => {
-                    const rawId = String(delivery?.id ?? '').trim();
-                    return /^\d+$/.test(rawId) ? rawId : '';
+                .flatMap((delivery) => {
+                    const rawIds = Array.isArray(delivery?.delivery_ids) && delivery.delivery_ids.length
+                        ? delivery.delivery_ids
+                        : [delivery?.id];
+                    return rawIds.map((value) => {
+                        const rawId = String(value ?? '').trim();
+                        return /^\d+$/.test(rawId) ? rawId : '';
+                    });
+                })
+                .filter(Boolean);
+        };
+
+        const getSelectedDeleteIds = () => {
+            const selectedIds = new Set(getSelectedIds());
+            return getAllDeliveries()
+                .filter((delivery) => selectedIds.has(String(delivery?.delivery_key || '').trim()))
+                .flatMap((delivery) => {
+                    const rawRemoteKey = String(delivery?.delivery_key || '').trim();
+                    if (rawRemoteKey.startsWith('remote:') || rawRemoteKey.startsWith('remote_reply:')) {
+                        return [rawRemoteKey];
+                    }
+                    const rawIds = Array.isArray(delivery?.delivery_ids) && delivery.delivery_ids.length
+                        ? delivery.delivery_ids
+                        : [delivery?.id];
+                    return rawIds.map((value) => {
+                        const rawId = String(value ?? '').trim();
+                        return /^\d+$/.test(rawId) ? rawId : '';
+                    });
                 })
                 .filter(Boolean);
         };
@@ -842,7 +867,7 @@
                 confirmMessage = 'Apagar todas as mensagens Slack listadas de todos os supervisores?';
             } else {
                 actionButton = deleteSelectedBtn;
-                selectedIds = getSelectedIds();
+                selectedIds = getSelectedDeleteIds();
                 if (!selectedIds.length) {
                     setFeedback('Selecione ao menos uma mensagem Slack para apagar.', 'warning');
                     refreshActionState();

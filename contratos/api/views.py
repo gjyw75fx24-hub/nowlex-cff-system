@@ -801,6 +801,99 @@ def _build_slack_delivery_group_key(payload):
     return (analise_id, processo_id, card_source, card_index)
 
 
+def _build_slack_delivery_aggregate_key(payload):
+    group_key = _build_slack_delivery_group_key(payload)
+    if not group_key:
+        return None
+    return (
+        *group_key,
+        str(payload.get('status_key') or '').strip().lower(),
+        str(payload.get('dispatch_state') or '').strip().lower(),
+        bool(payload.get('has_message')),
+    )
+
+
+def _aggregate_slack_delivery_results(results):
+    if not isinstance(results, list):
+        return []
+
+    aggregated_results = []
+    aggregated_by_key = {}
+
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+
+        aggregate_key = _build_slack_delivery_aggregate_key(item)
+        if not aggregate_key:
+            payload = dict(item)
+            delivery_id = payload.get('id')
+            payload['delivery_ids'] = [delivery_id] if delivery_id else []
+            aggregated_results.append(payload)
+            continue
+
+        existing = aggregated_by_key.get(aggregate_key)
+        if existing is None:
+            payload = dict(item)
+            delivery_id = payload.get('id')
+            payload['delivery_ids'] = [delivery_id] if delivery_id else []
+            payload['_queue_positions'] = [int(payload.get('queue_position') or 0)] if int(payload.get('queue_position') or 0) > 0 else []
+            payload['_supervisor_names'] = {
+                str(name or '').strip()
+                for name in (payload.get('supervisor_names') or [])
+                if str(name or '').strip()
+            }
+            if str(payload.get('supervisor_name') or '').strip():
+                payload['_supervisor_names'].add(str(payload.get('supervisor_name') or '').strip())
+            aggregated_by_key[aggregate_key] = payload
+            aggregated_results.append(payload)
+            continue
+
+        delivery_id = item.get('id')
+        if delivery_id and delivery_id not in existing['delivery_ids']:
+            existing['delivery_ids'].append(delivery_id)
+
+        for raw_name in (item.get('supervisor_names') or []):
+            normalized_name = str(raw_name or '').strip()
+            if normalized_name:
+                existing['_supervisor_names'].add(normalized_name)
+        supervisor_name = str(item.get('supervisor_name') or '').strip()
+        if supervisor_name:
+            existing['_supervisor_names'].add(supervisor_name)
+
+        queue_position = int(item.get('queue_position') or 0)
+        if queue_position > 0:
+            existing['_queue_positions'].append(queue_position)
+
+        existing_has_message = bool(existing.get('has_message'))
+        current_has_message = bool(item.get('has_message'))
+        if current_has_message and not existing_has_message:
+            existing['has_message'] = True
+            existing['dispatch_state'] = item.get('dispatch_state')
+            existing['notified_at'] = item.get('notified_at')
+            existing['notified_at_display'] = item.get('notified_at_display')
+
+        existing_updated = str(existing.get('updated_at') or existing.get('notified_at') or '')
+        current_updated = str(item.get('updated_at') or item.get('notified_at') or '')
+        if current_updated > existing_updated:
+            for field_name in ('updated_at', 'updated_at_display', 'notified_at', 'notified_at_display'):
+                existing[field_name] = item.get(field_name)
+
+    for item in aggregated_results:
+        if not isinstance(item, dict):
+            continue
+        supervisor_names = sorted(item.pop('_supervisor_names', set()), key=lambda value: value.casefold())
+        item['supervisor_names'] = supervisor_names
+        item['supervisor_name'] = supervisor_names[0] if len(supervisor_names) == 1 else ''
+        queue_positions = [int(value) for value in (item.pop('_queue_positions', []) or []) if int(value) > 0]
+        if len(item.get('delivery_ids') or []) == 1 and len(queue_positions) == 1:
+            item['queue_position'] = queue_positions[0]
+        else:
+            item['queue_position'] = 0
+
+    return aggregated_results
+
+
 def _annotate_slack_delivery_supervisors(results):
     grouped_supervisors = {}
     for item in results:
@@ -2210,8 +2303,9 @@ class SlackSupervisionDeliveryListAPIView(APIView):
             results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
             _annotate_slack_delivery_supervisors(results)
             available_analysis_types = _normalize_slack_delivery_analysis_type_filters(results)
-            results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             _annotate_slack_delivery_queue(results)
+            results = _aggregate_slack_delivery_results(results)
+            results.sort(key=lambda item: str(item.get('updated_at') or item.get('notified_at') or ''), reverse=True)
             return Response({
                 'summary': _build_slack_delivery_summary(results),
                 'available_analysis_types': available_analysis_types,
