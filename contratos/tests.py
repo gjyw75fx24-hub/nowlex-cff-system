@@ -415,8 +415,13 @@ class SlackSupervisionInteractionTests(SimpleTestCase):
             desired_status='aprovado',
             entry=entry_snapshot,
             slack_user_id='U123',
+            slack_channel_id='',
+            slack_message_ts='',
         )
 
+    @patch('contratos.api.views._trigger_supervision_analysis_sync_async')
+    @patch('contratos.api.views.update_slack_message')
+    @patch('contratos.api.views.build_supervision_processing_message')
     @patch('contratos.api.views._save_supervision_card')
     @patch('contratos.api.views._load_supervision_card')
     @patch('contratos.api.views._get_supervisor_by_slack_user_id')
@@ -425,6 +430,9 @@ class SlackSupervisionInteractionTests(SimpleTestCase):
         mocked_get_supervisor,
         mocked_load_card,
         mocked_save_card,
+        mocked_build_processing,
+        mocked_update_message,
+        mocked_trigger_sync,
     ):
         supervisor = SimpleNamespace(
             username='maicon',
@@ -435,11 +443,17 @@ class SlackSupervisionInteractionTests(SimpleTestCase):
         card = {}
         mocked_get_supervisor.return_value = supervisor
         mocked_load_card.return_value = (analise, respostas, respostas['saved_processos_vinculados'], card, 0)
+        mocked_build_processing.return_value = {
+            'text': 'Atualizacao em andamento',
+            'blocks': [{'type': 'section', 'text': {'type': 'mrkdwn', 'text': 'Teste'}}],
+        }
         payload = {
             'view': {
                 'callback_id': 'supervision_decision_modal',
                 'private_metadata': json.dumps({
                     'slack_user_id': 'U123',
+                    'slack_channel_id': 'D123',
+                    'slack_message_ts': '100.000',
                     'status': 'aprovado',
                     'metadata': json.dumps({
                         'analise_id': 55,
@@ -468,7 +482,19 @@ class SlackSupervisionInteractionTests(SimpleTestCase):
         self.assertEqual(card['supervisor_status_autor'], 'Maicon Bispo')
         self.assertEqual(card['supervisor_observacoes'], 'Testando supervisão via Slack')
         self.assertEqual(card['supervisor_observacoes_autor'], 'Maicon Bispo')
-        mocked_save_card.assert_called_once_with(analise, respostas, request_user=supervisor)
+        mocked_save_card.assert_called_once_with(analise, respostas, request_user=supervisor, trigger_sync=False)
+        mocked_build_processing.assert_called_once_with(
+            desired_status='aprovado',
+            actor_name='Maicon Bispo',
+            note='Testando supervisão via Slack',
+        )
+        mocked_update_message.assert_called_once_with(
+            'D123',
+            '100.000',
+            text='Atualizacao em andamento',
+            blocks=[{'type': 'section', 'text': {'type': 'mrkdwn', 'text': 'Teste'}}],
+        )
+        mocked_trigger_sync.assert_called_once_with(55)
 
 
 class SlackSingleDeliverySyncTests(SimpleTestCase):

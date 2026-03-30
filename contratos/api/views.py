@@ -82,6 +82,7 @@ from ..services.nowlex_calc import (
     parse_decimal,
 )
 from ..services.slack_supervisao import (
+    build_supervision_processing_message,
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
@@ -90,6 +91,7 @@ from ..services.slack_supervisao import (
     slack_supervisao_interactive_enabled,
     sync_supervision_slack_for_analysis,
     sync_supervision_slack_for_supervisor,
+    update_slack_message,
 )
 from ..integracoes_escavador.partes import collect_partes_from_escavador_payload
 
@@ -403,7 +405,7 @@ def _load_supervision_card(analise_id, source, index):
     return analise, respostas, cards, card, entry_index
 
 
-def _save_supervision_card(analise, respostas, *, request_user=None):
+def _save_supervision_card(analise, respostas, *, request_user=None, trigger_sync=True):
     analise.respostas = respostas
     if request_user is not None:
         analise.updated_by = request_user
@@ -446,7 +448,8 @@ def _save_supervision_card(analise, respostas, *, request_user=None):
                 exc_info=bulk_exc,
             )
             raise RuntimeError('Falha ao salvar supervisão.') from bulk_exc
-    _trigger_supervision_analysis_sync_async(analise.pk)
+    if trigger_sync:
+        _trigger_supervision_analysis_sync_async(analise.pk)
 
 
 def _trigger_supervision_analysis_sync_async(analise_id):
@@ -2241,6 +2244,19 @@ class SlackSupervisionInteractionAPIView(View):
             },
             ensure_ascii=True,
         )
+        container = payload.get('container') if isinstance(payload.get('container'), dict) else {}
+        channel_payload = payload.get('channel') if isinstance(payload.get('channel'), dict) else {}
+        message_payload = payload.get('message') if isinstance(payload.get('message'), dict) else {}
+        slack_channel_id = str(
+            container.get('channel_id')
+            or channel_payload.get('id')
+            or ''
+        ).strip()
+        slack_message_ts = str(
+            container.get('message_ts')
+            or message_payload.get('ts')
+            or ''
+        ).strip()
         entry = action_payload.get('entry')
         if not isinstance(entry, dict):
             entry = None
@@ -2251,6 +2267,8 @@ class SlackSupervisionInteractionAPIView(View):
                 desired_status=desired_status,
                 entry=entry,
                 slack_user_id=slack_user_id,
+                slack_channel_id=slack_channel_id,
+                slack_message_ts=slack_message_ts,
             )
         except Exception:
             logger.exception('Falha ao abrir modal de decisao do Slack')
@@ -2265,6 +2283,8 @@ class SlackSupervisionInteractionAPIView(View):
             private_metadata = json.loads(private_metadata_raw or '{}')
 
             slack_user_id = str(private_metadata.get('slack_user_id') or '').strip()
+            slack_channel_id = str(private_metadata.get('slack_channel_id') or '').strip()
+            slack_message_ts = str(private_metadata.get('slack_message_ts') or '').strip()
             supervisor = _get_supervisor_by_slack_user_id(slack_user_id)
             if not supervisor:
                 return JsonResponse({
@@ -2321,7 +2341,29 @@ class SlackSupervisionInteractionAPIView(View):
                 card['supervisor_status_autor'] = actor_name
                 card['supervisor_observacoes'] = note_value
                 card['supervisor_observacoes_autor'] = actor_name if note_value.strip() else ''
-            _save_supervision_card(analise, respostas, request_user=supervisor)
+            _save_supervision_card(analise, respostas, request_user=supervisor, trigger_sync=False)
+            if slack_channel_id and slack_message_ts:
+                try:
+                    processing_message = build_supervision_processing_message(
+                        desired_status=desired_status,
+                        actor_name=actor_name,
+                        note=note_value,
+                    )
+                    update_slack_message(
+                        slack_channel_id,
+                        slack_message_ts,
+                        text=processing_message['text'],
+                        blocks=processing_message['blocks'],
+                    )
+                except BaseException as exc:
+                    logger.warning(
+                        'Falha ao atualizar mensagem Slack para estado em andamento analise=%s source=%s index=%s erro=%s',
+                        analise_id,
+                        source,
+                        index,
+                        exc,
+                    )
+            _trigger_supervision_analysis_sync_async(analise.pk)
             return JsonResponse({'response_action': 'clear'})
         except DRFValidationError as exc:
             return JsonResponse({

@@ -863,7 +863,16 @@ def fetch_remote_supervision_slack_messages(configs, *, existing_refs=None):
     return snapshot['results'], snapshot['errors']
 
 
-def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status, entry=None, slack_user_id):
+def open_supervision_decision_modal(
+    trigger_id,
+    *,
+    metadata_json,
+    desired_status,
+    entry=None,
+    slack_user_id,
+    slack_channel_id='',
+    slack_message_ts='',
+):
     api_token = _slack_bot_token()
     if not api_token:
         raise ValueError('SLACK_BOT_TOKEN não configurado.')
@@ -894,6 +903,8 @@ def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status
                     'metadata': metadata_json,
                     'status': desired_status,
                     'slack_user_id': slack_user_id,
+                    'slack_channel_id': str(slack_channel_id or '').strip(),
+                    'slack_message_ts': str(slack_message_ts or '').strip(),
                 }),
                 'title': {'type': 'plain_text', 'text': 'Supervisão'},
                 'submit': {'type': 'plain_text', 'text': status_label},
@@ -902,6 +913,39 @@ def open_supervision_decision_modal(trigger_id, *, metadata_json, desired_status
             },
         },
     )
+
+
+def build_supervision_processing_message(*, desired_status, actor_name, note=''):
+    action_label = 'Barrar' if desired_status == 'barrado' else SUPERVISION_STATUS_LABELS.get(desired_status, desired_status.capitalize())
+    lines = [
+        f'*Status solicitado:* {action_label}',
+        f'*Supervisor:* {actor_name or "Supervisor"}',
+        'O CFF System esta registrando essa resposta.',
+    ]
+    normalized_note = str(note or '').strip()
+    if normalized_note:
+        lines.append(f'*Devolutiva:* {normalized_note}')
+    blocks = [
+        {
+            'type': 'header',
+            'text': {
+                'type': 'plain_text',
+                'text': 'Atualizacao em andamento',
+                'emoji': True,
+            },
+        },
+        {
+            'type': 'section',
+            'text': {
+                'type': 'mrkdwn',
+                'text': '\n'.join(lines)[:2900],
+            },
+        },
+    ]
+    return {
+        'text': f'Atualizacao em andamento - {action_label} por {actor_name or "Supervisor"}'[:4000],
+        'blocks': blocks,
+    }
 
 
 def _thread_update_text(entry, actor_name, status_key):
