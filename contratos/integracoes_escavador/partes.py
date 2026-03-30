@@ -89,6 +89,8 @@ def collect_partes_from_escavador_payload(dados_api: dict | None) -> list[dict]:
             current["endereco"] = endereco
 
     for fonte in dados_api.get("fontes", []) or []:
+        if not isinstance(fonte, dict):
+            continue
         for envolvido in fonte.get("envolvidos", []) or []:
             merge_payload(envolvido, prefer_documento=True)
 

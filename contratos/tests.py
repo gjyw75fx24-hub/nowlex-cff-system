@@ -11,6 +11,7 @@ from rest_framework.test import APIRequestFactory
 
 from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin, slack_supervision_manager_view
 from contratos.api.views import (
+    BuscarDadosEscavadorView,
     SlackSupervisionInteractionAPIView,
     SlackSupervisionDeliveryDeleteAPIView,
     SlackSupervisionDeliveryListAPIView,
@@ -70,6 +71,57 @@ class SlackSupervisionManagerAdminViewTests(SimpleTestCase):
 
         with self.assertRaises(PermissionDenied):
             slack_supervision_manager_view(request)
+
+
+class BuscarDadosEscavadorViewTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    @patch('contratos.api.views.requests.get')
+    def test_handles_null_nested_payloads_without_crashing(self, mocked_get):
+        mocked_response = Mock()
+        mocked_response.json.return_value = {
+            'numero_cnj': '0711144-91.2019.8.07.0001',
+            'estado_origem': None,
+            'fontes': [
+                None,
+                {
+                    'capa': None,
+                    'tribunal': None,
+                    'fonte': None,
+                    'movimentacoes': [
+                        None,
+                        {'data': '2026-03-30T10:00:00', 'titulo': 'Andamento de teste'},
+                    ],
+                    'envolvidos': None,
+                },
+            ],
+            'partes_envolvidas': [
+                None,
+                {'nome': 'Fulano da Silva', 'polo': 'PASSIVO', 'cpf': '12345678900'},
+            ],
+        }
+        mocked_response.raise_for_status.return_value = None
+        mocked_get.return_value = mocked_response
+
+        request = self.factory.get('/api/escavador/0711144-91.2019.8.07.0001/')
+        request.user = SimpleNamespace(is_authenticated=True)
+
+        response = BuscarDadosEscavadorView.as_view()(request, '0711144-91.2019.8.07.0001')
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload['status'], 'success')
+        self.assertEqual(payload['processo']['numero_cnj'], '0711144-91.2019.8.07.0001')
+        self.assertIsNone(payload['processo']['uf'])
+        self.assertIsNone(payload['processo']['vara'])
+        self.assertIsNone(payload['processo']['tribunal'])
+        self.assertIsNone(payload['processo']['valor_causa'])
+        self.assertEqual(payload['processo']['status_id'], 'DESCONHECIDO')
+        self.assertEqual(payload['partes'][0]['nome'], 'Fulano da Silva')
+        self.assertEqual(payload['partes'][0]['documento'], '12345678900')
+        self.assertEqual(len(payload['andamentos']), 1)
+        self.assertEqual(payload['andamentos'][0]['descricao'], 'Andamento de teste')
 
 
 class ResolveSupervisionCardContractsTests(SimpleTestCase):

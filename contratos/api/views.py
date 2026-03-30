@@ -4713,16 +4713,19 @@ class BuscarDadosEscavadorView(View):
             andamentos_data = []
 
             if escavador_data:
-                primeira_fonte = escavador_data.get('fontes', [{}])[0]
-                capa_fonte = primeira_fonte.get('capa', {})
-                tribunal_fonte = primeira_fonte.get('tribunal', {})
+                fontes = escavador_data.get('fontes') or []
+                primeira_fonte = fontes[0] if fontes and isinstance(fontes[0], dict) else {}
+                capa_fonte = primeira_fonte.get('capa') if isinstance(primeira_fonte.get('capa'), dict) else {}
+                tribunal_fonte = primeira_fonte.get('tribunal') if isinstance(primeira_fonte.get('tribunal'), dict) else {}
+                estado_origem = escavador_data.get('estado_origem') if isinstance(escavador_data.get('estado_origem'), dict) else {}
+                valor_causa = capa_fonte.get('valor_causa') if isinstance(capa_fonte.get('valor_causa'), dict) else {}
 
                 processo_data = {
                     'numero_cnj': escavador_data.get('numero_cnj'),
-                    'uf': escavador_data.get('estado_origem', {}).get('sigla'),
+                    'uf': estado_origem.get('sigla'),
                     'vara': capa_fonte.get('orgao_julgador'),
                     'tribunal': tribunal_fonte.get('sigla'),
-                    'valor_causa': capa_fonte.get('valor_causa', {}).get('valor'),
+                    'valor_causa': valor_causa.get('valor'),
                     'status_id': capa_fonte.get('classe') or 'DESCONHECIDO',
                     'status_nome': capa_fonte.get('classe') or 'DESCONHECIDO',
                 }
@@ -4731,9 +4734,18 @@ class BuscarDadosEscavadorView(View):
 
                 # Andamentos processuais
                 andamentos_data = []
-                for fonte in escavador_data.get('fontes', []):
-                    fonte_nome = fonte.get('fonte', {}).get('nome')
-                    for mov in fonte.get('movimentacoes', []):
+                for fonte in fontes:
+                    if not isinstance(fonte, dict):
+                        continue
+
+                    fonte_payload = fonte.get('fonte') if isinstance(fonte.get('fonte'), dict) else {}
+                    movimentacoes = fonte.get('movimentacoes') or []
+                    fonte_nome = fonte_payload.get('nome')
+
+                    for mov in movimentacoes:
+                        if not isinstance(mov, dict):
+                            continue
+
                         data_raw = mov.get('data')
                         data_iso = None
                         if data_raw:
