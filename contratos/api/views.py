@@ -1087,7 +1087,7 @@ def _extract_remote_supervision_message_payload(remote_item):
 def _build_slack_delivery_summary(results):
     sent_count = sum(1 for item in results if item.get('has_message'))
     responded_count = sum(1 for item in results if item.get('is_responded'))
-    pending_count = sum(1 for item in results if item.get('is_pending'))
+    pending_count = sum(1 for item in results if item.get('is_pending') and not item.get('has_message'))
     queued_count = sum(1 for item in results if item.get('dispatch_state') == 'queued')
     return {
         'sent_count': sent_count,

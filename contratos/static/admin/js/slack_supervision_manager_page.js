@@ -203,7 +203,7 @@
                 return Boolean(delivery.is_responded);
             }
             if (activeSummaryFilter === 'pending') {
-                return Boolean(delivery.is_pending);
+                return Boolean(delivery.is_pending) && !Boolean(delivery.has_message);
             }
             if (activeSummaryFilter === 'queued') {
                 return String(delivery.dispatch_state || '').trim() === 'queued';

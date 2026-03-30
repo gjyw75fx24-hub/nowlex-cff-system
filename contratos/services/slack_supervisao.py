@@ -1277,43 +1277,15 @@ def _build_supervisor_delivery_context(supervisor, config, *, include_completed=
         key = _build_entry_key(entry)
         if not key:
             continue
-        delivery = deliveries.get(key)
-        analise = analyses.get(int(entry.get('analise_id') or 0))
-        entry_status_key = _normalize_delivery_status_key(_entry_status_key(entry), fallback='pendente')
-        if delivery is None:
-            if not analise:
-                continue
-            delivery = _insert_delivery(SupervisaoSlackEntrega(
-                analise=analise,
-                processo=analise.processo_judicial,
-                supervisor=supervisor,
-                card_id=str(entry.get('cardId') or ''),
-                card_source=str(entry.get('card_source') or ''),
-                card_index=int(entry.get('card_index') or 0),
-                slack_user_id=config.slack_user_id,
-                last_status=entry_status_key,
-            ))
+        delivery = _ensure_delivery_for_entry(
+            supervisor,
+            config,
+            entry,
+            deliveries_by_key=deliveries,
+            analyses_by_id=analyses,
+        )
+        if delivery is not None:
             deliveries[key] = delivery
-            continue
-
-        update_fields = []
-        has_message = _has_slack_message(delivery)
-        new_card_id = str(entry.get('cardId') or delivery.card_id or '')
-        if delivery.card_id != new_card_id:
-            delivery.card_id = new_card_id
-            update_fields.append('card_id')
-        if delivery.slack_user_id != config.slack_user_id:
-            delivery.slack_user_id = config.slack_user_id
-            update_fields.append('slack_user_id')
-        if analise and delivery.processo_id != getattr(analise, 'processo_judicial_id', None):
-            delivery.processo = analise.processo_judicial
-            update_fields.append('processo')
-        if not has_message and delivery.last_status != entry_status_key:
-            delivery.last_status = entry_status_key
-            update_fields.append('last_status')
-        if update_fields:
-            update_fields.append('updated_at')
-            _save_delivery(delivery, update_fields=update_fields)
 
     entries_by_key = {
         _build_entry_key(entry): entry
@@ -1321,6 +1293,110 @@ def _build_supervisor_delivery_context(supervisor, config, *, include_completed=
         if _build_entry_key(entry)
     }
     return accepted_entries, deliveries, entries_by_key
+
+
+def _collect_entries_for_selected_keys(entry_keys, reference_supervisor):
+    normalized_entry_keys = {
+        key for key in (entry_keys or set())
+        if isinstance(key, tuple) and len(key) == 3
+    }
+    if not normalized_entry_keys or not reference_supervisor:
+        return {}
+
+    collected = {}
+    for entry in _collect_supervision_entries_for_supervisor(reference_supervisor, include_completed=True):
+        key = _build_entry_key(entry)
+        if not key or key not in normalized_entry_keys:
+            continue
+        collected[key] = entry
+    return collected
+
+
+def _load_analyses_for_entries(entries):
+    analysis_ids = sorted({
+        int(entry.get('analise_id') or 0)
+        for entry in (entries or [])
+        if int(entry.get('analise_id') or 0)
+    })
+    if not analysis_ids:
+        return {}
+    return {
+        analise.pk: analise
+        for analise in AnaliseProcesso.objects.select_related('processo_judicial').filter(pk__in=analysis_ids)
+    }
+
+
+def _load_deliveries_for_supervisor_entries(supervisor, entries):
+    analysis_ids = sorted({
+        int(entry.get('analise_id') or 0)
+        for entry in (entries or [])
+        if int(entry.get('analise_id') or 0)
+    })
+    if not analysis_ids:
+        return {}
+    return {
+        (delivery.analise_id, delivery.card_source, delivery.card_index): delivery
+        for delivery in SupervisaoSlackEntrega.objects.filter(
+            supervisor=supervisor,
+            analise_id__in=analysis_ids,
+        )
+    }
+
+
+def _ensure_delivery_for_entry(supervisor, config, entry, *, deliveries_by_key=None, analyses_by_id=None):
+    key = _build_entry_key(entry)
+    if not key:
+        return None
+
+    delivery = deliveries_by_key.get(key) if isinstance(deliveries_by_key, dict) else None
+    analise = None
+    if isinstance(analyses_by_id, dict):
+        analise = analyses_by_id.get(int(entry.get('analise_id') or 0))
+    entry_status_key = _normalize_delivery_status_key(_entry_status_key(entry), fallback='pendente')
+
+    if delivery is None:
+        if analise is None:
+            analise = (
+                AnaliseProcesso.objects
+                .select_related('processo_judicial')
+                .filter(pk=int(entry.get('analise_id') or 0))
+                .first()
+            )
+        if not analise:
+            return None
+        delivery = _insert_delivery(SupervisaoSlackEntrega(
+            analise=analise,
+            processo=analise.processo_judicial,
+            supervisor=supervisor,
+            card_id=str(entry.get('cardId') or ''),
+            card_source=str(entry.get('card_source') or ''),
+            card_index=int(entry.get('card_index') or 0),
+            slack_user_id=config.slack_user_id,
+            last_status=entry_status_key,
+        ))
+        if isinstance(deliveries_by_key, dict):
+            deliveries_by_key[key] = delivery
+        return delivery
+
+    update_fields = []
+    has_message = _has_slack_message(delivery)
+    new_card_id = str(entry.get('cardId') or delivery.card_id or '')
+    if delivery.card_id != new_card_id:
+        delivery.card_id = new_card_id
+        update_fields.append('card_id')
+    if delivery.slack_user_id != config.slack_user_id:
+        delivery.slack_user_id = config.slack_user_id
+        update_fields.append('slack_user_id')
+    if analise and delivery.processo_id != getattr(analise, 'processo_judicial_id', None):
+        delivery.processo = analise.processo_judicial
+        update_fields.append('processo')
+    if not has_message and delivery.last_status != entry_status_key:
+        delivery.last_status = entry_status_key
+        update_fields.append('last_status')
+    if update_fields:
+        update_fields.append('updated_at')
+        _save_delivery(delivery, update_fields=update_fields)
+    return delivery
 
 
 def _sync_pending_batch_for_type(*, supervisor, analysis_type_slug, accepted_entries, deliveries, request=None):
@@ -1725,6 +1801,29 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     queued_count = 0
     type_totals = {}
 
+    reference_supervisor = None
+    if request is not None and is_supervisor_user(getattr(request, 'user', None)):
+        reference_supervisor = request.user
+    if reference_supervisor is None and selected_deliveries:
+        reference_supervisor = getattr(selected_deliveries[0], 'supervisor', None)
+    if reference_supervisor is None:
+        for config in configs.values():
+            reference_supervisor = getattr(config, 'user', None)
+            if reference_supervisor is not None:
+                break
+
+    selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisor)
+    if not selected_entries_by_key:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': 'Nao foi possivel localizar os cards selecionados para envio.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
+
+    analyses_by_id = _load_analyses_for_entries(selected_entries_by_key.values())
+
     for supervisor_id, config in configs.items():
         supervisor = getattr(config, 'user', None)
         if not supervisor:
@@ -1733,38 +1832,63 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
                 'error': 'Supervisor sem configuração Slack ativa para envio selecionado.',
             })
             continue
+        accepted_entries = [
+            selected_entries_by_key[key]
+            for key in sorted(selected_card_keys)
+            if key in selected_entries_by_key and _supervisor_accepts_entry(config, selected_entries_by_key[key])
+        ]
+        if not accepted_entries:
+            continue
         try:
-            accepted_entries, deliveries_map, entries_by_key = _build_supervisor_delivery_context(
-                supervisor,
-                config,
-                include_completed=True,
-                entry_keys=selected_card_keys,
-            )
+            deliveries_map = _load_deliveries_for_supervisor_entries(supervisor, accepted_entries)
         except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
             })
             logger.warning(
-                'Falha ao montar contexto Slack para envio selecionado supervisor=%s erro=%s',
+                'Falha ao carregar entregas Slack para envio selecionado supervisor=%s erro=%s',
                 supervisor_id,
                 exc,
             )
             continue
-        if not accepted_entries:
-            continue
 
         supervisor_has_selected_entries = False
         for key in sorted(selected_card_keys):
-            entry = entries_by_key.get(key)
+            entry = selected_entries_by_key.get(key)
             if not entry:
+                continue
+            if not _supervisor_accepts_entry(config, entry):
                 continue
             supervisor_has_selected_entries = True
             delivery = deliveries_map.get(key)
             if delivery is None:
+                try:
+                    delivery = _ensure_delivery_for_entry(
+                        supervisor,
+                        config,
+                        entry,
+                        deliveries_by_key=deliveries_map,
+                        analyses_by_id=analyses_by_id,
+                    )
+                except BaseException as exc:
+                    errors.append({
+                        'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                        'error': str(exc),
+                    })
+                    logger.warning(
+                        'Falha ao preparar entrega Slack para envio selecionado supervisor=%s card=%s:%s:%s erro=%s',
+                        supervisor_id,
+                        key[0],
+                        key[1],
+                        key[2],
+                        exc,
+                    )
+                    continue
+            if delivery is None:
                 errors.append({
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
-                    'error': f'Entrega {key[0]}:{key[1]}:{key[2]} não encontrada no contexto do supervisor.',
+                    'error': f'Entrega {key[0]}:{key[1]}:{key[2]} não encontrada para o supervisor.',
                 })
                 continue
             group_key = _entry_analysis_group_key(entry)
@@ -1828,7 +1952,12 @@ def ensure_supervision_delivery_records(configs):
         if not supervisor:
             continue
         try:
-            _build_supervisor_delivery_context(supervisor, config, include_completed=False)
+            accepted_entries, _deliveries, _entries_by_key = _build_supervisor_delivery_context(
+                supervisor,
+                config,
+                include_completed=False,
+            )
+            _prune_stale_pending_delivery_records(supervisor, accepted_entries)
         except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
@@ -1840,6 +1969,38 @@ def ensure_supervision_delivery_records(configs):
                 exc,
             )
     return errors
+
+
+def _prune_stale_pending_delivery_records(supervisor, accepted_entries):
+    valid_keys = {
+        _build_entry_key(entry)
+        for entry in (accepted_entries or [])
+        if _build_entry_key(entry)
+    }
+    stale_ids = []
+    pending_statuses = sorted(SUPERVISION_PENDING_STATUSES | LEGACY_PENDING_STATUS_KEYS)
+    deliveries = (
+        SupervisaoSlackEntrega.objects
+        .filter(
+            supervisor=supervisor,
+            last_status__in=pending_statuses,
+            slack_channel_id='',
+            slack_message_ts='',
+        )
+        .only('id', 'analise_id', 'card_source', 'card_index')
+    )
+    for delivery in deliveries:
+        delivery_key = (
+            int(getattr(delivery, 'analise_id', 0) or 0),
+            str(getattr(delivery, 'card_source', '') or '').strip(),
+            int(getattr(delivery, 'card_index', 0) or 0),
+        )
+        if delivery_key in valid_keys:
+            continue
+        stale_ids.append(int(delivery.pk))
+    if stale_ids:
+        SupervisaoSlackEntrega.objects.filter(pk__in=stale_ids).delete()
+    return stale_ids
 
 
 def get_supervision_entry_for_card(*, supervisor, analise_id, source, index):
