@@ -1640,6 +1640,144 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     }
 
 
+def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None):
+    normalized_ids = []
+    for raw_value in delivery_ids or []:
+        try:
+            normalized_id = int(str(raw_value or '').strip())
+        except (TypeError, ValueError):
+            continue
+        if normalized_id > 0:
+            normalized_ids.append(normalized_id)
+    if not normalized_ids:
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
+    if not slack_supervisao_enabled():
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
+
+    selected_deliveries = list(
+        SupervisaoSlackEntrega.objects
+        .select_related('supervisor', 'analise', 'processo')
+        .filter(pk__in=normalized_ids)
+        .order_by('supervisor_id', 'id')
+    )
+    if not selected_deliveries:
+        return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
+
+    configs = {
+        config.user_id: config
+        for config in (
+            UserSlackConfig.objects.select_related('user')
+            .filter(user__is_active=True, user_id__in={delivery.supervisor_id for delivery in selected_deliveries})
+            .exclude(slack_user_id='')
+        )
+    }
+
+    recipient_names = set()
+    eligible_names = set()
+    errors = []
+    queued_count = 0
+    type_totals = {}
+
+    deliveries_by_supervisor = {}
+    for delivery in selected_deliveries:
+        deliveries_by_supervisor.setdefault(delivery.supervisor_id, []).append(delivery)
+
+    for supervisor_id, supervisor_deliveries in deliveries_by_supervisor.items():
+        config = configs.get(supervisor_id)
+        supervisor = getattr(config, 'user', None)
+        if not config or not supervisor:
+            errors.append({
+                'supervisor': str(supervisor_id),
+                'error': 'Supervisor sem configuração Slack ativa para envio selecionado.',
+            })
+            continue
+        eligible_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
+        try:
+            accepted_entries, deliveries_map, entries_by_key = _build_supervisor_delivery_context(
+                supervisor,
+                config,
+                include_completed=True,
+            )
+        except BaseException as exc:
+            errors.append({
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                'error': str(exc),
+            })
+            logger.warning(
+                'Falha ao montar contexto Slack para envio selecionado supervisor=%s erro=%s',
+                supervisor_id,
+                exc,
+            )
+            continue
+        if not accepted_entries:
+            continue
+
+        for selected_delivery in supervisor_deliveries:
+            key = (
+                int(selected_delivery.analise_id or 0),
+                str(selected_delivery.card_source or '').strip(),
+                int(selected_delivery.card_index or 0),
+            )
+            entry = entries_by_key.get(key)
+            if not entry:
+                errors.append({
+                    'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                    'error': f'Entrega {selected_delivery.pk} não encontrada na agenda atual.',
+                })
+                continue
+            delivery = deliveries_map.get(key) or selected_delivery
+            group_key = _entry_analysis_group_key(entry)
+            group_summary = type_totals.setdefault(group_key, {
+                'analysis_type_slug': group_key,
+                'pending_total': 0,
+                'already_sent_count': 0,
+                'posted_now_count': 0,
+                'to_send_count': 0,
+                'to_queue_count': 0,
+                'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+            })
+            had_message_before = _has_slack_message(delivery)
+            if _entry_is_pending(entry):
+                group_summary['pending_total'] += 1
+                group_summary['to_send_count'] += 1
+            try:
+                result = _sync_single_delivery(
+                    entry,
+                    supervisor,
+                    delivery,
+                    request=request,
+                    allow_post=_entry_is_pending(entry),
+                )
+                if had_message_before:
+                    group_summary['already_sent_count'] += 1
+                elif result.get('sent'):
+                    group_summary['posted_now_count'] += 1
+                if result.get('queued'):
+                    group_summary['to_queue_count'] += 1
+                    queued_count += 1
+                if result.get('sent'):
+                    recipient_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
+            except BaseException as exc:
+                errors.append({
+                    'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                    'error': str(exc),
+                })
+                logger.warning(
+                    'Falha ao sincronizar entrega Slack selecionada supervisor=%s delivery=%s erro=%s',
+                    supervisor_id,
+                    selected_delivery.pk,
+                    exc,
+                )
+
+    return {
+        'recipients': sorted(name for name in recipient_names if name),
+        'eligible_recipients': sorted(name for name in eligible_names if name),
+        'errors': errors,
+        'queued_count': queued_count,
+        'type_summaries': list(type_totals.values()),
+    }
+
+
 def ensure_supervision_delivery_records(configs):
     errors = []
     for config in configs or []:

@@ -90,6 +90,7 @@ from ..services.slack_supervisao import (
     open_supervision_decision_modal,
     slack_supervisao_interactive_enabled,
     sync_supervision_slack_for_analysis,
+    sync_supervision_slack_for_selected_deliveries,
     sync_supervision_slack_for_supervisor,
     update_slack_message,
 )
@@ -559,11 +560,36 @@ def _normalize_delivery_status_key(raw_status, *, has_message=False):
 
 def _build_slack_delivery_analysis_type(delivery):
     source = str(getattr(delivery, 'card_source', '') or '').strip()
+    analise = getattr(delivery, 'analise', None)
+    respostas = getattr(analise, 'respostas', None) if analise is not None else None
+    card = None
+    if isinstance(respostas, dict):
+        raw_cards = respostas.get(source) or []
+        try:
+            card_index = int(getattr(delivery, 'card_index', 0) or 0)
+        except (TypeError, ValueError):
+            card_index = 0
+        if isinstance(raw_cards, list) and 0 <= card_index < len(raw_cards):
+            candidate = raw_cards[card_index]
+            if isinstance(candidate, dict):
+                card = candidate
+
+    analysis_type = card.get('analysis_type') if isinstance(card, dict) and isinstance(card.get('analysis_type'), dict) else {}
+    analysis_type_name = (
+        str(analysis_type.get('nome') or '').strip()
+        or str(analysis_type.get('short') or '').strip()
+        or str(analysis_type.get('hashtag') or '').strip()
+        or str(analysis_type.get('slug') or '').strip()
+    )
+    analysis_type_slug = str(analysis_type.get('slug') or '').strip().lower()
+    analysis_type_short = _build_analysis_type_short(analysis_type)
+    if analysis_type_name:
+        return analysis_type_name, analysis_type_slug or analysis_type_name.lower(), analysis_type_short
     if source == 'saved_processos_vinculados':
-        return 'Análise salva', 'saved'
+        return 'Análise salva', 'saved', 'AS'
     if source == 'processos_vinculados':
-        return 'Análise vinculada', 'linked'
-    return 'Análise', source.lower()
+        return 'Análise vinculada', 'linked', 'AV'
+    return 'Análise', source.lower(), ''
 
 
 def _build_slack_delivery_card_label(delivery):
@@ -589,7 +615,7 @@ def _safe_delivery_parte_label(delivery):
 def _build_slack_delivery_entry_payload(delivery, request_user):
     try:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
-        analysis_type_name, analysis_type_slug = _build_slack_delivery_analysis_type(delivery)
+        analysis_type_name, analysis_type_slug, analysis_type_short = _build_slack_delivery_analysis_type(delivery)
         notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
         updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
         has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
@@ -616,6 +642,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'cnj_label': _build_slack_delivery_card_label(delivery),
             'analysis_type_name': analysis_type_name,
             'analysis_type_slug': analysis_type_slug,
+            'analysis_type_short': analysis_type_short,
             'last_status': status_key,
             'status_key': status_key,
             'is_pending': is_pending,
@@ -652,6 +679,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'cnj_label': str(getattr(delivery, 'card_id', '') or '').strip() or 'Card',
             'analysis_type_name': 'Análise',
             'analysis_type_slug': '',
+            'analysis_type_short': '',
             'last_status': status_key,
             'status_key': status_key,
             'is_pending': is_pending,
@@ -812,6 +840,7 @@ def _extract_remote_supervision_message_payload(remote_item):
         'cnj_label': cnj_label,
         'analysis_type_name': analysis_type_name,
         'analysis_type_slug': 'remote_slack',
+        'analysis_type_short': 'RS',
         'last_status': status_key,
         'status_key': status_key,
         'is_pending': status_key in {'pendente', 'pre_aprovado'},
@@ -1994,10 +2023,11 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                     parte_nome_display=Subquery(passive_part_name_subquery),
                     parte_nome_fallback=Subquery(any_part_name_subquery),
                 )
-                .select_related('processo', 'supervisor')
+                .select_related('processo', 'supervisor', 'analise')
                 .only(
                     'id',
                     'analise_id',
+                    'analise__respostas',
                     'processo_id',
                     'processo__cnj',
                     'supervisor_id',
@@ -2140,6 +2170,28 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
     def post(self, request):
         if not is_supervisor_developer_user(request.user):
             return Response({'detail': 'Apenas Supervisor Desenvolvedor pode atualizar entregas Slack.'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        mode = str(data.get('mode') or 'all').strip().lower()
+        raw_ids = data.get('delivery_ids') or []
+        selected_delivery_ids = []
+        for raw_value in raw_ids:
+            try:
+                delivery_id = int(str(raw_value or '').strip())
+            except (TypeError, ValueError):
+                continue
+            if delivery_id > 0:
+                selected_delivery_ids.append(delivery_id)
+
+        if mode == 'selected':
+            result = sync_supervision_slack_for_selected_deliveries(selected_delivery_ids, request=request) or {}
+            return Response({
+                'recipients': sorted(str(name).strip() for name in (result.get('recipients') or []) if str(name).strip()),
+                'eligible_recipients': sorted(str(name).strip() for name in (result.get('eligible_recipients') or []) if str(name).strip()),
+                'errors': result.get('errors') or [],
+                'queued_count': int(result.get('queued_count') or 0),
+                'type_summaries': [item for item in (result.get('type_summaries') or []) if isinstance(item, dict)],
+            })
 
         configs = (
             UserSlackConfig.objects

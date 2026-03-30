@@ -2903,15 +2903,22 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             });
         }
 
-        function refreshSlackSupervisionDeliveries() {
+        function refreshSlackSupervisionDeliveries(options = {}) {
             const csrftoken = $('input[name="csrfmiddlewaretoken"]').val();
+            const payload = {};
+            if (options && options.mode) {
+                payload.mode = options.mode;
+            }
+            if (options && Array.isArray(options.deliveryIds) && options.deliveryIds.length) {
+                payload.delivery_ids = options.deliveryIds;
+            }
             return $.ajax({
                 url: SLACK_SUPERVISION_DELIVERIES_REFRESH_URL,
                 method: 'POST',
                 headers: { 'X-CSRFToken': csrftoken },
                 contentType: 'application/json; charset=utf-8',
                 dataType: 'json',
-                data: JSON.stringify({})
+                data: JSON.stringify(payload)
             });
         }
 
@@ -2969,10 +2976,22 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const toolbar = document.createElement('div');
             toolbar.className = 'analise-slack-deliveries-toolbar';
+            const typeFilterWrap = document.createElement('label');
+            typeFilterWrap.className = 'analise-slack-deliveries-toolbar__filter';
+            const typeFilterLabel = document.createElement('span');
+            typeFilterLabel.textContent = 'Tipo';
+            const typeFilterSelect = document.createElement('select');
+            typeFilterSelect.className = 'analise-slack-deliveries-toolbar__select';
+            typeFilterWrap.appendChild(typeFilterLabel);
+            typeFilterWrap.appendChild(typeFilterSelect);
             const refreshBtn = document.createElement('button');
             refreshBtn.type = 'button';
             refreshBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
             refreshBtn.textContent = 'Atualizar';
+            const sendSelectedBtn = document.createElement('button');
+            sendSelectedBtn.type = 'button';
+            sendSelectedBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
+            sendSelectedBtn.textContent = 'Enviar selecionadas';
             const findOldThreadsBtn = document.createElement('button');
             findOldThreadsBtn.type = 'button';
             findOldThreadsBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn';
@@ -2993,12 +3012,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             deleteAllBtn.type = 'button';
             deleteAllBtn.className = 'button button-secondary analise-slack-deliveries-toolbar__btn analise-slack-deliveries-toolbar__btn--danger';
             deleteAllBtn.textContent = 'Apagar todas';
+            toolbar.appendChild(typeFilterWrap);
             toolbar.appendChild(refreshBtn);
-            toolbar.appendChild(findOldThreadsBtn);
-            toolbar.appendChild(deleteOldThreadsBtn);
+            toolbar.appendChild(sendSelectedBtn);
             toolbar.appendChild(deleteLastBtn);
             toolbar.appendChild(deleteSelectedBtn);
             toolbar.appendChild(deleteAllBtn);
+            toolbar.appendChild(findOldThreadsBtn);
+            toolbar.appendChild(deleteOldThreadsBtn);
 
             const feedback = document.createElement('div');
             feedback.className = 'analise-slack-deliveries-modal__feedback';
@@ -3041,6 +3062,77 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             let reconcileRetryTimer = null;
             let reconcileRetryAttempts = 0;
             const maxReconcileRetryAttempts = 4;
+            let activeSummaryFilter = 'all';
+            let activeAnalysisTypeFilter = '';
+            let selectedDeliveryKeys = new Set();
+
+            const getAllDeliveries = () => (Array.isArray(deliveries) ? deliveries : []);
+            const getSelectedIds = () => Array.from(selectedDeliveryKeys).filter(Boolean);
+            const getSelectedLocalIds = () => (
+                getAllDeliveries()
+                    .filter((delivery) => selectedDeliveryKeys.has(String(delivery?.delivery_key || '').trim()))
+                    .map((delivery) => {
+                        const rawId = String(delivery?.id ?? '').trim();
+                        return /^\d+$/.test(rawId) ? rawId : '';
+                    })
+                    .filter(Boolean)
+            );
+            const matchesSummaryFilter = (delivery) => {
+                if (!delivery || activeSummaryFilter === 'all') {
+                    return true;
+                }
+                if (activeSummaryFilter === 'sent') {
+                    return Boolean(delivery.has_message);
+                }
+                if (activeSummaryFilter === 'responded') {
+                    return Boolean(delivery.is_responded);
+                }
+                if (activeSummaryFilter === 'pending') {
+                    return Boolean(delivery.is_pending);
+                }
+                if (activeSummaryFilter === 'queued') {
+                    return String(delivery.dispatch_state || '').trim() === 'queued';
+                }
+                return true;
+            };
+            const matchesTypeFilter = (delivery) => {
+                if (!activeAnalysisTypeFilter) {
+                    return true;
+                }
+                return String(delivery?.analysis_type_slug || '').trim() === activeAnalysisTypeFilter;
+            };
+            const getVisibleDeliveries = () => (
+                getAllDeliveries().filter((delivery) => matchesSummaryFilter(delivery) && matchesTypeFilter(delivery))
+            );
+            const refreshTypeFilterOptions = () => {
+                const options = [];
+                const seen = new Set();
+                getAllDeliveries().forEach((delivery) => {
+                    const slug = String(delivery?.analysis_type_slug || '').trim();
+                    const name = String(delivery?.analysis_type_name || '').trim();
+                    if (!slug || !name || seen.has(slug)) {
+                        return;
+                    }
+                    seen.add(slug);
+                    options.push({ slug, name });
+                });
+                options.sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
+                typeFilterSelect.innerHTML = '';
+                const allOption = document.createElement('option');
+                allOption.value = '';
+                allOption.textContent = 'Todos os tipos';
+                typeFilterSelect.appendChild(allOption);
+                options.forEach((item) => {
+                    const optionEl = document.createElement('option');
+                    optionEl.value = item.slug;
+                    optionEl.textContent = item.name;
+                    typeFilterSelect.appendChild(optionEl);
+                });
+                if (activeAnalysisTypeFilter && !options.some((item) => item.slug === activeAnalysisTypeFilter)) {
+                    activeAnalysisTypeFilter = '';
+                }
+                typeFilterSelect.value = activeAnalysisTypeFilter;
+            };
 
             const isOrphanThreadReply = (delivery) => (
                 Boolean(delivery?.is_remote_orphan) && String(delivery?.message_kind || '').trim() === 'thread_reply_orphan'
@@ -3055,7 +3147,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const setBusy = (busy) => {
                 isBusy = busy;
-                [refreshBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn, closeBtn, footerClose].forEach((button) => {
+                [refreshBtn, sendSelectedBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn, closeBtn, footerClose, typeFilterSelect].forEach((button) => {
                     button.disabled = busy;
                 });
                 list.classList.toggle('is-loading', busy);
@@ -3078,7 +3170,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             };
 
             const resetToolbarLoadingState = () => {
-                [refreshBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn].forEach((button) => {
+                [refreshBtn, sendSelectedBtn, findOldThreadsBtn, deleteOldThreadsBtn, deleteLastBtn, deleteSelectedBtn, deleteAllBtn].forEach((button) => {
                     setActionLoadingState(button, false);
                 });
             };
@@ -3096,18 +3188,15 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 feedback.className = `analise-slack-deliveries-modal__feedback analise-slack-deliveries-modal__feedback--${variant}`;
             };
 
-            const getSelectedIds = () => (
-                Array.from(list.querySelectorAll('input[type="checkbox"][data-delivery-key]:checked'))
-                    .map((input) => String(input.getAttribute('data-delivery-key') || '').trim())
-                    .filter(Boolean)
-            );
-
             const refreshActionState = () => {
                 const selectedCount = getSelectedIds().length;
+                const selectedLocalCount = getSelectedLocalIds().length;
                 deleteSelectedBtn.disabled = isBusy || selectedCount === 0;
                 deleteLastBtn.disabled = isBusy || deliveries.length === 0;
                 deleteAllBtn.disabled = isBusy || (deliveries.length === 0 && !hasRemoteLoadWarnings);
+                sendSelectedBtn.disabled = isBusy || selectedLocalCount === 0;
                 deleteOldThreadsBtn.disabled = isBusy || orphanReplyKeys.length === 0;
+                refreshBtn.textContent = selectedLocalCount > 0 ? 'Atualizar selecionadas' : 'Atualizar';
             };
 
             const collectDeliveryErrorMessages = (items) => (
@@ -3120,27 +3209,37 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
             const renderSummary = () => {
                 const cards = [
-                    { label: 'Enviadas', value: summaryData.sent_count || 0 },
-                    { label: 'Respondidas', value: summaryData.responded_count || 0 },
-                    { label: 'Pendentes', value: summaryData.pending_count || 0 },
-                    { label: 'Em fila', value: summaryData.queued_count || 0 }
+                    { label: 'Enviadas', value: summaryData.sent_count || 0, filterKey: 'sent' },
+                    { label: 'Respondidas', value: summaryData.responded_count || 0, filterKey: 'responded' },
+                    { label: 'Pendentes', value: summaryData.pending_count || 0, filterKey: 'pending' },
+                    { label: 'Em fila', value: summaryData.queued_count || 0, filterKey: 'queued' }
                 ];
                 summary.innerHTML = '';
                 cards.forEach((card) => {
-                    const cardEl = document.createElement('div');
+                    const cardEl = document.createElement('button');
+                    cardEl.type = 'button';
                     cardEl.className = 'analise-slack-deliveries-summary__card';
+                    if (activeSummaryFilter === card.filterKey) {
+                        cardEl.classList.add('analise-slack-deliveries-summary__card--active');
+                    }
                     const valueEl = document.createElement('strong');
                     valueEl.textContent = String(card.value);
                     const labelEl = document.createElement('span');
                     labelEl.textContent = card.label;
                     cardEl.appendChild(valueEl);
                     cardEl.appendChild(labelEl);
+                    cardEl.addEventListener('click', () => {
+                        activeSummaryFilter = activeSummaryFilter === card.filterKey ? 'all' : card.filterKey;
+                        renderSummary();
+                        renderList();
+                    });
                     summary.appendChild(cardEl);
                 });
             };
 
             const renderList = () => {
                 list.innerHTML = '';
+                const visibleDeliveries = getVisibleDeliveries();
                 if (!deliveries.length) {
                     const empty = document.createElement('div');
                     empty.className = 'analise-slack-deliveries-empty';
@@ -3149,18 +3248,29 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     refreshActionState();
                     return;
                 }
-                deliveries.forEach((delivery) => {
+                if (!visibleDeliveries.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'analise-slack-deliveries-empty';
+                    empty.textContent = 'Nenhuma mensagem corresponde ao filtro atual.';
+                    list.appendChild(empty);
+                    refreshActionState();
+                    return;
+                }
+                visibleDeliveries.forEach((delivery) => {
                     const item = document.createElement('label');
                     item.className = 'analise-slack-deliveries-item';
                     if (highlightOrphanReplies && isOrphanThreadReply(delivery)) {
                         item.classList.add('analise-slack-deliveries-item--orphan-thread');
                     }
 
+                    const deliveryKey = String(delivery.delivery_key || delivery.id || '').trim();
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
-                    checkbox.setAttribute('data-delivery-key', String(delivery.delivery_key || delivery.id || '').trim());
+                    checkbox.setAttribute('data-delivery-key', deliveryKey);
+                    checkbox.checked = selectedDeliveryKeys.has(deliveryKey);
                     if (highlightOrphanReplies && isOrphanThreadReply(delivery)) {
                         checkbox.checked = true;
+                        selectedDeliveryKeys.add(deliveryKey);
                     }
 
                     const content = document.createElement('div');
@@ -3168,10 +3278,18 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
 
                     const titleEl = document.createElement('div');
                     titleEl.className = 'analise-slack-deliveries-item__title';
+                    const typeBadge = document.createElement('span');
+                    typeBadge.className = 'analise-slack-deliveries-item__type-badge';
+                    typeBadge.textContent = String(delivery.analysis_type_short || delivery.analysis_type_name || 'A').trim().slice(0, 12);
+                    typeBadge.title = String(delivery.analysis_type_name || '').trim();
+                    const titleText = document.createElement('span');
+                    titleText.className = 'analise-slack-deliveries-item__title-text';
                     const queueLabel = Number.isFinite(Number(delivery.queue_position)) && Number(delivery.queue_position) > 0
                         ? ` · Em fila #${delivery.queue_position}`
                         : '';
-                    titleEl.textContent = `${delivery.analysis_type_name || 'Análise'} · ${delivery.cnj_label || 'Card'}${queueLabel}`;
+                    titleText.textContent = `${delivery.cnj_label || 'Card'}${queueLabel}`;
+                    titleEl.appendChild(typeBadge);
+                    titleEl.appendChild(titleText);
 
                     const meta = document.createElement('div');
                     meta.className = 'analise-slack-deliveries-item__meta';
@@ -3179,6 +3297,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         ? 'Status Slack: em fila'
                         : (delivery.last_status ? `Status Slack: ${delivery.last_status}` : 'Status Slack: enviado');
                     meta.textContent = [
+                        delivery.analysis_type_name ? `Tipo: ${delivery.analysis_type_name}` : '',
                         delivery.supervisor_name ? `Supervisor: ${delivery.supervisor_name}` : '',
                         delivery.parte_nome ? `Parte: ${delivery.parte_nome}` : '',
                         delivery.processo_label ? `Processo: ${delivery.processo_label}` : '',
@@ -3194,7 +3313,19 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     list.appendChild(item);
                 });
                 list.querySelectorAll('input[type="checkbox"][data-delivery-key]').forEach((input) => {
-                    input.addEventListener('change', refreshActionState);
+                    input.addEventListener('change', () => {
+                        const deliveryKey = String(input.getAttribute('data-delivery-key') || '').trim();
+                        if (!deliveryKey) {
+                            refreshActionState();
+                            return;
+                        }
+                        if (input.checked) {
+                            selectedDeliveryKeys.add(deliveryKey);
+                        } else {
+                            selectedDeliveryKeys.delete(deliveryKey);
+                        }
+                        refreshActionState();
+                    });
                 });
                 refreshActionState();
             };
@@ -3243,6 +3374,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
             const applyDeliveriesResponse = (response) => {
                 const responseErrors = collectDeliveryErrorMessages(response?.errors);
                 deliveries = Array.isArray(response?.results) ? response.results : [];
+                const availableKeys = new Set(
+                    deliveries
+                        .map((delivery) => String(delivery?.delivery_key || '').trim())
+                        .filter(Boolean)
+                );
+                selectedDeliveryKeys = new Set(
+                    Array.from(selectedDeliveryKeys).filter((key) => availableKeys.has(key))
+                );
                 syncOrphanReplyKeys();
                 summaryData = response?.summary && typeof response.summary === 'object'
                     ? response.summary
@@ -3251,6 +3390,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 emptyListMessage = hasRemoteLoadWarnings && !deliveries.length
                     ? `Nao foi possivel listar as mensagens ja enviadas no Slack. ${responseErrors.join(' | ')}`
                     : 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+                refreshTypeFilterOptions();
                 renderSummary();
                 renderList();
                 if (hasRemoteLoadWarnings) {
@@ -3269,9 +3409,11 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     || 'Falha ao carregar mensagens Slack.';
                 deliveries = [];
                 orphanReplyKeys = [];
+                selectedDeliveryKeys = new Set();
                 summaryData = { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
                 hasRemoteLoadWarnings = false;
                 emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
+                refreshTypeFilterOptions();
                 renderSummary();
                 renderList();
                 setFeedback(message, 'error');
@@ -3352,7 +3494,14 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     });
             };
 
-            const runRefresh = () => {
+            const runRefresh = (options = {}) => {
+                const selectedLocalIds = getSelectedLocalIds();
+                const selectedOnly = Boolean(options?.selectedOnly || selectedLocalIds.length > 0);
+                if (options?.selectedOnly && !selectedLocalIds.length) {
+                    setFeedback('Selecione ao menos uma mensagem local para enviar.', 'warning');
+                    refreshActionState();
+                    return;
+                }
                 const previousSummary = {
                     sent_count: Number(summaryData?.sent_count || 0),
                     responded_count: Number(summaryData?.responded_count || 0),
@@ -3384,9 +3533,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                     }, 4000);
                 };
                 setBusy(true);
-                setActionLoadingState(refreshBtn, true, 'Atualizando...');
+                setActionLoadingState(options?.selectedOnly ? sendSelectedBtn : refreshBtn, true, selectedOnly ? 'Enviando...' : 'Atualizando...');
                 setFeedback('');
-                refreshSlackSupervisionDeliveries()
+                refreshSlackSupervisionDeliveries(selectedOnly ? {
+                    mode: 'selected',
+                    deliveryIds: selectedLocalIds,
+                } : {})
                     .done((response) => {
                         const recipients = Array.isArray(response?.recipients) ? response.recipients.filter(Boolean) : [];
                         const queuedCount = parseInt(response?.queued_count || 0, 10) || 0;
@@ -3409,6 +3561,9 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                             );
                         } else if (recipients.length || queuedCount) {
                             const parts = [];
+                            if (selectedOnly) {
+                                parts.push(`${selectedLocalIds.length} item(ns) selecionado(s) processado(s)`);
+                            }
                             if (recipients.length) {
                                 parts.push(`Mensagens sincronizadas para: ${recipients.join(', ')}`);
                             }
@@ -3431,6 +3586,7 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                         const message = xhr?.responseJSON?.detail || 'A atualização pode ainda estar em processamento. Vamos recarregar a lista automaticamente.';
                         setFeedback(message, 'warning');
                         setActionLoadingState(refreshBtn, false);
+                        setActionLoadingState(sendSelectedBtn, false);
                         setBusy(false);
                         refreshActionState();
                         scheduleReloadAfterFailure();
@@ -3541,7 +3697,12 @@ function showCffSystemDialog(message, type = 'warning', onClose = null) {
                 }
             };
 
-            refreshBtn.addEventListener('click', runRefresh);
+            typeFilterSelect.addEventListener('change', () => {
+                activeAnalysisTypeFilter = String(typeFilterSelect.value || '').trim();
+                renderList();
+            });
+            refreshBtn.addEventListener('click', () => runRefresh({ selectedOnly: getSelectedLocalIds().length > 0 }));
+            sendSelectedBtn.addEventListener('click', () => runRefresh({ selectedOnly: true }));
             findOldThreadsBtn.addEventListener('click', runFindOldThreads);
             deleteOldThreadsBtn.addEventListener('click', () => { void runDeleteOldThreads(); });
             deleteLastBtn.addEventListener('click', () => { void runDelete('last'); });

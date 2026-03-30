@@ -33,6 +33,7 @@ from contratos.services.slack_supervisao import (
     delete_supervision_slack_deliveries,
     ensure_supervision_delivery_records,
     fetch_remote_supervision_slack_messages,
+    sync_supervision_slack_for_selected_deliveries,
     sync_supervision_slack_for_supervisor,
 )
 
@@ -553,6 +554,34 @@ class SlackSingleDeliverySyncTests(SimpleTestCase):
 
 
 class SlackDeliveryPayloadTests(SimpleTestCase):
+    def test_uses_card_analysis_type_from_analysis_response(self):
+        delivery = SimpleNamespace(
+            pk=1,
+            analise_id=77,
+            processo_id=44,
+            processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
+            supervisor=SimpleNamespace(pk=5, username='maicon', get_full_name=lambda: 'Maicon Bispo'),
+            analise=SimpleNamespace(respostas={
+                'saved_processos_vinculados': [{
+                    'analysis_type': {'nome': 'Esteira 3', 'slug': 'esteira_3'},
+                }],
+            }),
+            card_id='card-1',
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            last_status='pendente',
+            notified_at=None,
+            updated_at=None,
+            slack_channel_id='',
+            slack_message_ts='',
+            parte_nome_display='LAFAYETE',
+        )
+
+        payload = _build_slack_delivery_entry_payload(delivery, delivery.supervisor)
+
+        self.assertEqual(payload['analysis_type_name'], 'Esteira 3')
+        self.assertEqual(payload['analysis_type_slug'], 'esteira_3')
+
     def test_normalizes_legacy_sent_status_without_message_into_pending_queue(self):
         supervisor = SimpleNamespace(
             pk=5,
@@ -625,6 +654,58 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
 
         self.assertEqual(result['errors'], [])
         mocked_builder.assert_called_once_with(supervisor, config, include_completed=False)
+
+    @patch('contratos.services.slack_supervisao._sync_single_delivery')
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
+    @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
+    def test_selected_refresh_syncs_only_selected_deliveries(
+        self,
+        mocked_delivery_objects,
+        mocked_config_objects,
+        mocked_builder,
+        mocked_sync_single,
+    ):
+        supervisor = SimpleNamespace(
+            pk=2,
+            username='Maicon.Bispo',
+            get_full_name=lambda: 'Maicon Bispo',
+        )
+        config = SimpleNamespace(user=supervisor, user_id=2)
+        selected_delivery = SimpleNamespace(
+            pk=41,
+            supervisor_id=2,
+            supervisor=supervisor,
+            analise_id=55,
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            slack_channel_id='',
+            slack_message_ts='',
+        )
+        mocked_delivery_objects.select_related.return_value.filter.return_value.order_by.return_value = [selected_delivery]
+        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value = [config]
+        entry = {
+            'analise_id': 55,
+            'card_source': 'saved_processos_vinculados',
+            'card_index': 0,
+            'supervisor_status': 'pendente',
+            'analysis_type_slug': 'esteira_3',
+        }
+        mocked_builder.return_value = ([entry], {(55, 'saved_processos_vinculados', 0): selected_delivery}, {(55, 'saved_processos_vinculados', 0): entry})
+        mocked_sync_single.return_value = {'sent': True, 'queued': False}
+
+        result = sync_supervision_slack_for_selected_deliveries([41])
+
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['recipients'], ['Maicon Bispo'])
+        mocked_builder.assert_called_once_with(supervisor, config, include_completed=True)
+        mocked_sync_single.assert_called_once_with(
+            entry,
+            supervisor,
+            selected_delivery,
+            request=None,
+            allow_post=True,
+        )
 
 
 class SlackAnalysisGroupingTests(SimpleTestCase):

@@ -7146,6 +7146,7 @@ body.admin-navigation-loading-active * {
 }
 
 .analise-slack-deliveries-summary__card {
+    appearance: none;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -7153,6 +7154,19 @@ body.admin-navigation-loading-active * {
     border-radius: 12px;
     border: 1px solid rgba(40, 52, 72, 0.12);
     background: linear-gradient(180deg, #f9fbfd 0%, #f3f7fb 100%);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.analise-slack-deliveries-summary__card:hover {
+    border-color: rgba(35, 93, 166, 0.24);
+}
+
+.analise-slack-deliveries-summary__card--active {
+    border-color: rgba(35, 93, 166, 0.32);
+    box-shadow: 0 0 0 2px rgba(35, 93, 166, 0.08);
+    transform: translateY(-1px);
 }
 
 .analise-slack-deliveries-summary__card strong {
@@ -7169,6 +7183,28 @@ body.admin-navigation-loading-active * {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    align-items: center;
+}
+
+.analise-slack-deliveries-toolbar__filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(40, 52, 72, 0.12);
+    border-radius: 999px;
+    background: #f9fbfd;
+    color: #617286;
+    font-size: 0.82rem;
+}
+
+.analise-slack-deliveries-toolbar__select {
+    min-width: 180px;
+    border: none;
+    background: transparent;
+    color: #203247;
+    font-size: 0.82rem;
+    outline: none;
 }
 
 .analise-slack-deliveries-toolbar__btn {
@@ -7243,9 +7279,32 @@ body.admin-navigation-loading-active * {
 }
 
 .analise-slack-deliveries-item__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-weight: 700;
     color: #213246;
     line-height: 1.35;
+}
+
+.analise-slack-deliveries-item__title-text {
+    min-width: 0;
+}
+
+.analise-slack-deliveries-item__type-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(35, 93, 166, 0.08);
+    color: #235da6;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    flex-shrink: 0;
 }
 
 .analise-slack-deliveries-item__meta {
