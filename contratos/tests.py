@@ -27,6 +27,7 @@ from contratos.api.views import (
 from contratos.models import AnaliseProcesso, ProcessoJudicial
 from contratos.services.slack_supervisao import (
     _entry_analysis_group_key,
+    _supervisor_accepts_entry,
     _insert_delivery,
     _save_delivery,
     _sync_single_delivery,
@@ -838,7 +839,12 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
 
         self.assertEqual(result['errors'], [])
         self.assertEqual(result['recipients'], ['Maicon Bispo'])
-        mocked_builder.assert_called_once_with(supervisor, config, include_completed=True)
+        mocked_builder.assert_called_once_with(
+            supervisor,
+            config,
+            include_completed=True,
+            entry_keys={(55, 'saved_processos_vinculados', 0)},
+        )
         mocked_sync_single.assert_called_once_with(
             entry,
             supervisor,
@@ -908,8 +914,9 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
             'analysis_type_slug': 'novas-monitorias',
         }
 
-        def build_context(supervisor, config, include_completed):
+        def build_context(supervisor, config, include_completed, entry_keys=None):
             self.assertTrue(include_completed)
+            self.assertEqual(entry_keys, {selected_key})
             if supervisor.pk == supervisor_a.pk:
                 return ([entry_a], {selected_key: selected_delivery}, {selected_key: entry_a})
             if supervisor.pk == supervisor_b.pk:
@@ -925,6 +932,18 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         self.assertEqual(result['recipients'], ['Supervisor A', 'Supervisor B'])
         self.assertEqual(result['eligible_recipients'], ['Supervisor A', 'Supervisor B'])
         self.assertEqual(mocked_builder.call_count, 2)
+        mocked_builder.assert_any_call(
+            supervisor_a,
+            config_a,
+            include_completed=True,
+            entry_keys={selected_key},
+        )
+        mocked_builder.assert_any_call(
+            supervisor_b,
+            config_b,
+            include_completed=True,
+            entry_keys={selected_key},
+        )
         self.assertEqual(mocked_sync_single.call_count, 2)
         mocked_sync_single.assert_any_call(
             entry_a,
@@ -943,6 +962,18 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
 
 
 class SlackAnalysisGroupingTests(SimpleTestCase):
+    def test_supervisor_accepts_entry_with_normalized_slug_variants(self):
+        config = SimpleNamespace(
+            allowed_analysis_type_slugs=lambda: ['esteira-3'],
+        )
+
+        accepted = _supervisor_accepts_entry(config, {
+            'analysis_type_slug': 'esteira_3',
+            'analysis_type_nome': 'Esteira 3',
+        })
+
+        self.assertTrue(accepted)
+
     def test_group_key_falls_back_to_name_when_slug_is_missing(self):
         key = _entry_analysis_group_key({
             'analysis_type_nome': 'Novas Monitorias',

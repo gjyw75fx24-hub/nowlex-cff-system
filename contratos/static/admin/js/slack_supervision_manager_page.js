@@ -2,9 +2,41 @@
     const $ = window.jQuery || (window.django && window.django.jQuery);
 
     function normalizeErrorMessage(xhr, fallbackMessage) {
-        return xhr?.responseJSON?.detail
-            || String(xhr?.responseText || '').trim()
-            || fallbackMessage;
+        const responseJson = xhr?.responseJSON;
+        const jsonDetail = responseJson?.detail || responseJson?.error || responseJson?.message;
+        if (jsonDetail) {
+            return String(jsonDetail).trim();
+        }
+
+        const rawText = String(xhr?.responseText || '').trim();
+        if (!rawText) {
+            return fallbackMessage;
+        }
+
+        if (rawText.startsWith('{') || rawText.startsWith('[')) {
+            try {
+                const parsed = JSON.parse(rawText);
+                const parsedDetail = parsed?.detail || parsed?.error || parsed?.message;
+                if (parsedDetail) {
+                    return String(parsedDetail).trim();
+                }
+            } catch (error) {
+                // Ignora payload inválido e segue para a sanitização abaixo.
+            }
+        }
+
+        const lowerRawText = rawText.toLowerCase();
+        const looksLikeHtml = rawText.startsWith('<')
+            || lowerRawText.includes('<!doctype')
+            || lowerRawText.includes('<html')
+            || lowerRawText.includes('<body')
+            || lowerRawText.includes('<head')
+            || lowerRawText.includes('<title>');
+        if (looksLikeHtml) {
+            return fallbackMessage;
+        }
+
+        return rawText.length > 280 ? fallbackMessage : rawText;
     }
 
     document.addEventListener('DOMContentLoaded', function () {

@@ -161,6 +161,14 @@ def _normalize_analysis_slug(value):
     return str(value or '').strip().lower()
 
 
+def _normalize_analysis_match_key(value):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return ''
+    normalized = normalized.lstrip('#').replace('_', ' ').replace('-', ' ')
+    return ' '.join(part for part in normalized.split() if part)
+
+
 def _entry_analysis_type_slug(entry):
     return _normalize_analysis_slug(
         entry.get('analysis_type_slug')
@@ -192,8 +200,28 @@ def _supervisor_accepts_entry(config, entry):
     allowed_slugs = config.allowed_analysis_type_slugs() if config else []
     if not allowed_slugs:
         return True
-    entry_slug = _entry_analysis_type_slug(entry)
-    return bool(entry_slug and entry_slug in allowed_slugs)
+    normalized_allowed = {
+        _normalize_analysis_match_key(raw_slug)
+        for raw_slug in allowed_slugs
+        if _normalize_analysis_match_key(raw_slug)
+    }
+    if not normalized_allowed:
+        return True
+    entry_candidates = {
+        _normalize_analysis_match_key(candidate)
+        for candidate in (
+            entry.get('analysis_type_slug'),
+            entry.get('analysisTypeSlug'),
+            entry.get('analysis_hashtag'),
+            entry.get('analysisTypeHashtag'),
+            entry.get('analysis_type_nome'),
+            entry.get('analysisTypeName'),
+            entry.get('analysis_type_short'),
+            entry.get('analysisTypeShort'),
+        )
+        if _normalize_analysis_match_key(candidate)
+    }
+    return bool(entry_candidates and normalized_allowed.intersection(entry_candidates))
 
 
 def _entry_status_key(entry):
@@ -1208,11 +1236,17 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
     }
 
 
-def _build_supervisor_delivery_context(supervisor, config, *, include_completed=True):
+def _build_supervisor_delivery_context(supervisor, config, *, include_completed=True, entry_keys=None):
+    normalized_entry_keys = None
+    if entry_keys:
+        normalized_entry_keys = {
+            key for key in entry_keys
+            if isinstance(key, tuple) and len(key) == 3
+        }
     accepted_entries = []
     for entry in _collect_supervision_entries_for_supervisor(supervisor, include_completed=include_completed):
         key = _build_entry_key(entry)
-        if not key or not _supervisor_accepts_entry(config, entry):
+        if not key or (normalized_entry_keys is not None and key not in normalized_entry_keys) or not _supervisor_accepts_entry(config, entry):
             continue
         accepted_entries.append(entry)
 
@@ -1704,6 +1738,7 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
                 supervisor,
                 config,
                 include_completed=True,
+                entry_keys=selected_card_keys,
             )
         except BaseException as exc:
             errors.append({
