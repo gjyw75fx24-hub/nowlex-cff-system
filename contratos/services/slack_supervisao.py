@@ -147,6 +147,24 @@ def _build_entry_key(entry):
         return None
 
 
+def _parse_selected_card_key(value):
+    raw_value = str(value or '').strip()
+    if not raw_value:
+        return None
+    parts = raw_value.split('|', 2)
+    if len(parts) != 3:
+        return None
+    try:
+        analise_id = int(parts[0] or 0)
+        card_index = int(parts[2] or 0)
+    except (TypeError, ValueError):
+        return None
+    card_source = str(parts[1] or '').strip()
+    if not analise_id or not card_source:
+        return None
+    return (analise_id, card_source, card_index)
+
+
 def _entry_file_summary(entry):
     items = []
     for summary_item in entry.get('monitoria_files_summary') or []:
@@ -1778,7 +1796,7 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
     }
 
 
-def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None):
+def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None, selection_keys=None):
     normalized_ids = []
     for raw_value in delivery_ids or []:
         try:
@@ -1787,7 +1805,15 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
             continue
         if normalized_id > 0:
             normalized_ids.append(normalized_id)
-    if not normalized_ids:
+    normalized_selection_keys = {
+        parsed_key
+        for parsed_key in (
+            _parse_selected_card_key(raw_value)
+            for raw_value in (selection_keys or [])
+        )
+        if parsed_key
+    }
+    if not normalized_ids and not normalized_selection_keys:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
     if not slack_supervisao_enabled():
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
@@ -1807,7 +1833,7 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
             'queued_count': 0,
             'type_summaries': [],
         }
-    if not selected_deliveries:
+    if not selected_deliveries and not normalized_selection_keys:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 
     selected_card_keys = {
@@ -1820,6 +1846,7 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
         if int(getattr(delivery, 'analise_id', 0) or 0) > 0
         and str(getattr(delivery, 'card_source', '') or '').strip()
     }
+    selected_card_keys.update(normalized_selection_keys)
     if not selected_card_keys:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 

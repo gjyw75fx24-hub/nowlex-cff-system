@@ -1019,6 +1019,69 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
+    def test_selected_refresh_supports_selection_keys_without_local_delivery_id(
+        self,
+        mocked_delivery_objects,
+        mocked_config_objects,
+        mocked_collect_entries,
+        mocked_load_analyses,
+        mocked_load_deliveries,
+        mocked_ensure_delivery,
+        mocked_sync_single,
+    ):
+        supervisor = SimpleNamespace(
+            pk=2,
+            username='Maicon.Bispo',
+            get_full_name=lambda: 'Maicon Bispo',
+        )
+        config = SimpleNamespace(user=supervisor, user_id=2, allowed_analysis_type_slugs=lambda: [])
+        delivery = SimpleNamespace(
+            pk=41,
+            supervisor_id=2,
+            supervisor=supervisor,
+            analise_id=55,
+            card_source='saved_processos_vinculados',
+            card_index=0,
+            slack_channel_id='',
+            slack_message_ts='',
+        )
+        mocked_delivery_objects.select_related.return_value.filter.return_value.order_by.return_value = []
+        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value = [config]
+        entry = {
+            'analise_id': 55,
+            'card_source': 'saved_processos_vinculados',
+            'card_index': 0,
+            'supervisor_status': 'pendente',
+            'analysis_type_slug': 'esteira_3',
+        }
+        mocked_collect_entries.return_value = {(55, 'saved_processos_vinculados', 0): entry}
+        mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
+        mocked_load_deliveries.return_value = {(55, 'saved_processos_vinculados', 0): delivery}
+        mocked_sync_single.return_value = {'sent': True, 'queued': False}
+
+        result = sync_supervision_slack_for_selected_deliveries([], selection_keys=['55|saved_processos_vinculados|0'])
+
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(result['recipients'], ['Maicon Bispo'])
+        mocked_collect_entries.assert_called_once()
+        self.assertEqual(mocked_collect_entries.call_args.args[0], {(55, 'saved_processos_vinculados', 0)})
+        mocked_load_deliveries.assert_called_once_with(supervisor, [entry])
+        mocked_ensure_delivery.assert_not_called()
+        mocked_sync_single.assert_called_once_with(
+            entry,
+            supervisor,
+            delivery,
+            request=None,
+            allow_post=True,
+        )
+
+    @patch('contratos.services.slack_supervisao._sync_single_delivery')
+    @patch('contratos.services.slack_supervisao._ensure_delivery_for_entry')
+    @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
+    @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
+    @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
+    @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
+    @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
     def test_selected_refresh_syncs_selected_card_for_all_eligible_supervisors(
         self,
         mocked_delivery_objects,

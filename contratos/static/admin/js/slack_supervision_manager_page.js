@@ -112,6 +112,9 @@
             if (options && Array.isArray(options.deliveryIds) && options.deliveryIds.length) {
                 payload.delivery_ids = options.deliveryIds;
             }
+            if (options && Array.isArray(options.selectionKeys) && options.selectionKeys.length) {
+                payload.selection_keys = options.selectionKeys;
+            }
             return $.ajax({
                 url: refreshUrl,
                 method: 'POST',
@@ -190,6 +193,16 @@
                     });
                 })
                 .filter(Boolean);
+        };
+
+        const getSelectedSelectionKeys = () => {
+            const selectedIds = new Set(getSelectedIds());
+            return Array.from(new Set(
+                getAllDeliveries()
+                    .filter((delivery) => selectedIds.has(String(delivery?.delivery_key || '').trim()))
+                    .map((delivery) => String(delivery?.selection_key || '').trim())
+                    .filter(Boolean)
+            ));
         };
 
         const matchesSummaryFilter = (delivery) => {
@@ -424,12 +437,13 @@
         const refreshActionState = () => {
             const selectedCount = getSelectedIds().length;
             const selectedLocalCount = getSelectedLocalIds().length;
+            const selectedSelectionCount = getSelectedSelectionKeys().length;
             deleteSelectedBtn.disabled = isBusy || selectedCount === 0;
             deleteLastBtn.disabled = isBusy || deliveries.length === 0;
             deleteAllBtn.disabled = isBusy || (deliveries.length === 0 && !hasRemoteLoadWarnings);
-            sendSelectedBtn.disabled = isBusy || selectedLocalCount === 0;
+            sendSelectedBtn.disabled = isBusy || (selectedLocalCount === 0 && selectedSelectionCount === 0);
             deleteOldThreadsBtn.disabled = isBusy || orphanReplyKeys.length === 0;
-            refreshBtn.textContent = selectedLocalCount > 0 ? 'Atualizar selecionadas' : 'Atualizar';
+            refreshBtn.textContent = (selectedLocalCount > 0 || selectedSelectionCount > 0) ? 'Atualizar selecionadas' : 'Atualizar';
         };
 
         const collectDeliveryErrorMessages = (items) => (
@@ -723,8 +737,10 @@
 
         const runRefresh = (options = {}) => {
             const selectedLocalIds = getSelectedLocalIds();
-            const selectedOnly = Boolean(options?.selectedOnly || selectedLocalIds.length > 0);
-            if (options?.selectedOnly && !selectedLocalIds.length) {
+            const selectedSelectionKeys = getSelectedSelectionKeys();
+            const hasSelectedTargets = selectedLocalIds.length > 0 || selectedSelectionKeys.length > 0;
+            const selectedOnly = Boolean(options?.selectedOnly || hasSelectedTargets);
+            if (options?.selectedOnly && !hasSelectedTargets) {
                 setFeedback('Selecione ao menos uma mensagem local para enviar.', 'warning');
                 refreshActionState();
                 return;
@@ -766,6 +782,7 @@
             refreshSlackSupervisionDeliveries(selectedOnly ? {
                 mode: 'selected',
                 deliveryIds: selectedLocalIds,
+                selectionKeys: selectedSelectionKeys,
             } : {})
                 .done((response) => {
                     const recipients = Array.isArray(response?.recipients) ? response.recipients.filter(Boolean) : [];
@@ -790,7 +807,7 @@
                     } else if (recipients.length || queuedCount) {
                         const parts = [];
                         if (selectedOnly) {
-                            parts.push(`${selectedLocalIds.length} item(ns) selecionado(s) processado(s)`);
+                            parts.push(`${selectedSelectionKeys.length || selectedLocalIds.length} item(ns) selecionado(s) processado(s)`);
                         }
                         if (recipients.length) {
                             parts.push(`Mensagens sincronizadas para: ${recipients.join(', ')}`);

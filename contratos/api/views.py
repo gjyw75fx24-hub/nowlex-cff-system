@@ -717,6 +717,11 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         return {
             'id': delivery.pk,
             'delivery_key': str(delivery.pk),
+            'selection_key': _serialize_slack_delivery_selection_key({
+                'analise_id': delivery.analise_id,
+                'card_source': str(delivery.card_source or '').strip(),
+                'card_index': _safe_delivery_int(delivery.card_index),
+            }),
             'analise_id': delivery.analise_id,
             'processo_id': delivery.processo_id,
             'processo_label': processo_label,
@@ -756,6 +761,11 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
         return {
             'id': getattr(delivery, 'pk', None),
             'delivery_key': str(getattr(delivery, 'pk', '') or '').strip(),
+            'selection_key': _serialize_slack_delivery_selection_key({
+                'analise_id': getattr(delivery, 'analise_id', None),
+                'card_source': str(getattr(delivery, 'card_source', '') or '').strip(),
+                'card_index': _safe_delivery_int(getattr(delivery, 'card_index', 0)),
+            }),
             'analise_id': getattr(delivery, 'analise_id', None),
             'processo_id': getattr(delivery, 'processo_id', None),
             'processo_label': _safe_processo_label(delivery),
@@ -802,6 +812,17 @@ def _build_slack_delivery_group_key(payload):
     return (analise_id, processo_id, card_source, card_index)
 
 
+def _serialize_slack_delivery_selection_key(payload):
+    if not isinstance(payload, dict):
+        return ''
+    analise_id = int(payload.get('analise_id') or 0)
+    card_source = str(payload.get('card_source') or '').strip()
+    card_index = int(payload.get('card_index') or 0)
+    if not analise_id or not card_source:
+        return ''
+    return f'{analise_id}|{card_source}|{card_index}'
+
+
 def _build_slack_delivery_aggregate_key(payload):
     group_key = _build_slack_delivery_group_key(payload)
     if not group_key:
@@ -830,6 +851,7 @@ def _aggregate_slack_delivery_results(results):
             payload = dict(item)
             delivery_id = payload.get('id')
             payload['delivery_ids'] = [delivery_id] if delivery_id else []
+            payload['selection_key'] = _serialize_slack_delivery_selection_key(payload)
             aggregated_results.append(payload)
             continue
 
@@ -838,6 +860,7 @@ def _aggregate_slack_delivery_results(results):
             payload = dict(item)
             delivery_id = payload.get('id')
             payload['delivery_ids'] = [delivery_id] if delivery_id else []
+            payload['selection_key'] = _serialize_slack_delivery_selection_key(payload)
             payload['_queue_positions'] = [int(payload.get('queue_position') or 0)] if int(payload.get('queue_position') or 0) > 0 else []
             payload['_supervisor_names'] = {
                 str(name or '').strip()
@@ -2456,6 +2479,7 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
         data = request.data or {}
         mode = str(data.get('mode') or 'all').strip().lower()
         raw_ids = data.get('delivery_ids') or []
+        raw_selection_keys = data.get('selection_keys') or []
         selected_delivery_ids = []
         for raw_value in raw_ids:
             try:
@@ -2464,14 +2488,24 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
                 continue
             if delivery_id > 0:
                 selected_delivery_ids.append(delivery_id)
+        selected_selection_keys = [
+            str(raw_value or '').strip()
+            for raw_value in raw_selection_keys
+            if str(raw_value or '').strip()
+        ]
 
         if mode == 'selected':
             try:
-                result = sync_supervision_slack_for_selected_deliveries(selected_delivery_ids, request=request) or {}
+                result = sync_supervision_slack_for_selected_deliveries(
+                    selected_delivery_ids,
+                    request=request,
+                    selection_keys=selected_selection_keys,
+                ) or {}
             except BaseException as exc:
                 logger.exception(
-                    'Falha ao atualizar entregas Slack selecionadas delivery_ids=%s',
+                    'Falha ao atualizar entregas Slack selecionadas delivery_ids=%s selection_keys=%s',
                     selected_delivery_ids,
+                    selected_selection_keys,
                     exc_info=exc,
                 )
                 result = {
