@@ -2316,20 +2316,25 @@ window.addEventListener('DOMContentLoaded', () => {
             <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Período:
-                    <select class="kpi-productivity-period" style="padding:4px 8px;">
-                        <option value="1">Hoje</option>
-                        <option value="yesterday">Ontem</option>
-                        <option value="month_current">Mês atual</option>
-                        <option value="month_previous">Mês anterior</option>
-                        <option value="7">Últimos 7 dias</option>
-                        <option value="15">Últimos 15 dias</option>
-                        <option value="30" selected>Últimos 30 dias</option>
-                        <option value="60">Últimos 60 dias</option>
-                        <option value="90">Últimos 90 dias</option>
-                        <option value="180">Últimos 180 dias</option>
-                        <option value="365">Últimos 365 dias</option>
-                        <option value="all">Todo o histórico</option>
-                    </select>
+                    <div class="kpi-productivity-period-picker" style="position:relative; min-width:180px;">
+                        <button type="button" class="kpi-productivity-period-trigger" style="width:100%; min-width:180px; padding:4px 28px 4px 8px; text-align:left; border:1px solid #c9d5e2; border-radius:8px; background:#fff; color:#23384d; cursor:pointer;"></button>
+                        <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#6b7b8c; pointer-events:none;">▾</span>
+                        <div class="kpi-productivity-period-menu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:100%; max-height:min(420px, calc(100vh - 120px)); overflow:auto; border:1px solid #d9e1ea; border-radius:10px; background:#fff; box-shadow:0 12px 28px rgba(26, 47, 74, 0.18); z-index:30;"></div>
+                        <select class="kpi-productivity-period" style="display:none;">
+                            <option value="1">Hoje</option>
+                            <option value="yesterday">Ontem</option>
+                            <option value="month_current">Mês atual</option>
+                            <option value="month_previous">Mês anterior</option>
+                            <option value="7">Últimos 7 dias</option>
+                            <option value="15">Últimos 15 dias</option>
+                            <option value="30" selected>Últimos 30 dias</option>
+                            <option value="60">Últimos 60 dias</option>
+                            <option value="90">Últimos 90 dias</option>
+                            <option value="180">Últimos 180 dias</option>
+                            <option value="365">Últimos 365 dias</option>
+                            <option value="all">Todo o histórico</option>
+                        </select>
+                    </div>
                 </label>
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     De:
@@ -2345,20 +2350,25 @@ window.addEventListener('DOMContentLoaded', () => {
                 </label>
                 <label class="kpi-productivity-compare-wrap" style="display:none; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Comparar:
-                    <select class="kpi-productivity-compare-period" style="padding:4px 8px;">
-                        <option value="yesterday">Ontem</option>
-                        <option value="1">Hoje</option>
-                        <option value="month_previous" selected>Mês anterior</option>
-                        <option value="month_current">Mês atual</option>
-                        <option value="7">Últimos 7 dias</option>
-                        <option value="15">Últimos 15 dias</option>
-                        <option value="30">Últimos 30 dias</option>
-                        <option value="60">Últimos 60 dias</option>
-                        <option value="90">Últimos 90 dias</option>
-                        <option value="180">Últimos 180 dias</option>
-                        <option value="365">Últimos 365 dias</option>
-                        <option value="all">Todo o histórico</option>
-                    </select>
+                    <div class="kpi-productivity-compare-period-picker" style="position:relative; min-width:180px;">
+                        <button type="button" class="kpi-productivity-compare-period-trigger" style="width:100%; min-width:180px; padding:4px 28px 4px 8px; text-align:left; border:1px solid #c9d5e2; border-radius:8px; background:#fff; color:#23384d; cursor:pointer;"></button>
+                        <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#6b7b8c; pointer-events:none;">▾</span>
+                        <div class="kpi-productivity-compare-period-menu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:100%; max-height:min(420px, calc(100vh - 120px)); overflow:auto; border:1px solid #d9e1ea; border-radius:10px; background:#fff; box-shadow:0 12px 28px rgba(26, 47, 74, 0.18); z-index:30;"></div>
+                        <select class="kpi-productivity-compare-period" style="display:none;">
+                            <option value="yesterday">Ontem</option>
+                            <option value="1">Hoje</option>
+                            <option value="month_previous" selected>Mês anterior</option>
+                            <option value="month_current">Mês atual</option>
+                            <option value="7">Últimos 7 dias</option>
+                            <option value="15">Últimos 15 dias</option>
+                            <option value="30">Últimos 30 dias</option>
+                            <option value="60">Últimos 60 dias</option>
+                            <option value="90">Últimos 90 dias</option>
+                            <option value="180">Últimos 180 dias</option>
+                            <option value="365">Últimos 365 dias</option>
+                            <option value="all">Todo o histórico</option>
+                        </select>
+                    </div>
                 </label>
                 <label class="kpi-productivity-compare-wrap" style="display:none; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     De (comp.):
@@ -2370,15 +2380,27 @@ window.addEventListener('DOMContentLoaded', () => {
                 </label>
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
                     Usuário:
-                    <select class="kpi-productivity-user" style="padding:4px 8px; min-width:180px;"></select>
+                    <div class="kpi-productivity-user-picker" style="position:relative; min-width:220px;">
+                        <button type="button" class="kpi-productivity-user-trigger" style="width:100%; min-width:220px; padding:4px 28px 4px 8px; text-align:left; border:1px solid #c9d5e2; border-radius:8px; background:#fff; color:#23384d; cursor:pointer; position:relative;"></button>
+                        <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#6b7b8c; pointer-events:none;">▾</span>
+                        <div class="kpi-productivity-user-menu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:100%; max-height:280px; overflow:auto; border:1px solid #d9e1ea; border-radius:10px; background:#fff; box-shadow:0 12px 28px rgba(26, 47, 74, 0.18); z-index:30;"></div>
+                    </div>
                 </label>
                 <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
-                    Série diária:
-                    <select class="kpi-productivity-metric" style="padding:4px 8px;">
-                        <option value="analises" selected>Análises</option>
-                        <option value="tarefas">Tarefas</option>
-                        <option value="prazos">Prazos</option>
-                    </select>
+                    Carteira:
+                    <div class="kpi-productivity-carteira-picker" style="position:relative; min-width:200px;">
+                        <button type="button" class="kpi-productivity-carteira-trigger" style="width:100%; min-width:200px; padding:4px 28px 4px 8px; text-align:left; border:1px solid #c9d5e2; border-radius:8px; background:#fff; color:#23384d; cursor:pointer; position:relative;"></button>
+                        <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#6b7b8c; pointer-events:none;">▾</span>
+                        <div class="kpi-productivity-carteira-menu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:100%; max-height:280px; overflow:auto; border:1px solid #d9e1ea; border-radius:10px; background:#fff; box-shadow:0 12px 28px rgba(26, 47, 74, 0.18); z-index:30;"></div>
+                    </div>
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Tipo de Atividade:
+                    <div class="kpi-productivity-metric-picker" style="position:relative; min-width:220px;">
+                        <button type="button" class="kpi-productivity-metric-trigger" style="width:100%; min-width:220px; padding:4px 28px 4px 8px; text-align:left; border:1px solid #c9d5e2; border-radius:8px; background:#fff; color:#23384d; cursor:pointer; position:relative;"></button>
+                        <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:#6b7b8c; pointer-events:none;">▾</span>
+                        <div class="kpi-productivity-metric-menu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:100%; max-height:280px; overflow:auto; border:1px solid #d9e1ea; border-radius:10px; background:#fff; box-shadow:0 12px 28px rgba(26, 47, 74, 0.18); z-index:30;"></div>
+                    </div>
                 </label>
             </div>
             <div class="kpi-productivity-summary" style="font-size:12px; color:#46576b; margin-bottom:10px;"></div>
@@ -2395,21 +2417,34 @@ window.addEventListener('DOMContentLoaded', () => {
         chartContainer.appendChild(productivitySection);
         attachPrintButtonToPanel(productivitySection, 'Produtividade por Usuario');
 
+        const periodPicker = productivitySection.querySelector('.kpi-productivity-period-picker');
+        const periodTrigger = productivitySection.querySelector('.kpi-productivity-period-trigger');
+        const periodMenu = productivitySection.querySelector('.kpi-productivity-period-menu');
         const periodSelect = productivitySection.querySelector('.kpi-productivity-period');
         const dateFromInput = productivitySection.querySelector('.kpi-productivity-date-from');
         const dateToInput = productivitySection.querySelector('.kpi-productivity-date-to');
         const compareEnabledInput = productivitySection.querySelector('.kpi-productivity-compare-enabled');
+        const comparePeriodPicker = productivitySection.querySelector('.kpi-productivity-compare-period-picker');
+        const comparePeriodTrigger = productivitySection.querySelector('.kpi-productivity-compare-period-trigger');
+        const comparePeriodMenu = productivitySection.querySelector('.kpi-productivity-compare-period-menu');
         const comparePeriodSelect = productivitySection.querySelector('.kpi-productivity-compare-period');
         const compareDateFromInput = productivitySection.querySelector('.kpi-productivity-compare-date-from');
         const compareDateToInput = productivitySection.querySelector('.kpi-productivity-compare-date-to');
         const compareWrapEls = Array.from(productivitySection.querySelectorAll('.kpi-productivity-compare-wrap'));
-        const userSelect = productivitySection.querySelector('.kpi-productivity-user');
-        const metricSelect = productivitySection.querySelector('.kpi-productivity-metric');
+        const userPicker = productivitySection.querySelector('.kpi-productivity-user-picker');
+        const userTrigger = productivitySection.querySelector('.kpi-productivity-user-trigger');
+        const userMenu = productivitySection.querySelector('.kpi-productivity-user-menu');
+        const carteiraPicker = productivitySection.querySelector('.kpi-productivity-carteira-picker');
+        const carteiraTrigger = productivitySection.querySelector('.kpi-productivity-carteira-trigger');
+        const carteiraMenu = productivitySection.querySelector('.kpi-productivity-carteira-menu');
+        const metricPicker = productivitySection.querySelector('.kpi-productivity-metric-picker');
+        const metricTrigger = productivitySection.querySelector('.kpi-productivity-metric-trigger');
+        const metricMenu = productivitySection.querySelector('.kpi-productivity-metric-menu');
         const summaryEl = productivitySection.querySelector('.kpi-productivity-summary');
         const tableWrap = productivitySection.querySelector('.kpi-productivity-table-wrap');
         const usersCanvas = document.getElementById('kpiProductivityUsersChart');
         const dailyCanvas = document.getElementById('kpiProductivityDailyChart');
-        if (periodSelect && dateFromInput && dateToInput && compareEnabledInput && comparePeriodSelect && compareDateFromInput && compareDateToInput && userSelect && metricSelect && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
+        if (periodPicker && periodTrigger && periodMenu && periodSelect && dateFromInput && dateToInput && compareEnabledInput && comparePeriodPicker && comparePeriodTrigger && comparePeriodMenu && comparePeriodSelect && compareDateFromInput && compareDateToInput && userPicker && userTrigger && userMenu && carteiraPicker && carteiraTrigger && carteiraMenu && metricPicker && metricTrigger && metricMenu && summaryEl && tableWrap && usersCanvas && dailyCanvas) {
             if (productivityDateMin) {
                 dateFromInput.min = productivityDateMin;
                 dateToInput.min = productivityDateMin;
@@ -2531,6 +2566,31 @@ window.addEventListener('DOMContentLoaded', () => {
                     return acc;
                 }, { analises: 0, tarefas: 0, prazos: 0 });
             };
+            const aggregateSelectedDailyRows = (selectedRows, boundsToApply) => {
+                const map = {};
+                selectedRows.forEach((row) => {
+                    filterDailyByBounds(row.allDailyRows || [], boundsToApply).forEach((dailyRow) => {
+                        const dateKey = String(dailyRow?.date || '').trim();
+                        if (!dateKey) return;
+                        if (!map[dateKey]) {
+                            map[dateKey] = { date: dateKey, analises: 0, tarefas: 0, prazos: 0 };
+                        }
+                        map[dateKey].analises += Number(dailyRow.analises || 0);
+                        map[dateKey].tarefas += Number(dailyRow.tarefas || 0);
+                        map[dateKey].prazos += Number(dailyRow.prazos || 0);
+                    });
+                });
+                return Object.values(map).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+            };
+            const activityOptions = [
+                { key: 'analises', label: 'Análises' },
+                { key: 'tarefas', label: 'Tarefas' },
+                { key: 'prazos', label: 'Prazos' },
+            ];
+            const activityLabelByKey = activityOptions.reduce((acc, item) => {
+                acc[item.key] = item.label;
+                return acc;
+            }, {});
 
             const sortedUsers = productivityUsers
                 .slice()
@@ -2540,16 +2600,464 @@ window.addEventListener('DOMContentLoaded', () => {
                     if (totalB !== totalA) return totalB - totalA;
                     return String(a?.user_label || '').localeCompare(String(b?.user_label || ''), 'pt-BR');
                 });
+            const allUserKeys = sortedUsers
+                .map((user) => String(user?.user_key || '').trim())
+                .filter(Boolean);
+            let selectedUserKeys = new Set(allUserKeys);
+            const allCarteiraKeys = Array.from(new Set(
+                sortedUsers
+                    .map((user) => String(user?.carteira_label || '').trim())
+                    .filter(Boolean)
+            ));
+            let selectedCarteiraKeys = new Set(allCarteiraKeys);
+            const allActivityKeys = activityOptions.map((item) => item.key);
+            let selectedActivityKeys = new Set(allActivityKeys);
 
-            userSelect.innerHTML = `
-                <option value="ALL">Todos os usuários</option>
-                ${sortedUsers.map((user) => `
-                    <option value="${escapeHtml(user.user_key || '')}">
-                        ${escapeHtml(user.user_label || 'Sem usuário')}
-                    </option>
-                `).join('')}
-            `;
-            userSelect.value = 'ALL';
+            const areAllUsersSelected = () => selectedUserKeys.size >= allUserKeys.length;
+            const areAllCarteirasSelected = () => selectedCarteiraKeys.size >= allCarteiraKeys.length;
+            const areAllActivitiesSelected = () => selectedActivityKeys.size >= allActivityKeys.length;
+            const getSelectedBaseUsers = () => (
+                areAllUsersSelected()
+                    ? sortedUsers.slice()
+                    : sortedUsers.filter((user) => selectedUserKeys.has(String(user?.user_key || '').trim()))
+            );
+            const getSelectedUsersLabel = () => {
+                const selectedUsers = getSelectedBaseUsers();
+                if (selectedUsers.length >= sortedUsers.length) {
+                    return 'Todos os usuários';
+                }
+                if (selectedUsers.length === 1) {
+                    return String(selectedUsers[0]?.user_label || 'Usuário');
+                }
+                if (selectedUsers.length === 2) {
+                    return selectedUsers.map((user) => String(user?.user_label || 'Usuário')).join(', ');
+                }
+                return `${selectedUsers.length} usuários`;
+            };
+            const getSelectedCarteirasLabel = () => {
+                const selectedCarteiras = areAllCarteirasSelected()
+                    ? allCarteiraKeys.slice()
+                    : allCarteiraKeys.filter((value) => selectedCarteiraKeys.has(value));
+                if (selectedCarteiras.length >= allCarteiraKeys.length) {
+                    return 'Todas as carteiras';
+                }
+                if (selectedCarteiras.length === 0) {
+                    return 'Nenhuma carteira';
+                }
+                if (selectedCarteiras.length === 1) {
+                    return selectedCarteiras[0];
+                }
+                if (selectedCarteiras.length === 2) {
+                    return selectedCarteiras.join(', ');
+                }
+                return `${selectedCarteiras.length} carteiras`;
+            };
+            const getSelectedActivityLabel = () => {
+                const selectedActivities = areAllActivitiesSelected()
+                    ? activityOptions.slice()
+                    : activityOptions.filter((item) => selectedActivityKeys.has(item.key));
+                if (selectedActivities.length >= activityOptions.length) {
+                    return 'Todos os tipos';
+                }
+                if (selectedActivities.length === 0) {
+                    return 'Nenhum tipo';
+                }
+                if (selectedActivities.length === 1) {
+                    return selectedActivities[0].label;
+                }
+                if (selectedActivities.length === 2) {
+                    return selectedActivities.map((item) => item.label).join(', ');
+                }
+                return `${selectedActivities.length} tipos`;
+            };
+            const renderSingleSelectPicker = (selectEl, triggerEl, menuEl, optionClassName) => {
+                const options = Array.from(selectEl.options || []);
+                const currentValue = String(selectEl.value || '').trim();
+                const selectedOption = options.find((option) => String(option.value || '').trim() === currentValue) || options[0] || null;
+                triggerEl.textContent = selectedOption ? String(selectedOption.textContent || '').trim() : '';
+                menuEl.innerHTML = `
+                    <div style="padding:8px; display:flex; flex-direction:column; gap:4px;">
+                        ${options.map((option) => {
+                            const optionValue = String(option.value || '').trim();
+                            const isSelected = optionValue === currentValue;
+                            return `
+                                <button
+                                    type="button"
+                                    class="${optionClassName}"
+                                    data-value="${escapeHtml(optionValue)}"
+                                    data-selected="${isSelected ? '1' : '0'}"
+                                    style="display:block; width:100%; border:0; background:${isSelected ? '#e1ecf9' : 'transparent'}; color:${isSelected ? '#2d5f8a' : '#23384d'}; border-radius:8px; padding:7px 10px; text-align:left; cursor:pointer; font-weight:${isSelected ? '600' : '500'}; transition:background-color 0.18s ease, color 0.18s ease;"
+                                >
+                                    ${escapeHtml(option.textContent || '')}
+                                </button>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                menuEl.querySelectorAll(`.${optionClassName}`).forEach((buttonEl) => {
+                    buttonEl.addEventListener('mouseenter', () => {
+                        if (buttonEl.dataset.selected === '1') return;
+                        buttonEl.style.background = '#eaf3ff';
+                        buttonEl.style.color = '#2d5f8a';
+                    });
+                    buttonEl.addEventListener('mouseleave', () => {
+                        if (buttonEl.dataset.selected === '1') return;
+                        buttonEl.style.background = 'transparent';
+                        buttonEl.style.color = '#23384d';
+                    });
+                });
+            };
+            const bindMultiSelectHover = (menuEl, optionSelector, checkedSelector) => {
+                menuEl.querySelectorAll(optionSelector).forEach((optionEl) => {
+                    const isSelected = () => Boolean(optionEl.querySelector(checkedSelector)?.checked);
+                    optionEl.style.transition = 'background-color 0.18s ease, color 0.18s ease';
+                    optionEl.style.background = 'transparent';
+                    optionEl.style.color = '#23384d';
+                    optionEl.addEventListener('mouseenter', () => {
+                        optionEl.style.background = '#eaf3ff';
+                        optionEl.style.color = '#2d5f8a';
+                    });
+                    optionEl.addEventListener('mouseleave', () => {
+                        optionEl.style.background = 'transparent';
+                        optionEl.style.color = '#23384d';
+                    });
+                });
+            };
+            const closePeriodMenu = () => {
+                periodMenu.style.display = 'none';
+            };
+            const openPeriodMenu = () => {
+                periodMenu.style.display = 'block';
+            };
+            const closeComparePeriodMenu = () => {
+                comparePeriodMenu.style.display = 'none';
+            };
+            const openComparePeriodMenu = () => {
+                comparePeriodMenu.style.display = 'block';
+            };
+            const closeUserMenu = () => {
+                userMenu.style.display = 'none';
+            };
+            const openUserMenu = () => {
+                userMenu.style.display = 'block';
+            };
+            const closeCarteiraMenu = () => {
+                carteiraMenu.style.display = 'none';
+            };
+            const openCarteiraMenu = () => {
+                carteiraMenu.style.display = 'block';
+            };
+            const closeMetricMenu = () => {
+                metricMenu.style.display = 'none';
+            };
+            const openMetricMenu = () => {
+                metricMenu.style.display = 'block';
+            };
+            const renderUserPicker = () => {
+                userTrigger.textContent = getSelectedUsersLabel();
+                userMenu.innerHTML = `
+                    <div style="padding:8px; border-bottom:1px solid #e7edf5;">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button type="button" class="kpi-productivity-user-select-all" style="flex:1 1 auto; border:0; background:#eef4fb; color:#2d5f8a; border-radius:8px; padding:7px 10px; text-align:left; cursor:pointer; font-weight:600;">
+                                Todos os usuários
+                            </button>
+                            <button type="button" class="kpi-productivity-user-clear" style="border:0; background:transparent; color:#7a8897; border-radius:8px; padding:7px 8px; text-align:center; cursor:pointer; font-weight:500;">
+                                Limpar
+                            </button>
+                        </div>
+                    </div>
+                    <div style="padding:8px; display:flex; flex-direction:column; gap:4px;">
+                        ${sortedUsers.map((user) => {
+                            const userKey = String(user?.user_key || '').trim();
+                            const checked = areAllUsersSelected() || selectedUserKeys.has(userKey);
+                            return `
+                                <label class="kpi-productivity-user-option" style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; color:#23384d;">
+                                    <input type="checkbox" class="kpi-productivity-user-checkbox" value="${escapeHtml(userKey)}" ${checked ? 'checked' : ''}>
+                                    <span>${escapeHtml(user.user_label || 'Sem usuário')}</span>
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                bindMultiSelectHover(userMenu, '.kpi-productivity-user-option', '.kpi-productivity-user-checkbox');
+            };
+            const renderCarteiraPicker = () => {
+                carteiraTrigger.textContent = getSelectedCarteirasLabel();
+                carteiraMenu.innerHTML = `
+                    <div style="padding:8px; border-bottom:1px solid #e7edf5;">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button type="button" class="kpi-productivity-carteira-select-all" style="flex:1 1 auto; border:0; background:#eef4fb; color:#2d5f8a; border-radius:8px; padding:7px 10px; text-align:left; cursor:pointer; font-weight:600;">
+                                Todas as carteiras
+                            </button>
+                            <button type="button" class="kpi-productivity-carteira-clear" style="border:0; background:transparent; color:#7a8897; border-radius:8px; padding:7px 8px; text-align:center; cursor:pointer; font-weight:500;">
+                                Limpar
+                            </button>
+                        </div>
+                    </div>
+                    <div style="padding:8px; display:flex; flex-direction:column; gap:4px;">
+                        ${allCarteiraKeys.map((carteiraLabel) => {
+                            const checked = areAllCarteirasSelected() || selectedCarteiraKeys.has(carteiraLabel);
+                            return `
+                                <label class="kpi-productivity-carteira-option" style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; color:#23384d;">
+                                    <input type="checkbox" class="kpi-productivity-carteira-checkbox" value="${escapeHtml(carteiraLabel)}" ${checked ? 'checked' : ''}>
+                                    <span>${escapeHtml(carteiraLabel)}</span>
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                bindMultiSelectHover(carteiraMenu, '.kpi-productivity-carteira-option', '.kpi-productivity-carteira-checkbox');
+            };
+            const renderMetricPicker = () => {
+                metricTrigger.textContent = getSelectedActivityLabel();
+                metricMenu.innerHTML = `
+                    <div style="padding:8px; border-bottom:1px solid #e7edf5;">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button type="button" class="kpi-productivity-metric-select-all" style="flex:1 1 auto; border:0; background:#eef4fb; color:#2d5f8a; border-radius:8px; padding:7px 10px; text-align:left; cursor:pointer; font-weight:600;">
+                                Todos os tipos
+                            </button>
+                            <button type="button" class="kpi-productivity-metric-clear" style="border:0; background:transparent; color:#7a8897; border-radius:8px; padding:7px 8px; text-align:center; cursor:pointer; font-weight:500;">
+                                Limpar
+                            </button>
+                        </div>
+                    </div>
+                    <div style="padding:8px; display:flex; flex-direction:column; gap:4px;">
+                        ${activityOptions.map((activity) => {
+                            const checked = areAllActivitiesSelected() || selectedActivityKeys.has(activity.key);
+                            return `
+                                <label class="kpi-productivity-metric-option" style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; color:#23384d;">
+                                    <input type="checkbox" class="kpi-productivity-metric-checkbox" value="${escapeHtml(activity.key)}" ${checked ? 'checked' : ''}>
+                                    <span>${escapeHtml(activity.label)}</span>
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+                bindMultiSelectHover(metricMenu, '.kpi-productivity-metric-option', '.kpi-productivity-metric-checkbox');
+            };
+            const syncSelectedUserKeys = (nextKeys) => {
+                const sanitizedKeys = new Set(
+                    Array.from(nextKeys || [])
+                        .map((value) => String(value || '').trim())
+                        .filter((value) => allUserKeys.includes(value))
+                );
+                if (!sanitizedKeys.size) {
+                    allUserKeys.forEach((value) => sanitizedKeys.add(value));
+                }
+                selectedUserKeys = sanitizedKeys;
+            };
+            const syncSelectedCarteiraKeys = (nextKeys) => {
+                selectedCarteiraKeys = new Set(
+                    Array.from(nextKeys || [])
+                        .map((value) => String(value || '').trim())
+                        .filter((value) => allCarteiraKeys.includes(value))
+                );
+            };
+            const syncSelectedActivityKeys = (nextKeys) => {
+                selectedActivityKeys = new Set(
+                    Array.from(nextKeys || [])
+                        .map((value) => String(value || '').trim())
+                        .filter((value) => allActivityKeys.includes(value))
+                );
+            };
+            periodTrigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (periodMenu.style.display === 'block') {
+                    closePeriodMenu();
+                    return;
+                }
+                openPeriodMenu();
+            });
+            comparePeriodTrigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (comparePeriodMenu.style.display === 'block') {
+                    closeComparePeriodMenu();
+                    return;
+                }
+                openComparePeriodMenu();
+            });
+            userTrigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (userMenu.style.display === 'block') {
+                    closeUserMenu();
+                    return;
+                }
+                openUserMenu();
+            });
+            carteiraTrigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (carteiraMenu.style.display === 'block') {
+                    closeCarteiraMenu();
+                    return;
+                }
+                openCarteiraMenu();
+            });
+            metricTrigger.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (metricMenu.style.display === 'block') {
+                    closeMetricMenu();
+                    return;
+                }
+                openMetricMenu();
+            });
+            userMenu.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const selectAllButton = event.target.closest('.kpi-productivity-user-select-all');
+                if (selectAllButton) {
+                    event.preventDefault();
+                    syncSelectedUserKeys(allUserKeys);
+                    renderUserPicker();
+                    renderProductivity();
+                    return;
+                }
+                const clearButton = event.target.closest('.kpi-productivity-user-clear');
+                if (clearButton) {
+                    event.preventDefault();
+                    selectedUserKeys = new Set();
+                    renderUserPicker();
+                    openUserMenu();
+                    renderProductivity();
+                }
+            });
+            carteiraMenu.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const selectAllButton = event.target.closest('.kpi-productivity-carteira-select-all');
+                if (selectAllButton) {
+                    event.preventDefault();
+                    syncSelectedCarteiraKeys(allCarteiraKeys);
+                    renderCarteiraPicker();
+                    renderProductivity();
+                    return;
+                }
+                const clearButton = event.target.closest('.kpi-productivity-carteira-clear');
+                if (clearButton) {
+                    event.preventDefault();
+                    selectedCarteiraKeys = new Set();
+                    renderCarteiraPicker();
+                    openCarteiraMenu();
+                    renderProductivity();
+                }
+            });
+            metricMenu.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const selectAllButton = event.target.closest('.kpi-productivity-metric-select-all');
+                if (selectAllButton) {
+                    event.preventDefault();
+                    syncSelectedActivityKeys(allActivityKeys);
+                    renderMetricPicker();
+                    renderProductivity();
+                    return;
+                }
+                const clearButton = event.target.closest('.kpi-productivity-metric-clear');
+                if (clearButton) {
+                    event.preventDefault();
+                    selectedActivityKeys = new Set();
+                    renderMetricPicker();
+                    openMetricMenu();
+                    renderProductivity();
+                }
+            });
+            periodMenu.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const optionButton = event.target.closest('.kpi-productivity-period-option');
+                if (!optionButton) return;
+                event.preventDefault();
+                const nextValue = String(optionButton.dataset.value || '').trim();
+                if (nextValue && nextValue !== String(periodSelect.value || '').trim()) {
+                    periodSelect.value = nextValue;
+                    renderSingleSelectPicker(periodSelect, periodTrigger, periodMenu, 'kpi-productivity-period-option');
+                    periodSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                closePeriodMenu();
+            });
+            comparePeriodMenu.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const optionButton = event.target.closest('.kpi-productivity-compare-period-option');
+                if (!optionButton) return;
+                event.preventDefault();
+                const nextValue = String(optionButton.dataset.value || '').trim();
+                if (nextValue && nextValue !== String(comparePeriodSelect.value || '').trim()) {
+                    comparePeriodSelect.value = nextValue;
+                    renderSingleSelectPicker(comparePeriodSelect, comparePeriodTrigger, comparePeriodMenu, 'kpi-productivity-compare-period-option');
+                    comparePeriodSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                closeComparePeriodMenu();
+            });
+            userMenu.addEventListener('change', (event) => {
+                event.stopPropagation();
+                const checkbox = event.target.closest('.kpi-productivity-user-checkbox');
+                if (!checkbox) return;
+                const nextKeys = new Set(selectedUserKeys);
+                const userKey = String(checkbox.value || '').trim();
+                if (checkbox.checked) {
+                    nextKeys.add(userKey);
+                } else {
+                    nextKeys.delete(userKey);
+                }
+                syncSelectedUserKeys(nextKeys);
+                renderUserPicker();
+                openUserMenu();
+                renderProductivity();
+            });
+            carteiraMenu.addEventListener('change', (event) => {
+                event.stopPropagation();
+                const checkbox = event.target.closest('.kpi-productivity-carteira-checkbox');
+                if (!checkbox) return;
+                const nextKeys = new Set(selectedCarteiraKeys);
+                const carteiraKey = String(checkbox.value || '').trim();
+                if (checkbox.checked) {
+                    nextKeys.add(carteiraKey);
+                } else {
+                    nextKeys.delete(carteiraKey);
+                }
+                syncSelectedCarteiraKeys(nextKeys);
+                renderCarteiraPicker();
+                openCarteiraMenu();
+                renderProductivity();
+            });
+            metricMenu.addEventListener('change', (event) => {
+                event.stopPropagation();
+                const checkbox = event.target.closest('.kpi-productivity-metric-checkbox');
+                if (!checkbox) return;
+                const nextKeys = new Set(selectedActivityKeys);
+                const activityKey = String(checkbox.value || '').trim();
+                if (checkbox.checked) {
+                    nextKeys.add(activityKey);
+                } else {
+                    nextKeys.delete(activityKey);
+                }
+                syncSelectedActivityKeys(nextKeys);
+                renderMetricPicker();
+                openMetricMenu();
+                renderProductivity();
+            });
+            document.addEventListener('click', (event) => {
+                if (!periodPicker.contains(event.target)) {
+                    closePeriodMenu();
+                }
+                if (!comparePeriodPicker.contains(event.target)) {
+                    closeComparePeriodMenu();
+                }
+                if (!userPicker.contains(event.target)) {
+                    closeUserMenu();
+                }
+                if (!carteiraPicker.contains(event.target)) {
+                    closeCarteiraMenu();
+                }
+                if (!metricPicker.contains(event.target)) {
+                    closeMetricMenu();
+                }
+            });
+            renderSingleSelectPicker(periodSelect, periodTrigger, periodMenu, 'kpi-productivity-period-option');
+            renderSingleSelectPicker(comparePeriodSelect, comparePeriodTrigger, comparePeriodMenu, 'kpi-productivity-compare-period-option');
+            renderUserPicker();
+            renderCarteiraPicker();
+            renderMetricPicker();
 
             let usersChart = null;
             let dailyChart = null;
@@ -2784,8 +3292,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 syncCompareVisibility();
                 const periodValue = String(periodSelect.value || '30');
                 const periodValueKey = periodValue.trim().toLowerCase();
-                const selectedUserKey = String(userSelect.value || 'ALL');
-                const metricValue = String(metricSelect.value || 'total');
                 const bounds = getActiveBounds(periodValue, dateFromInput, dateToInput);
                 const compareEnabled = Boolean(compareEnabledInput.checked);
                 const comparePeriodValue = String(comparePeriodSelect.value || 'month_previous');
@@ -2793,13 +3299,18 @@ window.addEventListener('DOMContentLoaded', () => {
                 const compareBounds = compareEnabled
                     ? getActiveBounds(comparePeriodValue, compareDateFromInput, compareDateToInput)
                     : null;
-                const metricLabels = {
-                    analises: 'Análises',
-                    tarefas: 'Tarefas',
-                    prazos: 'Prazos',
-                };
-                const selectedMetricKey = ['analises', 'tarefas', 'prazos'].includes(metricValue) ? metricValue : 'analises';
-                const selectedMetricLabel = metricLabels[selectedMetricKey];
+                const selectedMetricKeys = areAllActivitiesSelected()
+                    ? allActivityKeys.slice()
+                    : allActivityKeys.filter((key) => selectedActivityKeys.has(key));
+                const sumSelectedMetrics = (source) => (
+                    selectedMetricKeys.reduce((total, key) => total + Number(source?.[key] || 0), 0)
+                );
+                const selectedMetricLabel = (() => {
+                    if (selectedMetricKeys.length === 0) return 'atividades selecionadas';
+                    if (selectedMetricKeys.length === 1) return activityLabelByKey[selectedMetricKeys[0]] || 'atividade';
+                    if (selectedMetricKeys.length === allActivityKeys.length) return 'Atividades';
+                    return 'Atividades selecionadas';
+                })();
 
                 const rows = sortedUsers.map((user) => {
                     const dailyRows = filterDailyByBounds(user.daily || [], bounds);
@@ -2823,9 +3334,6 @@ window.addEventListener('DOMContentLoaded', () => {
                         tarefas: Number(pendingTotals.tarefas || 0),
                         prazos: Number(pendingTotals.prazos || 0),
                     };
-                    const currentMetric = Number(period[selectedMetricKey] || 0);
-                    const compareMetric = Number(compare[selectedMetricKey] || 0);
-                    const deltaMetric = currentMetric - compareMetric;
                     return {
                         user_key: user.user_key,
                         user_label: user.user_label || 'Sem usuário',
@@ -2833,62 +3341,79 @@ window.addEventListener('DOMContentLoaded', () => {
                         carteira_title: carteiraDetails,
                         period,
                         compare,
-                        currentMetric,
-                        compareMetric,
-                        deltaMetric,
-                        deltaPctMetric: formatDeltaPct(currentMetric, compareMetric),
+                        currentMetric: 0,
+                        compareMetric: 0,
+                        deltaMetric: 0,
+                        deltaPctMetric: formatDeltaPct(0, 0),
                         semDataTotals,
                         semDataTotal,
                         pending,
+                        allDailyRows: Array.isArray(user.daily) ? user.daily : [],
                         dailyRows,
                     };
                 });
+                const filteredRowsByCarteira = (
+                    areAllCarteirasSelected()
+                        ? rows.slice()
+                        : rows.filter((row) => selectedCarteiraKeys.has(String(row.carteira_label || '').trim()))
+                );
+                const selectedRows = (
+                    areAllUsersSelected()
+                        ? filteredRowsByCarteira.slice()
+                        : filteredRowsByCarteira.filter((row) => selectedUserKeys.has(String(row.user_key || '').trim()))
+                );
 
-                const periodTotals = rows.reduce((acc, row) => {
+                const periodTotals = selectedRows.reduce((acc, row) => {
                     acc.analises += Number(row.period.analises || 0);
                     acc.tarefas += Number(row.period.tarefas || 0);
                     acc.prazos += Number(row.period.prazos || 0);
                     return acc;
                 }, { analises: 0, tarefas: 0, prazos: 0 });
                 const compareTotals = compareEnabled
-                    ? rows.reduce((acc, row) => {
+                    ? selectedRows.reduce((acc, row) => {
                         acc.analises += Number(row.compare.analises || 0);
                         acc.tarefas += Number(row.compare.tarefas || 0);
                         acc.prazos += Number(row.compare.prazos || 0);
                         return acc;
                     }, { analises: 0, tarefas: 0, prazos: 0 })
                     : { analises: 0, tarefas: 0, prazos: 0 };
-                const metricCurrentTeam = Number(periodTotals[selectedMetricKey] || 0);
-                const metricCompareTeam = Number(compareTotals[selectedMetricKey] || 0);
+                const metricCurrentTeam = sumSelectedMetrics(periodTotals);
+                const metricCompareTeam = sumSelectedMetrics(compareTotals);
                 const metricDeltaTeam = metricCurrentTeam - metricCompareTeam;
-                const semDataTotalAll = Number(productivitySemData.total || sumMetrics(productivitySemData || {}));
-                const pendingTotals = selectedUserKey === 'ALL'
-                    ? {
-                        tarefas: Number(productivityPending.tarefas || 0),
-                        prazos: Number(productivityPending.prazos || 0),
-                    }
-                    : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.pending || { tarefas: 0, prazos: 0 });
+                const semDataTotalAll = selectedRows.reduce((acc, row) => acc + Number(row.semDataTotal || 0), 0);
+                const pendingTotals = selectedRows.reduce((acc, row) => {
+                    acc.tarefas += Number(row.pending?.tarefas || 0);
+                    acc.prazos += Number(row.pending?.prazos || 0);
+                    return acc;
+                }, { tarefas: 0, prazos: 0 });
                 const periodLabel = formatBoundsLabel(bounds, periodValueKey);
                 const compareLabel = compareEnabled ? formatBoundsLabel(compareBounds, comparePeriodValueKey) : '';
-                const carteiraNames = Array.from(new Set(rows.map((row) => String(row.carteira_label || '').trim()).filter(Boolean)));
+                const carteiraNames = Array.from(new Set(selectedRows.map((row) => String(row.carteira_label || '').trim()).filter(Boolean)));
                 const carteiraScopeLabel = carteiraNames.length === 1 ? carteiraNames[0] : 'recorte atual';
                 const trendWord = metricDeltaTeam > 0 ? 'maior' : (metricDeltaTeam < 0 ? 'menor' : 'igual');
                 const teamSentence = compareEnabled
-                    ? `Equipe da carteira ${carteiraScopeLabel}: produtividade de ${selectedMetricLabel.toLowerCase()} ${trendWord} em ${formatDeltaPct(metricCurrentTeam, metricCompareTeam)} (${numberPt(metricCurrentTeam)} vs ${numberPt(metricCompareTeam)}).`
-                    : `Equipe da carteira ${carteiraScopeLabel}: ${numberPt(metricCurrentTeam)} ${selectedMetricLabel.toLowerCase()} concluídas.`;
-                const selectedUserRow = rows.find((row) => String(row.user_key || '') === selectedUserKey) || null;
-                const candidateRows = rows.filter((row) => (Number(row.currentMetric || 0) > 0 || Number(row.compareMetric || 0) > 0));
-                const highlightedRow = selectedUserRow
-                    || (candidateRows.length
-                        ? candidateRows.slice().sort((a, b) => Number(b.deltaMetric || 0) - Number(a.deltaMetric || 0))[0]
-                        : null);
+                    ? `Equipe da carteira ${carteiraScopeLabel}: produtividade de ${String(selectedMetricLabel).toLowerCase()} ${trendWord} em ${formatDeltaPct(metricCurrentTeam, metricCompareTeam)} (${numberPt(metricCurrentTeam)} vs ${numberPt(metricCompareTeam)}).`
+                    : `Equipe da carteira ${carteiraScopeLabel}: ${numberPt(metricCurrentTeam)} ${String(selectedMetricLabel).toLowerCase()} concluídas.`;
+                selectedRows.forEach((row) => {
+                    row.currentMetric = sumSelectedMetrics(row.period);
+                    row.compareMetric = sumSelectedMetrics(row.compare);
+                    row.deltaMetric = row.currentMetric - row.compareMetric;
+                    row.deltaPctMetric = formatDeltaPct(row.currentMetric, row.compareMetric);
+                });
+                const candidateRows = selectedRows.filter((row) => (Number(row.currentMetric || 0) > 0 || Number(row.compareMetric || 0) > 0));
+                const highlightedRow = candidateRows.length
+                    ? candidateRows.slice().sort((a, b) => Number(b.deltaMetric || 0) - Number(a.deltaMetric || 0))[0]
+                    : null;
                 const userSentence = (() => {
                     if (!highlightedRow) return 'Individualmente, sem produção registrada para o recorte selecionado.';
+                    if (!compareEnabled && selectedRows.length === 1) {
+                        return `Individualmente, ${highlightedRow.user_label} concluiu ${numberPt(highlightedRow.currentMetric)} ${String(selectedMetricLabel).toLowerCase()}.`;
+                    }
                     if (!compareEnabled) {
-                        return `Individualmente, ${highlightedRow.user_label} concluiu ${numberPt(highlightedRow.currentMetric)} ${selectedMetricLabel.toLowerCase()}.`;
+                        return `Usuários selecionados: ${getSelectedUsersLabel()} · Carteiras: ${getSelectedCarteirasLabel()} · Tipos de atividade: ${getSelectedActivityLabel()}.`;
                     }
                     const userTrend = Number(highlightedRow.deltaMetric || 0) > 0 ? 'mais' : (Number(highlightedRow.deltaMetric || 0) < 0 ? 'menos' : 'o mesmo');
-                    return `Individualmente, ${highlightedRow.user_label} produziu ${userTrend} ${selectedMetricLabel.toLowerCase()}: ${formatDeltaPct(highlightedRow.currentMetric, highlightedRow.compareMetric)} (${numberPt(highlightedRow.currentMetric)} vs ${numberPt(highlightedRow.compareMetric)}).`;
+                    return `Individualmente, ${highlightedRow.user_label} produziu ${userTrend} ${String(selectedMetricLabel).toLowerCase()}: ${formatDeltaPct(highlightedRow.currentMetric, highlightedRow.compareMetric)} (${numberPt(highlightedRow.currentMetric)} vs ${numberPt(highlightedRow.compareMetric)}).`;
                 })();
 
                 summaryEl.innerHTML = `
@@ -2902,10 +3427,10 @@ window.addEventListener('DOMContentLoaded', () => {
                 const compareHeader = compareEnabled
                     ? `
                         <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(selectedMetricLabel)}<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">comparado</span></th>
-                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Delta ${escapeHtml(selectedMetricLabel.toLowerCase())}<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual - comparado</span></th>
+                        <th style="text-align:right; padding:6px; border:1px solid #d8e1ea;">Delta ${escapeHtml(String(selectedMetricLabel).toLowerCase())}<br><span style="font-size:10px; color:#7d8da0; font-weight:400;">atual - comparado</span></th>
                     `
                     : '';
-                const tableRows = rows.map((row) => `
+                const tableRows = selectedRows.map((row) => `
                     <tr>
                         <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;" title="${escapeHtml(row.carteira_title || row.carteira_label)}">${escapeHtml(row.carteira_label)}</td>
                         <td style="text-align:left; padding:6px; border:1px solid #d8e1ea;">${escapeHtml(row.user_label)}</td>
@@ -2941,63 +3466,29 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (usersChart) usersChart.destroy();
                 const usersCtx = usersCanvas.getContext('2d');
                 if (usersCtx) {
-                    const topRows = rows
+                    const topRows = selectedRows
                         .slice()
                         .sort((a, b) => Number(b.currentMetric || 0) - Number(a.currentMetric || 0))
                         .slice(0, 20);
-                    const chartDatasets = [
-                        {
-                            label: 'Análises',
-                            metricKey: 'analises',
-                            compared: false,
-                            data: topRows.map((row) => Number(row.period.analises || 0)),
-                            ...getDatasetColors('analises', false),
-                            borderWidth: 1,
-                        },
-                        {
-                            label: 'Tarefas',
-                            metricKey: 'tarefas',
-                            compared: false,
-                            data: topRows.map((row) => Number(row.period.tarefas || 0)),
-                            ...getDatasetColors('tarefas', false),
-                            borderWidth: 1,
-                        },
-                        {
-                            label: 'Prazos',
-                            metricKey: 'prazos',
-                            compared: false,
-                            data: topRows.map((row) => Number(row.period.prazos || 0)),
-                            ...getDatasetColors('prazos', false),
-                            borderWidth: 1,
-                        },
-                    ];
+                    const chartDatasets = selectedMetricKeys.map((metricKey) => ({
+                        label: activityLabelByKey[metricKey] || metricKey,
+                        metricKey,
+                        compared: false,
+                        data: topRows.map((row) => Number(row.period?.[metricKey] || 0)),
+                        ...getDatasetColors(metricKey, false),
+                        borderWidth: 1,
+                    }));
                     if (compareEnabled) {
-                        chartDatasets.push(
-                            {
-                                label: 'Análises (comparado)',
-                                metricKey: 'analises',
+                        selectedMetricKeys.forEach((metricKey) => {
+                            chartDatasets.push({
+                                label: `${activityLabelByKey[metricKey] || metricKey} (comparado)`,
+                                metricKey,
                                 compared: true,
-                                data: topRows.map((row) => Number(row.compare.analises || 0)),
-                                ...getDatasetColors('analises', true),
+                                data: topRows.map((row) => Number(row.compare?.[metricKey] || 0)),
+                                ...getDatasetColors(metricKey, true),
                                 borderWidth: 1,
-                            },
-                            {
-                                label: 'Tarefas (comparado)',
-                                metricKey: 'tarefas',
-                                compared: true,
-                                data: topRows.map((row) => Number(row.compare.tarefas || 0)),
-                                ...getDatasetColors('tarefas', true),
-                                borderWidth: 1,
-                            },
-                            {
-                                label: 'Prazos (comparado)',
-                                metricKey: 'prazos',
-                                compared: true,
-                                data: topRows.map((row) => Number(row.compare.prazos || 0)),
-                                ...getDatasetColors('prazos', true),
-                                borderWidth: 1,
-                            },
-                        );
+                            });
+                        });
                     }
                     usersChart = new Chart(usersCtx, {
                         type: 'bar',
@@ -3055,13 +3546,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     });
                 }
 
-                const sourceDaily = (() => {
-                    if (selectedUserKey === 'ALL') {
-                        return filterDailyByBounds(productivityDaily, bounds);
-                    }
-                    const selectedUser = rows.find((row) => String(row.user_key || '') === selectedUserKey);
-                    return selectedUser ? selectedUser.dailyRows : [];
-                })();
+                const sourceDaily = aggregateSelectedDailyRows(selectedRows, bounds);
                 const sourceDailyMap = {};
                 sourceDaily.forEach((row) => {
                     sourceDailyMap[String(row.date || '')] = row;
@@ -3082,37 +3567,27 @@ window.addEventListener('DOMContentLoaded', () => {
                     });
                 }
 
-                const metricResolver = (row) => {
-                    if (!row) return 0;
-                    return Number(row[selectedMetricKey] || 0);
-                };
-                const dailyValues = dateLabels.map((dateKey) => metricResolver(sourceDailyMap[dateKey]));
-
                 if (dailyChart) dailyChart.destroy();
                 const dailyCtx = dailyCanvas.getContext('2d');
                 if (dailyCtx) {
-                    const labelBase = selectedMetricKey === 'analises'
-                        ? 'Análises/dia'
-                        : selectedMetricKey === 'tarefas'
-                            ? 'Tarefas/dia'
-                            : 'Prazos/dia';
-                    const labelUser = selectedUserKey === 'ALL'
-                        ? 'Todos os usuários'
-                        : (rows.find((row) => String(row.user_key || '') === selectedUserKey)?.user_label || 'Usuário');
+                    const labelUser = getSelectedUsersLabel();
                     dailyChart = new Chart(dailyCtx, {
                         type: 'line',
                         data: {
                             labels: dateLabels.map((dateKey) => formatDateLabel(dateKey)),
-                            datasets: [{
-                                label: `${labelBase} · ${labelUser}`,
-                                data: dailyValues,
-                                backgroundColor: 'rgba(61, 109, 138, 0.20)',
-                                borderColor: 'rgba(61, 109, 138, 0.96)',
-                                borderWidth: 2,
-                                pointRadius: 2,
-                                tension: 0.22,
-                                fill: true,
-                            }],
+                            datasets: selectedMetricKeys.map((metricKey) => {
+                                const colors = getDatasetColors(metricKey, false);
+                                return {
+                                    label: `${activityLabelByKey[metricKey] || metricKey}/dia · ${labelUser}`,
+                                    data: dateLabels.map((dateKey) => Number(sourceDailyMap[dateKey]?.[metricKey] || 0)),
+                                    backgroundColor: colors.backgroundColor,
+                                    borderColor: colors.borderColor,
+                                    borderWidth: 2,
+                                    pointRadius: 2,
+                                    tension: 0.22,
+                                    fill: selectedMetricKeys.length === 1,
+                                };
+                            }),
                         },
                         options: {
                             responsive: true,
@@ -3143,15 +3618,19 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             };
 
-            periodSelect.addEventListener('change', renderProductivity);
+            periodSelect.addEventListener('change', () => {
+                renderSingleSelectPicker(periodSelect, periodTrigger, periodMenu, 'kpi-productivity-period-option');
+                renderProductivity();
+            });
             dateFromInput.addEventListener('change', renderProductivity);
             dateToInput.addEventListener('change', renderProductivity);
             compareEnabledInput.addEventListener('change', renderProductivity);
-            comparePeriodSelect.addEventListener('change', renderProductivity);
+            comparePeriodSelect.addEventListener('change', () => {
+                renderSingleSelectPicker(comparePeriodSelect, comparePeriodTrigger, comparePeriodMenu, 'kpi-productivity-compare-period-option');
+                renderProductivity();
+            });
             compareDateFromInput.addEventListener('change', renderProductivity);
             compareDateToInput.addEventListener('change', renderProductivity);
-            userSelect.addEventListener('change', renderProductivity);
-            metricSelect.addEventListener('change', renderProductivity);
             syncCompareVisibility();
             renderProductivity();
         }
