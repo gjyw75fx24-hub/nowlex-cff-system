@@ -1295,20 +1295,48 @@ def _build_supervisor_delivery_context(supervisor, config, *, include_completed=
     return accepted_entries, deliveries, entries_by_key
 
 
-def _collect_entries_for_selected_keys(entry_keys, reference_supervisor):
+def _collect_entries_for_selected_keys(entry_keys, reference_supervisors):
     normalized_entry_keys = {
         key for key in (entry_keys or set())
         if isinstance(key, tuple) and len(key) == 3
     }
-    if not normalized_entry_keys or not reference_supervisor:
+    if not normalized_entry_keys:
+        return {}
+
+    if isinstance(reference_supervisors, (list, tuple, set)):
+        raw_supervisors = list(reference_supervisors)
+    else:
+        raw_supervisors = [reference_supervisors]
+
+    normalized_supervisors = []
+    seen_supervisors = set()
+    for supervisor in raw_supervisors:
+        if not supervisor:
+            continue
+        supervisor_key = (
+            getattr(supervisor, 'pk', None),
+            str(getattr(supervisor, 'username', '') or '').strip(),
+            id(supervisor),
+        )
+        if supervisor_key in seen_supervisors:
+            continue
+        seen_supervisors.add(supervisor_key)
+        normalized_supervisors.append(supervisor)
+
+    if not normalized_supervisors:
         return {}
 
     collected = {}
-    for entry in _collect_supervision_entries_for_supervisor(reference_supervisor, include_completed=True):
-        key = _build_entry_key(entry)
-        if not key or key not in normalized_entry_keys:
-            continue
-        collected[key] = entry
+    remaining_keys = set(normalized_entry_keys)
+    for supervisor in normalized_supervisors:
+        if not remaining_keys:
+            break
+        for entry in _collect_supervision_entries_for_supervisor(supervisor, include_completed=True):
+            key = _build_entry_key(entry)
+            if not key or key not in remaining_keys:
+                continue
+            collected[key] = entry
+            remaining_keys.discard(key)
     return collected
 
 
@@ -1819,19 +1847,20 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     queued_count = 0
     type_totals = {}
 
-    reference_supervisor = None
+    reference_supervisors = []
     if request is not None and is_supervisor_user(getattr(request, 'user', None)):
-        reference_supervisor = request.user
-    if reference_supervisor is None and selected_deliveries:
-        reference_supervisor = getattr(selected_deliveries[0], 'supervisor', None)
-    if reference_supervisor is None:
-        for config in configs.values():
-            reference_supervisor = getattr(config, 'user', None)
-            if reference_supervisor is not None:
-                break
+        reference_supervisors.append(request.user)
+    reference_supervisors.extend(
+        getattr(delivery, 'supervisor', None)
+        for delivery in selected_deliveries
+    )
+    reference_supervisors.extend(
+        getattr(config, 'user', None)
+        for config in configs.values()
+    )
 
     try:
-        selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisor)
+        selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisors)
     except BaseException as exc:
         return {
             'recipients': [],
