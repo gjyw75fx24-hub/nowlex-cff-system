@@ -9,7 +9,12 @@ from django.test import RequestFactory, SimpleTestCase
 from rest_framework.renderers import JSONRenderer
 from rest_framework.test import APIRequestFactory
 
-from contratos.admin import AnaliseProcessoInline, ProcessoJudicialAdmin, slack_supervision_manager_view
+from contratos.admin import (
+    AnaliseProcessoInline,
+    ProcessoJudicialAdmin,
+    _resolve_productivity_carteira_fallback_actor,
+    slack_supervision_manager_view,
+)
 from contratos.api.views import (
     BuscarDadosEscavadorView,
     SlackSupervisionInteractionAPIView,
@@ -74,6 +79,30 @@ class SlackSupervisionManagerAdminViewTests(SimpleTestCase):
 
         with self.assertRaises(PermissionDenied):
             slack_supervision_manager_view(request)
+
+
+class ProductivityCarteiraFallbackTests(SimpleTestCase):
+    def test_resolves_passivas_fallback_to_rodrigo(self):
+        actor_key, actor_label = _resolve_productivity_carteira_fallback_actor(
+            carteira_nome='Passivas',
+            known_users_by_norm={
+                'rodrigo.junqueira': {'id': 17, 'label': 'Rodrigo.Junqueira'},
+            },
+        )
+
+        self.assertEqual(actor_key, 'user:17')
+        self.assertEqual(actor_label, 'Rodrigo.Junqueira')
+
+    def test_returns_empty_when_carteira_has_no_fallback(self):
+        actor_key, actor_label = _resolve_productivity_carteira_fallback_actor(
+            carteira_nome='BCSUL',
+            known_users_by_norm={
+                'rodrigo.junqueira': {'id': 17, 'label': 'Rodrigo.Junqueira'},
+            },
+        )
+
+        self.assertEqual(actor_key, '')
+        self.assertEqual(actor_label, '')
 
 
 class BuscarDadosEscavadorViewTests(SimpleTestCase):

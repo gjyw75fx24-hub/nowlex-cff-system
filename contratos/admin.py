@@ -115,6 +115,9 @@ PREPOSITIONS = {'da', 'de', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'n
 TASK_EXPORT_SCOPE_DEFAULT = "default"
 TASK_EXPORT_SCOPE_IRON_MOUNTAIN = "iron_mountain"
 IRON_MOUNTAIN_OBSERVACAO = "SOLICITAR CONTRATO VIA IRON MOUNTAIN."
+PRODUCTIVITY_ANALYSIS_FALLBACK_BY_CARTEIRA = {
+    "passivas": "Rodrigo.Junqueira",
+}
 
 
 def strip_related_widget(formfield):
@@ -177,6 +180,30 @@ def _task_export_display_user_name(user) -> str:
 def _task_export_priority_label(value: str) -> str:
     mapping = dict(Tarefa.PRIORIDADE_CHOICES)
     return str(mapping.get(value, value or "")).strip().upper()
+
+
+def _normalize_productivity_lookup_text(value) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _resolve_productivity_carteira_fallback_actor(carteira_nome="", known_users_by_norm=None):
+    if not isinstance(known_users_by_norm, dict) or not known_users_by_norm:
+        return "", ""
+    carteira_key = _normalize_productivity_lookup_text(carteira_nome)
+    if not carteira_key:
+        return "", ""
+    fallback_username = PRODUCTIVITY_ANALYSIS_FALLBACK_BY_CARTEIRA.get(carteira_key)
+    if not fallback_username:
+        return "", ""
+    known_user = known_users_by_norm.get(_normalize_productivity_lookup_text(fallback_username))
+    if not known_user:
+        return "", ""
+    return f"user:{known_user['id']}", known_user["label"]
 
 
 def _task_export_scope_label(scope: str) -> str:
@@ -8860,7 +8887,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 return ""
             return _clean_text(user_obj.get_full_name()) or _clean_text(getattr(user_obj, "username", ""))
 
-        def _resolve_actor_key_label(author_text="", fallback_user=None):
+        def _resolve_actor_key_label(author_text="", fallback_user=None, carteira_nome=""):
             fallback_id = _safe_int(getattr(fallback_user, "id", None)) if fallback_user else None
             fallback_label = _resolve_user_display(fallback_user) if fallback_user else ""
             normalized_author_text = _clean_text(author_text)
@@ -8873,6 +8900,12 @@ class CarteiraAdmin(admin.ModelAdmin):
                 return f"user:{fallback_id}", fallback_label or normalized_author_text or f"Usuário {fallback_id}"
             if normalized_author_text:
                 return f"author:{normalized_key or normalized_author_text.lower()}", normalized_author_text
+            fallback_actor_key, fallback_actor_label = _resolve_productivity_carteira_fallback_actor(
+                carteira_nome=carteira_nome,
+                known_users_by_norm=known_users_by_norm,
+            )
+            if fallback_actor_key and fallback_actor_label:
+                return fallback_actor_key, fallback_actor_label
             return "unknown", "Sem usuário"
 
         def _ensure_productivity_user(user_key, user_label):
@@ -9081,24 +9114,6 @@ class CarteiraAdmin(admin.ModelAdmin):
                 if not isinstance(respostas_obj, dict):
                     respostas_obj = {}
 
-                card_has_content = _card_has_analysis_content(card)
-                card_author_key = ""
-                card_author_label = ""
-                card_date = ""
-                if card_has_content:
-                    analysis_author = _clean_text(card.get("analysis_author"))
-                    fallback_user = getattr(analise_obj, "updated_by", None)
-                    card_author_key, card_author_label = _resolve_actor_key_label(
-                        analysis_author,
-                        fallback_user=fallback_user,
-                    )
-                    card_timestamp = (
-                        _parse_datetime_value(card.get("saved_at"))
-                        or _parse_datetime_value(card.get("updated_at"))
-                        or _parse_datetime_value(getattr(analise_obj, "updated_at", None))
-                    )
-                    card_date = card_timestamp.date().isoformat() if card_timestamp else ""
-
                 tipo_meta = _resolve_tipo_meta(analysis_type, respostas_obj)
                 tipo_id = int(tipo_meta["id"]) if isinstance(tipo_meta, dict) and tipo_meta.get("id") else None
                 tipo_nome = (tipo_meta or {}).get("nome") or _clean_text(analysis_type.get("nome")) or "[Sem tipo]"
@@ -9115,6 +9130,26 @@ class CarteiraAdmin(admin.ModelAdmin):
                 if not carteira_id:
                     continue
                 carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
+
+                card_has_content = _card_has_analysis_content(card)
+                card_author_key = ""
+                card_author_label = ""
+                card_date = ""
+                if card_has_content:
+                    analysis_author = _clean_text(card.get("analysis_author"))
+                    fallback_user = getattr(analise_obj, "updated_by", None)
+                    card_author_key, card_author_label = _resolve_actor_key_label(
+                        analysis_author,
+                        fallback_user=fallback_user,
+                        carteira_nome=carteira_nome,
+                    )
+                    card_timestamp = (
+                        _parse_datetime_value(card.get("saved_at"))
+                        or _parse_datetime_value(card.get("updated_at"))
+                        or _parse_datetime_value(getattr(analise_obj, "updated_at", None))
+                    )
+                    card_date = card_timestamp.date().isoformat() if card_timestamp else ""
+
                 if card_has_content:
                     _register_productivity_event(
                         "analises",
