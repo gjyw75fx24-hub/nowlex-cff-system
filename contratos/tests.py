@@ -1017,12 +1017,14 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
     @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
     @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
+    @patch('contratos.api.views.is_supervisor_user', return_value=True)
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
     def test_selected_refresh_supports_selection_keys_without_local_delivery_id(
         self,
         mocked_delivery_objects,
         mocked_config_objects,
+        _mocked_is_supervisor_user,
         mocked_collect_entries,
         mocked_load_analyses,
         mocked_load_deliveries,
@@ -1058,20 +1060,26 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
         mocked_load_deliveries.return_value = {(55, 'saved_processos_vinculados', 0): delivery}
         mocked_sync_single.return_value = {'sent': True, 'queued': False}
+        request = SimpleNamespace(user=supervisor)
 
-        result = sync_supervision_slack_for_selected_deliveries([], selection_keys=['55|saved_processos_vinculados|0'])
+        result = sync_supervision_slack_for_selected_deliveries(
+            [],
+            request=request,
+            selection_keys=['55|saved_processos_vinculados|0'],
+        )
 
         self.assertEqual(result['errors'], [])
         self.assertEqual(result['recipients'], ['Maicon Bispo'])
         mocked_collect_entries.assert_called_once()
         self.assertEqual(mocked_collect_entries.call_args.args[0], {(55, 'saved_processos_vinculados', 0)})
+        self.assertEqual(mocked_collect_entries.call_args.args[1], [supervisor, supervisor])
         mocked_load_deliveries.assert_called_once_with(supervisor, [entry])
         mocked_ensure_delivery.assert_not_called()
         mocked_sync_single.assert_called_once_with(
             entry,
             supervisor,
             delivery,
-            request=None,
+            request=request,
             allow_post=True,
         )
 

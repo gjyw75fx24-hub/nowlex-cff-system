@@ -1797,6 +1797,8 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
 
 
 def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None, selection_keys=None):
+    from contratos.api.views import is_supervisor_user
+
     normalized_ids = []
     for raw_value in delivery_ids or []:
         try:
