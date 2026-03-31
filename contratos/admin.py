@@ -8593,9 +8593,14 @@ class CarteiraAdmin(admin.ModelAdmin):
         }
 
         process_changelist_url = reverse("admin:contratos_processojudicial_changelist")
+        carteira_rows = list(Carteira.objects.order_by("nome").values("id", "nome", "cor_grafico"))
         carteira_lookup = {
             carteira["id"]: carteira["nome"]
-            for carteira in Carteira.objects.order_by("nome").values("id", "nome")
+            for carteira in carteira_rows
+        }
+        carteira_color_lookup = {
+            carteira["id"]: (carteira.get("cor_grafico") or "#417690")
+            for carteira in carteira_rows
         }
         priority_default_carteira_id = 0
         priority_default_carteira_nome = ""
@@ -8757,6 +8762,22 @@ class CarteiraAdmin(admin.ModelAdmin):
             # 4) Fallback final: nunca deixar KPI em [Sem tipo]
             return tipo_passivas_default or tipo_monitoria_default
 
+        def _resolve_card_carteira_id(card, tipo_meta, carteira_default):
+            if not isinstance(card, dict):
+                return None
+
+            carteira_card_id = _safe_int(card.get("carteira_id"))
+            carteira_id = carteira_card_id
+            if not carteira_id:
+                tipo_slug = _clean_text((tipo_meta or {}).get("slug"))
+                tipo_nome = _clean_text((tipo_meta or {}).get("nome"))
+                tipo_norm_for_carteira = _normalize_type_text(f"{tipo_slug} {tipo_nome}")
+                if passivas_carteira_id and "passiv" in tipo_norm_for_carteira:
+                    carteira_id = passivas_carteira_id
+                else:
+                    carteira_id = carteira_default
+            return carteira_id
+
         for tipo_meta in tipo_lookup.values():
             search_text = tipo_meta.get("search_text", "")
             if tipo_monitoria_default is None and "monitor" in search_text:
@@ -8813,6 +8834,86 @@ class CarteiraAdmin(admin.ModelAdmin):
                 "tipo_analise_id": _safe_int(questao.get("tipo_analise_id")),
                 "opcoes": opcoes_by_chave.get(chave, []),
             }
+
+        coverage_by_carteira = {}
+
+        def _ensure_coverage_bucket(carteira_id):
+            carteira_id_int = _safe_int(carteira_id)
+            if not carteira_id_int or carteira_id_int not in carteira_lookup:
+                return None
+            bucket = coverage_by_carteira.get(carteira_id_int)
+            if bucket is None:
+                bucket = {
+                    "carteira_id": carteira_id_int,
+                    "carteira_nome": carteira_lookup.get(carteira_id_int, "[Sem carteira]"),
+                    "carteira_cor": carteira_color_lookup.get(carteira_id_int, "#417690"),
+                    "process_ids": set(),
+                    "concluded_process_ids": set(),
+                    "classes": {},
+                }
+                coverage_by_carteira[carteira_id_int] = bucket
+            return bucket
+
+        def _register_process_for_carteira(processo_id, carteira_id, classe_nome):
+            bucket = _ensure_coverage_bucket(carteira_id)
+            if bucket is None:
+                return
+            classe_label = _clean_text(classe_nome) or "Sem classe processual"
+            is_new = processo_id not in bucket["process_ids"]
+            bucket["process_ids"].add(processo_id)
+            if is_new:
+                bucket["classes"][classe_label] = int(bucket["classes"].get(classe_label, 0)) + 1
+
+        processos_cobertura = (
+            ProcessoJudicial.objects.select_related("analise_processo", "status")
+            .prefetch_related(Prefetch("carteiras_vinculadas", queryset=Carteira.objects.only("id")))
+            .only(
+                "id",
+                "carteira_id",
+                "status__nome",
+                "analise_processo__respostas",
+            )
+        )
+
+        for processo in processos_cobertura:
+            classe_nome = _clean_text(getattr(getattr(processo, "status", None), "nome", "")) or "Sem classe processual"
+            processo_carteira_ids = set()
+            if processo.carteira_id:
+                processo_carteira_ids.add(int(processo.carteira_id))
+            for carteira in processo.carteiras_vinculadas.all():
+                carteira_id = _safe_int(getattr(carteira, "id", None))
+                if carteira_id:
+                    processo_carteira_ids.add(carteira_id)
+            for carteira_id in processo_carteira_ids:
+                _register_process_for_carteira(processo.id, carteira_id, classe_nome)
+
+            analise_obj = getattr(processo, "analise_processo", None)
+            respostas = getattr(analise_obj, "respostas", None)
+            cards = _get_cards_from_respostas(respostas)
+            if not cards:
+                continue
+
+            carteira_default = processo.carteira_id
+            if not carteira_default and processo_carteira_ids:
+                carteira_default = sorted(processo_carteira_ids)[0]
+
+            for card in cards:
+                if not isinstance(card, dict):
+                    continue
+                analysis_type = card.get("analysis_type") if isinstance(card.get("analysis_type"), dict) else {}
+                respostas_obj = card.get("tipo_de_acao_respostas")
+                if not isinstance(respostas_obj, dict):
+                    respostas_obj = {}
+                tipo_meta = _resolve_tipo_meta(analysis_type, respostas_obj)
+                carteira_id = _resolve_card_carteira_id(card, tipo_meta, carteira_default)
+                if not carteira_id:
+                    continue
+
+                _register_process_for_carteira(processo.id, carteira_id, classe_nome)
+                if _card_has_analysis_content(card):
+                    bucket = _ensure_coverage_bucket(carteira_id)
+                    if bucket is not None:
+                        bucket["concluded_process_ids"].add(processo.id)
 
         processos = (
             ProcessoJudicial.objects.filter(analise_processo__isnull=False)
@@ -9119,14 +9220,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                 tipo_nome = (tipo_meta or {}).get("nome") or _clean_text(analysis_type.get("nome")) or "[Sem tipo]"
                 tipo_slug = (tipo_meta or {}).get("slug") or _clean_text(analysis_type.get("slug")) or "[sem-slug]"
 
-                carteira_card_id = _safe_int(card.get("carteira_id"))
-                carteira_id = carteira_card_id
-                if not carteira_id:
-                    tipo_norm_for_carteira = _normalize_type_text(f"{tipo_slug or ''} {tipo_nome or ''}")
-                    if passivas_carteira_id and "passiv" in tipo_norm_for_carteira:
-                        carteira_id = passivas_carteira_id
-                    else:
-                        carteira_id = carteira_default
+                carteira_id = _resolve_card_carteira_id(card, tipo_meta, carteira_default)
                 if not carteira_id:
                     continue
                 carteira_nome = carteira_lookup.get(carteira_id, "[Sem carteira]")
@@ -9741,7 +9835,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             priority_by_carteira_map.values(),
             key=lambda item: ((item.get("carteira_nome") or "").upper(), int(item.get("carteira_id") or 0)),
         ):
-            carteira_rows = sorted(
+            carteira_priority_rows = sorted(
                 (carteira_bucket.get("rows") or {}).values(),
                 key=lambda item: ((item.get("prioridade_nome") or "").upper(), item.get("uf") or ""),
             )
@@ -9766,7 +9860,7 @@ class CarteiraAdmin(admin.ModelAdmin):
                         "analisados": int(carteira_totals.get("analisados") or 0),
                         "pendentes": int(carteira_totals.get("pendentes") or 0),
                     },
-                    "rows": carteira_rows,
+                        "rows": carteira_priority_rows,
                     "by_priority": carteira_by_priority,
                     "by_uf": carteira_by_uf,
                 }
@@ -10015,6 +10109,76 @@ class CarteiraAdmin(admin.ModelAdmin):
         productivity_pending_payload["total"] = int(
             productivity_pending_payload["tarefas"] + productivity_pending_payload["prazos"]
         )
+        serialized_analysis_coverage = []
+        serialized_classe_processual = []
+        coverage_total_process_ids = set()
+        coverage_total_concluded_ids = set()
+        for carteira in carteira_rows:
+            carteira_id = int(carteira["id"])
+            bucket = coverage_by_carteira.get(carteira_id) or {
+                "process_ids": set(),
+                "concluded_process_ids": set(),
+                "classes": {},
+            }
+            total_cadastros = len(bucket["process_ids"])
+            concluidos = len(bucket["concluded_process_ids"])
+            pendentes = max(total_cadastros - concluidos, 0)
+            coverage_total_process_ids.update(bucket["process_ids"])
+            coverage_total_concluded_ids.update(bucket["concluded_process_ids"])
+            serialized_analysis_coverage.append(
+                {
+                    "carteira_id": carteira_id,
+                    "carteira_nome": carteira["nome"],
+                    "carteira_cor": carteira_color_lookup.get(carteira_id, "#417690"),
+                    "total_cadastros": int(total_cadastros),
+                    "concluidos": int(concluidos),
+                    "pendentes": int(pendentes),
+                    "pct_concluidos": round((concluidos * 100.0 / total_cadastros), 2) if total_cadastros else 0.0,
+                    "pct_pendentes": round((pendentes * 100.0 / total_cadastros), 2) if total_cadastros else 0.0,
+                }
+            )
+            classes_sorted = sorted(
+                bucket["classes"].items(),
+                key=lambda item: (-int(item[1]), item[0].upper()),
+            )
+            serialized_classe_processual.append(
+                {
+                    "carteira_id": carteira_id,
+                    "carteira_nome": carteira["nome"],
+                    "carteira_cor": carteira_color_lookup.get(carteira_id, "#417690"),
+                    "total_cadastros": int(total_cadastros),
+                    "classes": [
+                        {
+                            "label": classe_label,
+                            "count": int(classe_count),
+                            "pct": round((int(classe_count) * 100.0 / total_cadastros), 2) if total_cadastros else 0.0,
+                        }
+                        for classe_label, classe_count in classes_sorted
+                    ],
+                }
+            )
+        analysis_coverage_kpi_data = {
+            "rows": serialized_analysis_coverage,
+            "totals": {
+                "total_cadastros": int(len(coverage_total_process_ids)),
+                "concluidos": int(len(coverage_total_concluded_ids)),
+                "pendentes": int(max(len(coverage_total_process_ids) - len(coverage_total_concluded_ids), 0)),
+            },
+        }
+        classe_processual_kpi_data = {
+            "carteiras": serialized_classe_processual,
+            "default_carteira_id": int(
+                next(
+                    (
+                        row["carteira_id"]
+                        for row in serialized_classe_processual
+                        if int(row.get("total_cadastros") or 0) > 0
+                    ),
+                    serialized_classe_processual[0]["carteira_id"] if serialized_classe_processual else 0,
+                )
+                or 0
+            ),
+        }
         productivity_kpi_data = {
             "users": serialized_productivity_users,
             "daily": serialized_productivity_daily,
@@ -10053,6 +10217,8 @@ class CarteiraAdmin(admin.ModelAdmin):
             "peticao_year_max": int(peticao_year_max or today.year),
             "peticao_pendentes_total": int(peticao_pendentes_total or 0),
             "priority_kpi": priority_kpi_data,
+            "analysis_coverage_kpi": analysis_coverage_kpi_data,
+            "classe_processual_kpi": classe_processual_kpi_data,
             "productivity_kpi": productivity_kpi_data,
             "online_presence_kpi": online_presence_kpi_data,
             "cpf_lote_kpi": cpf_lote_kpi_data,

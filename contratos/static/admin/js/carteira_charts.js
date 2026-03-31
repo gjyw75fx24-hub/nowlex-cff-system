@@ -969,19 +969,287 @@ window.addEventListener('DOMContentLoaded', () => {
         : {};
     const productivityDateMin = String(productivityKpi?.date_min || '').trim();
     const productivityDateMax = String(productivityKpi?.date_max || '').trim();
+    const analysisCoverageKpi = (kpiData && typeof kpiData === 'object' && kpiData.analysis_coverage_kpi)
+        ? kpiData.analysis_coverage_kpi
+        : {};
+    const analysisCoverageRows = Array.isArray(analysisCoverageKpi.rows) ? analysisCoverageKpi.rows : [];
+    const analysisCoverageTotals = (analysisCoverageKpi && typeof analysisCoverageKpi === 'object' && analysisCoverageKpi.totals)
+        ? analysisCoverageKpi.totals
+        : {};
+    const classeProcessualKpi = (kpiData && typeof kpiData === 'object' && kpiData.classe_processual_kpi)
+        ? kpiData.classe_processual_kpi
+        : {};
+    const classeProcessualCarteiras = Array.isArray(classeProcessualKpi.carteiras) ? classeProcessualKpi.carteiras : [];
+    const classeProcessualDefaultCarteiraId = Number(classeProcessualKpi.default_carteira_id || 0);
     const onlinePresenceKpi = (kpiData && typeof kpiData === 'object' && kpiData.online_presence_kpi)
         ? kpiData.online_presence_kpi
         : {};
     const cpfLoteKpi = (kpiData && typeof kpiData === 'object' && kpiData.cpf_lote_kpi)
         ? kpiData.cpf_lote_kpi
         : {};
-    if (!kpiUfOptions.length || !Object.keys(kpiBuckets).length) return;
+    const hasLegacyKpiBuckets = Boolean(kpiUfOptions.length && Object.keys(kpiBuckets).length);
 
     const formatCountPt = (value) => Number(value || 0).toLocaleString('pt-BR');
     const formatCurrencyPt = (value) => `R$ ${Number(value || 0).toLocaleString('pt-BR', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     })}`;
+    const chartPalette = [
+        '#3D6D8A', '#2E8BC0', '#4DAA57', '#B48B1E', '#9C4E9A', '#D46A4A', '#5C6BC0', '#6B8E23',
+        '#C97B63', '#2A9D8F', '#577590', '#F4A261',
+    ];
+    const getChartColor = (index, alpha = 1) => {
+        const hex = chartPalette[index % chartPalette.length];
+        return hexToRgba(hex, alpha);
+    };
+
+    if (analysisCoverageRows.length) {
+        const coverageSection = document.createElement('section');
+        coverageSection.style.marginTop = '22px';
+        coverageSection.style.padding = '16px';
+        coverageSection.style.border = '1px solid #d9e1ea';
+        coverageSection.style.borderRadius = '10px';
+        coverageSection.style.background = '#fff';
+        coverageSection.innerHTML = `
+            <h3 style="margin:0 0 8px 0;">Cobertura de Análise por Carteira</h3>
+            <div style="font-size:12px; color:#46576b; margin-bottom:10px;">
+                Do total de cadastros por carteira, quantos já possuem análise concluída do tipo da carteira e quantos seguem pendentes.
+            </div>
+            <div class="carteira-coverage-summary" style="margin-bottom:10px; font-size:12px; color:#46576b;"></div>
+            <div style="position:relative; width:100%; height:${Math.max(280, analysisCoverageRows.length * 46)}px;">
+                <canvas class="carteira-coverage-canvas"></canvas>
+            </div>
+        `;
+        chartContainer.appendChild(coverageSection);
+        attachPrintButtonToPanel(coverageSection, 'Cobertura de Analise por Carteira');
+
+        const coverageSummary = coverageSection.querySelector('.carteira-coverage-summary');
+        const coverageCanvas = coverageSection.querySelector('.carteira-coverage-canvas');
+        const coverageRowsSorted = analysisCoverageRows.slice().sort((a, b) => (
+            Number(b?.total_cadastros || 0) - Number(a?.total_cadastros || 0)
+        ) || String(a?.carteira_nome || '').localeCompare(String(b?.carteira_nome || ''), 'pt-BR'));
+
+        if (coverageSummary) {
+            coverageSummary.innerHTML = `
+                Total de cadastros considerados: <strong>${formatCountPt(analysisCoverageTotals.total_cadastros || 0)}</strong>
+                &nbsp;|&nbsp; Concluídos: <strong>${formatCountPt(analysisCoverageTotals.concluidos || 0)}</strong>
+                &nbsp;|&nbsp; Pendentes: <strong>${formatCountPt(analysisCoverageTotals.pendentes || 0)}</strong>
+            `;
+        }
+
+        if (coverageCanvas && coverageRowsSorted.length) {
+            new Chart(coverageCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: coverageRowsSorted.map((row) => row.carteira_nome || 'Sem carteira'),
+                    datasets: [
+                        {
+                            label: 'Concluídos',
+                            data: coverageRowsSorted.map((row) => Number(row?.concluidos || 0)),
+                            backgroundColor: '#4DAA57',
+                            borderColor: '#3d8d48',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                        },
+                        {
+                            label: 'Pendentes',
+                            data: coverageRowsSorted.map((row) => Number(row?.pendentes || 0)),
+                            backgroundColor: '#D9E2EC',
+                            borderColor: '#A9B7C6',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                                callback: (value) => formatCountPt(value),
+                            },
+                            grid: {
+                                color: '#edf2f7',
+                            },
+                        },
+                        y: {
+                            stacked: true,
+                            grid: {
+                                display: false,
+                            },
+                        },
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const row = coverageRowsSorted[context.dataIndex] || {};
+                                    const isConcluded = String(context.dataset?.label || '') === 'Concluídos';
+                                    const pctValue = isConcluded ? row.pct_concluidos : row.pct_pendentes;
+                                    return `${context.dataset.label}: ${formatCountPt(context.raw || 0)} (${Number(pctValue || 0).toLocaleString('pt-BR')}%)`;
+                                },
+                                footer(items) {
+                                    const row = coverageRowsSorted[items?.[0]?.dataIndex] || {};
+                                    return `Total: ${formatCountPt(row.total_cadastros || 0)}`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+    }
+
+    if (classeProcessualCarteiras.length) {
+        const classeSection = document.createElement('section');
+        classeSection.style.marginTop = '22px';
+        classeSection.style.padding = '16px';
+        classeSection.style.border = '1px solid #d9e1ea';
+        classeSection.style.borderRadius = '10px';
+        classeSection.style.background = '#fff';
+        classeSection.innerHTML = `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+                <h3 style="margin:0;">Classes Processuais por Carteira</h3>
+                <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#46576b;">
+                    Carteira:
+                    <select class="carteira-classe-filter" style="padding:4px 8px; min-width:220px;"></select>
+                </label>
+            </div>
+            <div style="font-size:12px; color:#46576b; margin-bottom:10px;">
+                Composição das classes processuais existentes nos cadastros da carteira selecionada.
+            </div>
+            <div class="carteira-classe-summary" style="margin-bottom:10px; font-size:12px; color:#46576b;"></div>
+            <div class="carteira-classe-empty" style="display:none; font-size:13px; color:#57697d;"></div>
+            <div class="carteira-classe-chart-wrap" style="position:relative; width:100%; height:360px;">
+                <canvas class="carteira-classe-canvas"></canvas>
+            </div>
+        `;
+        chartContainer.appendChild(classeSection);
+        attachPrintButtonToPanel(classeSection, 'Classes Processuais por Carteira');
+
+        const classeSelect = classeSection.querySelector('.carteira-classe-filter');
+        const classeSummary = classeSection.querySelector('.carteira-classe-summary');
+        const classeEmpty = classeSection.querySelector('.carteira-classe-empty');
+        const classeChartWrap = classeSection.querySelector('.carteira-classe-chart-wrap');
+        const classeCanvas = classeSection.querySelector('.carteira-classe-canvas');
+        let classeChart = null;
+
+        if (classeSelect) {
+            const fragment = document.createDocumentFragment();
+            classeProcessualCarteiras.forEach((item) => {
+                const option = document.createElement('option');
+                option.value = String(item.carteira_id || '');
+                option.textContent = String(item.carteira_nome || 'Sem carteira');
+                fragment.appendChild(option);
+            });
+            classeSelect.appendChild(fragment);
+            if (classeProcessualDefaultCarteiraId) {
+                classeSelect.value = String(classeProcessualDefaultCarteiraId);
+            } else if (classeProcessualCarteiras[0]) {
+                classeSelect.value = String(classeProcessualCarteiras[0].carteira_id || '');
+            }
+        }
+
+        const renderClasseProcessualChart = () => {
+            const selectedCarteiraId = Number(classeSelect?.value || 0);
+            const selectedCarteira = classeProcessualCarteiras.find(
+                (item) => Number(item?.carteira_id || 0) === selectedCarteiraId
+            ) || classeProcessualCarteiras[0] || null;
+
+            if (classeChart && typeof classeChart.destroy === 'function') {
+                classeChart.destroy();
+                classeChart = null;
+            }
+
+            if (!selectedCarteira) {
+                if (classeSummary) classeSummary.textContent = '';
+                if (classeEmpty) {
+                    classeEmpty.style.display = 'block';
+                    classeEmpty.textContent = 'Nenhuma carteira disponível para este gráfico.';
+                }
+                if (classeChartWrap) classeChartWrap.style.display = 'none';
+                return;
+            }
+
+            const classRows = Array.isArray(selectedCarteira.classes) ? selectedCarteira.classes : [];
+            if (classeSummary) {
+                classeSummary.innerHTML = `
+                    Carteira: <strong>${selectedCarteira.carteira_nome || 'Sem carteira'}</strong>
+                    &nbsp;|&nbsp; Cadastros: <strong>${formatCountPt(selectedCarteira.total_cadastros || 0)}</strong>
+                    &nbsp;|&nbsp; Classes distintas: <strong>${formatCountPt(classRows.length)}</strong>
+                `;
+            }
+
+            if (!classRows.length || !Number(selectedCarteira.total_cadastros || 0)) {
+                if (classeEmpty) {
+                    classeEmpty.style.display = 'block';
+                    classeEmpty.textContent = 'Sem classes processuais cadastradas para a carteira selecionada.';
+                }
+                if (classeChartWrap) classeChartWrap.style.display = 'none';
+                return;
+            }
+
+            if (classeEmpty) {
+                classeEmpty.style.display = 'none';
+                classeEmpty.textContent = '';
+            }
+            if (classeChartWrap) classeChartWrap.style.display = 'block';
+
+            classeChart = new Chart(classeCanvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: classRows.map((row) => row.label || 'Sem classe processual'),
+                    datasets: [
+                        {
+                            data: classRows.map((row) => Number(row?.count || 0)),
+                            backgroundColor: classRows.map((_, index) => getChartColor(index, 0.88)),
+                            borderColor: classRows.map((_, index) => getChartColor(index, 1)),
+                            borderWidth: 1,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12,
+                                boxHeight: 12,
+                                padding: 14,
+                            },
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const row = classRows[context.dataIndex] || {};
+                                    return `${row.label || 'Sem classe processual'}: ${formatCountPt(row.count || 0)} (${Number(row.pct || 0).toLocaleString('pt-BR')}%)`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        };
+
+        if (classeSelect) {
+            classeSelect.addEventListener('change', renderClasseProcessualChart);
+        }
+        renderClasseProcessualChart();
+    }
+
+    if (!hasLegacyKpiBuckets) return;
 
     const kpiSection = document.createElement('section');
     kpiSection.style.marginTop = '22px';
