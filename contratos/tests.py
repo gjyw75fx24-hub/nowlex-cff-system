@@ -949,20 +949,14 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         mocked_builder.assert_called_once_with(supervisor, config, include_completed=False)
 
     @patch('contratos.services.slack_supervisao._sync_single_delivery')
-    @patch('contratos.services.slack_supervisao._ensure_delivery_for_entry')
-    @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
-    @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
-    @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
     def test_selected_refresh_syncs_only_selected_deliveries(
         self,
         mocked_delivery_objects,
         mocked_config_objects,
-        mocked_collect_entries,
-        mocked_load_analyses,
-        mocked_load_deliveries,
-        mocked_ensure_delivery,
+        mocked_build_context,
         mocked_sync_single,
     ):
         supervisor = SimpleNamespace(
@@ -990,20 +984,23 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
             'supervisor_status': 'pendente',
             'analysis_type_slug': 'esteira_3',
         }
-        mocked_collect_entries.return_value = {(55, 'saved_processos_vinculados', 0): entry}
-        mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
-        mocked_load_deliveries.return_value = {(55, 'saved_processos_vinculados', 0): selected_delivery}
+        mocked_build_context.return_value = (
+            [entry],
+            {(55, 'saved_processos_vinculados', 0): selected_delivery},
+            {(55, 'saved_processos_vinculados', 0): entry},
+        )
         mocked_sync_single.return_value = {'sent': True, 'queued': False}
 
         result = sync_supervision_slack_for_selected_deliveries([41])
 
         self.assertEqual(result['errors'], [])
         self.assertEqual(result['recipients'], ['Maicon Bispo'])
-        mocked_collect_entries.assert_called_once()
-        self.assertEqual(mocked_collect_entries.call_args.args[0], {(55, 'saved_processos_vinculados', 0)})
-        self.assertEqual(mocked_collect_entries.call_args.args[1], [supervisor, supervisor])
-        mocked_load_deliveries.assert_called_once_with(supervisor, [entry])
-        mocked_ensure_delivery.assert_not_called()
+        mocked_build_context.assert_called_once_with(
+            supervisor,
+            config,
+            include_completed=True,
+            entry_keys={(55, 'saved_processos_vinculados', 0)},
+        )
         mocked_sync_single.assert_called_once_with(
             entry,
             supervisor,
@@ -1013,22 +1010,14 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         )
 
     @patch('contratos.services.slack_supervisao._sync_single_delivery')
-    @patch('contratos.services.slack_supervisao._ensure_delivery_for_entry')
-    @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
-    @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
-    @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
-    @patch('contratos.api.views.is_supervisor_user', return_value=True)
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
     def test_selected_refresh_supports_selection_keys_without_local_delivery_id(
         self,
         mocked_delivery_objects,
         mocked_config_objects,
-        _mocked_is_supervisor_user,
-        mocked_collect_entries,
-        mocked_load_analyses,
-        mocked_load_deliveries,
-        mocked_ensure_delivery,
+        mocked_build_context,
         mocked_sync_single,
     ):
         supervisor = SimpleNamespace(
@@ -1056,9 +1045,11 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
             'supervisor_status': 'pendente',
             'analysis_type_slug': 'esteira_3',
         }
-        mocked_collect_entries.return_value = {(55, 'saved_processos_vinculados', 0): entry}
-        mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
-        mocked_load_deliveries.return_value = {(55, 'saved_processos_vinculados', 0): delivery}
+        mocked_build_context.return_value = (
+            [entry],
+            {(55, 'saved_processos_vinculados', 0): delivery},
+            {(55, 'saved_processos_vinculados', 0): entry},
+        )
         mocked_sync_single.return_value = {'sent': True, 'queued': False}
         request = SimpleNamespace(user=supervisor)
 
@@ -1070,11 +1061,12 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
 
         self.assertEqual(result['errors'], [])
         self.assertEqual(result['recipients'], ['Maicon Bispo'])
-        mocked_collect_entries.assert_called_once()
-        self.assertEqual(mocked_collect_entries.call_args.args[0], {(55, 'saved_processos_vinculados', 0)})
-        self.assertEqual(mocked_collect_entries.call_args.args[1], [supervisor, supervisor])
-        mocked_load_deliveries.assert_called_once_with(supervisor, [entry])
-        mocked_ensure_delivery.assert_not_called()
+        mocked_build_context.assert_called_once_with(
+            supervisor,
+            config,
+            include_completed=True,
+            entry_keys={(55, 'saved_processos_vinculados', 0)},
+        )
         mocked_sync_single.assert_called_once_with(
             entry,
             supervisor,
@@ -1084,20 +1076,14 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         )
 
     @patch('contratos.services.slack_supervisao._sync_single_delivery')
-    @patch('contratos.services.slack_supervisao._ensure_delivery_for_entry')
-    @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
-    @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
-    @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
     def test_selected_refresh_syncs_selected_card_for_all_eligible_supervisors(
         self,
         mocked_delivery_objects,
         mocked_config_objects,
-        mocked_collect_entries,
-        mocked_load_analyses,
-        mocked_load_deliveries,
-        mocked_ensure_delivery,
+        mocked_build_context,
         mocked_sync_single,
     ):
         supervisor_a = SimpleNamespace(
@@ -1152,25 +1138,15 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
             'supervisor_status': 'pendente',
             'analysis_type_slug': 'novas-monitorias',
         }
-        entry_b = {
-            'analise_id': 55,
-            'card_source': 'saved_processos_vinculados',
-            'card_index': 0,
-            'supervisor_status': 'pendente',
-            'analysis_type_slug': 'novas-monitorias',
-        }
-        mocked_collect_entries.return_value = {selected_key: entry_a}
-        mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
-
-        def load_deliveries(supervisor, entries):
-            self.assertEqual(entries, [entry_a])
+        def build_context(supervisor, config, *, include_completed=True, entry_keys=None):
+            self.assertEqual(entry_keys, {selected_key})
             if supervisor.pk == supervisor_a.pk:
-                return {selected_key: selected_delivery}
+                return [entry_a], {selected_key: selected_delivery}, {selected_key: entry_a}
             if supervisor.pk == supervisor_b.pk:
-                return {selected_key: delivery_b}
-            return {}
+                return [entry_a], {selected_key: delivery_b}, {selected_key: entry_a}
+            return [], {}, {}
 
-        mocked_load_deliveries.side_effect = load_deliveries
+        mocked_build_context.side_effect = build_context
         mocked_sync_single.return_value = {'sent': True, 'queued': False}
 
         result = sync_supervision_slack_for_selected_deliveries([41])
@@ -1178,11 +1154,7 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         self.assertEqual(result['errors'], [])
         self.assertEqual(result['recipients'], ['Supervisor A', 'Supervisor B'])
         self.assertEqual(result['eligible_recipients'], ['Supervisor A', 'Supervisor B'])
-        mocked_collect_entries.assert_called_once()
-        self.assertEqual(mocked_collect_entries.call_args.args[0], {selected_key})
-        self.assertEqual(mocked_collect_entries.call_args.args[1], [supervisor_a, supervisor_a, supervisor_b])
-        self.assertEqual(mocked_load_deliveries.call_count, 2)
-        mocked_ensure_delivery.assert_not_called()
+        self.assertEqual(mocked_build_context.call_count, 2)
         self.assertEqual(mocked_sync_single.call_count, 2)
         mocked_sync_single.assert_any_call(
             entry_a,
@@ -1200,20 +1172,14 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
         )
 
     @patch('contratos.services.slack_supervisao._sync_single_delivery')
-    @patch('contratos.services.slack_supervisao._ensure_delivery_for_entry')
-    @patch('contratos.services.slack_supervisao._load_deliveries_for_supervisor_entries')
-    @patch('contratos.services.slack_supervisao._load_analyses_for_entries')
-    @patch('contratos.services.slack_supervisao._collect_entries_for_selected_keys')
+    @patch('contratos.services.slack_supervisao._build_supervisor_delivery_context')
     @patch('contratos.services.slack_supervisao.UserSlackConfig.objects')
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects')
-    def test_selected_refresh_creates_missing_delivery_for_second_supervisor(
+    def test_selected_refresh_skips_supervisor_without_selected_context(
         self,
         mocked_delivery_objects,
         mocked_config_objects,
-        mocked_collect_entries,
-        mocked_load_analyses,
-        mocked_load_deliveries,
-        mocked_ensure_delivery,
+        mocked_build_context,
         mocked_sync_single,
     ):
         supervisor_a = SimpleNamespace(pk=2, username='a', get_full_name=lambda: 'Supervisor A')
@@ -1250,32 +1216,21 @@ class SlackSupervisorRefreshTests(SimpleTestCase):
             'supervisor_status': 'pendente',
             'analysis_type_slug': 'novas-monitorias',
         }
-        mocked_collect_entries.return_value = {selected_key: entry}
-        mocked_load_analyses.return_value = {55: SimpleNamespace(pk=55, processo_judicial=None, processo_judicial_id=None)}
-
-        def load_deliveries(supervisor, entries):
-            self.assertEqual(entries, [entry])
+        def build_context(supervisor, config, *, include_completed=True, entry_keys=None):
+            self.assertEqual(entry_keys, {selected_key})
             if supervisor.pk == supervisor_a.pk:
-                return {selected_key: selected_delivery}
-            return {}
+                return [entry], {selected_key: selected_delivery}, {selected_key: entry}
+            return [], {}, {}
 
-        def ensure_delivery(supervisor, config, entry_payload, deliveries_by_key=None, analyses_by_id=None):
-            self.assertEqual(supervisor.pk, supervisor_b.pk)
-            self.assertEqual(entry_payload, entry)
-            deliveries_by_key[selected_key] = created_delivery_b
-            return created_delivery_b
-
-        mocked_load_deliveries.side_effect = load_deliveries
-        mocked_ensure_delivery.side_effect = ensure_delivery
+        mocked_build_context.side_effect = build_context
         mocked_sync_single.return_value = {'sent': True, 'queued': False}
 
         result = sync_supervision_slack_for_selected_deliveries([41])
 
         self.assertEqual(result['errors'], [])
-        self.assertEqual(result['recipients'], ['Supervisor A', 'Supervisor B'])
-        mocked_ensure_delivery.assert_called_once()
-        mocked_sync_single.assert_any_call(entry, supervisor_a, selected_delivery, request=None, allow_post=True)
-        mocked_sync_single.assert_any_call(entry, supervisor_b, created_delivery_b, request=None, allow_post=True)
+        self.assertEqual(result['recipients'], ['Supervisor A'])
+        self.assertEqual(result['eligible_recipients'], ['Supervisor A'])
+        mocked_sync_single.assert_called_once_with(entry, supervisor_a, selected_delivery, request=None, allow_post=True)
 
 
 class SlackAnalysisGroupingTests(SimpleTestCase):
