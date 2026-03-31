@@ -2466,7 +2466,24 @@ class SlackSupervisionDeliveryRefreshAPIView(APIView):
                 selected_delivery_ids.append(delivery_id)
 
         if mode == 'selected':
-            result = sync_supervision_slack_for_selected_deliveries(selected_delivery_ids, request=request) or {}
+            try:
+                result = sync_supervision_slack_for_selected_deliveries(selected_delivery_ids, request=request) or {}
+            except BaseException as exc:
+                logger.exception(
+                    'Falha ao atualizar entregas Slack selecionadas delivery_ids=%s',
+                    selected_delivery_ids,
+                    exc_info=exc,
+                )
+                result = {
+                    'recipients': [],
+                    'eligible_recipients': [],
+                    'errors': [{
+                        'supervisor': '',
+                        'error': str(exc) or 'Falha ao atualizar as mensagens selecionadas do Slack.',
+                    }],
+                    'queued_count': 0,
+                    'type_summaries': [],
+                }
             return Response({
                 'recipients': sorted(str(name).strip() for name in (result.get('recipients') or []) if str(name).strip()),
                 'eligible_recipients': sorted(str(name).strip() for name in (result.get('eligible_recipients') or []) if str(name).strip()),

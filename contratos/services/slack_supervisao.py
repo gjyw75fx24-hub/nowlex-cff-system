@@ -1764,12 +1764,21 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     if not slack_supervisao_enabled():
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 
-    selected_deliveries = list(
-        SupervisaoSlackEntrega.objects
-        .select_related('supervisor', 'analise', 'processo')
-        .filter(pk__in=normalized_ids)
-        .order_by('supervisor_id', 'id')
-    )
+    try:
+        selected_deliveries = list(
+            SupervisaoSlackEntrega.objects
+            .select_related('supervisor', 'analise', 'processo')
+            .filter(pk__in=normalized_ids)
+            .order_by('supervisor_id', 'id')
+        )
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao carregar as entregas selecionadas.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
     if not selected_deliveries:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 
@@ -1786,14 +1795,23 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     if not selected_card_keys:
         return {'recipients': [], 'eligible_recipients': [], 'errors': [], 'queued_count': 0, 'type_summaries': []}
 
-    configs = {
-        config.user_id: config
-        for config in (
-            UserSlackConfig.objects.select_related('user')
-            .filter(user__is_active=True)
-            .exclude(slack_user_id='')
-        )
-    }
+    try:
+        configs = {
+            config.user_id: config
+            for config in (
+                UserSlackConfig.objects.select_related('user')
+                .filter(user__is_active=True)
+                .exclude(slack_user_id='')
+            )
+        }
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao carregar a configuração Slack dos supervisores.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
 
     recipient_names = set()
     eligible_names = set()
@@ -1812,7 +1830,16 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
             if reference_supervisor is not None:
                 break
 
-    selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisor)
+    try:
+        selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisor)
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao localizar os cards selecionados.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
     if not selected_entries_by_key:
         return {
             'recipients': [],
@@ -1822,7 +1849,16 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
             'type_summaries': [],
         }
 
-    analyses_by_id = _load_analyses_for_entries(selected_entries_by_key.values())
+    try:
+        analyses_by_id = _load_analyses_for_entries(selected_entries_by_key.values())
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao carregar as análises dos cards selecionados.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
 
     for supervisor_id, config in configs.items():
         supervisor = getattr(config, 'user', None)
