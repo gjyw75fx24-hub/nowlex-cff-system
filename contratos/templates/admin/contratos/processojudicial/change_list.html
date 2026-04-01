@@ -1991,6 +1991,37 @@
         </div>
     </div>
 
+    <!-- Modal de exportação do questionário procedural -->
+    <div id="questionario-procedural-modal" style="display:none; position: fixed; z-index: 2000; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.2); align-items: center; justify-content: center;">
+        <div style="background:#fff; padding:16px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.2); min-width:320px; max-width:90%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0;">Exportar Questionário Procedural</h3>
+                <button type="button" id="questionario-procedural-close" style="border:none; background:transparent; font-size:20px; cursor:pointer;">×</button>
+            </div>
+            <label for="questionario-procedural-tipo" style="display:block; margin-bottom:8px; font-weight:bold;">Tipo de análise</label>
+            <select id="questionario-procedural-tipo" style="width:100%; padding:6px; margin-bottom:12px;">
+                <option value="">Selecione o tipo de análise</option>
+                {% for tipo in tipos_analise_export_options %}
+                <option value="{{ tipo.id }}">{{ tipo.nome }}</option>
+                {% endfor %}
+            </select>
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" id="questionario-procedural-cancel" class="button">Cancelar</button>
+                <button type="button" id="questionario-procedural-confirm" class="button default">Exportar planilha</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="action-feedback-modal" class="row-open-choice-overlay" style="z-index:2001;">
+        <div class="row-open-choice-modal" role="dialog" aria-modal="true" aria-labelledby="action-feedback-title">
+            <h3 class="row-open-choice-title" id="action-feedback-title">Aviso</h3>
+            <p class="row-open-choice-text" id="action-feedback-text"></p>
+            <div class="row-open-choice-actions">
+                <button type="button" id="action-feedback-confirm" class="row-open-choice-here">OK</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal de lembrete em massa -->
     <div id="lembrete-modal" style="display:none; position: fixed; z-index: 2000; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.2); align-items: center; justify-content: center;">
         <div style="background:#fff; padding:16px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.2); min-width:280px; max-width:90%;">
@@ -2340,6 +2371,15 @@
         const delegateCancel = document.getElementById('delegate-cancel');
         const delegateClose = document.getElementById('delegate-close');
         const delegateUrl = "{% url 'admin:processo_delegate_bulk' %}";
+        const questionarioProceduralModal = document.getElementById('questionario-procedural-modal');
+        const questionarioProceduralTipo = document.getElementById('questionario-procedural-tipo');
+        const questionarioProceduralConfirm = document.getElementById('questionario-procedural-confirm');
+        const questionarioProceduralCancel = document.getElementById('questionario-procedural-cancel');
+        const questionarioProceduralClose = document.getElementById('questionario-procedural-close');
+        const actionFeedbackModal = document.getElementById('action-feedback-modal');
+        const actionFeedbackTitle = document.getElementById('action-feedback-title');
+        const actionFeedbackText = document.getElementById('action-feedback-text');
+        const actionFeedbackConfirm = document.getElementById('action-feedback-confirm');
         const lembreteModal = document.getElementById('lembrete-modal');
         const lembreteInput = document.getElementById('lembrete-dias');
         const lembreteConfirm = document.getElementById('lembrete-confirm');
@@ -2405,6 +2445,7 @@
         let batchMissingLoaded = 0;
         let batchMissingSelected = new Set();
         let cnjBatchRegisterBusy = false;
+        let actionFeedbackOnClose = null;
 
         if (!form || !actionSelect) return;
 
@@ -2431,6 +2472,45 @@
         function hideModal() {
             if (delegateModal) {
                 delegateModal.style.display = 'none';
+            }
+        }
+        function showQuestionarioProceduralModal() {
+            if (questionarioProceduralModal) {
+                questionarioProceduralModal.style.display = 'flex';
+                if (questionarioProceduralTipo) {
+                    questionarioProceduralTipo.focus();
+                }
+            }
+        }
+        function hideQuestionarioProceduralModal() {
+            if (questionarioProceduralModal) {
+                questionarioProceduralModal.style.display = 'none';
+            }
+            if (form) {
+                form.dataset.questionarioProceduralSubmitting = '0';
+            }
+        }
+        function showActionFeedbackModal(message, options) {
+            if (!actionFeedbackModal || !actionFeedbackText || !actionFeedbackConfirm) {
+                window.alert(message);
+                return;
+            }
+            const config = options || {};
+            actionFeedbackTitle.textContent = config.title || 'Aviso';
+            actionFeedbackText.textContent = message || '';
+            actionFeedbackOnClose = typeof config.onClose === 'function' ? config.onClose : null;
+            actionFeedbackModal.classList.add('open');
+            actionFeedbackConfirm.focus();
+        }
+        function hideActionFeedbackModal() {
+            if (!actionFeedbackModal) {
+                return;
+            }
+            actionFeedbackModal.classList.remove('open');
+            const onClose = actionFeedbackOnClose;
+            actionFeedbackOnClose = null;
+            if (onClose) {
+                onClose();
             }
         }
         function showLembreteModal() {
@@ -2574,7 +2654,7 @@
                 hideModal();
                 window.location.reload();
             }).catch((error) => {
-                alert(error?.message || 'Não foi possível salvar a delegação.');
+                showActionFeedbackModal(error?.message || 'Não foi possível salvar a delegação.');
             }).finally(() => {
                 if (delegateConfirm) {
                     delegateConfirm.disabled = false;
@@ -2589,10 +2669,21 @@
                 e.preventDefault();
                 const ids = getSelectedIds();
                 if (!ids.length) {
-                    alert('Selecione ao menos um processo para delegar.');
+                    showActionFeedbackModal('Selecione ao menos um processo para delegar.');
                     return;
                 }
                 showModal();
+                return;
+            }
+            if (actionSelect.value === 'exportar_questionario_procedural') {
+                if (form.dataset.questionarioProceduralSubmitting === '1') return;
+                e.preventDefault();
+                const ids = getSelectedIds();
+                if (!ids.length) {
+                    showActionFeedbackModal('Selecione ao menos um cadastro para exportar o questionário.');
+                    return;
+                }
+                showQuestionarioProceduralModal();
                 return;
             }
             if (actionSelect.value === 'inserir_lembrete') {
@@ -2600,7 +2691,7 @@
                 e.preventDefault();
                 const ids = getSelectedIds();
                 if (!ids.length) {
-                    alert('Selecione ao menos um processo para inserir lembrete.');
+                    showActionFeedbackModal('Selecione ao menos um processo para inserir lembrete.');
                     return;
                 }
                 showLembreteModal();
@@ -2628,6 +2719,41 @@
             });
         }
 
+        [questionarioProceduralCancel, questionarioProceduralClose].forEach(btn => {
+            if (btn) btn.addEventListener('click', hideQuestionarioProceduralModal);
+        });
+
+        if (questionarioProceduralConfirm) {
+            questionarioProceduralConfirm.addEventListener('click', function() {
+                const ids = getSelectedIds();
+                if (!ids.length) {
+                    hideQuestionarioProceduralModal();
+                    return;
+                }
+                const tipoId = questionarioProceduralTipo ? String(questionarioProceduralTipo.value || '').trim() : '';
+                if (!tipoId) {
+                    showActionFeedbackModal('Selecione o tipo de análise para exportar.', {
+                        onClose: () => {
+                            if (questionarioProceduralTipo) {
+                                questionarioProceduralTipo.focus();
+                            }
+                        },
+                    });
+                    return;
+                }
+                let hidden = form.querySelector('input[name="questionario_procedural_tipo_id"]');
+                if (!hidden) {
+                    hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = 'questionario_procedural_tipo_id';
+                    form.appendChild(hidden);
+                }
+                hidden.value = tipoId;
+                form.dataset.questionarioProceduralSubmitting = '1';
+                form.submit();
+            });
+        }
+
         [lembreteCancel, lembreteClose].forEach(btn => {
             if (btn) btn.addEventListener('click', hideLembreteModal);
         });
@@ -2641,8 +2767,11 @@
                 }
                 const dias = parseInt((lembreteInput && lembreteInput.value) ? lembreteInput.value : '', 10);
                 if (!dias || dias <= 0) {
-                    alert('Informe a periodicidade em dias.');
-                    if (lembreteInput) lembreteInput.focus();
+                    showActionFeedbackModal('Informe a periodicidade em dias.', {
+                        onClose: () => {
+                            if (lembreteInput) lembreteInput.focus();
+                        },
+                    });
                     return;
                 }
                 let hidden = form.querySelector('input[name=\"pertinencia_dias\"]');
@@ -2657,6 +2786,24 @@
                 form.submit();
             });
         }
+
+        if (actionFeedbackModal) {
+            actionFeedbackModal.addEventListener('click', function(event) {
+                if (event.target === actionFeedbackModal) {
+                    hideActionFeedbackModal();
+                }
+            });
+        }
+
+        if (actionFeedbackConfirm) {
+            actionFeedbackConfirm.addEventListener('click', hideActionFeedbackModal);
+        }
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape' && actionFeedbackModal && actionFeedbackModal.classList.contains('open')) {
+                hideActionFeedbackModal();
+            }
+        });
 
         function escapeHtml(text) {
             return String(text || '')

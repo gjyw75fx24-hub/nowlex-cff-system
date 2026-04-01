@@ -2512,24 +2512,7 @@ def configuracao_analise_tipo_objetiva_export_view(request, tipo_id: int):
     return response
 
 
-def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: int):
-    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
-        messages.error(request, "Acesso restrito a supervisores.")
-        return HttpResponseRedirect(reverse('admin:index'))
-
-    try:
-        tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
-    except (ProgrammingError, OperationalError):
-        messages.warning(
-            request,
-            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
-            "Rode as migrações para habilitar a funcionalidade."
-        )
-        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
-    except TipoAnaliseObjetiva.DoesNotExist:
-        messages.error(request, "Tipo de análise não encontrado.")
-        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
-
+def _get_tipo_analise_planilha_columns(tipo: TipoAnaliseObjetiva):
     questoes = list(
         QuestaoAnalise.objects.filter(tipo_analise=tipo, ativo=True)
         .prefetch_related(
@@ -2541,8 +2524,7 @@ def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: in
         .order_by("ordem", "id")
     )
     if not questoes:
-        messages.error(request, "Este tipo não possui perguntas ativas para exportar em planilha.")
-        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+        return []
 
     question_columns = [
         {
@@ -2632,10 +2614,16 @@ def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: in
     if observacoes_column:
         ordered_columns.append(observacoes_column)
 
-    headers = [str(column.get("header") or "").strip().upper() for column in ordered_columns]
-    blank_rows = [["" for _ in headers] for _ in range(200)]
+    return ordered_columns
+
+
+def _build_tipo_analise_planilha_headers(ordered_columns):
+    return [str(column.get("header") or "").strip().upper() for column in ordered_columns]
+
+
+def _build_tipo_analise_planilha_data_validations(ordered_columns, data_row_count: int):
     data_validations = []
-    last_row = len(blank_rows) + 1
+    last_row = max(int(data_row_count or 0), 1) + 1
 
     for column_index, column in enumerate(ordered_columns, start=1):
         questao = column.get("question")
@@ -2658,13 +2646,62 @@ def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: in
             }
         )
 
+    return data_validations
+
+
+def _build_tipo_analise_planilha_row(ordered_columns, *, values_by_header=None):
+    normalized_values = {}
+    for header, value in (values_by_header or {}).items():
+        normalized_header = normalize_header(str(header or ""))
+        if not normalized_header:
+            continue
+        normalized_values[normalized_header] = "" if value is None else str(value)
+
+    row = []
+    for column in ordered_columns:
+        normalized_header = column.get("normalized_header") or normalize_header(column.get("header") or "")
+        row.append(normalized_values.get(normalized_header, ""))
+    return row
+
+
+def _build_tipo_analise_planilha_workbook(tipo: TipoAnaliseObjetiva, ordered_columns, rows):
+    headers = _build_tipo_analise_planilha_headers(ordered_columns)
+    data_validations = _build_tipo_analise_planilha_data_validations(ordered_columns, len(rows))
     workbook_bytes = build_simple_xlsx(
         tipo.nome or "Tipo de Análise",
         headers,
-        blank_rows,
+        rows,
         data_validations=data_validations,
         auto_filter=False,
     )
+    return workbook_bytes
+
+
+def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: int):
+    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    try:
+        tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
+    except (ProgrammingError, OperationalError):
+        messages.warning(
+            request,
+            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
+            "Rode as migrações para habilitar a funcionalidade."
+        )
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+    except TipoAnaliseObjetiva.DoesNotExist:
+        messages.error(request, "Tipo de análise não encontrado.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    ordered_columns = _get_tipo_analise_planilha_columns(tipo)
+    if not ordered_columns:
+        messages.error(request, "Este tipo não possui perguntas ativas para exportar em planilha.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    blank_rows = [["" for _ in ordered_columns] for _ in range(200)]
+    workbook_bytes = _build_tipo_analise_planilha_workbook(tipo, ordered_columns, blank_rows)
     timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
     filename = f"{tipo.slug or 'tipo_analise'}_{timestamp}.xlsx"
     response = HttpResponse(
@@ -10816,6 +10853,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
     actions = [
         'excluir_andamentos_selecionados',
         'delegate_processes',
+        'exportar_questionario_procedural',
         'gerar_habilitacao_em_lote',
         'gerar_pdf_habilitacao_em_lote',
         'baixar_combo_habilitacao_em_lote',
@@ -12552,6 +12590,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         actions = super().get_actions(request)
         if not request.user.is_superuser and not is_user_supervisor(request.user):
             actions.pop('change_carteira_bulk', None)
+        if getattr(getattr(request, 'resolver_match', None), 'url_name', '') == 'processo_lembretes':
+            actions.pop('exportar_questionario_procedural', None)
+        try:
+            has_active_tipos_analise = TipoAnaliseObjetiva.objects.filter(ativo=True).exists()
+        except (ProgrammingError, OperationalError):
+            has_active_tipos_analise = False
+        if not has_active_tipos_analise:
+            actions.pop('exportar_questionario_procedural', None)
         protocol_type = str(request.GET.get('para_protocolar') or '').strip().lower()
         if protocol_type != 'habilitacao':
             actions.pop('gerar_habilitacao_em_lote', None)
@@ -14219,6 +14265,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             pertinencia_status=ProcessoJudicialNumeroCnj.PERTINENCIA_PERTINENTE
         ).count()
         extra_context['delegar_users'] = User.objects.order_by('username')
+        try:
+            extra_context['tipos_analise_export_options'] = list(
+                TipoAnaliseObjetiva.objects.filter(ativo=True).order_by('nome').values('id', 'nome')
+            )
+        except (ProgrammingError, OperationalError):
+            extra_context['tipos_analise_export_options'] = []
         badge = self._build_changelist_context_badge(request)
         extra_context['changelist_context_badge'] = badge
         if badge and badge.get('kind') == 'carteira':
@@ -15428,6 +15480,127 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         selected_ids = ','.join(str(pk) for pk in queryset.values_list('pk', flat=True))
         return HttpResponseRedirect(f'delegate-select-user/?ids={selected_ids}')
     delegate_processes.short_description = "Delegar processos selecionados"
+
+    def _build_questionario_procedural_lote_value(self, request):
+        cpf_info = self._get_cpf_lote_info(request)
+        if cpf_info.get('cpfs'):
+            return str(cpf_info.get('lote_label') or 'Lista digitada').strip()
+        cnj_info = self._get_cnj_lote_info(request)
+        if cnj_info.get('cnjs'):
+            return str(cnj_info.get('lote_label') or 'Lista digitada').strip()
+        return ''
+
+    def _build_questionario_procedural_row(self, processo, lote_value: str):
+        def _append_unique(values, seen, raw_value, *, normalizer=None):
+            text = str(raw_value or '').strip()
+            if not text:
+                return
+            key = normalizer(text) if normalizer else text
+            key = key or text
+            if key in seen:
+                return
+            seen.add(key)
+            values.append(text)
+
+        cnj_values = []
+        seen_cnjs = set()
+        _append_unique(cnj_values, seen_cnjs, processo.cnj, normalizer=normalize_cnj_digits)
+        numeros_cnj = getattr(processo, '_prefetched_questionario_numeros_cnj', None)
+        if numeros_cnj is None:
+            numeros_cnj = processo.numeros_cnj.only('cnj', 'criado_em').order_by('-criado_em')
+        for entry in numeros_cnj:
+            _append_unique(cnj_values, seen_cnjs, getattr(entry, 'cnj', ''), normalizer=normalize_cnj_digits)
+
+        contratos_values = []
+        seen_contratos = set()
+        contratos = getattr(processo, '_prefetched_questionario_contratos', None)
+        if contratos is None:
+            contratos = processo.contratos.only('numero_contrato').order_by('numero_contrato', 'id')
+        for contrato in contratos:
+            _append_unique(contratos_values, seen_contratos, getattr(contrato, 'numero_contrato', ''))
+
+        partes = list(getattr(processo, '_prefetched_questionario_partes', None) or [])
+        if not partes:
+            partes = list(processo.partes_processuais.only('nome', 'documento', 'tipo_polo').order_by('id'))
+        parte_passiva = next((parte for parte in partes if parte.tipo_polo == 'PASSIVO'), None)
+        parte_referencia = parte_passiva or (partes[0] if partes else None)
+
+        return {
+            'LOTE': lote_value,
+            'PROCESSO CNJ': ';'.join(cnj_values),
+            'PARTE CONTRÁRIA': str(getattr(parte_referencia, 'nome', '') or '').strip(),
+            'CPF': str(getattr(parte_referencia, 'documento', '') or '').strip(),
+            'CONTRATOS': '-'.join(contratos_values),
+        }
+
+    def exportar_questionario_procedural(self, request, queryset):
+        tipo_id = str(request.POST.get('questionario_procedural_tipo_id') or '').strip()
+        if not tipo_id:
+            self.message_user(request, "Selecione o tipo de análise para exportar.", messages.ERROR)
+            return None
+
+        try:
+            tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id, ativo=True)
+        except (ProgrammingError, OperationalError):
+            self.message_user(
+                request,
+                "Tipos de Análise Objetiva ainda não estão disponíveis neste banco.",
+                messages.ERROR,
+            )
+            return None
+        except (TypeError, ValueError):
+            self.message_user(request, "Tipo de análise inválido.", messages.ERROR)
+            return None
+        except TipoAnaliseObjetiva.DoesNotExist:
+            self.message_user(request, "Tipo de análise não encontrado.", messages.ERROR)
+            return None
+
+        ordered_columns = _get_tipo_analise_planilha_columns(tipo)
+        if not ordered_columns:
+            self.message_user(request, "Este tipo não possui perguntas ativas para exportar em planilha.", messages.ERROR)
+            return None
+
+        processos = list(
+            queryset.prefetch_related(
+                Prefetch(
+                    'numeros_cnj',
+                    queryset=ProcessoJudicialNumeroCnj.objects.only('id', 'processo_id', 'cnj', 'criado_em').order_by('-criado_em'),
+                    to_attr='_prefetched_questionario_numeros_cnj',
+                ),
+                Prefetch(
+                    'partes_processuais',
+                    queryset=Parte.objects.only('id', 'processo_id', 'tipo_polo', 'nome', 'documento').order_by('id'),
+                    to_attr='_prefetched_questionario_partes',
+                ),
+                Prefetch(
+                    'contratos',
+                    queryset=Contrato.objects.only('id', 'processo_id', 'numero_contrato').order_by('numero_contrato', 'id'),
+                    to_attr='_prefetched_questionario_contratos',
+                ),
+            )
+        )
+        if not processos:
+            self.message_user(request, "Selecione ao menos um cadastro para exportar o questionário.", messages.WARNING)
+            return None
+
+        lote_value = self._build_questionario_procedural_lote_value(request)
+        rows = [
+            _build_tipo_analise_planilha_row(
+                ordered_columns,
+                values_by_header=self._build_questionario_procedural_row(processo, lote_value),
+            )
+            for processo in processos
+        ]
+        workbook_bytes = _build_tipo_analise_planilha_workbook(tipo, ordered_columns, rows)
+        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+        filename = f"{tipo.slug or 'tipo_analise'}_questionario_procedural_{timestamp}.xlsx"
+        response = HttpResponse(
+            workbook_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    exportar_questionario_procedural.short_description = "Exportar Questionário Procedural"
 
     def inserir_lembrete(self, request, queryset):
         raw_days = str(request.POST.get('pertinencia_dias') or request.POST.get('lembrete_dias') or '').strip()
