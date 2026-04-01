@@ -7527,6 +7527,19 @@ body.admin-navigation-loading-active * {
     flex-shrink: 0;
 }
 
+.analise-slack-deliveries-item__schedule-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(40, 52, 72, 0.06);
+    color: #4e6175;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
 .analise-slack-deliveries-item__meta {
     margin-top: 4px;
     color: #617286;
