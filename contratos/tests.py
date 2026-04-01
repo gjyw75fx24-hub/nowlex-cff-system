@@ -292,6 +292,30 @@ class AnaliseProcessoAdminTests(SimpleTestCase):
 
         admin_instance._sync_supervision_slack_after_admin_save.assert_called_once_with(request, processo)
 
+    @patch('contratos.admin.get_user_allowed_carteira_ids', return_value=[])
+    def test_extract_changelist_filters_ignores_agenda_focus_params(self, _mocked_allowed_ids):
+        admin_instance = ProcessoJudicialAdmin(ProcessoJudicial, AdminSite())
+        request = RequestFactory().get(
+            '/admin/contratos/processojudicial/1717/change/',
+            {
+                'tab': 'supervisionar',
+                'open_agenda': '1',
+                'agenda_focus_type': 'S',
+                'agenda_focus_date': '2026-05-01',
+                'agenda_focus_card': '2054-saved_processos_vinculados-0',
+                'agenda_focus_analise_id': '2054',
+                'agenda_focus_source': 'saved_processos_vinculados',
+                'agenda_focus_index': '0',
+                'status__id__exact': '1',
+            },
+        )
+        request.user = SimpleNamespace(is_authenticated=True, is_superuser=True)
+        request.session = {}
+
+        filters = admin_instance._extract_changelist_filters_for_navigation(request)
+
+        self.assertEqual(filters, 'status__id__exact=1')
+
 
 class SaveDeliveryTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
