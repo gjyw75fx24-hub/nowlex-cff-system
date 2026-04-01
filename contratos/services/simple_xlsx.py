@@ -34,29 +34,32 @@ def _serialize_inline_text_cell(reference: str, value: object, *, style_id: int 
     )
 
 
-def build_simple_xlsx(
-    sheet_name: str,
-    headers: Sequence[object],
-    rows: Iterable[Sequence[object]],
+def _quote_sheet_reference(value: str) -> str:
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _serialize_worksheet_xml(
+    rows: Sequence[Sequence[object]],
     *,
     data_validations: Sequence[dict] | None = None,
-) -> bytes:
-    rows = [list(row) for row in rows]
-    headers = list(headers)
-    if not headers:
-        raise ValueError("headers cannot be empty")
-
-    normalized_sheet_name = _sanitize_sheet_name(sheet_name)
-    column_count = len(headers)
-    all_rows = [headers, *rows]
+    freeze_header: bool = False,
+    auto_filter: bool = False,
+    style_header: bool = False,
+) -> str:
+    normalized_rows = [list(row) for row in rows]
+    column_count = max((len(row) for row in normalized_rows), default=1)
+    row_count = max(len(normalized_rows), 1)
 
     column_widths = []
     for column_index in range(column_count):
-        max_length = max(len(str(row[column_index] if column_index < len(row) else "")) for row in all_rows)
+        max_length = max(
+            len(str(row[column_index] if column_index < len(row) else ""))
+            for row in (normalized_rows or [[""]])
+        )
         column_widths.append(min(max(max_length + 3, 12), 42))
 
     xml_rows = []
-    for row_index, row in enumerate(all_rows, start=1):
+    for row_index, row in enumerate(normalized_rows, start=1):
         serialized_cells = []
         for column_index in range(1, column_count + 1):
             cell_reference = f"{_excel_column_name(column_index)}{row_index}"
@@ -65,12 +68,15 @@ def build_simple_xlsx(
                 _serialize_inline_text_cell(
                     cell_reference,
                     value,
-                    style_id=1 if row_index == 1 else None,
+                    style_id=1 if style_header and row_index == 1 else None,
                 )
             )
         xml_rows.append(f'<row r="{row_index}">{"".join(serialized_cells)}</row>')
 
-    last_cell = f"{_excel_column_name(column_count)}{len(all_rows)}"
+    if not xml_rows:
+        xml_rows.append(f'<row r="1">{_serialize_inline_text_cell("A1", "")}</row>')
+
+    last_cell = f"{_excel_column_name(column_count)}{row_count}"
     cols_xml = "".join(
         f'<col min="{idx}" max="{idx}" width="{width}" customWidth="1"/>'
         for idx, width in enumerate(column_widths, start=1)
@@ -96,23 +102,111 @@ def build_simple_xlsx(
                 "</dataValidations>"
             )
 
-    worksheet_xml = (
+    if freeze_header:
+        sheet_views_xml = (
+            '<sheetViews><sheetView workbookViewId="0">'
+            '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+            '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
+            "</sheetView></sheetViews>"
+        )
+    else:
+        sheet_views_xml = '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+
+    auto_filter_xml = f'<autoFilter ref="A1:{last_cell}"/>' if auto_filter else ""
+
+    return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         f'<dimension ref="A1:{last_cell}"/>'
-        '<sheetViews>'
-        '<sheetView workbookViewId="0">'
-        '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
-        '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
-        '</sheetView>'
-        '</sheetViews>'
+        f"{sheet_views_xml}"
         '<sheetFormatPr defaultRowHeight="15"/>'
         f"<cols>{cols_xml}</cols>"
         f'<sheetData>{"".join(xml_rows)}</sheetData>'
-        f'<autoFilter ref="A1:{last_cell}"/>'
+        f"{auto_filter_xml}"
         f"{validations_xml}"
         "</worksheet>"
     )
+
+
+def build_simple_xlsx(
+    sheet_name: str,
+    headers: Sequence[object],
+    rows: Iterable[Sequence[object]],
+    *,
+    data_validations: Sequence[dict] | None = None,
+    auto_filter: bool = True,
+) -> bytes:
+    rows = [list(row) for row in rows]
+    headers = list(headers)
+    if not headers:
+        raise ValueError("headers cannot be empty")
+
+    normalized_sheet_name = _sanitize_sheet_name(sheet_name)
+    main_rows = [headers, *rows]
+
+    data_validations = list(data_validations or [])
+    hidden_sheet_name = "_validacoes"
+    hidden_list_columns: list[list[str]] = []
+    hidden_list_indexes: dict[tuple[str, ...], int] = {}
+    hidden_list_names: dict[int, str] = {}
+    normalized_validations = []
+
+    for validation in data_validations:
+        sqref = str(validation.get("sqref") or "").strip()
+        formula1 = str(validation.get("formula1") or "").strip()
+        if not sqref:
+            continue
+        if not formula1:
+            values = []
+            for raw_value in validation.get("values") or []:
+                text = str(raw_value or "").strip()
+                if text:
+                    values.append(text)
+            if values:
+                values_key = tuple(values)
+                hidden_column_index = hidden_list_indexes.get(values_key)
+                if hidden_column_index is None:
+                    hidden_column_index = len(hidden_list_columns) + 1
+                    hidden_list_indexes[values_key] = hidden_column_index
+                    hidden_list_columns.append(values)
+                validation_name = hidden_list_names.get(hidden_column_index)
+                if not validation_name:
+                    validation_name = f"VALIDACAO_{hidden_column_index}"
+                    hidden_list_names[hidden_column_index] = validation_name
+                column_name = _excel_column_name(hidden_column_index)
+                formula1 = validation_name
+        if sqref and formula1:
+            normalized_validations.append({"sqref": sqref, "formula1": formula1})
+
+    worksheet_xml = _serialize_worksheet_xml(
+        main_rows,
+        data_validations=normalized_validations,
+        freeze_header=True,
+        auto_filter=bool(auto_filter),
+        style_header=True,
+    )
+
+    workbook_sheets = [
+        {"name": normalized_sheet_name, "path": "worksheets/sheet1.xml", "hidden": False},
+    ]
+    worksheets = [("xl/worksheets/sheet1.xml", worksheet_xml)]
+    if hidden_list_columns:
+        max_hidden_length = max((len(column) for column in hidden_list_columns), default=1)
+        hidden_rows = []
+        for row_index in range(max_hidden_length):
+            hidden_rows.append(
+                [
+                    column[row_index] if row_index < len(column) else ""
+                    for column in hidden_list_columns
+                ]
+            )
+        workbook_sheets.append({"name": hidden_sheet_name, "path": "worksheets/sheet2.xml", "hidden": True})
+        worksheets.append(
+            (
+                "xl/worksheets/sheet2.xml",
+                _serialize_worksheet_xml(hidden_rows),
+            )
+        )
 
     styles_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -136,22 +230,58 @@ def build_simple_xlsx(
         "</styleSheet>"
     )
 
+    workbook_sheets_xml = []
+    workbook_rels = []
+    content_type_overrides = []
+    for index, sheet in enumerate(workbook_sheets, start=1):
+        state_attr = ' state="hidden"' if sheet.get("hidden") else ""
+        workbook_sheets_xml.append(
+            f'<sheet name="{escape(str(sheet["name"]))}" sheetId="{index}" r:id="rId{index}"{state_attr}/>'
+        )
+        workbook_rels.append(
+            f'<Relationship Id="rId{index}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            f'Target="{sheet["path"]}"/>'
+        )
+        content_type_overrides.append(
+            f'<Override PartName="/xl/{sheet["path"]}" '
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+
+    defined_names_xml = ""
+    if hidden_list_columns:
+        defined_name_entries = []
+        for hidden_column_index, values in enumerate(hidden_list_columns, start=1):
+            validation_name = hidden_list_names.get(hidden_column_index)
+            if not validation_name or not values:
+                continue
+            column_name = _excel_column_name(hidden_column_index)
+            defined_name_entries.append(
+                f'<definedName name="{escape(validation_name)}">'
+                f"{escape(_quote_sheet_reference(hidden_sheet_name))}!${column_name}$1:${column_name}${len(values)}"
+                "</definedName>"
+            )
+        if defined_name_entries:
+            defined_names_xml = f'<definedNames>{"".join(defined_name_entries)}</definedNames>'
+
+    styles_rel_id = len(workbook_sheets) + 1
     workbook_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
         '<fileVersion appName="xl"/>'
         '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="14000"/></bookViews>'
-        f'<sheets><sheet name="{escape(normalized_sheet_name)}" sheetId="1" r:id="rId1"/></sheets>'
+        f'<sheets>{"".join(workbook_sheets_xml)}</sheets>'
+        f"{defined_names_xml}"
         "</workbook>"
     )
 
     workbook_rels_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-        'Target="worksheets/sheet1.xml"/>'
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+        f'{"".join(workbook_rels)}'
+        f'<Relationship Id="rId{styles_rel_id}" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
         'Target="styles.xml"/>'
         "</Relationships>"
     )
@@ -198,8 +328,7 @@ def build_simple_xlsx(
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" '
-        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        f'{"".join(content_type_overrides)}'
         '<Override PartName="/xl/styles.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
         '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
@@ -217,5 +346,6 @@ def build_simple_xlsx(
         archive.writestr("xl/workbook.xml", workbook_xml)
         archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
         archive.writestr("xl/styles.xml", styles_xml)
-        archive.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
+        for worksheet_path, worksheet_content in worksheets:
+            archive.writestr(worksheet_path, worksheet_content)
     return output.getvalue()

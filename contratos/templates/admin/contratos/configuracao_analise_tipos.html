@@ -22,7 +22,10 @@
                         <a href="{% url 'admin:contratos_configuracao_analise_novas_monitorias' %}">Novas Monitórias</a>
                         {% if is_supervisor and tipo_monitoria %}
                             <small style="margin-left: 8px;">
-                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo_monitoria.id %}" style="color:#6b7280;">Exportar</a>
+                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export_planilha' tipo_monitoria.id %}" style="color:#6b7280;">Planilha</a>
+                            </small>
+                            <small style="margin-left: 8px;">
+                                <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo_monitoria.id %}" style="color:#6b7280;">JSON</a>
                             </small>
                             <small style="margin-left: 8px;">
                                 <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_import_for' tipo_monitoria.id %}" style="color:#6b7280;">Importar</a>
@@ -37,7 +40,10 @@
                                 <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva' tipo.id %}">{{ tipo.nome }}</a>
                                 {% if is_supervisor %}
                                     <small style="margin-left: 8px;">
-                                        <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo.id %}" style="color:#6b7280;">Exportar</a>
+                                        <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export_planilha' tipo.id %}" style="color:#6b7280;">Planilha</a>
+                                    </small>
+                                    <small style="margin-left: 8px;">
+                                        <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_export' tipo.id %}" style="color:#6b7280;">JSON</a>
                                     </small>
                                     <small style="margin-left: 8px;">
                                         <a href="{% url 'admin:contratos_configuracao_analise_tipo_objetiva_import_for' tipo.id %}" style="color:#6b7280;">Importar</a>

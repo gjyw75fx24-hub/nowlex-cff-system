@@ -13,7 +13,7 @@
 {% block content %}
 <div id="content-main">
     <form action="" method="post" enctype="multipart/form-data">{% csrf_token %}
-        <p>Envie um JSON exportado (Exportar) para criar/atualizar o Tipo de Análise e sua árvore.</p>
+        <p>Envie um arquivo JSON exportado pelo link <strong>JSON</strong> para criar/atualizar o Tipo de Análise e sua árvore.</p>
         {% if tipo_target %}
             <p><strong>Destino:</strong> {{ tipo_target.nome }} ({{ tipo_target.slug }})</p>
         {% endif %}

@@ -2510,6 +2510,170 @@ def configuracao_analise_tipo_objetiva_export_view(request, tipo_id: int):
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
+
+def configuracao_analise_tipo_objetiva_export_planilha_view(request, tipo_id: int):
+    if not (is_user_supervisor(request.user) or bool(getattr(request.user, 'is_superuser', False))):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return HttpResponseRedirect(reverse('admin:index'))
+
+    try:
+        tipo = TipoAnaliseObjetiva.objects.get(pk=tipo_id)
+    except (ProgrammingError, OperationalError):
+        messages.warning(
+            request,
+            "Tipos de Análise Objetiva ainda não estão disponíveis neste banco. "
+            "Rode as migrações para habilitar a funcionalidade."
+        )
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+    except TipoAnaliseObjetiva.DoesNotExist:
+        messages.error(request, "Tipo de análise não encontrado.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    questoes = list(
+        QuestaoAnalise.objects.filter(tipo_analise=tipo, ativo=True)
+        .prefetch_related(
+            Prefetch(
+                "opcoes",
+                queryset=OpcaoResposta.objects.filter(ativo=True).order_by("id"),
+            )
+        )
+        .order_by("ordem", "id")
+    )
+    if not questoes:
+        messages.error(request, "Este tipo não possui perguntas ativas para exportar em planilha.")
+        return HttpResponseRedirect(reverse('admin:contratos_configuracao_analise_tipos'))
+
+    question_columns = [
+        {
+            "header": str(questao.texto_pergunta or questao.chave or f"Pergunta {questao.id}").strip(),
+            "question": questao,
+            "normalized_header": normalize_header(
+                str(questao.texto_pergunta or questao.chave or f"Pergunta {questao.id}").strip()
+            ),
+        }
+        for questao in questoes
+    ]
+
+    for column in question_columns:
+        if column.get("normalized_header") == "HABILITACAO E3":
+            column["header"] = "HABILITAÇÃO EM CS"
+            column["normalized_header"] = "HABILITACAO EM CS"
+
+    used_question_ids = set()
+
+    def take_first_question_column(normalized_header: str):
+        for column in question_columns:
+            questao = column.get("question")
+            if not questao or questao.id in used_question_ids:
+                continue
+            if column.get("normalized_header") == normalized_header:
+                used_question_ids.add(questao.id)
+                return column
+        return None
+
+    ordered_columns = []
+    lote_column = take_first_question_column("LOTE")
+    if lote_column:
+        ordered_columns.append(lote_column)
+    else:
+        ordered_columns.append(
+            {
+                "header": "LOTE",
+                "question": None,
+                "normalized_header": "LOTE",
+            }
+        )
+
+    for manual_header in ("PROCESSO CNJ", "PARTE CONTRÁRIA", "CPF", "CONTRATOS"):
+        ordered_columns.append(
+            {
+                "header": manual_header,
+                "question": None,
+                "normalized_header": normalize_header(manual_header),
+            }
+        )
+
+    habilitacao_column = None
+    propor_monitoria_column = None
+    contratos_monitoria_column = None
+    observacoes_column = None
+    for column in question_columns:
+        questao = column.get("question")
+        if not questao or questao.id in used_question_ids:
+            continue
+        normalized_header = column.get("normalized_header")
+        if normalized_header == "OBSERVACOES":
+            observacoes_column = column
+            used_question_ids.add(questao.id)
+            continue
+        if normalized_header == "HABILITACAO":
+            habilitacao_column = column
+            used_question_ids.add(questao.id)
+            continue
+        if normalized_header == "PROPOR MONITORIA":
+            propor_monitoria_column = column
+            used_question_ids.add(questao.id)
+            continue
+        if normalized_header == "SELECIONE OS CONTRATOS PARA A MONITORIA":
+            contratos_monitoria_column = column
+            used_question_ids.add(questao.id)
+            continue
+        ordered_columns.append(column)
+        used_question_ids.add(questao.id)
+
+    for trailing_column in (
+        habilitacao_column,
+        propor_monitoria_column,
+        contratos_monitoria_column,
+    ):
+        if trailing_column:
+            ordered_columns.append(trailing_column)
+    if observacoes_column:
+        ordered_columns.append(observacoes_column)
+
+    headers = [str(column.get("header") or "").strip().upper() for column in ordered_columns]
+    blank_rows = [["" for _ in headers] for _ in range(200)]
+    data_validations = []
+    last_row = len(blank_rows) + 1
+
+    for column_index, column in enumerate(ordered_columns, start=1):
+        questao = column.get("question")
+        if not questao:
+            continue
+        if questao.tipo_campo != "OPCOES":
+            continue
+        opcoes = [
+            str(opcao.texto_resposta or "").strip()
+            for opcao in questao.opcoes.all()
+            if str(opcao.texto_resposta or "").strip()
+        ]
+        if not opcoes:
+            continue
+        column_name = _excel_column_name(column_index)
+        data_validations.append(
+            {
+                "sqref": f"{column_name}2:{column_name}{last_row}",
+                "values": opcoes,
+            }
+        )
+
+    workbook_bytes = build_simple_xlsx(
+        tipo.nome or "Tipo de Análise",
+        headers,
+        blank_rows,
+        data_validations=data_validations,
+        auto_filter=False,
+    )
+    timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
+    filename = f"{tipo.slug or 'tipo_analise'}_{timestamp}.xlsx"
+    response = HttpResponse(
+        workbook_bytes,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def _normalize_question_match_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).lower()
 
@@ -5669,6 +5833,11 @@ def _get_admin_urls():
             "contratos/configuracao-analise/tipos/<int:tipo_id>/export/",
             admin.site.admin_view(configuracao_analise_tipo_objetiva_export_view),
             name="contratos_configuracao_analise_tipo_objetiva_export",
+        ),
+        path(
+            "contratos/configuracao-analise/tipos/<int:tipo_id>/export/planilha/",
+            admin.site.admin_view(configuracao_analise_tipo_objetiva_export_planilha_view),
+            name="contratos_configuracao_analise_tipo_objetiva_export_planilha",
         ),
         path(
             "contratos/configuracao-analise/tipos/import/",
