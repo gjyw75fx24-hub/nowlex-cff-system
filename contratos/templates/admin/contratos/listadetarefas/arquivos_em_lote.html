@@ -371,6 +371,7 @@
       Lista: <strong>{{ lista.nome }}</strong>. Envie um ou centenas de arquivos com nomes no padrão
       <strong>123456789 - Tipo do arquivo</strong>, por exemplo: <em>123456789 - Contrato</em>,
       <em>123456789 - Saldo Devedor</em>, <em>123456789 - Relatório</em>, <em>123456789 - TED</em>.
+      Depois da distribuição, a tarefa correspondente é baixada automaticamente quando todos os arquivos solicitados forem atendidos.
     </p>
     <form method="post" enctype="multipart/form-data" id="lista-batch-preview-form">
       {% csrf_token %}
@@ -378,7 +379,7 @@
       <input class="lista-batch-import-file-input" type="file" name="arquivos" multiple required data-preview-files>
       <div class="lista-batch-import-actions">
         <span class="help">O sistema vai localizar os cadastros pelo número do contrato presente no nome do arquivo.</span>
-        <button type="submit" class="lista-batch-import-button lista-batch-import-button--primary" data-preview-submit>Encontrar Destino</button>
+        <button type="submit" class="lista-batch-import-button lista-batch-import-button--primary" data-preview-submit>Uploadar arquivos</button>
       </div>
     </form>
   </div>
@@ -559,8 +560,8 @@
         </div>
 
         <div class="lista-batch-import-actions">
-          <p class="help">Selecione os arquivos desejados, ajuste o destino quando houver mais de um match e conclua em Importar.</p>
-          <button type="submit" class="lista-batch-import-button lista-batch-import-button--import" data-import-submit>Importar selecionados</button>
+          <p class="help">Selecione os arquivos desejados, ajuste o destino quando houver mais de um match e conclua em Distribuir arquivos.</p>
+          <button type="submit" class="lista-batch-import-button lista-batch-import-button--import" data-import-submit>Distribuir arquivos</button>
         </div>
       </form>
     </div>
@@ -587,7 +588,7 @@
         previewForm.dataset.busy = '1';
         previewButton.disabled = true;
         previewButton.classList.add('lista-batch-import-button--busy');
-        previewButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Encontrando destino...</span>';
+        previewButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Enviando arquivos...</span>';
         window.setTimeout(() => {
           if (previewButton && document.body.contains(previewButton)) {
             previewButton.disabled = false;
@@ -677,7 +678,7 @@
       form.dataset.busy = '1';
       importButton.disabled = true;
       importButton.classList.add('lista-batch-import-button--busy');
-      importButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Importando...</span>';
+      importButton.innerHTML = '<span class="lista-batch-import-button__spinner" aria-hidden="true"></span><span>Distribuindo arquivos...</span>';
       window.setTimeout(() => {
         if (importButton && document.body.contains(importButton)) {
           importButton.disabled = false;

@@ -2001,17 +2001,20 @@ class ListaDeTarefasAdmin(admin.ModelAdmin):
     def exportacoes_link(self, obj):
         if obj.automacao_tipo != ListaDeTarefas.AUTOMACAO_SOLICITACAO_ARQUIVOS_MASSA:
             return "-"
+        batch_upload_url = reverse("admin:contratos_listadetarefas_arquivos_em_lote", args=[obj.pk])
         planilha_url = reverse("admin:contratos_listadetarefas_exportar_preview", args=[obj.pk, "planilha"])
         slack_url = reverse("admin:contratos_listadetarefas_exportar_preview", args=[obj.pk, "slack"])
         iron_planilha_url = planilha_url + "?" + urlencode({"scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
         iron_slack_url = slack_url + "?" + urlencode({"scope": TASK_EXPORT_SCOPE_IRON_MOUNTAIN})
         return format_html(
             '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;">'
+            '<a class="button" href="{}">Upload / Distribuir arquivos</a>'
             '<a class="button" href="{}">Exportar planilha</a>'
             '<a class="button" href="{}">Exportar ao Slack</a>'
             '<a class="button" href="{}">Planilha Iron Mountain</a>'
             '<a class="button" href="{}">Slack Iron Mountain</a>'
             "</span>",
+            batch_upload_url,
             planilha_url,
             slack_url,
             iron_planilha_url,
