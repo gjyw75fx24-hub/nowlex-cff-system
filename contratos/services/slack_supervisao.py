@@ -787,6 +787,13 @@ def add_slack_reaction(channel_id, message_ts, reaction_name):
             raise
 
 
+def _clear_delivery_slack_refs(delivery):
+    delivery.slack_channel_id = ''
+    delivery.slack_message_ts = ''
+    delivery.slack_thread_ts = ''
+    delivery.notified_at = None
+
+
 def _is_supervision_root_message(message):
     if not isinstance(message, dict):
         return False
@@ -1195,13 +1202,27 @@ def _sync_single_delivery(entry, supervisor, delivery, *, request=None, allow_po
             has_message = _has_slack_message(delivery)
         else:
             queued = status_key in SUPERVISION_PENDING_STATUSES
-    elif message_changed:
-        update_slack_message(
-            delivery.slack_channel_id,
-            delivery.slack_message_ts,
-            text=message['text'],
-            blocks=message['blocks'],
-        )
+    elif message_changed or (allow_post and status_key in SUPERVISION_PENDING_STATUSES):
+        try:
+            update_slack_message(
+                delivery.slack_channel_id,
+                delivery.slack_message_ts,
+                text=message['text'],
+                blocks=message['blocks'],
+            )
+        except ValueError as exc:
+            error_text = str(exc or '').strip()
+            if error_text in {'message_not_found', 'channel_not_found'} and allow_post and status_key in SUPERVISION_PENDING_STATUSES:
+                _clear_delivery_slack_refs(delivery)
+                channel_id = open_slack_dm(delivery.slack_user_id)
+                posted = post_slack_message(channel_id, text=message['text'], blocks=message['blocks'])
+                delivery.slack_channel_id = channel_id
+                delivery.slack_message_ts = str(posted.get('ts') or '').strip()
+                delivery.slack_thread_ts = delivery.slack_message_ts
+                delivery.notified_at = timezone.now()
+                has_message = _has_slack_message(delivery)
+            else:
+                raise
 
     note_present = bool(str(entry.get('supervisor_observacoes') or '').strip())
     should_post_thread_reply = (
@@ -1797,6 +1818,8 @@ def sync_supervision_slack_for_supervisor(user_id, *, request=None):
 
 
 def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None, selection_keys=None):
+    from contratos.api.views import is_supervisor_user
+
     normalized_ids = []
     for raw_value in delivery_ids or []:
         try:
@@ -1874,6 +1897,48 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
     queued_count = 0
     type_totals = {}
 
+    reference_supervisors = []
+    if request is not None and is_supervisor_user(getattr(request, 'user', None)):
+        reference_supervisors.append(request.user)
+    reference_supervisors.extend(
+        getattr(delivery, 'supervisor', None)
+        for delivery in selected_deliveries
+    )
+    reference_supervisors.extend(
+        getattr(config, 'user', None)
+        for config in configs.values()
+    )
+
+    try:
+        selected_entries_by_key = _collect_entries_for_selected_keys(selected_card_keys, reference_supervisors)
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao localizar os cards selecionados.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
+    if not selected_entries_by_key:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': 'Nao foi possivel localizar os cards selecionados para envio.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
+
+    try:
+        analyses_by_id = _load_analyses_for_entries(selected_entries_by_key.values())
+    except BaseException as exc:
+        return {
+            'recipients': [],
+            'eligible_recipients': [],
+            'errors': [{'supervisor': '', 'error': str(exc) or 'Falha ao carregar as análises dos cards selecionados.'}],
+            'queued_count': 0,
+            'type_summaries': [],
+        }
+
     for supervisor_id, config in configs.items():
         supervisor = getattr(config, 'user', None)
         if not supervisor:
@@ -1882,33 +1947,59 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
                 'error': 'Supervisor sem configuração Slack ativa para envio selecionado.',
             })
             continue
+        accepted_entries = [
+            selected_entries_by_key[key]
+            for key in sorted(selected_card_keys)
+            if key in selected_entries_by_key and _supervisor_accepts_entry(config, selected_entries_by_key[key])
+        ]
+        if not accepted_entries:
+            continue
         try:
-            accepted_entries, deliveries_map, entries_by_key = _build_supervisor_delivery_context(
-                supervisor,
-                config,
-                include_completed=True,
-                entry_keys=selected_card_keys,
-            )
+            deliveries_map = _load_deliveries_for_supervisor_entries(supervisor, accepted_entries)
         except BaseException as exc:
             errors.append({
                 'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
                 'error': str(exc),
             })
             logger.warning(
-                'Falha ao montar contexto Slack para envio selecionado supervisor=%s erro=%s',
+                'Falha ao carregar entregas Slack para envio selecionado supervisor=%s erro=%s',
                 supervisor_id,
                 exc,
             )
             continue
-        if not accepted_entries:
-            continue
 
-        eligible_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
+        supervisor_has_selected_entries = False
         for key in sorted(selected_card_keys):
-            entry = entries_by_key.get(key)
+            entry = selected_entries_by_key.get(key)
             if not entry:
                 continue
+            if not _supervisor_accepts_entry(config, entry):
+                continue
+            supervisor_has_selected_entries = True
             delivery = deliveries_map.get(key)
+            if delivery is None:
+                try:
+                    delivery = _ensure_delivery_for_entry(
+                        supervisor,
+                        config,
+                        entry,
+                        deliveries_by_key=deliveries_map,
+                        analyses_by_id=analyses_by_id,
+                    )
+                except BaseException as exc:
+                    errors.append({
+                        'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
+                        'error': str(exc),
+                    })
+                    logger.warning(
+                        'Falha ao preparar entrega Slack para envio selecionado supervisor=%s card=%s:%s:%s erro=%s',
+                        supervisor_id,
+                        key[0],
+                        key[1],
+                        key[2],
+                        exc,
+                    )
+                    continue
             if delivery is None:
                 errors.append({
                     'supervisor': str(supervisor.get_full_name()).strip() or str(supervisor.username).strip(),
@@ -1957,6 +2048,8 @@ def sync_supervision_slack_for_selected_deliveries(delivery_ids, *, request=None
                     f'{key[0]}:{key[1]}:{key[2]}',
                     exc,
                 )
+        if supervisor_has_selected_entries:
+            eligible_names.add(str(supervisor.get_full_name()).strip() or str(supervisor.username).strip())
 
     return {
         'recipients': sorted(name for name in recipient_names if name),
