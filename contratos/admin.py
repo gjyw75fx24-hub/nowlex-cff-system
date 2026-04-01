@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import re
+import threading
 import uuid
 import unicodedata
 import zipfile
@@ -35,7 +36,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.core.management.color import no_style
-from django.db import connection, models, transaction
+from django.db import close_old_connections, connection, models, transaction
 from django.db.models import Count, Exists, FloatField, Max, Min, OuterRef, Q, Sum, Subquery, Prefetch, Window
 from django.db.models.query import prefetch_related_objects
 from django.db.models.expressions import RawSQL
@@ -14093,7 +14094,76 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         existing._skip_auto_slack_sync = True
         return existing
 
+    def _form_submission_has_meaningful_changes(self, form, formsets):
+        ignored_form_fields = {"cnj_entries_data", "cnj_active_index"}
+        if any(field not in ignored_form_fields for field in getattr(form, "changed_data", []) or []):
+            return True
+
+        for formset in formsets or []:
+            for inline_form in getattr(formset, "forms", []) or []:
+                cleaned_data = getattr(inline_form, "cleaned_data", None) or {}
+                if cleaned_data.get("DELETE"):
+                    return True
+                if inline_form.has_changed():
+                    return True
+        return False
+
+    def _queue_supervision_slack_after_admin_save(self, request, processo):
+        analise = getattr(processo, "analise_processo", None)
+        if not analise or not getattr(analise, "pk", None):
+            return
+        if not getattr(analise, "para_supervisionar", False):
+            return
+
+        try:
+            from contratos.services.slack_supervisao import (
+                slack_supervisao_enabled,
+                sync_supervision_slack_for_analysis,
+            )
+        except Exception:
+            return
+
+        if not slack_supervisao_enabled():
+            messages.warning(
+                request,
+                "Processo salvo. Supervisão pendente, mas o envio ao Slack não está configurado.",
+            )
+            return
+
+        analise_id = int(analise.pk)
+
+        def _sync_async():
+            close_old_connections()
+            try:
+                sync_supervision_slack_for_analysis(analise_id)
+            except BaseException as exc:
+                logger.exception(
+                    "Falha no sync assíncrono da supervisão Slack após salvar processo analise_id=%s",
+                    analise_id,
+                    exc_info=exc,
+                )
+            finally:
+                close_old_connections()
+
+        def _launch():
+            try:
+                thread = threading.Thread(
+                    target=_sync_async,
+                    name=f"admin-slack-supervision-sync-{analise_id}",
+                    daemon=True,
+                )
+                thread.start()
+            except BaseException as exc:
+                logger.exception(
+                    "Falha ao disparar sync assíncrono da supervisão Slack após salvar processo analise_id=%s",
+                    analise_id,
+                    exc_info=exc,
+                )
+
+        transaction.on_commit(_launch)
+
     def save_related(self, request, form, formsets, change):
+        should_sync_supervision = self._form_submission_has_meaningful_changes(form, formsets)
         super().save_related(request, form, formsets, change)
         obj = form.instance
         # Baseia-se no estado já persistido pelo próprio form do Django (M2M)
@@ -14122,96 +14192,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             obj.carteiras_vinculadas.clear()
         if hasattr(obj, '_selected_carteira_ids_snapshot'):
             delattr(obj, '_selected_carteira_ids_snapshot')
-        transaction.on_commit(
-            partial(self._sync_supervision_slack_after_admin_save, request, obj)
-        )
-
-    def _sync_supervision_slack_after_admin_save(self, request, processo):
-        analise = getattr(processo, 'analise_processo', None)
-        if not analise or not getattr(analise, 'pk', None):
-            return
-
-        if not getattr(analise, 'para_supervisionar', False):
-            return
-
-        try:
-            from contratos.services.slack_supervisao import (
-                slack_supervisao_enabled,
-                sync_supervision_slack_for_analysis,
-            )
-        except Exception:
-            return
-
-        if not slack_supervisao_enabled():
-            messages.warning(
-                request,
-                "Processo salvo. Supervisão pendente, mas o envio ao Slack não está configurado.",
-            )
-            return
-
-        try:
-            sync_result = sync_supervision_slack_for_analysis(analise.pk, request=request) or {}
-        except Exception as exc:
-            messages.warning(
-                request,
-                f"Processo salvo. Supervisão pendente, mas houve falha ao enviar ao Slack: {exc}",
-            )
-            return
-
-        recipients = [
-            str(name).strip()
-            for name in (sync_result.get('recipients') or [])
-            if str(name).strip()
-        ]
-        eligible_recipients = [
-            str(name).strip()
-            for name in (sync_result.get('eligible_recipients') or [])
-            if str(name).strip()
-        ]
-        errors = sync_result.get('errors') or []
-        has_pending_entries = bool(sync_result.get('has_pending_entries'))
-        queued_count = int(sync_result.get('queued_count') or 0)
-
-        if recipients:
-            success_message = f"Supervisão enviada ao Slack para: {', '.join(recipients)}."
-            if queued_count:
-                success_message += f" {queued_count} item(ns) ficaram em fila."
-            messages.success(request, success_message)
-            if errors:
-                first_error = errors[0]
-                messages.warning(
-                    request,
-                    "Nem todos os supervisores receberam no Slack. "
-                    f"{first_error.get('supervisor') or 'Supervisor'}: {first_error.get('error') or 'falha não informada'}.",
-                )
-            return
-
-        if not has_pending_entries:
-            return
-
-        if queued_count and eligible_recipients:
-            messages.warning(
-                request,
-                "Processo salvo. A supervisão ficou em fila no Slack "
-                f"para: {', '.join(eligible_recipients)}. "
-                f"{queued_count} item(ns) aguardam liberação por tipo de análise.",
-            )
-            return
-
-        if eligible_recipients and errors:
-            first_error = errors[0]
-            messages.warning(
-                request,
-                "Processo salvo. Supervisão pendente, mas o Slack não concluiu o envio. "
-                f"{first_error.get('supervisor') or 'Supervisor'}: {first_error.get('error') or 'falha não informada'}.",
-            )
-            return
-
-        messages.warning(
-            request,
-            "Processo salvo. Supervisão pendente, mas nenhum supervisor Slack está configurado "
-            "para esta carteira e tipo de análise.",
-        )
+        if should_sync_supervision:
+            self._queue_supervision_slack_after_admin_save(request, obj)
 
 
     def changelist_view(self, request, extra_context=None):
