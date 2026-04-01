@@ -2476,6 +2476,7 @@
         }
         function showQuestionarioProceduralModal() {
             if (questionarioProceduralModal) {
+                setQuestionarioProceduralSubmittingState(false);
                 questionarioProceduralModal.style.display = 'flex';
                 if (questionarioProceduralTipo) {
                     questionarioProceduralTipo.focus();
@@ -2486,8 +2487,29 @@
             if (questionarioProceduralModal) {
                 questionarioProceduralModal.style.display = 'none';
             }
+            setQuestionarioProceduralSubmittingState(false);
             if (form) {
                 form.dataset.questionarioProceduralSubmitting = '0';
+            }
+        }
+        function setQuestionarioProceduralSubmittingState(isSubmitting) {
+            if (questionarioProceduralConfirm) {
+                if (!questionarioProceduralConfirm.dataset.originalText) {
+                    questionarioProceduralConfirm.dataset.originalText = questionarioProceduralConfirm.textContent || 'Exportar planilha';
+                }
+                questionarioProceduralConfirm.disabled = !!isSubmitting;
+                questionarioProceduralConfirm.textContent = isSubmitting
+                    ? 'Exportando...'
+                    : (questionarioProceduralConfirm.dataset.originalText || 'Exportar planilha');
+            }
+            if (questionarioProceduralCancel) {
+                questionarioProceduralCancel.disabled = !!isSubmitting;
+            }
+            if (questionarioProceduralClose) {
+                questionarioProceduralClose.disabled = !!isSubmitting;
+            }
+            if (questionarioProceduralTipo) {
+                questionarioProceduralTipo.disabled = !!isSubmitting;
             }
         }
         function showActionFeedbackModal(message, options) {
@@ -2749,6 +2771,7 @@
                     form.appendChild(hidden);
                 }
                 hidden.value = tipoId;
+                setQuestionarioProceduralSubmittingState(true);
                 form.dataset.questionarioProceduralSubmitting = '1';
                 form.submit();
             });

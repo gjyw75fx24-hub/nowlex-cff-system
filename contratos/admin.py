@@ -15524,13 +15524,14 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             partes = list(processo.partes_processuais.only('nome', 'documento', 'tipo_polo').order_by('id'))
         parte_passiva = next((parte for parte in partes if parte.tipo_polo == 'PASSIVO'), None)
         parte_referencia = parte_passiva or (partes[0] if partes else None)
+        parte_nome = str(getattr(parte_referencia, 'nome', '') or '').strip()
 
         return {
             'LOTE': lote_value,
             'PROCESSO CNJ': ';'.join(cnj_values),
-            'PARTE CONTRÁRIA': str(getattr(parte_referencia, 'nome', '') or '').strip(),
+            'PARTE CONTRÁRIA': format_polo_name(parte_nome) if parte_nome else '',
             'CPF': str(getattr(parte_referencia, 'documento', '') or '').strip(),
-            'CONTRATOS': '-'.join(contratos_values),
+            'CONTRATOS': ' - '.join(contratos_values),
         }
 
     def exportar_questionario_procedural(self, request, queryset):
