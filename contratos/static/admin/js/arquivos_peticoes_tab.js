@@ -751,7 +751,9 @@
         };
         const handleFileBatchSelection = async (row, fileInput, files = []) => {
             if (!files.length) return;
-            if (files.length > 1 && multiUploadUrl) {
+            const formIdInput = row?.querySelector('input[name$="-id"]');
+            const isExistingRow = Boolean((formIdInput?.value || '').trim());
+            if (!isExistingRow && multiUploadUrl) {
                 await uploadFilesDirectly(row, fileInput, files);
                 return;
             }

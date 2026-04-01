@@ -964,8 +964,11 @@ document.addEventListener('DOMContentLoaded', function() {
         mirror.className = 'documento-peticoes-file-errors';
         nomeCell.appendChild(mirror);
       }
-      mirror.innerHTML = '';
-      mirror.appendChild(fileErrors.cloneNode(true));
+      const nextErrorHtml = fileErrors.outerHTML;
+      if (mirror.dataset.errorHtml !== nextErrorHtml) {
+        mirror.innerHTML = nextErrorHtml;
+        mirror.dataset.errorHtml = nextErrorHtml;
+      }
       return true;
     };
 
