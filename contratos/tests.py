@@ -506,8 +506,6 @@ class SlackApiPostTests(SimpleTestCase):
 
 
 class SlackDeliveryViewRendererTests(SimpleTestCase):
-    databases = {'default'}
-
     def test_slack_delivery_views_render_only_json(self):
         self.assertEqual(SlackSupervisionDeliveryListAPIView.renderer_classes, [JSONRenderer])
         self.assertEqual(SlackSupervisionDeliveryDeleteAPIView.renderer_classes, [JSONRenderer])
@@ -576,49 +574,6 @@ class SlackDeliveryViewRendererTests(SimpleTestCase):
         self.assertEqual(response.data['summary']['sent_count'], 0)
         self.assertEqual(response.data['summary']['queued_count'], 1)
         mocked_delivery_objects.filter.return_value.update.assert_called_once()
-
-    @patch('contratos.api.views.is_supervisor_developer_user', return_value=True)
-    @patch('contratos.api.views.fetch_remote_supervision_slack_snapshot')
-    @patch('contratos.api.views.ensure_supervision_delivery_records')
-    @patch('contratos.api.views.SupervisaoSlackEntrega.objects')
-    @patch('contratos.api.views.UserSlackConfig.objects')
-    def test_list_view_ignores_invalid_remote_items_without_breaking(
-        self,
-        mocked_config_objects,
-        mocked_delivery_objects,
-        mocked_reconcile,
-        mocked_remote_snapshot,
-        _mocked_is_supervisor_dev,
-    ):
-        mocked_config_objects.select_related.return_value.filter.return_value.exclude.return_value.order_by.return_value = []
-        mocked_delivery_objects.annotate.return_value.select_related.return_value.only.return_value.order_by.return_value = []
-        mocked_remote_snapshot.return_value = {
-            'results': [
-                None,
-                {
-                    'slack_channel_id': 'D999',
-                    'slack_message_ts': '123.456',
-                    'message_kind': 'root',
-                    'supervisor_name': 'Maicon.Bispo',
-                    'supervisor': SimpleNamespace(pk=7),
-                    'message': {
-                        'text': 'Nova supervisão pendente\nTipo: Esteira 3 | Data S: 01/05/2026\nCNJ: 0610205-29.2015.8.04.0001',
-                    },
-                },
-            ],
-            'errors': [],
-            'seen_refs': set(),
-            'complete_channels': {'D999'},
-        }
-        request = APIRequestFactory().get('/api/slack/supervisao/entregas/')
-        request.user = SimpleNamespace(is_authenticated=True, is_superuser=False)
-
-        response = SlackSupervisionDeliveryListAPIView().get(request)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['summary']['sent_count'], 1)
-        self.assertEqual(len(response.data['results']), 1)
-        self.assertEqual(response.data['results'][0]['analysis_type_name'], 'Esteira 3')
 
 
 class SlackSupervisionInteractionTests(SimpleTestCase):

@@ -34,9 +34,12 @@
         );
     };
 
+    if (!isTrackedSourcePath(window.location.pathname)) {
+        return;
+    }
+
     let overlay = null;
     let isVisible = false;
-    let overlayText = 'Carregando cadastro...';
 
     const ensureOverlay = () => {
         if (overlay) {
@@ -58,29 +61,14 @@
                     <span class="admin-navigation-loading__square"></span>
                     <span class="admin-navigation-loading__square"></span>
                 </div>
-                <div class="admin-navigation-loading__text">${overlayText}</div>
+                <div class="admin-navigation-loading__text">Carregando cadastro...</div>
             </div>
         `;
         document.body.appendChild(overlay);
         return overlay;
     };
 
-    const setOverlayText = (text) => {
-        const normalizedText = String(text || '').trim() || 'Carregando cadastro...';
-        overlayText = normalizedText;
-        if (!overlay) {
-            return;
-        }
-        const textNode = overlay.querySelector('.admin-navigation-loading__text');
-        if (textNode) {
-            textNode.textContent = normalizedText;
-        }
-    };
-
-    const showLoading = (text) => {
-        if (text) {
-            setOverlayText(text);
-        }
+    const showLoading = () => {
         if (isVisible) {
             return;
         }
@@ -99,12 +87,6 @@
         overlay.classList.remove('is-active');
         overlay.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('admin-navigation-loading-active');
-    };
-
-    window.__adminNavigationLoading = {
-        show: showLoading,
-        hide: hideLoading,
-        setText: setOverlayText,
     };
 
     const shouldIgnoreAnchor = (anchor) => {
@@ -153,13 +135,6 @@
 
     window.__adminNavigateWithLoading = navigateWithLoading;
 
-    if (!isTrackedSourcePath(window.location.pathname)) {
-        window.addEventListener('pageshow', () => {
-            hideLoading();
-        });
-        return;
-    }
-
     document.addEventListener('click', (event) => {
         if (event.defaultPrevented || event.button !== 0) {
             return;
@@ -196,7 +171,6 @@
 
     window.addEventListener('admin:navigation-loading:start', (event) => {
         const targetUrlRaw = event?.detail?.targetUrl || '';
-        const loadingText = event?.detail?.text || '';
         if (targetUrlRaw) {
             try {
                 const targetUrl = new URL(targetUrlRaw, window.location.href);
@@ -210,7 +184,7 @@
                 return;
             }
         }
-        showLoading(loadingText);
+        showLoading();
     });
 
     window.addEventListener('pageshow', () => {

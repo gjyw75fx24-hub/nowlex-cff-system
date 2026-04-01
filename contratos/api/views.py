@@ -1046,9 +1046,7 @@ def _parse_remote_slack_delivery_key(value):
 
 
 def _extract_remote_supervision_message_payload(remote_item):
-    if not isinstance(remote_item, dict):
-        remote_item = {}
-    message = remote_item.get('message')
+    message = remote_item.get('message') if isinstance(remote_item, dict) else {}
     if not isinstance(message, dict):
         message = {}
     message_kind = str(remote_item.get('message_kind') or '').strip()
@@ -2299,10 +2297,7 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 .exclude(slack_user_id='')
                 .order_by('user_id')
             )
-            request_query_params = getattr(request, 'query_params', None)
-            if request_query_params is None:
-                request_query_params = getattr(request, 'GET', {})
-            reconcile_requested = (request_query_params.get('reconcile') or '').strip().lower() in {'1', 'true', 'sim', 'yes'}
+            reconcile_requested = (request.query_params.get('reconcile') or '').strip().lower() in {'1', 'true', 'sim', 'yes'}
             reconcile_errors = ensure_supervision_delivery_records(configs) if reconcile_requested else []
             passive_part_name_subquery = (
                 Parte.objects
@@ -2375,19 +2370,10 @@ class SlackSupervisionDeliveryListAPIView(APIView):
                 if str(item.get('slack_channel_id') or '').strip() and str(item.get('slack_message_ts') or '').strip()
             }
             remote_snapshot = fetch_remote_supervision_slack_snapshot(configs, existing_refs=existing_refs)
-            if not isinstance(remote_snapshot, dict):
-                remote_snapshot = {}
             remote_messages = remote_snapshot.get('results') or []
             remote_errors = remote_snapshot.get('errors') or []
             self._clear_stale_local_message_refs(results, remote_snapshot)
-            for remote_item in remote_messages:
-                if not isinstance(remote_item, dict):
-                    logger.warning('Item remoto inválido ao listar entregas Slack: %r', remote_item)
-                    continue
-                try:
-                    results.append(_extract_remote_supervision_message_payload(remote_item))
-                except BaseException as exc:
-                    logger.warning('Falha ao extrair mensagem remota Slack na listagem: %s', exc)
+            results.extend(_extract_remote_supervision_message_payload(item) for item in remote_messages)
             _annotate_slack_delivery_supervisors(results)
             results = _aggregate_slack_delivery_results(results)
             _annotate_slack_delivery_designated_supervisors(results, configs)
