@@ -44,6 +44,7 @@
         if (!root || !$) {
             return;
         }
+        const pageLoading = window.__adminNavigationLoading || null;
 
         const listUrl = String(root.dataset.listUrl || '').trim();
         const refreshUrl = String(root.dataset.refreshUrl || '').trim();
@@ -93,6 +94,15 @@
         let typePickerRoot = null;
         let typePickerTrigger = null;
         let typePickerMenu = null;
+        let initialLoadPending = true;
+
+        const showPageLoading = (text = 'Carregando mensagens Slack...') => {
+            pageLoading?.show?.(text);
+        };
+
+        const hidePageLoading = () => {
+            pageLoading?.hide?.();
+        };
 
         function fetchSlackSupervisionDeliveries(options = {}) {
             const requestData = {};
@@ -694,6 +704,7 @@
 
         const applyDeliveriesResponse = (response) => {
             const responseErrors = collectDeliveryErrorMessages(response?.errors);
+            const responseDetail = String(response?.detail || '').trim();
             deliveries = Array.isArray(response?.results) ? response.results : [];
             const availableKeys = new Set(
                 deliveries
@@ -721,7 +732,9 @@
             refreshMonthFilterOptions();
             renderSummary();
             renderList();
-            if (hasRemoteLoadWarnings) {
+            if (responseDetail) {
+                setFeedback(responseDetail, 'error');
+            } else if (hasRemoteLoadWarnings) {
                 setFeedback(`Mensagens carregadas com avisos: ${responseErrors.join(' | ')}`, 'warning');
             }
         };
@@ -745,12 +758,20 @@
         const loadDeliveries = (options = {}) => {
             const shouldReconcile = !(options && options.reconcile === false);
             const retryContextLabel = String(options?.retryContextLabel || 'Fila').trim() || 'Fila';
+            const shouldUsePageLoading = initialLoadPending;
+            if (shouldUsePageLoading) {
+                showPageLoading();
+            }
             setBusy(true);
             setFeedback('');
             if (shouldReconcile) {
                 clearReconcileRetryState();
             }
             const finalizeLoad = () => {
+                if (shouldUsePageLoading) {
+                    initialLoadPending = false;
+                    hidePageLoading();
+                }
                 resetToolbarLoadingState();
                 setBusy(false);
                 refreshActionState();
