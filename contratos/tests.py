@@ -815,77 +815,18 @@ class SlackSingleDeliverySyncTests(SimpleTestCase):
 
 
 class SlackDeliveryPayloadTests(SimpleTestCase):
-    def test_includes_agenda_date_from_supervision_schedule(self):
-        contracts_qs = Mock()
-        contracts_qs.only.return_value = [
-            SimpleNamespace(
-                pk=1,
-                id=1,
-                numero_contrato='111',
-                data_prescricao=date(2026, 5, 20),
-                valor_total_devido=None,
-                valor_causa=None,
-            ),
-        ]
-        contracts_manager = Mock()
-        contracts_manager.all.return_value = contracts_qs
-        analise = SimpleNamespace(
-            processo_judicial_id=44,
-            respostas={
-                'saved_processos_vinculados': [{
-                    'contratos': [1],
-                    'supervision_date': '2026-05-01',
-                    'analysis_type': {'nome': 'Esteira 3', 'slug': 'esteira_3'},
-                }],
-            },
-            processo_judicial=SimpleNamespace(contratos=contracts_manager),
-        )
-        supervisor = SimpleNamespace(pk=5, username='maicon', get_full_name=lambda: 'Maicon Bispo')
-        delivery = SimpleNamespace(
-            pk=1,
-            analise_id=77,
-            processo_id=44,
-            processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
-            supervisor=supervisor,
-            analise=analise,
-            card_id='card-1',
-            card_source='saved_processos_vinculados',
-            card_index=0,
-            last_status='pendente',
-            notified_at=None,
-            updated_at=None,
-            slack_channel_id='',
-            slack_message_ts='',
-            parte_nome_display='LAFAYETE',
-        )
-
-        payload = _build_slack_delivery_entry_payload(delivery, supervisor)
-
-        self.assertEqual(payload['agenda_date'], '2026-05-01')
-        self.assertEqual(payload['agenda_date_display'], '01/05/2026')
-        self.assertEqual(payload['analysis_type_name'], 'Esteira 3')
-        self.assertEqual(payload['analysis_type_slug'], 'esteira_3')
-
     def test_uses_card_analysis_type_from_analysis_response(self):
-        contracts_qs = Mock()
-        contracts_qs.only.return_value = []
-        contracts_manager = Mock()
-        contracts_manager.all.return_value = contracts_qs
         delivery = SimpleNamespace(
             pk=1,
             analise_id=77,
             processo_id=44,
             processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
             supervisor=SimpleNamespace(pk=5, username='maicon', get_full_name=lambda: 'Maicon Bispo'),
-            analise=SimpleNamespace(
-                processo_judicial_id=44,
-                processo_judicial=SimpleNamespace(contratos=contracts_manager),
-                respostas={
-                    'saved_processos_vinculados': [{
-                        'analysis_type': {'nome': 'Esteira 3', 'slug': 'esteira_3'},
-                    }],
-                },
-            ),
+            analise=SimpleNamespace(respostas={
+                'saved_processos_vinculados': [{
+                    'analysis_type': {'nome': 'Esteira 3', 'slug': 'esteira_3'},
+                }],
+            }),
             card_id='card-1',
             card_source='saved_processos_vinculados',
             card_index=0,
@@ -901,62 +842,6 @@ class SlackDeliveryPayloadTests(SimpleTestCase):
 
         self.assertEqual(payload['analysis_type_name'], 'Esteira 3')
         self.assertEqual(payload['analysis_type_slug'], 'esteira_3')
-
-    def test_includes_agenda_date_from_prescricao_when_schedule_is_missing(self):
-        contracts_qs = Mock()
-        contracts_qs.only.return_value = [
-            SimpleNamespace(
-                pk=1,
-                id=1,
-                numero_contrato='111',
-                data_prescricao=date(2026, 4, 10),
-                valor_total_devido=None,
-                valor_causa=None,
-            ),
-            SimpleNamespace(
-                pk=2,
-                id=2,
-                numero_contrato='222',
-                data_prescricao=date(2026, 4, 5),
-                valor_total_devido=None,
-                valor_causa=None,
-            ),
-        ]
-        contracts_manager = Mock()
-        contracts_manager.all.return_value = contracts_qs
-        analise = SimpleNamespace(
-            processo_judicial_id=44,
-            respostas={
-                'saved_processos_vinculados': [{
-                    'contratos': [1, 2],
-                    'analysis_type': {'nome': 'Novas Monitórias', 'slug': 'novas_monitorias'},
-                }],
-            },
-            processo_judicial=SimpleNamespace(contratos=contracts_manager),
-        )
-        supervisor = SimpleNamespace(pk=5, username='maicon', get_full_name=lambda: 'Maicon Bispo')
-        delivery = SimpleNamespace(
-            pk=1,
-            analise_id=77,
-            processo_id=44,
-            processo=SimpleNamespace(cnj='0808557-86.2026.8.23.0010'),
-            supervisor=supervisor,
-            analise=analise,
-            card_id='card-1',
-            card_source='saved_processos_vinculados',
-            card_index=0,
-            last_status='pendente',
-            notified_at=None,
-            updated_at=None,
-            slack_channel_id='',
-            slack_message_ts='',
-            parte_nome_display='LAFAYETE',
-        )
-
-        payload = _build_slack_delivery_entry_payload(delivery, supervisor)
-
-        self.assertEqual(payload['agenda_date'], '2026-04-05')
-        self.assertEqual(payload['agenda_date_display'], '05/04/2026')
 
     def test_normalizes_legacy_sent_status_without_message_into_pending_queue(self):
         supervisor = SimpleNamespace(

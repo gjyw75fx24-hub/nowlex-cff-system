@@ -700,13 +700,8 @@ def _safe_delivery_parte_documento(delivery):
 def _build_slack_delivery_entry_payload(delivery, request_user):
     try:
         supervisor = getattr(delivery, 'supervisor', None) or request_user
-        analise = getattr(delivery, 'analise', None)
-        respostas = getattr(analise, 'respostas', None) if analise is not None else None
         card = _build_slack_delivery_card(delivery)
         analysis_type_name, analysis_type_slug, analysis_type_short = _build_slack_delivery_analysis_type(delivery)
-        custom_supervision_date = _parse_optional_date(card.get('supervision_date')) if isinstance(card, dict) else None
-        prescricao_date = _resolve_supervision_card_prescricao_date(analise, card, respostas=respostas) if isinstance(card, dict) else None
-        agenda_date = _resolve_supervision_entry_date(custom_supervision_date, prescricao_date)
         notified_at = timezone.localtime(delivery.notified_at) if delivery.notified_at else None
         updated_at = timezone.localtime(delivery.updated_at) if delivery.updated_at else None
         has_message = bool(str(delivery.slack_channel_id or '').strip() and str(delivery.slack_message_ts or '').strip())
@@ -747,8 +742,7 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'is_pending': is_pending,
             'is_responded': is_responded,
             'dispatch_state': dispatch_state,
-            'agenda_date': agenda_date.isoformat() if agenda_date else '',
-            'agenda_date_display': agenda_date.strftime('%d/%m/%Y') if agenda_date else '',
+            'agenda_date': '',
             'notified_at': notified_at.isoformat() if notified_at else '',
             'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
             'updated_at': updated_at.isoformat() if updated_at else '',
@@ -793,7 +787,6 @@ def _build_slack_delivery_entry_payload(delivery, request_user):
             'is_responded': is_responded,
             'dispatch_state': 'sent' if has_message else ('queued' if is_pending else 'unsent'),
             'agenda_date': '',
-            'agenda_date_display': '',
             'notified_at': '',
             'notified_at_display': '',
             'updated_at': '',
@@ -909,11 +902,6 @@ def _aggregate_slack_delivery_results(results):
         if current_updated > existing_updated:
             for field_name in ('updated_at', 'updated_at_display', 'notified_at', 'notified_at_display'):
                 existing[field_name] = item.get(field_name)
-        existing_agenda = str(existing.get('agenda_date') or '')
-        current_agenda = str(item.get('agenda_date') or '')
-        if current_agenda and (not existing_agenda or current_agenda < existing_agenda):
-            existing['agenda_date'] = current_agenda
-            existing['agenda_date_display'] = item.get('agenda_date_display') or ''
 
     for item in aggregated_results:
         if not isinstance(item, dict):
@@ -1142,7 +1130,6 @@ def _extract_remote_supervision_message_payload(remote_item):
         'is_responded': status_key in {'aprovado', 'reprovado'},
         'dispatch_state': 'sent' if has_message else 'unsent',
         'agenda_date': '',
-        'agenda_date_display': '',
         'notified_at': notified_at.isoformat() if notified_at else '',
         'notified_at_display': notified_at.strftime('%d/%m/%Y %H:%M') if notified_at else '',
         'updated_at': notified_at.isoformat() if notified_at else '',

@@ -5,7 +5,7 @@
 {{ block.super }}
 <script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
 <script src="{% static 'admin/js/jquery.init.js' %}"></script>
-<script defer src="{% static 'admin/js/slack_supervision_manager_page.js' %}?v=20260401a"></script>
+<script defer src="{% static 'admin/js/slack_supervision_manager_page.js' %}?v=20260330a"></script>
 {% endblock %}
 
 {% block breadcrumbs %}
@@ -52,10 +52,6 @@
         <label class="analise-slack-deliveries-toolbar__filter">
           <span>Tipo de Análise</span>
           <select id="slack-supervision-manager-type-filter" class="analise-slack-deliveries-toolbar__select"></select>
-        </label>
-        <label class="analise-slack-deliveries-toolbar__filter">
-          <span>Mês</span>
-          <select id="slack-supervision-manager-month-filter" class="analise-slack-deliveries-toolbar__select"></select>
         </label>
         <label class="analise-slack-deliveries-toolbar__filter analise-slack-deliveries-toolbar__filter--search">
           <span>Busca</span>

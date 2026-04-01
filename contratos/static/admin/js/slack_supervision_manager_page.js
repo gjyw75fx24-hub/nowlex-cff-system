@@ -57,7 +57,6 @@
         const feedback = document.getElementById('slack-supervision-manager-feedback');
         const list = document.getElementById('slack-supervision-manager-list');
         const typeFilterSelect = document.getElementById('slack-supervision-manager-type-filter');
-        const monthFilterSelect = document.getElementById('slack-supervision-manager-month-filter');
         const searchInput = document.getElementById('slack-supervision-manager-search');
         const refreshBtn = document.getElementById('slack-supervision-manager-refresh');
         const sendSelectedBtn = document.getElementById('slack-supervision-manager-send-selected');
@@ -85,10 +84,8 @@
         const maxReconcileRetryAttempts = 4;
         let activeSummaryFilter = 'all';
         let activeAnalysisTypeFilter = '';
-        let activeMonthFilter = '';
         let activeSearchTerm = '';
         let availableAnalysisTypes = [];
-        let availableMonths = [];
         let selectedDeliveryKeys = new Set();
         let typePickerRoot = null;
         let typePickerTrigger = null;
@@ -234,13 +231,6 @@
             return String(delivery?.analysis_type_filter_key || delivery?.analysis_type_slug || '').trim() === activeAnalysisTypeFilter;
         };
 
-        const matchesMonthFilter = (delivery) => {
-            if (!activeMonthFilter) {
-                return true;
-            }
-            return String(delivery?.agenda_date || '').trim().slice(0, 7) === activeMonthFilter;
-        };
-
         const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
 
         const matchesSearchFilter = (delivery) => {
@@ -257,32 +247,11 @@
         };
 
         const getVisibleDeliveries = () => (
-            getAllDeliveries()
-                .filter((delivery) => (
-                    matchesSummaryFilter(delivery)
-                    && matchesTypeFilter(delivery)
-                    && matchesMonthFilter(delivery)
-                    && matchesSearchFilter(delivery)
-                ))
-                .sort((left, right) => {
-                    const leftAgendaDate = String(left?.agenda_date || '').trim();
-                    const rightAgendaDate = String(right?.agenda_date || '').trim();
-                    if (leftAgendaDate && rightAgendaDate && leftAgendaDate !== rightAgendaDate) {
-                        return leftAgendaDate.localeCompare(rightAgendaDate);
-                    }
-                    if (leftAgendaDate && !rightAgendaDate) {
-                        return -1;
-                    }
-                    if (!leftAgendaDate && rightAgendaDate) {
-                        return 1;
-                    }
-                    const leftTitle = String(left?.cnj_label || '').trim();
-                    const rightTitle = String(right?.cnj_label || '').trim();
-                    if (leftTitle && rightTitle && leftTitle !== rightTitle) {
-                        return leftTitle.localeCompare(rightTitle, 'pt-BR');
-                    }
-                    return Number(left?.card_index || 0) - Number(right?.card_index || 0);
-                })
+            getAllDeliveries().filter((delivery) => (
+                matchesSummaryFilter(delivery)
+                && matchesTypeFilter(delivery)
+                && matchesSearchFilter(delivery)
+            ))
         );
 
         const refreshTypeFilterOptions = () => {
@@ -304,42 +273,6 @@
             }
             typeFilterSelect.value = activeAnalysisTypeFilter;
             renderTypePickerOptions();
-        };
-
-        const formatMonthLabel = (value) => {
-            const rawValue = String(value || '').trim();
-            if (!/^\d{4}-\d{2}$/.test(rawValue)) {
-                return rawValue;
-            }
-            const [year, month] = rawValue.split('-');
-            const monthDate = new Date(Number(year), Number(month) - 1, 1);
-            const label = new Intl.DateTimeFormat('pt-BR', {
-                month: 'long',
-                year: 'numeric',
-            }).format(monthDate);
-            return label.charAt(0).toUpperCase() + label.slice(1);
-        };
-
-        const refreshMonthFilterOptions = () => {
-            if (!monthFilterSelect) {
-                return;
-            }
-            const options = Array.isArray(availableMonths) ? availableMonths.slice() : [];
-            monthFilterSelect.innerHTML = '';
-            const allOption = document.createElement('option');
-            allOption.value = '';
-            allOption.textContent = 'Todos os meses';
-            monthFilterSelect.appendChild(allOption);
-            options.forEach((value) => {
-                const optionEl = document.createElement('option');
-                optionEl.value = value;
-                optionEl.textContent = formatMonthLabel(value);
-                monthFilterSelect.appendChild(optionEl);
-            });
-            if (activeMonthFilter && !options.includes(activeMonthFilter)) {
-                activeMonthFilter = '';
-            }
-            monthFilterSelect.value = activeMonthFilter;
         };
 
         const closeTypePicker = () => {
@@ -447,12 +380,9 @@
                 findOldThreadsBtn,
                 deleteOldThreadsBtn,
                 typeFilterSelect,
-                monthFilterSelect,
                 searchInput,
             ].forEach((button) => {
-                if (button) {
-                    button.disabled = busy;
-                }
+                button.disabled = busy;
             });
             if (typePickerTrigger) {
                 typePickerTrigger.disabled = busy;
@@ -600,9 +530,6 @@
                 typeBadge.className = 'analise-slack-deliveries-item__type-badge';
                 typeBadge.textContent = String(delivery.analysis_type_short || delivery.analysis_type_name || 'A').trim().slice(0, 12);
                 typeBadge.title = String(delivery.analysis_type_name || '').trim();
-                const scheduleBadge = document.createElement('span');
-                scheduleBadge.className = 'analise-slack-deliveries-item__schedule-badge';
-                scheduleBadge.textContent = delivery.agenda_date_display ? `Data S ${delivery.agenda_date_display}` : 'Data S -';
                 const titleText = document.createElement('span');
                 titleText.className = 'analise-slack-deliveries-item__title-text';
                 const queueLabel = Number.isFinite(Number(delivery.queue_position)) && Number(delivery.queue_position) > 0
@@ -610,7 +537,6 @@
                     : '';
                 titleText.textContent = `${delivery.cnj_label || 'Card'}${queueLabel}`;
                 titleEl.appendChild(typeBadge);
-                titleEl.appendChild(scheduleBadge);
                 titleEl.appendChild(titleText);
 
                 const meta = document.createElement('div');
@@ -705,11 +631,6 @@
             );
             syncOrphanReplyKeys();
             availableAnalysisTypes = Array.isArray(response?.available_analysis_types) ? response.available_analysis_types : [];
-            availableMonths = Array.from(new Set(
-                deliveries
-                    .map((delivery) => String(delivery?.agenda_date || '').trim().slice(0, 7))
-                    .filter((value) => /^\d{4}-\d{2}$/.test(value))
-            )).sort();
             summaryData = response?.summary && typeof response.summary === 'object'
                 ? response.summary
                 : { sent_count: 0, responded_count: 0, pending_count: 0, queued_count: 0 };
@@ -718,7 +639,6 @@
                 ? `Nao foi possivel listar as mensagens ja enviadas no Slack. ${responseErrors.join(' | ')}`
                 : 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
             refreshTypeFilterOptions();
-            refreshMonthFilterOptions();
             renderSummary();
             renderList();
             if (hasRemoteLoadWarnings) {
@@ -734,9 +654,7 @@
             hasRemoteLoadWarnings = false;
             emptyListMessage = 'Nenhuma entrega Slack de supervisão foi encontrada para os supervisores.';
             availableAnalysisTypes = [];
-            availableMonths = [];
             refreshTypeFilterOptions();
-            refreshMonthFilterOptions();
             renderSummary();
             renderList();
             setFeedback(normalizeErrorMessage(xhr, 'Falha ao carregar mensagens Slack.'), 'error');
@@ -1009,12 +927,6 @@
             renderTypePickerOptions();
             renderList();
         });
-        if (monthFilterSelect) {
-            monthFilterSelect.addEventListener('change', () => {
-                activeMonthFilter = String(monthFilterSelect.value || '').trim();
-                renderList();
-            });
-        }
         if (searchInput) {
             searchInput.addEventListener('input', () => {
                 activeSearchTerm = String(searchInput.value || '').trim();
