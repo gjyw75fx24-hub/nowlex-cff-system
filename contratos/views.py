@@ -1583,10 +1583,9 @@ def buscar_dados_escavador_view(request):
             nome_classe_processual = fonte_principal.get('capa', {}).get('classe')
             if nome_classe_processual:
                 normalized_name = re.sub(r'\s*\(\d+\)$', '', nome_classe_processual).strip()
-                
-                # get_or_create é atômico e a forma correta de evitar race conditions.
-                status, created = StatusProcessual.objects.get_or_create(
-                    nome=normalized_name.title(),
+
+                status, created = StatusProcessual.get_or_create_normalized(
+                    normalized_name,
                     defaults={'ordem': 0}
                 )
                 status_id = status.id

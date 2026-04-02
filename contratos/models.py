@@ -14,6 +14,8 @@ from django.dispatch import receiver
 from django.utils.text import slugify
 from django.utils import timezone
 
+from .services.status_processual import build_safe_status_processual_nome
+
 logger = logging.getLogger(__name__)
 
 
@@ -133,6 +135,31 @@ class StatusProcessual(models.Model):
         verbose_name = "Classe Processual"
         verbose_name_plural = "Classes Processuais"
         ordering = ['ordem', 'nome']
+
+    @classmethod
+    def normalize_nome(cls, value):
+        return build_safe_status_processual_nome(value, max_len=100)
+
+    @classmethod
+    def get_or_create_normalized(cls, nome, defaults=None):
+        normalized_name = cls.normalize_nome(nome)
+        if not normalized_name:
+            return None, False
+        status = cls.objects.filter(nome=normalized_name).order_by('id').first()
+        if status is None:
+            status = cls.objects.filter(nome__iexact=normalized_name).order_by('id').first()
+        if status:
+            if status.nome != normalized_name and not cls.objects.filter(nome=normalized_name).exclude(pk=status.pk).exists():
+                status.nome = normalized_name
+                status.save(update_fields=['nome'])
+            return status, False
+        params = dict(defaults or {})
+        params['nome'] = normalized_name
+        return cls.objects.create(**params), True
+
+    def save(self, *args, **kwargs):
+        self.nome = self.normalize_nome(self.nome)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nome

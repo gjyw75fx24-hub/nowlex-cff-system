@@ -312,13 +312,13 @@ def _coerce_option_value(question, raw_value: str) -> str:
 
 
 def _get_or_create_status(nome: str) -> Optional[StatusProcessual]:
-    label = str(nome or "").strip()
-    if not label:
+    status, _ = StatusProcessual.get_or_create_normalized(
+        nome,
+        defaults={"ativo": True},
+    )
+    if not status:
         return None
-    status = StatusProcessual.objects.filter(nome__iexact=label).order_by("id").first()
-    if status:
-        return status
-    return StatusProcessual.objects.create(nome=label, ativo=True)
+    return status
 
 
 def _format_currency(value: Optional[Decimal]) -> str:

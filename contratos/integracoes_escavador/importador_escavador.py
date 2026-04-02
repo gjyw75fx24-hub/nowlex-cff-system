@@ -16,7 +16,7 @@ def importar_dados_escavador(json_data):
 
     # Criar ou localizar status processual
     classe = build_safe_status_nome(fonte["capa"].get("classe"))
-    status, _ = StatusProcessual.objects.get_or_create(nome=classe)
+    status, _ = StatusProcessual.get_or_create_normalized(classe)
 
     # Criar processo judicial
     processo, created = ProcessoJudicial.objects.update_or_create(

@@ -9075,7 +9075,7 @@ class CarteiraAdmin(admin.ModelAdmin):
             bucket = _ensure_coverage_bucket(carteira_id)
             if bucket is None:
                 return
-            classe_label = _clean_text(classe_nome) or "Sem classe processual"
+            classe_label = StatusProcessual.normalize_nome(_clean_text(classe_nome)) or "Sem classe processual"
             is_new = processo_id not in bucket["process_ids"]
             bucket["process_ids"].add(processo_id)
             if is_new:
@@ -9093,7 +9093,9 @@ class CarteiraAdmin(admin.ModelAdmin):
         )
 
         for processo in processos_cobertura:
-            classe_nome = _clean_text(getattr(getattr(processo, "status", None), "nome", "")) or "Sem classe processual"
+            classe_nome = StatusProcessual.normalize_nome(
+                _clean_text(getattr(getattr(processo, "status", None), "nome", ""))
+            ) or "Sem classe processual"
             processo_carteira_ids = set()
             if processo.carteira_id:
                 processo_carteira_ids.add(int(processo.carteira_id))
@@ -11861,11 +11863,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             })
             return preview
 
-        classe_nome = build_safe_status_nome(re.sub(r'\s*\(\d+\)$', '', str(capa.get('classe') or '')).strip().title())
+        classe_nome = build_safe_status_nome(re.sub(r'\s*\(\d+\)$', '', str(capa.get('classe') or '')).strip())
         status_obj = None
         if classe_nome:
-            status_obj, _ = StatusProcessual.objects.get_or_create(
-                nome=classe_nome,
+            status_obj, _ = StatusProcessual.get_or_create_normalized(
+                classe_nome,
                 defaults={'ordem': 0},
             )
 

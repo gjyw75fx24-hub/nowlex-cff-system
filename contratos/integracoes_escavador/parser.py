@@ -34,8 +34,8 @@ def parse_dados_processo(processo: ProcessoJudicial, dados_api: dict):
     # Associa o StatusProcessual (classe processual)
     nome_classe_processual = build_safe_status_nome(dados_api.get('classe_processual'))
     if nome_classe_processual:
-        status, _ = StatusProcessual.objects.get_or_create(
-            nome=nome_classe_processual,
+        status, _ = StatusProcessual.get_or_create_normalized(
+            nome_classe_processual,
             defaults={'ordem': 0} # Ordem padrão para novos status
         )
         processo.status = status
@@ -91,7 +91,7 @@ def _truncate_with_hash(value: str, max_len: int) -> str:
 
 
 def build_safe_status_nome(nome: str | None) -> str:
-    return _truncate_with_hash(nome or '', 100)
+    return StatusProcessual.normalize_nome(nome or '')
 
 
 def build_safe_andamento_descricao(descricao: str | None) -> str:
