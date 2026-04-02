@@ -2096,7 +2096,7 @@
                 <button type="button" id="cnj-batch-register-close" class="cnj-batch-register-modal__close">×</button>
             </div>
             <div class="cnj-batch-register-modal__meta" id="cnj-batch-register-meta">
-                Os CNJs abaixo não possuem cadastro. A verificação exige dados completos; não será criado cadastro incompleto.
+                Os CNJs abaixo não possuem cadastro. A verificação exige os dados obrigatórios, exceto quando você liberar CPF/CNPJ dos polos e/ou Vara nas opções abaixo.
             </div>
             <div class="cnj-batch-register-modal__field-row">
                 <label for="cnj-batch-register-carteira">Carteira destino</label>
@@ -2112,6 +2112,13 @@
                 <label for="cnj-batch-register-allow-missing-documents" class="cnj-batch-register-modal__option-copy">
                     <span>Permitir cadastrar mesmo sem CPF/CNPJ dos polos</span>
                     <span class="cnj-batch-register-modal__hint">Use isso apenas quando o restante dos dados obrigatórios estiver completo.</span>
+                </label>
+            </div>
+            <div class="cnj-batch-register-modal__field-row cnj-batch-register-modal__field-row--option">
+                <input type="checkbox" id="cnj-batch-register-allow-missing-vara" class="cnj-batch-register-modal__checkbox" checked>
+                <label for="cnj-batch-register-allow-missing-vara" class="cnj-batch-register-modal__option-copy">
+                    <span>Permitir cadastrar mesmo sem Vara</span>
+                    <span class="cnj-batch-register-modal__hint">Essa opção fica ligada por padrão para não bloquear o lote quando o Escavador não retornar a Vara.</span>
                 </label>
             </div>
             <div class="cnj-batch-register-modal__actions">
@@ -2424,6 +2431,7 @@
         const cnjBatchRegisterRefresh = document.getElementById('cnj-batch-register-refresh');
         const cnjBatchRegisterCarteira = document.getElementById('cnj-batch-register-carteira');
         const cnjBatchRegisterAllowMissingDocuments = document.getElementById('cnj-batch-register-allow-missing-documents');
+        const cnjBatchRegisterAllowMissingVara = document.getElementById('cnj-batch-register-allow-missing-vara');
         const cnjBatchRegisterBody = document.getElementById('cnj-batch-register-body');
         const cnjBatchRegisterProgress = document.getElementById('cnj-batch-register-progress');
         const cnjBatchRegisterVerifyUrl = "{{ cnj_batch_verify_url|escapejs }}";
@@ -3098,6 +3106,10 @@
             return !!cnjBatchRegisterAllowMissingDocuments?.checked;
         }
 
+        function getAllowMissingVaraFlag() {
+            return cnjBatchRegisterAllowMissingVara ? !!cnjBatchRegisterAllowMissingVara.checked : true;
+        }
+
         async function verifyCnjBatchRegisterRows() {
             if (!cnjBatchRegisterVerifyUrl) return;
             const cnjs = cnjBatchRegisterRows.map((row) => row.cnj).filter(Boolean);
@@ -3121,6 +3133,7 @@
                     const payload = await postJson(cnjBatchRegisterVerifyUrl, {
                         cnjs: chunk,
                         allow_missing_documents: getAllowMissingDocumentsFlag(),
+                        allow_missing_vara: getAllowMissingVaraFlag(),
                     });
                     mergeCnjBatchRegisterRows(payload.rows || []);
                 } catch (error) {
@@ -3173,6 +3186,7 @@
                         cnjs: chunk,
                         carteira_id: carteiraId,
                         allow_missing_documents: getAllowMissingDocumentsFlag(),
+                        allow_missing_vara: getAllowMissingVaraFlag(),
                     });
                     mergeCnjBatchRegisterRows(payload.rows || []);
                     processed += Number(payload.processed || chunk.length || 0);
@@ -3707,6 +3721,11 @@
         }
         if (cnjBatchRegisterAllowMissingDocuments) {
             cnjBatchRegisterAllowMissingDocuments.addEventListener('change', () => {
+                resetCnjBatchRegisterRows('Opção alterada. Clique em Verificar novamente.');
+            });
+        }
+        if (cnjBatchRegisterAllowMissingVara) {
+            cnjBatchRegisterAllowMissingVara.addEventListener('change', () => {
                 resetCnjBatchRegisterRows('Opção alterada. Clique em Verificar novamente.');
             });
         }

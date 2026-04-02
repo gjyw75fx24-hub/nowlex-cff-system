@@ -317,6 +317,163 @@ class AnaliseProcessoAdminTests(SimpleTestCase):
         self.assertEqual(filters, 'status__id__exact=1')
 
 
+class ProcessoJudicialAdminSearchTests(SimpleTestCase):
+    def _mock_match_id_collection(self, queryset, ids):
+        ordered_qs = Mock()
+        values_qs = Mock()
+        distinct_qs = Mock()
+        queryset.order_by.return_value = ordered_qs
+        ordered_qs.values_list.return_value = values_qs
+        values_qs.distinct.return_value = distinct_qs
+        distinct_qs.iterator.return_value = iter(ids)
+        return ordered_qs, values_qs, distinct_qs
+
+    @patch('django.contrib.admin.options.ModelAdmin.get_search_results')
+    def test_get_search_results_clears_ordering_before_collecting_ids(self, mocked_super_get_search_results):
+        admin_instance = ProcessoJudicialAdmin(ProcessoJudicial, AdminSite())
+        request = RequestFactory().get('/admin/contratos/processojudicial/', {'q': '123.456'})
+
+        queryset = Mock()
+        queryset.none = Mock()
+        super_qs = Mock()
+        extra_qs = Mock()
+        final_qs = Mock()
+        mocked_super_get_search_results.return_value = (super_qs, True)
+        queryset.filter.side_effect = [extra_qs, final_qs]
+
+        super_ordered, super_values, super_distinct = self._mock_match_id_collection(super_qs, [1, 1, 2])
+        extra_ordered, extra_values, extra_distinct = self._mock_match_id_collection(extra_qs, [2, 3])
+
+        result_qs, use_distinct = admin_instance.get_search_results(request, queryset, '123.456')
+
+        super_qs.order_by.assert_called_once_with()
+        super_ordered.values_list.assert_called_once_with('pk', flat=True)
+        super_values.distinct.assert_called_once_with()
+        super_distinct.iterator.assert_called_once_with(chunk_size=200)
+
+        extra_qs.order_by.assert_called_once_with()
+        extra_ordered.values_list.assert_called_once_with('pk', flat=True)
+        extra_values.distinct.assert_called_once_with()
+        extra_distinct.iterator.assert_called_once_with(chunk_size=200)
+
+        self.assertEqual(queryset.filter.call_args_list[-1], call(pk__in={1, 2, 3}))
+        queryset.none.assert_not_called()
+        self.assertIs(result_qs, final_qs)
+        self.assertFalse(use_distinct)
+
+
+class CnjBatchRegisterAdminTests(SimpleTestCase):
+    def setUp(self):
+        self.admin_instance = ProcessoJudicialAdmin(ProcessoJudicial, AdminSite())
+        self.factory = RequestFactory()
+        self.cnj = '06076171520168040001'
+
+    def _build_escavador_payload(self, *, vara=''):
+        return {
+            'numero_cnj': '0607617-15.2016.8.04.0001',
+            'estado_origem': {'sigla': 'AM'},
+            'fontes': [
+                {
+                    'capa': {
+                        'orgao_julgador': vara,
+                    },
+                    'tribunal': {
+                        'sigla': 'TJAM',
+                    },
+                },
+            ],
+        }
+
+    @patch('contratos.admin.collect_partes_from_escavador_payload')
+    @patch('contratos.admin.buscar_processo_por_cnj')
+    @patch.object(ProcessoJudicialAdmin, '_find_processo_by_cnj_digits', return_value=None)
+    def test_inspect_allows_missing_vara_when_flag_enabled(
+        self,
+        _mocked_find_existing,
+        mocked_buscar_processo,
+        mocked_collect_partes,
+    ):
+        mocked_buscar_processo.return_value = self._build_escavador_payload(vara='')
+        mocked_collect_partes.return_value = [
+            {'tipo_polo': 'ATIVO', 'documento': '12345678900'},
+            {'tipo_polo': 'PASSIVO', 'documento': '00987654321'},
+        ]
+
+        row = self.admin_instance._inspect_cnj_batch_registration(
+            self.cnj,
+            allow_missing_vara=True,
+        )
+
+        self.assertEqual(row['status'], 'ready')
+        self.assertEqual(row['status_label'], 'Pronto para cadastrar')
+        self.assertIn('Cadastro seguirá mesmo sem: Vara.', row['detail'])
+
+    @patch('contratos.admin.collect_partes_from_escavador_payload')
+    @patch('contratos.admin.buscar_processo_por_cnj')
+    @patch.object(ProcessoJudicialAdmin, '_find_processo_by_cnj_digits', return_value=None)
+    def test_inspect_blocks_missing_vara_when_flag_disabled(
+        self,
+        _mocked_find_existing,
+        mocked_buscar_processo,
+        mocked_collect_partes,
+    ):
+        mocked_buscar_processo.return_value = self._build_escavador_payload(vara='')
+        mocked_collect_partes.return_value = [
+            {'tipo_polo': 'ATIVO', 'documento': '12345678900'},
+            {'tipo_polo': 'PASSIVO', 'documento': '00987654321'},
+        ]
+
+        row = self.admin_instance._inspect_cnj_batch_registration(
+            self.cnj,
+            allow_missing_vara=False,
+        )
+
+        self.assertEqual(row['status'], 'pending_data')
+        self.assertIn('Faltam dados obrigatórios: Vara.', row['detail'])
+
+    @patch.object(ProcessoJudicialAdmin, '_build_cnj_batch_preview_row', return_value={'cnj': '06076171520168040001'})
+    def test_verify_view_defaults_allow_missing_vara_to_true(self, mocked_build_preview):
+        request = self.factory.post(
+            '/admin/contratos/processojudicial/cnj-batch/verify/',
+            data=json.dumps({'cnjs': [self.cnj]}),
+            content_type='application/json',
+        )
+        request.user = SimpleNamespace(is_authenticated=True)
+
+        response = self.admin_instance.cnj_batch_verify_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(json.loads(response.content)['ok'])
+        self.assertTrue(mocked_build_preview.call_args.kwargs['allow_missing_vara'])
+
+    @patch.object(
+        ProcessoJudicialAdmin,
+        '_create_processo_from_escavador_cnj',
+        return_value={'status': 'created', 'cnj': '06076171520168040001'},
+    )
+    @patch.object(ProcessoJudicialAdmin, '_get_carteira_for_cnj_batch_registration', return_value=SimpleNamespace(id=7))
+    def test_import_view_respects_unchecked_allow_missing_vara(
+        self,
+        _mocked_get_carteira,
+        mocked_create_processo,
+    ):
+        request = self.factory.post(
+            '/admin/contratos/processojudicial/cnj-batch/import/',
+            data=json.dumps({
+                'cnjs': [self.cnj],
+                'carteira_id': 7,
+                'allow_missing_vara': False,
+            }),
+            content_type='application/json',
+        )
+        request.user = SimpleNamespace(is_authenticated=True)
+
+        response = self.admin_instance.cnj_batch_import_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(mocked_create_processo.call_args.kwargs['allow_missing_vara'])
+
+
 class SaveDeliveryTests(SimpleTestCase):
     @patch('contratos.services.slack_supervisao.SupervisaoSlackEntrega.objects.bulk_create')
     def test_inserts_new_delivery_without_calling_model_save(self, mocked_bulk_create):

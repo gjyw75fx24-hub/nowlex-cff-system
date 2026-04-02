@@ -10614,6 +10614,15 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         "contratos__numero_contrato",
     )
     inlines = [ParteInline, AdvogadoPassivoInline, ContratoInline, AndamentoInline, TarefaInline, PrazoInline, AnaliseProcessoInline, ProcessoArquivoInline]
+
+    def _collect_search_match_ids(self, queryset):
+        return set(
+            queryset.order_by()
+            .values_list('pk', flat=True)
+            .distinct()
+            .iterator(chunk_size=200)
+        )
+
     def get_search_results(self, request, queryset, search_term):
         qs, use_distinct = super().get_search_results(request, queryset, search_term)
         if not search_term:
@@ -10621,7 +10630,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         # A busca padrão em campos relacionados pode retornar múltiplas linhas
         # do mesmo processo (joins 1-N). Consolidamos por PK para garantir que
         # cada processo apareça uma única vez no changelist.
-        matched_ids = set(qs.values_list('pk', flat=True))
+        matched_ids = self._collect_search_match_ids(qs)
         sanitized_digits = re.sub(r'\D', '', search_term)
         if sanitized_digits:
             escaped_digits = ''.join(re.escape(d) for d in sanitized_digits)
@@ -10633,7 +10642,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 | Q(numeros_cnj__cnj__iregex=rf'.*{digit_pattern}')
             )
             extra = queryset.filter(filters)
-            matched_ids.update(extra.values_list('pk', flat=True))
+            matched_ids.update(self._collect_search_match_ids(extra))
         if matched_ids:
             qs = queryset.filter(pk__in=matched_ids)
         else:
@@ -11726,7 +11735,12 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         qs = qs.filter(pk=carteira_id)
         return qs.first()
 
-    def _inspect_cnj_batch_registration(self, cnj_digits, allow_missing_documents=False):
+    def _inspect_cnj_batch_registration(
+        self,
+        cnj_digits,
+        allow_missing_documents=False,
+        allow_missing_vara=True,
+    ):
         cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
         row = {
             'cnj': cnj_digits,
@@ -11779,38 +11793,40 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         row['dados_api'] = dados_api
         row['partes'] = partes
 
-        issues = []
-        document_issues = []
+        blocking_issues = []
+        tolerated_issues = []
         if not uf:
-            issues.append('UF')
+            blocking_issues.append('UF')
         if not vara:
-            issues.append('Vara')
+            if allow_missing_vara:
+                tolerated_issues.append('Vara')
+            else:
+                blocking_issues.append('Vara')
         if not tribunal_sigla:
-            issues.append('Tribunal')
+            blocking_issues.append('Tribunal')
 
         ativos = [item for item in partes if item.get('tipo_polo') == 'ATIVO']
         passivos = [item for item in partes if item.get('tipo_polo') == 'PASSIVO']
         if not ativos:
-            issues.append('Polo ativo')
+            blocking_issues.append('Polo ativo')
         if not passivos:
-            issues.append('Polo passivo')
+            blocking_issues.append('Polo passivo')
         if any(not str(item.get('documento') or '').strip() for item in ativos):
-            document_issues.append('Documento do polo ativo')
+            if allow_missing_documents:
+                tolerated_issues.append('Documento do polo ativo')
+            else:
+                blocking_issues.append('Documento do polo ativo')
         if any(not str(item.get('documento') or '').strip() for item in passivos):
-            document_issues.append('Documento do polo passivo')
+            if allow_missing_documents:
+                tolerated_issues.append('Documento do polo passivo')
+            else:
+                blocking_issues.append('Documento do polo passivo')
 
-        if issues:
+        if blocking_issues:
             row.update({
                 'status': 'pending_data',
                 'status_label': 'Pendência',
-                'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(issues)) + '.',
-            })
-            return row
-        if document_issues and not allow_missing_documents:
-            row.update({
-                'status': 'pending_data',
-                'status_label': 'Pendência',
-                'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(document_issues)) + '.',
+                'detail': 'Faltam dados obrigatórios: ' + ', '.join(dict.fromkeys(blocking_issues)) + '.',
             })
             return row
 
@@ -11818,28 +11834,43 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
             'status': 'ready',
             'status_label': 'Pronto para cadastrar',
             'detail': (
-                'Cadastro seguirá mesmo sem: ' + ', '.join(dict.fromkeys(document_issues)) + '.'
-                if document_issues
+                'Cadastro seguirá mesmo sem: ' + ', '.join(dict.fromkeys(tolerated_issues)) + '.'
+                if tolerated_issues
                 else f'{len(passivos)} polo(s) passivo(s), {len(ativos)} polo(s) ativo(s).'
             ),
             'can_import': True,
         })
         return row
 
-    def _build_cnj_batch_preview_row(self, cnj_digits, request=None, allow_missing_documents=False):
+    def _build_cnj_batch_preview_row(
+        self,
+        cnj_digits,
+        request=None,
+        allow_missing_documents=False,
+        allow_missing_vara=True,
+    ):
         row = self._inspect_cnj_batch_registration(
             cnj_digits,
             allow_missing_documents=allow_missing_documents,
+            allow_missing_vara=allow_missing_vara,
         )
         row.pop('dados_api', None)
         row.pop('partes', None)
         return row
 
-    def _create_processo_from_escavador_cnj(self, cnj_digits, request, carteira_id=None, allow_missing_documents=False):
+    def _create_processo_from_escavador_cnj(
+        self,
+        cnj_digits,
+        request,
+        carteira_id=None,
+        allow_missing_documents=False,
+        allow_missing_vara=True,
+    ):
         cnj_digits = re.sub(r'\D', '', str(cnj_digits or ''))
         preview = self._inspect_cnj_batch_registration(
             cnj_digits,
             allow_missing_documents=allow_missing_documents,
+            allow_missing_vara=allow_missing_vara,
         )
         if preview.get('status') != 'ready':
             preview.pop('dados_api', None)
@@ -11961,6 +11992,11 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         except (TypeError, ValueError):
             return None
         return parsed if parsed > 0 else None
+
+    def _parse_checkbox_flag(self, value, default=False):
+        if value in (None, ''):
+            return default
+        return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
 
     def _parse_cpf_lote_kpi_status_filter(self, request):
         raw = str(request.GET.get('lote_kpi_status') or '').strip().lower()
@@ -14491,7 +14527,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         raw_cnjs = payload.get('cnjs') or []
         if isinstance(raw_cnjs, str):
             raw_cnjs = [raw_cnjs]
-        allow_missing_documents = str(payload.get('allow_missing_documents') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        allow_missing_documents = self._parse_checkbox_flag(payload.get('allow_missing_documents'))
+        allow_missing_vara = self._parse_checkbox_flag(payload.get('allow_missing_vara'), default=True)
         cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
         if not cnjs:
             return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
@@ -14501,6 +14538,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                 cnj,
                 request=request,
                 allow_missing_documents=allow_missing_documents,
+                allow_missing_vara=allow_missing_vara,
             )
             for cnj in cnjs
         ]
@@ -14582,7 +14620,8 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
         raw_cnjs = payload.get('cnjs') or []
         if isinstance(raw_cnjs, str):
             raw_cnjs = [raw_cnjs]
-        allow_missing_documents = str(payload.get('allow_missing_documents') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        allow_missing_documents = self._parse_checkbox_flag(payload.get('allow_missing_documents'))
+        allow_missing_vara = self._parse_checkbox_flag(payload.get('allow_missing_vara'), default=True)
         cnjs = self._parse_cnj_lote_text('\n'.join(str(item or '') for item in raw_cnjs))
         if not cnjs:
             return JsonResponse({'error': 'Nenhum CNJ informado.'}, status=400)
@@ -14602,6 +14641,7 @@ class ProcessoJudicialAdmin(NoRelatedLinksMixin, admin.ModelAdmin):
                     request,
                     carteira_id=carteira.id,
                     allow_missing_documents=allow_missing_documents,
+                    allow_missing_vara=allow_missing_vara,
                 )
             except Exception as exc:
                 logger.error('Erro ao cadastrar CNJ em lote %s: %s', cnj, exc, exc_info=True)
